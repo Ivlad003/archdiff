@@ -17,7 +17,7 @@ function element<T extends HTMLElement>(id: string): T {
 
 const viewsList = element<HTMLUListElement>("views");
 const search = element<HTMLInputElement>("search");
-const title = element<HTMLDivElement>("title");
+const title = element<HTMLSpanElement>("title-text");
 const reason = element<HTMLDivElement>("reason");
 const markdownPanel = element<HTMLPreElement>("markdown");
 const codePanel = element<HTMLPreElement>("code");
@@ -253,7 +253,69 @@ async function loadCoverage(): Promise<void> {
 }
 
 element<HTMLButtonElement>("fit").addEventListener("click", () => canvas.fit());
+element<HTMLButtonElement>("zoom-in").addEventListener("click", () => canvas.zoomAt(1.25));
+element<HTMLButtonElement>("zoom-out").addEventListener("click", () => canvas.zoomAt(1 / 1.25));
+element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 element<HTMLButtonElement>("review").addEventListener("click", () => setHash({ ...stateFromHash(), review: true }));
+element<HTMLDivElement>("export").addEventListener("click", () => element<HTMLDetailsElement>("export-menu").removeAttribute("open"));
+
+// The side panels fold away (the choice is remembered in this browser); the canvas refits when they do.
+function remembered(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function togglePanel(side: "left" | "right", force?: boolean): void {
+  const hidden = document.body.classList.toggle(`hide-${side}`, force);
+
+  try {
+    localStorage.setItem(`archdiff.hide-${side}`, hidden ? "1" : "0");
+  } catch {
+    // A private window: the choice lasts the page.
+  }
+
+  requestAnimationFrame(() => canvas.fit());
+}
+
+element<HTMLButtonElement>("toggle-left").addEventListener("click", () => togglePanel("left"));
+element<HTMLButtonElement>("toggle-right").addEventListener("click", () => togglePanel("right"));
+
+if (remembered("archdiff.hide-left")) document.body.classList.add("hide-left");
+
+if (remembered("archdiff.hide-right")) document.body.classList.add("hide-right");
+
+// Keyboard: Ctrl+B / Ctrl+] fold the panels, + − 0 zoom, Backspace goes back, / finds a view, Escape clears the pick.
+window.addEventListener("keydown", (event) => {
+  const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+
+  if (event.ctrlKey && event.key === "b") {
+    event.preventDefault();
+    togglePanel("left");
+  } else if (event.ctrlKey && event.key === "]") {
+    event.preventDefault();
+    togglePanel("right");
+  } else if (typing) {
+    if (event.key === "Escape") (event.target as HTMLElement).blur();
+  } else if (event.key === "+" || event.key === "=") {
+    canvas.zoomAt(1.25);
+  } else if (event.key === "-") {
+    canvas.zoomAt(1 / 1.25);
+  } else if (event.key === "0") {
+    canvas.fit();
+  } else if (event.key === "Backspace") {
+    history.back();
+  } else if (event.key === "/") {
+    event.preventDefault();
+    togglePanel("left", false);
+    search.focus();
+  } else if (event.key === "Escape") {
+    canvas.select(null);
+    void showNode(null);
+  }
+});
 depthInput.addEventListener("change", () => setHash({ ...stateFromHash(), depth: depthInput.value === "" ? null : Number(depthInput.value) }));
 baseInput.addEventListener("change", () => {
   if (stateFromHash().review) setHash(stateFromHash());

@@ -52,6 +52,10 @@ A call is followed when its callee is a declaration of the same file, an import 
 
 Every view (and the review) exports to draw.io / diagrams.net (`.drawio`, uncompressed, each cell carrying the archdiff ID and the code position), Excalidraw (`.excalidraw`, shapes with bound text and arrows), Archi (ArchiMate Open Exchange XML: components, functions, relationships and one view at the laid-out places) and Mermaid.
 
+## Speed, cache and CI
+
+Facts are cached by file content in `.archdiff/facts.json.gz` (add `.archdiff/` to `.gitignore`); a second run parses only what changed. Cold start parses in worker threads: about 6 s for 500 files, 9 s for 2300. In CI, persist `.archdiff/` between runs and fetch enough history for the merge-base (`fetch-depth: 0`), or pass `--base origin/main`. Files over 1.5 MB are skipped and listed by `coverage`. `--out` only writes a new file or one archdiff wrote before. `web` binds to localhost and refuses requests whose Host header is not its own; `--host 0.0.0.0` exposes the sources to the network. The analysis of what can go wrong on real repositories is in [docs/production.md](docs/production.md).
+
 ## Development
 
 ```bash

@@ -23,6 +23,7 @@ import {
   Perimeter,
   PerimeterRegistry,
   RectangleShape,
+  registerEntityRelationEdgeStyle,
   ShapeRegistry,
   SwimlaneShape,
   type CellStyle,
@@ -81,6 +82,8 @@ function register(): void {
   PerimeterRegistry.add("ellipsePerimeter", Perimeter.EllipsePerimeter);
   EdgeMarkerRegistry.add("classic", EdgeMarker.createArrow(2));
   EdgeMarkerRegistry.add("open", EdgeMarker.createOpenArrow(2));
+  // Edges leave a shape on its right side and enter the next on its left as an S-curve, so they run between the rank columns instead of across shapes.
+  registerEntityRelationEdgeStyle();
 }
 
 /** A long label in lines of at most `LINE` characters, broken after slashes and dots; three lines at most. */
@@ -145,7 +148,7 @@ function nodeStyle(node: DiagramNode): CellStyle {
 function edgeStyle(edge: DiagramEdge): CellStyle {
   const colour = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.kind === "call" ? "#1565c0" : "#78909c";
 
-  return { strokeColor: colour, fontColor: "#424242", fontSize: 10, labelBackgroundColor: "#ffffff", endArrow: edge.kind === "dependency" ? "open" : "classic", dashed: edge.kind === "ref" || edge.diff === "removed", strokeWidth: edge.diff ? 2 : 1, rounded: true };
+  return { strokeColor: colour, fontColor: "#424242", fontSize: 10, labelBackgroundColor: "#ffffff", endArrow: edge.kind === "dependency" ? "open" : "classic", dashed: edge.kind === "ref" || edge.diff === "removed", strokeWidth: edge.diff ? 2 : 1.2, edgeStyle: "entityRelationEdgeStyle", segment: 24, rounded: true, exitX: 1, exitY: 0.5, entryX: 0, entryY: 0.5 };
 }
 
 /** What the canvas tells the page. */
@@ -205,12 +208,24 @@ export class Canvas {
 
       if (node) this.events.open(node);
     });
+    // The wheel zooms around the cursor; the events of one frame are folded into one zoom, so a fast wheel does not redraw dozens of times.
+    let pending: { factor: number; x: number; y: number } | null = null;
     container.addEventListener(
       "wheel",
       (event) => {
         event.preventDefault();
         const box = container.getBoundingClientRect();
-        this.zoomAt(event.deltaY < 0 ? 1.15 : 1 / 1.15, event.clientX - box.left, event.clientY - box.top);
+        const factor = Math.exp(-event.deltaY * 0.0015);
+
+        if (pending) {
+          pending.factor *= factor;
+        } else {
+          pending = { factor, x: event.clientX - box.left, y: event.clientY - box.top };
+          requestAnimationFrame(() => {
+            if (pending) this.zoomAt(pending.factor, pending.x, pending.y);
+            pending = null;
+          });
+        }
       },
       { passive: false },
     );
@@ -229,10 +244,10 @@ export class Canvas {
     this.nodeOf.clear();
     this.edgeCells.length = 0;
     this.selected = null;
+    // A new root: `removeCells` honours `cellsDeletable`, which is off, so the model is cleared instead.
+    graph.getDataModel().clear();
     const parent = graph.getDefaultParent();
     graph.batchUpdate(() => {
-      graph.removeCells(graph.getChildCells(parent, true, true), true);
-
       for (const group of diagram.groups) {
         graph.insertVertex({
           parent,
@@ -285,6 +300,8 @@ export class Canvas {
     const view = this.graph.getView();
     const scale = view.scale;
     const next = Math.max(0.05, Math.min(4, scale * factor));
+
+    if (next === scale) return;
     const px = x / scale - view.translate.x;
     const py = y / scale - view.translate.y;
     view.scaleAndTranslate(next, x / next - px, y / next - py);

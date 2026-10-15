@@ -78,14 +78,26 @@ function fail(message: string): number {
   return 2;
 }
 
-function writeOut(text: string, out: string | true | undefined): void {
-  if (typeof out === "string") {
-    const { writeFileSync } = require("node:fs") as typeof import("node:fs");
-    writeFileSync(out, text);
-    process.stderr.write(`${out}: written\n`);
-  } else {
+/** Every output archdiff writes carries its name, so `--out` can tell its own file from someone else's. */
+function isGenerated(text: string): boolean {
+  return text.slice(0, 2000).includes("archdiff");
+}
+
+/** Prints to stdout, or writes `--out`: a new file, or one archdiff wrote before; any other file is refused (exit 2) and left as it is. */
+function writeOut(text: string, out: string | true | undefined): number {
+  if (typeof out !== "string") {
     process.stdout.write(text);
+
+    return 0;
   }
+
+  const { existsSync, readFileSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+
+  if (existsSync(out) && !isGenerated(readFileSync(out, "utf8"))) return fail(`--out ${out}: the file exists and was not written by archdiff; nothing written`);
+  writeFileSync(out, text);
+  process.stderr.write(`${out}: written\n`);
+
+  return 0;
 }
 
 const require = (await import("node:module")).createRequire(import.meta.url);
@@ -139,17 +151,13 @@ export async function main(argv: readonly string[]): Promise<number> {
         if (depth !== undefined && !(Number.isInteger(depth) && depth >= 0)) return fail("diagram: --depth must be a whole number");
         const analysis = await analyze(dirArg(1));
         const diagram = layout(viewOf(analysis, view, depth === undefined ? {} : { depth }));
-        writeOut(format === "md" ? diagramMarkdown(diagram, analysis) : exportDiagram(diagram, format as Exclude<ExportFormat, "md">), flags.get("out"));
-
-        return 0;
+        return writeOut(format === "md" ? diagramMarkdown(diagram, analysis) : exportDiagram(diagram, format as Exclude<ExportFormat, "md">), flags.get("out"));
       }
 
       case "coverage": {
         const analysis = await analyze(dirArg(0));
         const report = coverageReport(analysis);
-        writeOut(flags.has("json") ? `${JSON.stringify(report, null, 2)}\n` : report.markdown, flags.get("out"));
-
-        return 0;
+        return writeOut(flags.has("json") ? `${JSON.stringify(report, null, 2)}\n` : report.markdown, flags.get("out"));
       }
 
       case "review": {
@@ -158,9 +166,10 @@ export async function main(argv: readonly string[]): Promise<number> {
         if (format !== "md" && format !== "json" && !EXPORT_FORMATS.includes(format as ExportFormat)) return fail(`review: unknown format "${format}"`);
         const result = await review(dirArg(0), typeof flags.get("base") === "string" ? (flags.get("base") as string) : null);
 
-        if (format === "md") writeOut(reviewMarkdown(result), flags.get("out"));
-        else if (format === "json") writeOut(`${JSON.stringify(result.diff, null, 2)}\n`, flags.get("out"));
-        else writeOut(exportDiagram(result.diagram, format as Exclude<ExportFormat, "md">), flags.get("out"));
+        const text = format === "md" ? reviewMarkdown(result) : format === "json" ? `${JSON.stringify(result.diff, null, 2)}\n` : exportDiagram(result.diagram, format as Exclude<ExportFormat, "md">);
+        const written = writeOut(text, flags.get("out"));
+
+        if (written !== 0) return written;
 
         return result.diff.layerEdgesAdded.length > 0 ? 1 : 0;
       }

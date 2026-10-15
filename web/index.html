@@ -8,15 +8,23 @@
   </head>
   <body>
     <header id="top">
+      <button id="toggle-left" class="icon" title="Show or hide the views (Ctrl+B)">☰</button>
       <strong>archdiff</strong>
       <span id="root" class="muted"></span>
+      <span class="spacer"></span>
       <span id="stats" class="muted"></span>
       <span class="spacer"></span>
-      <label>depth <input id="depth" type="number" min="0" max="12" value="" placeholder="auto" /></label>
-      <button id="fit" title="Fit the diagram to the window">fit</button>
-      <label>base <input id="base" type="text" placeholder="merge-base" size="14" /></label>
+      <label title="How far from the subject the picture goes">depth <input id="depth" type="number" min="0" max="12" value="" placeholder="auto" /></label>
+      <button id="zoom-out" class="icon" title="Zoom out (−)">−</button>
+      <button id="zoom-in" class="icon" title="Zoom in (+)">+</button>
+      <button id="fit" title="Fit the diagram to the window (0)">fit</button>
+      <label>base <input id="base" type="text" placeholder="merge-base" size="12" /></label>
       <button id="review" title="The architectural diff of the working tree against the base">review</button>
-      <span id="export"></span>
+      <details id="export-menu">
+        <summary title="Download the diagram for another tool">export ▾</summary>
+        <div id="export"></div>
+      </details>
+      <button id="toggle-right" class="icon" title="Show or hide the details (Ctrl+])">▤</button>
     </header>
     <main>
       <aside id="left">
@@ -24,10 +32,26 @@
         <ul id="views"></ul>
       </aside>
       <section id="centre">
-        <div id="title"></div>
-        <div id="canvas"></div>
-        <div id="minimap"></div>
-        <div id="reason" class="muted"></div>
+        <div id="title">
+          <button id="back" class="icon" title="Back to the previous view (Backspace)">←</button>
+          <span id="title-text"></span>
+          <span id="hint" class="muted">click a shape for its code · double-click to open its own view · drag to pan · wheel to zoom</span>
+        </div>
+        <div id="canvas-wrap">
+          <div id="canvas"></div>
+          <div id="minimap"></div>
+          <div id="reason" class="muted"></div>
+        </div>
+        <div id="legend">
+          <span><i class="sw layer"></i>layer</span>
+          <span><i class="sw module"></i>module</span>
+          <span><i class="sw fn"></i>function</span>
+          <span><i class="sw external"></i>package</span>
+          <span><i class="sw hole"></i>not followed</span>
+          <span><i class="sw added"></i>added</span>
+          <span><i class="sw removed"></i>removed</span>
+          <span><i class="sw changed"></i>changed</span>
+        </div>
       </section>
       <aside id="right">
         <nav id="tabs">

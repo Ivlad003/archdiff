@@ -33,6 +33,8 @@ export interface CoverageReport {
   byReason: Partial<Record<Gap["reason"], number>>;
   unresolvedImports: number;
   parseErrors: string[];
+  /** Source files left out of the analysis (too large), with the reason. */
+  skipped: { path: string; reason: string }[];
   /** Modules with at least one blind call, unresolved import or syntax error, the most first. */
   modules: ModuleCoverage[];
   markdown: string;
@@ -91,6 +93,7 @@ export function coverageReport(analysis: Analysis): CoverageReport {
   const parseErrors = graph.gaps.filter((gap) => gap.reason === "parse-error").map((gap) => moduleOf(gap.from)).sort();
   const ratio = calls + blind === 0 ? 1 : calls / (calls + blind);
   const lines = [
+    "<!-- archdiff:generated — coverage -->",
     "# Coverage: what the diagrams cannot show",
     "",
     `${analysis.files.length} files. Calls into the repository: ${calls} followed, ${blind} blind (${Math.round(ratio * 100)}% followed). ${gaps - blind} calls go out of it (packages, built-ins, globals, methods of untyped values). ${graph.unresolvedImports.length} unresolved imports, ${parseErrors.length} files with syntax errors.`,
@@ -104,7 +107,14 @@ export function coverageReport(analysis: Analysis): CoverageReport {
   if (Object.keys(byReason).length === 0) lines.push("- none");
   lines.push("", "## Modules with gaps", "");
 
-  if (modules.length === 0) lines.push("None: every import and call was followed.");
+  if (modules.length === 0) lines.push("None: every import and call was followed.", "");
+
+  if (analysis.skipped.length > 0) {
+    lines.push("## Files not analysed", "");
+
+    for (const file of analysis.skipped) lines.push(`- ${file.path} — ${file.reason}`);
+    lines.push("");
+  }
 
   for (const row of modules) {
     const parts = Object.entries(row.gaps).map(([reason, n]) => `${n} ${reason}`);
@@ -120,5 +130,5 @@ export function coverageReport(analysis: Analysis): CoverageReport {
     lines.push("");
   }
 
-  return { files: analysis.files.length, calls, gaps, blind, ratio, byReason, unresolvedImports: graph.unresolvedImports.length, parseErrors, modules, markdown: `${lines.join("\n").trimEnd()}\n` };
+  return { files: analysis.files.length, calls, gaps, blind, ratio, byReason, unresolvedImports: graph.unresolvedImports.length, parseErrors, skipped: analysis.skipped, modules, markdown: `${lines.join("\n").trimEnd()}\n` };
 }

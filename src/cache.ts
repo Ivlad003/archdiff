@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { gunzipSync, gzipSync } from "node:zlib";
 import type { FileFacts } from "./extract/facts.ts";
 
 /** Bumped when the extractor changes what it records: every cached entry is then stale. */
@@ -17,7 +18,8 @@ export const EXTRACTOR_VERSION = 1;
 
 export const CACHE_DIRECTORY = ".archdiff";
 
-export const CACHE_FILE = `${CACHE_DIRECTORY}/facts.json`;
+/** Gzipped JSON: the facts of a repository are tens of megabytes as text, a few as gzip. */
+export const CACHE_FILE = `${CACHE_DIRECTORY}/facts.json.gz`;
 
 interface CacheEntry {
   hash: string;
@@ -59,7 +61,7 @@ export class FactCache {
     if (!existsSync(this.file)) return;
 
     try {
-      const parsed = JSON.parse(readFileSync(this.file, "utf8")) as CacheFile;
+      const parsed = JSON.parse(gunzipSync(readFileSync(this.file)).toString("utf8")) as CacheFile;
 
       if (parsed.version !== EXTRACTOR_VERSION || typeof parsed.entries !== "object") return;
 
@@ -107,7 +109,7 @@ export class FactCache {
     const content: CacheFile = { version: EXTRACTOR_VERSION, entries };
     mkdirSync(dirname(this.file), { recursive: true });
     const temporary = `${this.file}.${process.pid}.tmp`;
-    writeFileSync(temporary, stringify(content));
+    writeFileSync(temporary, gzipSync(stringify(content), { level: 4 }));
     renameSync(temporary, this.file);
   }
 }

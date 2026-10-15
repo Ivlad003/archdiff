@@ -73,7 +73,14 @@ function assertRef(ref: string): void {
   if (ref.startsWith("-") || ref === "") throw new Error(`not a git ref: "${ref}"`);
 }
 
-/** The merge-base of HEAD with the main branch (origin/HEAD, main, master, origin/main, origin/master), or HEAD when none is found. */
+/**
+ * The merge-base commit of HEAD with the main branch (origin/HEAD, main,
+ * master, origin/main, origin/master): the commit the change started from,
+ * so commits that landed on main since are not read as this change. On the
+ * main branch itself, or without any such branch, HEAD: the change is then
+ * the working tree. Throws with a hint when the repository is shallow and
+ * no base can be found.
+ */
 export function mergeBase(root: string): string {
   for (const candidate of ["origin/HEAD", "main", "master", "origin/main", "origin/master"]) {
     const exists = git(root, ["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`]);
@@ -81,14 +88,12 @@ export function mergeBase(root: string): string {
     if (!exists.ok) continue;
     const base = git(root, ["merge-base", "HEAD", candidate]);
 
-    if (base.ok) {
-      const sha = base.out.trim();
-      const head = git(root, ["rev-parse", "HEAD"]);
-
-      // On the main branch itself the merge-base is HEAD: the change is then the working tree against HEAD.
-      return head.ok && head.out.trim() === sha ? "HEAD" : candidate;
-    }
+    if (base.ok) return base.out.trim();
   }
+
+  const shallow = git(root, ["rev-parse", "--is-shallow-repository"]);
+
+  if (shallow.ok && shallow.out.trim() === "true") throw new Error("no merge-base with the main branch in a shallow clone: fetch more history (git fetch --unshallow, or fetch-depth: 0 in CI) or pass --base <ref>");
 
   return "HEAD";
 }
@@ -313,7 +318,7 @@ function fnLabel(change: NodeChange): string {
 /** The review as Markdown: the summary, the Mermaid picture, every change by kind. */
 export function reviewMarkdown(result: ReviewResult): string {
   const { diff, diagram } = result;
-  const lines = [`# Architecture changes since ${diff.base}`, ""];
+  const lines = [`<!-- archdiff:generated — review since ${diff.base} -->`, `# Architecture changes since ${diff.base}`, ""];
   const counts = [
     `${diff.changedFiles.length} source files changed`,
     `modules +${diff.modulesAdded.length} −${diff.modulesRemoved.length}`,

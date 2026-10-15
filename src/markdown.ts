@@ -20,7 +20,7 @@ function position(node: DiagramNode): string {
 
 /** The page of a diagram: title, Mermaid, the shapes by lane. */
 export function diagramMarkdown(diagram: Diagram, analysis: Analysis): string {
-  const lines = [`# ${diagram.title}`, ""];
+  const lines = [`<!-- archdiff:generated — view ${diagram.view} -->`, `# ${diagram.title}`, ""];
 
   if (diagram.reason) lines.push(`_${diagram.reason}_`, "");
   lines.push(`${diagram.nodes.length} shapes, ${diagram.edges.length} lines; ${analysis.files.length} files analysed.`, "", "```mermaid", toMermaid(diagram).trimEnd(), "```", "");

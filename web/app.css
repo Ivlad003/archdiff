@@ -5,6 +5,8 @@
   --bg: #fafafa;
   --panel: #ffffff;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --left: 280px;
+  --right: 420px;
 }
 
 * {
@@ -28,10 +30,12 @@ body {
 #top {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 #top .spacer {
@@ -39,18 +43,104 @@ body {
 }
 
 #top input[type="number"] {
-  width: 56px;
+  width: 52px;
+}
+
+#top input,
+#top button,
+#top summary {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button.icon {
+  padding: 2px 7px;
+  font-size: 14px;
+  line-height: 1.2;
 }
 
 .muted {
   color: var(--muted);
 }
 
+#stats {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#export-menu {
+  position: relative;
+}
+
+#export-menu summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  background: #fff;
+}
+
+#export-menu[open] summary {
+  border-color: var(--accent);
+}
+
+#export {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  margin-top: 4px;
+  padding: 4px 0;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+#export a {
+  padding: 4px 12px;
+  color: #212121;
+  text-decoration: none;
+}
+
+#export a:hover {
+  background: #f3e5f5;
+  color: var(--accent);
+}
+
 main {
   flex: 1;
   display: grid;
-  grid-template-columns: 280px 1fr 420px;
+  grid-template-columns: var(--left) 1fr var(--right);
   min-height: 0;
+}
+
+body.hide-left main {
+  grid-template-columns: 0 1fr var(--right);
+}
+
+body.hide-right main {
+  grid-template-columns: var(--left) 1fr 0;
+}
+
+body.hide-left.hide-right main {
+  grid-template-columns: 0 1fr 0;
 }
 
 #left,
@@ -58,6 +148,8 @@ main {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   background: var(--panel);
 }
 
@@ -69,9 +161,15 @@ main {
   border-left: 1px solid var(--border);
 }
 
+body.hide-left #left,
+body.hide-right #right {
+  border: 0;
+}
+
 #search {
   margin: 8px;
   padding: 4px 6px;
+  font: inherit;
 }
 
 #views {
@@ -116,18 +214,47 @@ main {
 }
 
 #title {
-  padding: 6px 12px;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+#title-text {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#hint {
+  margin-left: auto;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#canvas-wrap {
+  flex: 1;
+  position: relative;
+  min-height: 0;
 }
 
 #canvas {
-  flex: 1;
-  position: relative;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   cursor: grab;
   background: #fff;
+  background-image: radial-gradient(#e0e0e0 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+#canvas:active {
+  cursor: grabbing;
 }
 
 #minimap {
@@ -137,13 +264,81 @@ main {
   width: 180px;
   height: 120px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.92);
 }
 
 #reason {
   position: absolute;
   left: 12px;
   bottom: 12px;
+}
+
+#legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 5px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+#legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sw {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border: 1.5px solid #37474f;
+  border-radius: 2px;
+  background: #fff;
+}
+
+.sw.layer {
+  background: #eceff1;
+  border-color: #455a64;
+}
+
+.sw.fn {
+  background: #e3f2fd;
+  border-color: #1565c0;
+  border-radius: 5px;
+}
+
+.sw.external {
+  background: #fafafa;
+  border-color: #9e9e9e;
+  border-style: dashed;
+}
+
+.sw.hole {
+  background: #fff3e0;
+  border-color: #ef6c00;
+  border-style: dashed;
+}
+
+.sw.added {
+  background: #d4f8d4;
+  border-color: #2e7d32;
+  border-width: 2px;
+}
+
+.sw.removed {
+  background: #f8d4d4;
+  border-color: #c62828;
+  border-style: dashed;
+  border-width: 2px;
+}
+
+.sw.changed {
+  background: #fff4c2;
+  border-color: #ef6c00;
+  border-width: 2px;
 }
 
 #tabs {
@@ -154,6 +349,7 @@ main {
 #tabs button {
   flex: 1;
   border: 0;
+  border-radius: 0;
   background: transparent;
   padding: 6px;
   cursor: pointer;
@@ -198,7 +394,13 @@ main {
   background: #fff8e1;
 }
 
-#export a {
-  margin-left: 6px;
-  color: var(--accent);
+@media (max-width: 900px) {
+  :root {
+    --left: 220px;
+    --right: 300px;
+  }
+
+  #hint {
+    display: none;
+  }
 }

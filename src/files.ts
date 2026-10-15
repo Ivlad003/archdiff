@@ -14,6 +14,15 @@ import { matchesGlob } from "./glob.ts";
 /** Extensions archdiff parses. */
 export const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"] as const;
 
+/** A file larger than this (a vendored bundle, generated code) is not parsed: it would cost seconds and tell nothing about the architecture. */
+export const MAX_FILE_BYTES = 1_500_000;
+
+/** A source file left out of the analysis, and why: the coverage report names it. */
+export interface SkippedFile {
+  path: string;
+  reason: string;
+}
+
 /** Directories the walk never enters when git does not list the files. */
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", "coverage", ".archdiff", ".next", ".cache", "out"]);
 
@@ -68,15 +77,24 @@ export function listAllFiles(root: string): string[] {
  * list of globs (archdiff.json). A path git lists but the disk no longer
  * has (deleted, not yet staged) is left out.
  */
-export function listSourceFiles(root: string, exclude: readonly string[] = []): string[] {
+export function listSourceFiles(root: string, exclude: readonly string[] = []): { files: string[]; skipped: SkippedFile[] } {
   const all = gitFiles(root) ?? walkFiles(root);
   // Hidden directories (.github, .agents, .scratch) hold tooling, not the program; `exclude` cannot bring them back but archdiff.json layers may name them later.
   const kept = all.filter((path) => isSourceFile(path) && !path.startsWith(".") && !path.split("/").some((segment) => SKIPPED_DIRECTORIES.has(segment)) && !exclude.some((glob) => matchesGlob(path, glob)));
-  const present = kept.filter((path) => {
+  const files: string[] = [];
+  const skipped: SkippedFile[] = [];
+
+  for (const path of new Set(kept)) {
     const full = join(root, path);
 
-    return existsSync(full) && statSync(full).isFile();
-  });
+    if (!existsSync(full)) continue;
+    const stat = statSync(full);
 
-  return [...new Set(present)].sort();
+    if (!stat.isFile()) continue;
+
+    if (stat.size > MAX_FILE_BYTES) skipped.push({ path, reason: `${(stat.size / 1_000_000).toFixed(1)} MB, over the ${MAX_FILE_BYTES / 1_000_000} MB limit` });
+    else files.push(path);
+  }
+
+  return { files: files.sort(), skipped: skipped.sort((a, b) => (a.path < b.path ? -1 : 1)) };
 }

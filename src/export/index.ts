@@ -22,7 +22,7 @@ export function exportDiagram(diagram: Diagram, format: Exclude<ExportFormat, "m
     case "mermaid":
       return toMermaid(diagram);
     case "json":
-      return `${JSON.stringify(diagram, null, 2)}\n`;
+      return `${JSON.stringify({ generator: "archdiff", ...diagram }, null, 2)}\n`;
     case "drawio":
       return toDrawio(diagram);
     case "excalidraw":

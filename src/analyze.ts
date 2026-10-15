@@ -14,7 +14,7 @@ import { contentHash, FactCache } from "./cache.ts";
 import { loadConfig, type Config } from "./config.ts";
 import type { FileFacts } from "./extract/facts.ts";
 import { extractAll } from "./extract/pool.ts";
-import { listAllFiles, listSourceFiles } from "./files.ts";
+import { listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
 import { frameworkEntries, type DeclaredEntry } from "./frameworks.ts";
 import { buildGraph, type Graph } from "./graph.ts";
 import { createResolver } from "./resolve.ts";
@@ -39,6 +39,8 @@ export interface Analysis {
   root: string;
   config: Config;
   files: string[];
+  /** Source files left out (too large), with the reason. */
+  skipped: SkippedFile[];
   facts: Map<string, FileFacts>;
   graph: Graph;
   /** What the frameworks of the repository call (routes, hooks). */
@@ -59,9 +61,9 @@ export interface AnalyzeOptions {
 export async function analyze(root: string, options: AnalyzeOptions = {}): Promise<Analysis> {
   const started = performance.now();
   const config = options.config ?? loadConfig(root);
-  const onDisk = listSourceFiles(root, config.exclude);
+  const listed0 = listSourceFiles(root, config.exclude);
   const overrides = options.overrides ?? new Map<string, string | null>();
-  const files = [...new Set([...onDisk, ...[...overrides.keys()].filter((path) => overrides.get(path) !== null)])].filter((path) => overrides.get(path) !== null).sort();
+  const files = [...new Set([...listed0.files, ...[...overrides.keys()].filter((path) => overrides.get(path) !== null)])].filter((path) => overrides.get(path) !== null).sort();
   const listed = performance.now();
   const cache = options.cache === false ? null : new FactCache(root);
   const facts = new Map<string, FileFacts>();
@@ -77,7 +79,15 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
     else jobs.push({ path, content, hash });
   }
 
-  const fresh = await extractAll(jobs);
+  let fresh: FileFacts[];
+
+  try {
+    fresh = await extractAll(jobs);
+  } catch (error) {
+    // Worker threads refused (a sandbox, a memory limit): the main thread parses alone rather than failing the run.
+    process.stderr.write(`archdiff: parallel extraction failed (${error instanceof Error ? error.message : String(error)}); parsing on one thread\n`);
+    fresh = await extractAll(jobs, 1);
+  }
 
   for (let i = 0; i < jobs.length; i++) {
     const job = jobs[i]!;
@@ -106,5 +116,5 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
     ms: { list: Math.round(listed - started), extract: Math.round(extracted - listed), graph: Math.round(built - extracted), total: Math.round(built - started) },
   };
 
-  return { root, config, files, facts, graph, declaredEntries, stats };
+  return { root, config, files, skipped: listed0.skipped, facts, graph, declaredEntries, stats };
 }

@@ -57,6 +57,9 @@ function problem(response: ServerResponse, status: number, message: string): voi
   send(response, status, "application/json", JSON.stringify({ error: message }));
 }
 
+/** Host headers a browser sends to a server on this computer. */
+const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
 const STATIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".map": "application/json" };
 
 export async function serve(root: string, options: ServeOptions): Promise<void> {
@@ -75,6 +78,10 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     if (request.method !== "GET") return problem(response, 405, "GET only");
+    // A page on another site cannot read the sources through DNS rebinding: the Host header must be this server's own name.
+    const hostHeader = (request.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+
+    if (!ALLOWED_HOSTS.has(hostHeader) && hostHeader !== options.host) return problem(response, 421, "unexpected Host header");
     const url = new URL(request.url ?? "/", "http://localhost");
     const path = url.pathname;
 
