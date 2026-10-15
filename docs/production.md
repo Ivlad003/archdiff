@@ -50,6 +50,18 @@ An analysis of archdiff 0.1 on real repositories (keylang, 480 files; storefront
 
 **Stale page after an update** of archdiff: the browser caches nothing (`no-store`), so a restart is enough. *State:* fine.
 
+## The page and its drawings
+
+**Bundle size.** Excalidraw with React is about 2.4 MB of JavaScript, loaded once; locales load on demand, fonts (0.5 MB, the CJK family left out) on demand. The package grows from 4 MB to about 10 MB unpacked. *State:* accepted for one canvas that reads and draws; a CDN is deliberately not used, so the page works offline.
+
+**Drawings in the repository.** `.archdiff/layouts/<view>.json` holds the whole scene, including pencil strokes; a view drawn heavily is a few hundred kilobytes. Committing it shares the drawing; `POST /api/layout` accepts up to 8 MB and refuses anything that is not a list of elements. A drawing is matched to its view by the exact view key, so a renamed module leaves an orphan file. *State:* known; a `layouts prune` command is a later step.
+
+**Stale drawings.** The live diagram follows the saved places of shapes that still exist; shapes the code no longer has are dropped at the next re-layout, new ones are placed by the algorithm beside the kept ones (possibly overlapping a stroke). *State:* by design; re-layout is one click.
+
+**Mocks are not execution.** The Flow tab carries values by name only. A reader may take a carried value for a proven one. *State:* the panel and the Markdown say so in their first line; real execution with substituted modules is a separate, optional, later step.
+
+**Tapping in view mode** is read from pointer events; a drag over 6 scene pixels is a pan, not a tap. On a touch screen the second tap must land within half a second. *State:* works with a mouse; untested on touch.
+
 ## Writing files
 
 **`--out` overwrote any file.** A path typo could replace a hand-written document. *Now:* `--out` writes a new file or one that carries archdiff's marker (`<!-- archdiff:generated -->`, `%% archdiff:generated`, `host="archdiff"`, `"generator": "archdiff"`); any other existing file is refused with exit 2 and left intact. Every format carries such a marker.

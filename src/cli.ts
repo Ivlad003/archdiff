@@ -6,6 +6,8 @@
 import { resolve } from "node:path";
 import { analyze } from "./analyze.ts";
 import { coverageReport } from "./coverage.ts";
+import { dataFlow, flowMarkdown } from "./flow.ts";
+import { readLayout } from "./layouts.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
 import { reviewMarkdown, review } from "./diff.ts";
@@ -28,6 +30,10 @@ Commands:
                      module:<path> | calls:<path>#<fn> | coverage. --packages draws the
                      packages a module imports; --limit folds a bigger picture into
                      "… N more" (default 80)
+  flow <calls:view> [dir] [--depth N] [--json]
+                     The data flow from an entry point without running it: the steps in call
+                     order with their parameters and return types, the storages on the way,
+                     and the mock values saved on the page carried by name
   coverage [dir] [--json]
                      The map of what the diagrams cannot cover: unresolved imports, calls
                      archdiff could not follow, files with syntax errors, by module
@@ -162,6 +168,20 @@ export async function main(argv: readonly string[]): Promise<number> {
         if (limit !== undefined) options.limit = limit;
         const diagram = layout(viewOf(analysis, view, options));
         return writeOut(format === "md" ? diagramMarkdown(diagram, analysis) : exportDiagram(diagram, format as Exclude<ExportFormat, "md">), flags.get("out"));
+      }
+
+      case "flow": {
+        const key = positional[0];
+        const view = key ? parseView(key) : null;
+
+        if (!view || view.kind !== "calls") return fail("flow: a calls:<path>#<fn> view is required");
+        const analysis = await analyze(dirArg(1));
+        const depth = flags.has("depth") ? Number(flags.get("depth")) : 4;
+
+        if (!(Number.isInteger(depth) && depth >= 0)) return fail("flow: --depth must be a whole number");
+        const flow = dataFlow(analysis, view.id, readLayout(analysis.root, key!)?.mocks ?? [], depth);
+
+        return writeOut(flags.has("json") ? `${JSON.stringify(flow, null, 2)}\n` : flowMarkdown(flow), flags.get("out"));
       }
 
       case "coverage": {

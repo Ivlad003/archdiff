@@ -518,3 +518,46 @@ body.editing #reason {
 #status {
   font-size: 11px;
 }
+
+#flow-mocks label {
+  display: block;
+  margin: 8px 0 4px;
+  font-weight: 600;
+}
+
+#flow-mocks textarea {
+  width: 100%;
+  min-height: 48px;
+  font-family: var(--mono);
+  font-size: 12px;
+  resize: vertical;
+}
+
+#flow-mocks button {
+  margin-top: 6px;
+}
+
+.step {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.step.storage {
+  border-color: #00897b;
+  background: #e0f2f1;
+}
+
+.step .where {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.step .value {
+  color: #1b5e20;
+  background: #e8f5e9;
+  padding: 0 3px;
+  border-radius: 3px;
+}

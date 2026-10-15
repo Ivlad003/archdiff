@@ -8,7 +8,8 @@
 // API (GET): /api/views, /api/diagram?view=&depth=, /api/node?view=&id=,
 // /api/file?path=, /api/coverage, /api/review?base=,
 // /api/export?view=&format=, /api/scene?view= (the editor's scene: the
-// code's picture merged into the saved drawing), /api/layout?view=.
+// code's picture merged into the saved drawing), /api/layout?view=,
+// /api/flow?view= (the data flow of a calls view with its saved mocks).
 // POST /api/layout saves a drawing to .archdiff/layouts/. Entry point:
 // `serve`.
 
@@ -22,6 +23,7 @@ import { layout } from "./diagram.ts";
 import { review, reviewMarkdown } from "./diff.ts";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, type ExportFormat } from "./export/index.ts";
 import { toExcalidraw } from "./export/excalidraw.ts";
+import { dataFlow, flowMarkdown } from "./flow.ts";
 import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type SceneElement } from "./layouts.ts";
 import { diagramMarkdown, nodeMarkdown } from "./markdown.ts";
 import { parseJson } from "./json.ts";
@@ -151,6 +153,19 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           const saved = readLayout(root, key);
 
           return json(response, saved ? { saved: saved.saved, mocks: saved.mocks, elements: saved.elements.length } : null);
+        }
+
+        case "/api/flow": {
+          // The data-flow of a calls view: the saved mocks of the view carried through the call tree.
+          const key = url.searchParams.get("view") ?? "";
+          const view = parseView(key);
+
+          if (!view || view.kind !== "calls") return problem(response, 400, "the flow needs a calls: view");
+          const analysis = await fresh();
+          const depthText = url.searchParams.get("depth");
+          const flow = dataFlow(analysis, view.id, readLayout(root, key)?.mocks ?? [], depthText === null || depthText === "" ? 4 : Number(depthText));
+
+          return json(response, { flow, markdown: flowMarkdown(flow) });
         }
 
         case "/api/scene": {

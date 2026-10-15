@@ -378,6 +378,7 @@ async function load(): Promise<void> {
     }
 
     setMarkdown(markdownPanel, diagramMarkdown);
+    await loadFlow();
   } catch (error) {
     title.textContent = "archdiff";
     setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
@@ -401,6 +402,83 @@ async function loadCoverage(): Promise<void> {
   } catch (error) {
     setMarkdown(coveragePanel, error instanceof Error ? error.message : String(error));
   }
+}
+
+// ── The Flow tab: the data flow of a calls view with its mocks ───────────────
+
+const flowMocks = element<HTMLDivElement>("flow-mocks");
+const flowSteps = element<HTMLDivElement>("flow-steps");
+
+function textarea(label: string, value: string, placeholder: string): HTMLTextAreaElement {
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.placeholder = placeholder;
+  const caption = document.createElement("label");
+  caption.textContent = label;
+  flowMocks.append(caption, field);
+
+  return field;
+}
+
+async function loadFlow(): Promise<void> {
+  const state = stateFromHash();
+  flowMocks.replaceChildren();
+  flowSteps.replaceChildren();
+  element("flow-tab").hidden = !state.view.startsWith("calls:") || state.review;
+
+  if (element("flow-tab").hidden) return;
+  const { flow } = await api.flow(state.view, state.depth);
+  const entryId = state.view.slice("calls:".length);
+  const input = textarea(`Mock input of ${entryId.slice(entryId.indexOf("#") + 1)} (JSON object: a key per parameter)`, flow.input ?? "", '{"request": {"total": 42}}');
+  const storageFields = flow.storages.map((storage) => ({ id: storage.id, field: textarea(`Mock content of ${storage.module} (${storage.storage})`, storage.content ?? "", '{"rows": [{"id": 1}]}') }));
+  const apply = document.createElement("button");
+  apply.textContent = "apply mocks";
+  apply.title = "Save the mocks with the drawing of this view and carry the values through the steps";
+  apply.addEventListener("click", () => {
+    const next: unknown[] = [];
+
+    if (input.value.trim() !== "") next.push({ id: entryId, kind: "input", value: input.value.trim() });
+
+    for (const { id, field } of storageFields) if (field.value.trim() !== "") next.push({ id, kind: "storage", value: field.value.trim() });
+    mocks = next;
+    void (canvas ? api.saveLayout(state.view, canvas.scene(), mocks) : Promise.resolve()).then(() => loadFlow()).catch((error: unknown) => (flowSteps.textContent = error instanceof Error ? error.message : String(error)));
+  });
+  flowMocks.append(apply);
+
+  for (const step of flow.steps) {
+    const box = document.createElement("div");
+    box.className = `step${step.storage ? " storage" : ""}`;
+    box.style.marginLeft = `${step.depth * 14}px`;
+    const head = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = step.name;
+    name.style.cursor = "pointer";
+    name.title = "Show the code";
+    name.addEventListener("click", () => void showCode({ id: step.id, kind: "fn", label: step.name, ref: { id: step.id, file: step.module, line: step.line }, x: 0, y: 0, w: 0, h: 0 }));
+    head.append(name, "(");
+
+    for (const [i, param] of step.params.entries()) {
+      if (i > 0) head.append(", ");
+      head.append(`${param.name}: ${param.type}`);
+
+      if (param.value !== undefined) {
+        const value = document.createElement("span");
+        value.className = "value";
+        value.textContent = ` = ${param.value}`;
+        value.title = `from ${param.from ?? ""}`;
+        head.append(value);
+      }
+    }
+
+    head.append(`)${step.returns ? ` → ${step.returns}` : ""}`);
+    const where = document.createElement("div");
+    where.className = "where";
+    where.textContent = `${step.module}:${step.line}${step.storage ? ` · storage: ${step.storage}${step.content !== undefined ? ` holds ${step.content}` : ""}` : ""}${step.gaps > 0 ? ` · ${step.gaps} calls not followed` : ""}`;
+    box.append(head, where);
+    flowSteps.append(box);
+  }
+
+  if (flow.steps.length === 0) flowSteps.textContent = "No such function in the graph.";
 }
 
 // ── Controls ─────────────────────────────────────────────────────────────────

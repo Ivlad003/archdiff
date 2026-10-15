@@ -66,11 +66,17 @@
           <button data-tab="markdown" class="active">Markdown</button>
           <button data-tab="code">Code</button>
           <button data-tab="coverage">Coverage</button>
+          <button data-tab="flow" id="flow-tab" title="The data flow from this entry point, with mock inputs and storages (no code is run)">Flow</button>
           <button id="raw" class="small" title="Show the Markdown as text, to copy it">raw</button>
         </nav>
         <div id="markdown" class="panel prose active"></div>
         <pre id="code" class="panel"></pre>
         <div id="coverage" class="panel prose"></div>
+        <div id="flow" class="panel prose">
+          <p class="muted">Open a call flow (an entry point) to see its data flow: the steps in call order with their parameter and return types. Attach a mock input and mock storages; values are carried to parameters and properties of the same name. Nothing is run.</p>
+          <div id="flow-mocks"></div>
+          <div id="flow-steps"></div>
+        </div>
       </aside>
     </main>
     <script>

@@ -11,6 +11,8 @@ import { test } from "node:test";
 
 const root = join(import.meta.dirname, "..");
 
+const require = (await import("node:module")).createRequire(import.meta.url);
+
 const fixture = join(root, "tests/fixtures/sample");
 
 function archdiff(args: string[], cwd = root): { status: number | null; stdout: string; stderr: string } {
@@ -249,6 +251,40 @@ test("review measures the change from the merge-base, not from the tip of main",
     assert.equal(status, 0, stdout);
     assert.ok(stdout.includes("- fn `log` — src/lib/log.ts:1 (body)"), stdout);
     assert.ok(!stdout.includes("extra"), stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("flow lists the steps from an entry with their types, the storages, and the mocks carried by name", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-flow-"));
+
+  try {
+    cpSync(fixture, dir, { recursive: true });
+    const plain = archdiff(["flow", "calls:src/lib/orders.ts#placeOrder", dir]);
+    assert.equal(plain.status, 0, plain.stderr);
+    assert.ok(plain.stdout.includes("- **placeOrder**(id: string, total: number) → Order — src/lib/orders.ts:7"), plain.stdout);
+    assert.ok(plain.stdout.includes("  - **saveOrder**(order: Order) → void — src/db/store.ts:6 — storage: the file system"), plain.stdout);
+    assert.ok(plain.stdout.includes("## Storages on the way\n\n- src/db/store.ts — the file system"), plain.stdout);
+    // Mocks saved by the page: the input's keys reach the parameters of the same name.
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(join(dir, ".archdiff/layouts"), { recursive: true });
+    writeFileSync(
+      join(dir, ".archdiff/layouts/calls_src_lib_orders.ts_placeOrder.json"),
+      JSON.stringify({ format: 1, view: "calls:src/lib/orders.ts#placeOrder", elements: [], mocks: [{ id: "src/lib/orders.ts#placeOrder", kind: "input", value: '{"id": "o-1", "total": 42}' }, { id: "src/db/store.ts", kind: "storage", value: '{"order": {"id": "o-0"}}' }], saved: "2026-10-15T00:00:00.000Z" }),
+    );
+    const mocked = JSON.parse(archdiff(["flow", "calls:src/lib/orders.ts#placeOrder", dir, "--json"]).stdout) as { input?: string; steps: { name: string; params: { name: string; value?: string; from?: string }[]; content?: string }[] };
+    assert.equal(mocked.input, '{"id": "o-1", "total": 42}');
+    const entry = mocked.steps.find((step) => step.name === "placeOrder")!;
+    assert.deepEqual(
+      entry.params.map((param) => [param.name, param.value, param.from]),
+      [
+        ["id", '"o-1"', "input"],
+        ["total", "42", "input"],
+      ],
+    );
+    const save = mocked.steps.find((step) => step.name === "saveOrder")!;
+    assert.equal(save.content, '{"order": {"id": "o-0"}}');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -51,7 +51,26 @@ export interface SceneResponse {
   drawn: boolean;
 }
 
+export interface FlowStep {
+  id: string;
+  name: string;
+  module: string;
+  line: number;
+  depth: number;
+  params: { name: string; type: string; value?: string; from?: string }[];
+  returns: string | null;
+  storage?: string;
+  content?: string;
+  gaps: number;
+}
+
+export interface FlowResponse {
+  flow: { entry: string; steps: FlowStep[]; storages: { id: string; module: string; storage: string; content?: string }[]; input?: string };
+  markdown: string;
+}
+
 export const api = {
+  flow: (view: string, depth: number | null) => get<FlowResponse>(`/api/flow?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
   scene: (view: string, depth: number | null, packages: boolean) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}${packages ? "&packages=1" : ""}`),
   saveLayout: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
     const response = await fetch(`/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
