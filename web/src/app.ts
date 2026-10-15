@@ -1,11 +1,15 @@
-// The page: the list of views on the left, the canvas in the middle, and
-// on the right the Markdown of the diagram or the picked shape, the code
-// it stands for, and the coverage report. The view and depth live in the
-// URL hash, so a link opens the same picture. Every change re-asks the
+// The page: the list of views on the left, one Excalidraw canvas in the
+// middle (reading by default, drawing on demand), and on the right the
+// Markdown of the diagram or of the picked shape (rendered, or raw), the
+// code it stands for, and the coverage report. The view, depth and
+// options live in the URL hash, so a link opens the same picture and the
+// browser's back button walks the path taken. Every change re-asks the
 // server, which re-analyses from its cache: the diagrams are live.
 
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { api, type DiagramNode, type ViewEntry } from "./api.ts";
-import { Canvas } from "./canvas.ts";
+import { mountCanvas, VIEW_LINK, type CanvasHandle } from "./editor.tsx";
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -19,27 +23,37 @@ const viewsList = element<HTMLUListElement>("views");
 const search = element<HTMLInputElement>("search");
 const title = element<HTMLSpanElement>("title-text");
 const reason = element<HTMLDivElement>("reason");
-const markdownPanel = element<HTMLPreElement>("markdown");
+const markdownPanel = element<HTMLDivElement>("markdown");
 const codePanel = element<HTMLPreElement>("code");
-const coveragePanel = element<HTMLPreElement>("coverage");
+const coveragePanel = element<HTMLDivElement>("coverage");
 const depthInput = element<HTMLInputElement>("depth");
 const baseInput = element<HTMLInputElement>("base");
-const exportLinks = element<HTMLSpanElement>("export");
+const packagesInput = element<HTMLInputElement>("packages");
+const exportLinks = element<HTMLDivElement>("export");
+const saveButton = element<HTMLButtonElement>("save");
 
 interface State {
   view: string;
   depth: number | null;
   review: boolean;
+  /** Draw packages and built-ins in the module views. */
+  packages: boolean;
 }
 
 let views: ViewEntry[] = [];
 let diagramMarkdown = "";
+let nodes = new Map<string, DiagramNode>();
+let canvas: CanvasHandle | null = null;
+let mode: "view" | "edit" = "view";
+let dirty = false;
+let mocks: unknown[] = [];
+let rawMarkdown = false;
 
 function stateFromHash(): State {
   const params = new URLSearchParams(location.hash.slice(1));
   const depth = params.get("depth");
 
-  return { view: params.get("view") ?? "layers", depth: depth === null || depth === "" ? null : Number(depth), review: params.get("review") === "1" };
+  return { view: params.get("view") ?? "layers", depth: depth === null || depth === "" ? null : Number(depth), review: params.get("review") === "1", packages: params.get("packages") === "1" };
 }
 
 function setHash(state: State): void {
@@ -49,24 +63,15 @@ function setHash(state: State): void {
   if (state.depth !== null) params.set("depth", String(state.depth));
 
   if (state.review) params.set("review", "1");
+
+  if (state.packages) params.set("packages", "1");
   const base = baseInput.value.trim();
 
   if (base) params.set("base", base);
   location.hash = params.toString();
 }
 
-const canvas = new Canvas(element("canvas"), element("minimap"), {
-  select: (node) => {
-    void showNode(node);
-  },
-  open: (node) => {
-    const own = ownView(node);
-
-    if (own) setHash({ ...stateFromHash(), view: own, review: false });
-  },
-});
-
-/** The view a shape opens on a double click: a layer its modules, a module its imports, a function its calls. */
+/** The view a shape opens: a layer its modules, a module its imports, a function its calls. */
 function ownView(node: DiagramNode): string | null {
   const id = node.ref?.id ?? node.id;
 
@@ -82,6 +87,8 @@ function ownView(node: DiagramNode): string | null {
   }
 }
 
+// ── The right panel ──────────────────────────────────────────────────────────
+
 function showTab(name: string): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>("#tabs button")) button.classList.toggle("active", button.dataset["tab"] === name);
 
@@ -89,6 +96,53 @@ function showTab(name: string): void {
 }
 
 for (const button of document.querySelectorAll<HTMLButtonElement>("#tabs button")) button.addEventListener("click", () => showTab(button.dataset["tab"]!));
+
+/** Markdown as HTML (sanitised: a doc comment of the repository is not trusted), or as text when the raw toggle is on. */
+function renderMarkdown(target: HTMLElement, markdown: string): void {
+  if (rawMarkdown) {
+    target.replaceChildren(Object.assign(document.createElement("pre"), { textContent: markdown }));
+
+    return;
+  }
+
+  const html = marked.parse(markdown, { async: false, gfm: true });
+  target.innerHTML = DOMPurify.sanitize(html);
+
+  // The Mermaid source of the picture is for copying, not reading: folded under a summary.
+  for (const code of target.querySelectorAll("pre > code.language-mermaid")) {
+    const pre = code.parentElement!;
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Mermaid source";
+    details.append(summary);
+    pre.replaceWith(details);
+    details.append(pre);
+  }
+
+  // A `file:line` in the text opens the code; a view key opens the view.
+  for (const code of target.querySelectorAll("code")) {
+    const text = code.textContent ?? "";
+    const match = text.match(/^([\w./@-]+\.[cm]?[jt]sx?)(?::(\d+))?$/);
+
+    if (match && nodes.size > 0) {
+      code.classList.add("link");
+      code.title = "Show the code";
+      code.addEventListener("click", () => void showCode({ id: text, kind: "module", label: text, ref: { file: match[1]!, line: match[2] ? Number(match[2]) : 1 }, x: 0, y: 0, w: 0, h: 0 }));
+    }
+  }
+}
+
+element<HTMLButtonElement>("raw").addEventListener("click", () => {
+  rawMarkdown = !rawMarkdown;
+  element("raw").classList.toggle("active", rawMarkdown);
+  renderMarkdown(markdownPanel, markdownPanel.dataset["markdown"] ?? "");
+  renderMarkdown(coveragePanel, coveragePanel.dataset["markdown"] ?? "");
+});
+
+function setMarkdown(target: HTMLElement, markdown: string): void {
+  target.dataset["markdown"] = markdown;
+  renderMarkdown(target, markdown);
+}
 
 /** The code of a shape: the file with the shape's lines marked and scrolled into view. */
 async function showCode(node: DiagramNode): Promise<void> {
@@ -111,14 +165,15 @@ async function showCode(node: DiagramNode): Promise<void> {
   }
 
   const from = node.ref?.line ?? 1;
-  const to = node.ref?.endLine ?? (node.kind === "module" ? Infinity : from);
+  const to = node.ref?.endLine ?? from;
+  const mark = node.kind !== "module";
   codePanel.replaceChildren();
   const lines = text.split("\n");
   let first: HTMLElement | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = document.createElement("span");
-    line.className = `line${i + 1 >= from && i + 1 <= to && node.kind !== "module" ? " hit" : ""}`;
+    line.className = `line${mark && i + 1 >= from && i + 1 <= to ? " hit" : ""}`;
     const number = document.createElement("span");
     number.className = "n";
     number.textContent = String(i + 1);
@@ -129,14 +184,16 @@ async function showCode(node: DiagramNode): Promise<void> {
   }
 
   codePanel.prepend(Object.assign(document.createElement("div"), { className: "muted", textContent: `${file}${from > 1 ? `:${from}` : ""}` }));
+  showTab("code");
   first?.scrollIntoView({ block: "center" });
 }
 
-async function showNode(node: DiagramNode | null): Promise<void> {
+async function showNode(id: string | null): Promise<void> {
   const state = stateFromHash();
+  const node = id === null ? null : nodes.get(id);
 
   if (!node) {
-    markdownPanel.textContent = diagramMarkdown;
+    setMarkdown(markdownPanel, diagramMarkdown);
 
     return;
   }
@@ -144,16 +201,19 @@ async function showNode(node: DiagramNode | null): Promise<void> {
   if (!state.review) {
     try {
       const { markdown } = await api.node(state.view, node.id);
-      markdownPanel.textContent = markdown;
+      setMarkdown(markdownPanel, markdown);
     } catch (error) {
-      markdownPanel.textContent = error instanceof Error ? error.message : String(error);
+      setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
     }
   } else {
-    markdownPanel.textContent = `# ${node.label}\n\n${node.diff ?? "context"} — ${node.ref?.file ?? ""}`;
+    setMarkdown(markdownPanel, `# ${node.label}\n\n${node.diff ?? "context"} — ${node.ref?.file ?? ""}`);
   }
 
+  showTab("markdown");
   await showCode(node);
 }
+
+// ── The left panel ───────────────────────────────────────────────────────────
 
 function renderViews(filter: string): void {
   const state = stateFromHash();
@@ -175,13 +235,21 @@ function renderViews(filter: string): void {
     head.textContent = `${label} (${members.length})`;
     viewsList.append(head);
 
-    for (const view of members) {
+    // A long group (every module) shows its first entries; the filter finds the rest.
+    for (const view of members.slice(0, needle === "" ? 60 : 400)) {
       const item = document.createElement("li");
       item.textContent = view.title;
       item.title = view.key;
       item.classList.toggle("active", view.key === state.view && !state.review);
       item.addEventListener("click", () => setHash({ ...state, view: view.key, review: false }));
       viewsList.append(item);
+    }
+
+    if (members.length > (needle === "" ? 60 : 400)) {
+      const more = document.createElement("li");
+      more.className = "muted";
+      more.textContent = `… ${members.length - 60} more: type to filter`;
+      viewsList.append(more);
     }
   }
 }
@@ -200,36 +268,119 @@ function renderExports(view: string, base: string | null): void {
   }
 }
 
+// ── The canvas ───────────────────────────────────────────────────────────────
+
+function download(blob: Blob, name: string): void {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function fileName(extension: string): string {
+  return `${stateFromHash().view.replace(/[^A-Za-z0-9._-]+/g, "_")}${extension}`;
+}
+
+async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[]): Promise<CanvasHandle> {
+  if (canvas) {
+    canvas.replace(elements);
+
+    return canvas;
+  }
+
+  canvas = await mountCanvas(element("canvas"), elements, {
+    pick: (id) => void showNode(id),
+    open: (id, link) => {
+      const key = link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : nodes.has(id) ? ownView(nodes.get(id)!) : null;
+
+      if (key && mode === "view") setHash({ ...stateFromHash(), view: key, review: false });
+    },
+    changed: () => {
+      if (mode === "edit") {
+        dirty = true;
+        saveButton.classList.add("dirty");
+      }
+    },
+  });
+
+  return canvas;
+}
+
+function setMode(next: "view" | "edit"): void {
+  mode = next;
+  canvas?.setMode(next);
+  document.body.classList.toggle("editing", next === "edit");
+  element("edit-tools").hidden = next !== "edit";
+  element("edit").classList.toggle("active", next === "edit");
+
+  if (next === "view") {
+    dirty = false;
+    saveButton.classList.remove("dirty");
+  }
+}
+
+async function saveDrawing(): Promise<void> {
+  if (!canvas) return;
+  const { saved } = await api.saveLayout(stateFromHash().view, canvas.scene(), mocks);
+  dirty = false;
+  saveButton.classList.remove("dirty");
+  reason.textContent = `saved to ${saved}`;
+}
+
+function leaveEdit(): boolean {
+  if (mode !== "edit") return true;
+
+  if (dirty && !confirm("The drawing has unsaved changes. Leave the editor and lose them?")) return false;
+  setMode("view");
+
+  return true;
+}
+
+async function relayout(): Promise<void> {
+  if (!canvas) return;
+  await saveDrawing();
+  const scene = await api.scene(stateFromHash().view, stateFromHash().depth, stateFromHash().packages);
+  canvas.replace(scene.elements);
+}
+
+// ── Loading ──────────────────────────────────────────────────────────────────
+
 async function load(): Promise<void> {
   const state = stateFromHash();
   const base = new URLSearchParams(location.hash.slice(1)).get("base");
 
   if (base !== null) baseInput.value = base;
   depthInput.value = state.depth === null ? "" : String(state.depth);
+  packagesInput.checked = state.packages;
   renderViews(search.value);
   reason.textContent = "";
+  element<HTMLButtonElement>("edit").disabled = state.review;
 
   try {
     if (state.review) {
       const result = await api.review(baseInput.value.trim() || null);
       title.textContent = `${result.diagram.title} — ${result.diff.changedFiles.length} source files changed${result.diff.layerEdgesAdded.length > 0 ? ` — ⚠ ${result.diff.layerEdgesAdded.length} new layer dependencies` : ""}`;
       diagramMarkdown = result.markdown;
-      canvas.show(result.diagram);
+      nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
+      await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
       renderExports(`review:${result.diff.base}`, baseInput.value.trim() || null);
     } else {
-      const result = await api.diagram(state.view, state.depth);
-      title.textContent = result.diagram.title;
+      const result = await api.scene(state.view, state.depth, state.packages);
+      title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
       diagramMarkdown = result.markdown;
-      canvas.show(result.diagram);
+      nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
+      mocks = result.mocks;
+      await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
       renderExports(state.view, null);
     }
 
-    markdownPanel.textContent = diagramMarkdown;
+    setMarkdown(markdownPanel, diagramMarkdown);
   } catch (error) {
     title.textContent = "archdiff";
-    markdownPanel.textContent = error instanceof Error ? error.message : String(error);
+    setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
     showTab("markdown");
   }
 }
@@ -246,20 +397,36 @@ async function loadViews(): Promise<void> {
 async function loadCoverage(): Promise<void> {
   try {
     const report = await api.coverage();
-    coveragePanel.textContent = report.markdown;
+    setMarkdown(coveragePanel, report.markdown);
   } catch (error) {
-    coveragePanel.textContent = error instanceof Error ? error.message : String(error);
+    setMarkdown(coveragePanel, error instanceof Error ? error.message : String(error));
   }
 }
 
-element<HTMLButtonElement>("fit").addEventListener("click", () => canvas.fit());
-element<HTMLButtonElement>("zoom-in").addEventListener("click", () => canvas.zoomAt(1.25));
-element<HTMLButtonElement>("zoom-out").addEventListener("click", () => canvas.zoomAt(1 / 1.25));
-element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
-element<HTMLButtonElement>("review").addEventListener("click", () => setHash({ ...stateFromHash(), review: true }));
-element<HTMLDivElement>("export").addEventListener("click", () => element<HTMLDetailsElement>("export-menu").removeAttribute("open"));
+// ── Controls ─────────────────────────────────────────────────────────────────
 
-// The side panels fold away (the choice is remembered in this browser); the canvas refits when they do.
+element<HTMLButtonElement>("fit").addEventListener("click", () => canvas?.scrollToContent());
+element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
+element<HTMLButtonElement>("review").addEventListener("click", () => {
+  if (leaveEdit()) setHash({ ...stateFromHash(), review: true });
+});
+element<HTMLButtonElement>("edit").addEventListener("click", () => (mode === "edit" ? leaveEdit() : setMode("edit")));
+saveButton.addEventListener("click", () => void saveDrawing().catch((error: unknown) => (reason.textContent = error instanceof Error ? error.message : String(error))));
+element<HTMLButtonElement>("relayout").addEventListener("click", () => void relayout());
+element<HTMLButtonElement>("exit").addEventListener("click", () => leaveEdit());
+element<HTMLButtonElement>("shot-png").addEventListener("click", () => void canvas?.screenshot("png").then((blob) => download(blob, fileName(".png"))));
+element<HTMLButtonElement>("shot-svg").addEventListener("click", () => void canvas?.screenshot("svg").then((blob) => download(blob, fileName(".svg"))));
+element<HTMLDivElement>("export").addEventListener("click", () => element<HTMLDetailsElement>("export-menu").removeAttribute("open"));
+depthInput.addEventListener("change", () => setHash({ ...stateFromHash(), depth: depthInput.value === "" ? null : Number(depthInput.value) }));
+packagesInput.addEventListener("change", () => setHash({ ...stateFromHash(), packages: packagesInput.checked }));
+baseInput.addEventListener("change", () => {
+  if (stateFromHash().review) setHash(stateFromHash());
+});
+window.addEventListener("beforeunload", (event) => {
+  if (dirty) event.preventDefault();
+});
+
+// The side panels fold away (the choice is remembered in this browser).
 function remembered(key: string): boolean {
   try {
     return localStorage.getItem(key) === "1";
@@ -276,8 +443,6 @@ function togglePanel(side: "left" | "right", force?: boolean): void {
   } catch {
     // A private window: the choice lasts the page.
   }
-
-  requestAnimationFrame(() => canvas.fit());
 }
 
 element<HTMLButtonElement>("toggle-left").addEventListener("click", () => togglePanel("left"));
@@ -287,7 +452,7 @@ if (remembered("archdiff.hide-left")) document.body.classList.add("hide-left");
 
 if (remembered("archdiff.hide-right")) document.body.classList.add("hide-right");
 
-// Keyboard: Ctrl+B / Ctrl+] fold the panels, + − 0 zoom, Backspace goes back, / finds a view, Escape clears the pick.
+// Keyboard (outside the editor, which owns its own keys): Ctrl+B / Ctrl+] fold the panels, 0 fits, Backspace goes back, / finds a view, e edits, Escape clears the pick.
 window.addEventListener("keydown", (event) => {
   const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
 
@@ -297,31 +462,29 @@ window.addEventListener("keydown", (event) => {
   } else if (event.ctrlKey && event.key === "]") {
     event.preventDefault();
     togglePanel("right");
-  } else if (typing) {
-    if (event.key === "Escape") (event.target as HTMLElement).blur();
-  } else if (event.key === "+" || event.key === "=") {
-    canvas.zoomAt(1.25);
-  } else if (event.key === "-") {
-    canvas.zoomAt(1 / 1.25);
+  } else if (event.ctrlKey && event.key === "s" && mode === "edit") {
+    event.preventDefault();
+    void saveDrawing();
+  } else if (mode === "edit" || typing) {
+    if (typing && event.key === "Escape") (event.target as HTMLElement).blur();
   } else if (event.key === "0") {
-    canvas.fit();
+    canvas?.scrollToContent();
   } else if (event.key === "Backspace") {
     history.back();
   } else if (event.key === "/") {
     event.preventDefault();
     togglePanel("left", false);
     search.focus();
+  } else if (event.key === "e" && !stateFromHash().review) {
+    setMode("edit");
   } else if (event.key === "Escape") {
-    canvas.select(null);
     void showNode(null);
   }
 });
-depthInput.addEventListener("change", () => setHash({ ...stateFromHash(), depth: depthInput.value === "" ? null : Number(depthInput.value) }));
-baseInput.addEventListener("change", () => {
-  if (stateFromHash().review) setHash(stateFromHash());
+
+window.addEventListener("hashchange", () => {
+  if (leaveEdit()) void load();
 });
-window.addEventListener("hashchange", () => void load());
-window.addEventListener("resize", () => canvas.fit());
 
 void (async () => {
   await loadViews();

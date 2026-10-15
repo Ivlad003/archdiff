@@ -11,7 +11,7 @@ import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index
 import { reviewMarkdown, review } from "./diff.ts";
 import { serve } from "./server.ts";
 import { layout } from "./diagram.ts";
-import { parseView, viewOf, viewList } from "./views.ts";
+import { parseView, viewOf, viewList, type ViewOptions } from "./views.ts";
 
 const HELP = `archdiff: live diagrams of a TypeScript/JavaScript repository, and the architectural diff of a change
 
@@ -22,10 +22,12 @@ Commands:
                      Parse the repository and print its size: files, functions, imports,
                      resolved calls and gaps. --json: the stats as JSON
   views [dir]        List the views that can be drawn: layers, every module, every entry point
-  diagram <view> [dir] [--format F] [--depth N] [--out FILE]
+  diagram <view> [dir] [--format F] [--depth N] [--packages] [--limit N] [--out FILE]
                      Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,
                      drawio, excalidraw, archimate. Views: layers | layer:<name> |
-                     module:<path> | calls:<path>#<fn> | coverage
+                     module:<path> | calls:<path>#<fn> | coverage. --packages draws the
+                     packages a module imports; --limit folds a bigger picture into
+                     "… N more" (default 80)
   coverage [dir] [--json]
                      The map of what the diagrams cannot cover: unresolved imports, calls
                      archdiff could not follow, files with syntax errors, by module
@@ -59,7 +61,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "port", "host"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "port", "host", "limit"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -149,8 +151,16 @@ export async function main(argv: readonly string[]): Promise<number> {
         const depth = flags.has("depth") ? Number(flags.get("depth")) : undefined;
 
         if (depth !== undefined && !(Number.isInteger(depth) && depth >= 0)) return fail("diagram: --depth must be a whole number");
+        const limit = flags.has("limit") ? Number(flags.get("limit")) : undefined;
+
+        if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1)) return fail("diagram: --limit must be a whole number above 0");
         const analysis = await analyze(dirArg(1));
-        const diagram = layout(viewOf(analysis, view, depth === undefined ? {} : { depth }));
+        const options: ViewOptions = { packages: flags.has("packages") };
+
+        if (depth !== undefined) options.depth = depth;
+
+        if (limit !== undefined) options.limit = limit;
+        const diagram = layout(viewOf(analysis, view, options));
         return writeOut(format === "md" ? diagramMarkdown(diagram, analysis) : exportDiagram(diagram, format as Exclude<ExportFormat, "md">), flags.get("out"));
       }
 

@@ -17,9 +17,11 @@ export interface DiagramNode {
   /**
    * `layer`: a lane drawn as a box (the layers view); `module`: a file;
    * `fn`: a function, method or class; `external`: a package or a built-in;
-   * `hole`: a call archdiff could not resolve; `start`: an entry point.
+   * `hole`: a call archdiff could not resolve; `start`: an entry point;
+   * `more`: the shapes a big view folds away (`count` of them), so the
+   * picture stays readable — the Markdown lists them all.
    */
-  kind: "layer" | "module" | "fn" | "external" | "hole" | "start";
+  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more";
   label: string;
   /** The code the shape stands for: a graph ID and a position. */
   ref?: { id?: string; file?: string; line?: number; endLine?: number };
@@ -89,6 +91,7 @@ export const SIZE: Record<DiagramNode["kind"], { w: number; h: number }> = {
   external: { w: 150, h: 50 },
   hole: { w: 60, h: 40 },
   start: { w: 36, h: 36 },
+  more: { w: 150, h: 50 },
 };
 
 /** One cell of the grid: the largest shape and the gaps around it. */

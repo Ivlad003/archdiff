@@ -42,6 +42,8 @@ function shape(node: DiagramNode, id: string): string {
       return `${id}(${text})`;
     case "module":
       return `${id}[${text}]`;
+    case "more":
+      return `${id}[/${text}/]`;
   }
 }
 

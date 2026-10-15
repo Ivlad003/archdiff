@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>archdiff</title>
+    <link rel="stylesheet" href="page.css" />
     <link rel="stylesheet" href="app.css" />
   </head>
   <body>
@@ -15,11 +16,18 @@
       <span id="stats" class="muted"></span>
       <span class="spacer"></span>
       <label title="How far from the subject the picture goes">depth <input id="depth" type="number" min="0" max="12" value="" placeholder="auto" /></label>
-      <button id="zoom-out" class="icon" title="Zoom out (−)">−</button>
-      <button id="zoom-in" class="icon" title="Zoom in (+)">+</button>
+      <label title="Draw the packages and Node built-ins a module imports"><input id="packages" type="checkbox" /> packages</label>
       <button id="fit" title="Fit the diagram to the window (0)">fit</button>
       <label>base <input id="base" type="text" placeholder="merge-base" size="12" /></label>
       <button id="review" title="The architectural diff of the working tree against the base">review</button>
+      <button id="edit" title="Move shapes, draw with the pencil, write notes; saved to .archdiff/layouts/ (e)">✎ edit</button>
+      <span id="edit-tools" hidden>
+        <button id="save" title="Save the drawing to .archdiff/layouts/<view>.json (Ctrl+S)">save</button>
+        <button id="relayout" title="Redraw the shapes from the code; your drawings and the places of shapes that still exist stay">re-layout</button>
+        <button id="shot-png" title="Download a PNG of the drawing (or of the selected shapes)">PNG</button>
+        <button id="shot-svg" title="Download an SVG of the drawing (or of the selected shapes)">SVG</button>
+        <button id="exit" title="Back to reading">done</button>
+      </span>
       <details id="export-menu">
         <summary title="Download the diagram for another tool">export ▾</summary>
         <div id="export"></div>
@@ -35,11 +43,10 @@
         <div id="title">
           <button id="back" class="icon" title="Back to the previous view (Backspace)">←</button>
           <span id="title-text"></span>
-          <span id="hint" class="muted">click a shape for its code · double-click to open its own view · drag to pan · wheel to zoom</span>
+          <span id="hint" class="muted">tap a shape for its code · tap it again to open its own view · drag to pan · wheel to zoom</span>
         </div>
         <div id="canvas-wrap">
           <div id="canvas"></div>
-          <div id="minimap"></div>
           <div id="reason" class="muted"></div>
         </div>
         <div id="legend">
@@ -48,6 +55,7 @@
           <span><i class="sw fn"></i>function</span>
           <span><i class="sw external"></i>package</span>
           <span><i class="sw hole"></i>not followed</span>
+          <span><i class="sw more"></i>… more</span>
           <span><i class="sw added"></i>added</span>
           <span><i class="sw removed"></i>removed</span>
           <span><i class="sw changed"></i>changed</span>
@@ -58,12 +66,16 @@
           <button data-tab="markdown" class="active">Markdown</button>
           <button data-tab="code">Code</button>
           <button data-tab="coverage">Coverage</button>
+          <button id="raw" class="small" title="Show the Markdown as text, to copy it">raw</button>
         </nav>
-        <pre id="markdown" class="panel active"></pre>
+        <div id="markdown" class="panel prose active"></div>
         <pre id="code" class="panel"></pre>
-        <pre id="coverage" class="panel"></pre>
+        <div id="coverage" class="panel prose"></div>
       </aside>
     </main>
+    <script>
+      window.EXCALIDRAW_ASSET_PATH = "/excalidraw/";
+    </script>
     <script type="module" src="app.js"></script>
   </body>
 </html>

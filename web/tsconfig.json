@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "lib": ["es2023", "dom", "dom.iterable"],
     "types": [],
+    "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -14,5 +15,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "../src/diagram.ts", "../src/json.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../src/diagram.ts", "../src/json.ts", "../src/export/excalidraw.ts", "../src/scene.ts"]
 }

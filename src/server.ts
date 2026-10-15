@@ -5,9 +5,12 @@
 // GET only; binds to localhost unless --host says otherwise; the files it
 // returns are only the analysed sources of the repository.
 //
-// API: /api/views, /api/diagram?view=&depth=, /api/node?view=&id=,
+// API (GET): /api/views, /api/diagram?view=&depth=, /api/node?view=&id=,
 // /api/file?path=, /api/coverage, /api/review?base=,
-// /api/export?view=&format=. Entry point: `serve`.
+// /api/export?view=&format=, /api/scene?view= (the editor's scene: the
+// code's picture merged into the saved drawing), /api/layout?view=.
+// POST /api/layout saves a drawing to .archdiff/layouts/. Entry point:
+// `serve`.
 
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -18,7 +21,10 @@ import { coverageReport } from "./coverage.ts";
 import { layout } from "./diagram.ts";
 import { review, reviewMarkdown } from "./diff.ts";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, type ExportFormat } from "./export/index.ts";
+import { toExcalidraw } from "./export/excalidraw.ts";
+import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type SceneElement } from "./layouts.ts";
 import { diagramMarkdown, nodeMarkdown } from "./markdown.ts";
+import { parseJson } from "./json.ts";
 import { parseView, viewList, viewOf } from "./views.ts";
 
 export interface ServeOptions {
@@ -57,10 +63,35 @@ function problem(response: ServerResponse, status: number, message: string): voi
   send(response, status, "application/json", JSON.stringify({ error: message }));
 }
 
+/** The largest drawing the page may save. */
+const MAX_BODY = 8_000_000;
+
+/** The whole body of a request as text, or null when it is over `limit` bytes. */
+function readBody(request: IncomingMessage, limit: number): Promise<string | null> {
+  return new Promise((resolveBody, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    request.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+
+      if (size > limit) {
+        request.destroy();
+        resolveBody(null);
+
+        return;
+      }
+
+      chunks.push(chunk);
+    });
+    request.on("end", () => resolveBody(Buffer.concat(chunks).toString("utf8")));
+    request.on("error", reject);
+  });
+}
+
 /** Host headers a browser sends to a server on this computer. */
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
-const STATIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".map": "application/json" };
+const STATIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".map": "application/json", ".woff2": "font/woff2", ".ttf": "font/ttf", ".svg": "image/svg+xml", ".png": "image/png" };
 
 export async function serve(root: string, options: ServeOptions): Promise<void> {
   const web = await webDirectory();
@@ -76,8 +107,18 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     return current;
   };
 
+  // The placed diagram of a view, at the saved places when the view was drawn by hand.
+  const placed = (analysis: Analysis, key: string, depth?: number, packages = false): ReturnType<typeof layout> | null => {
+    const view = parseView(key);
+
+    if (!view) return null;
+    const options = depth === undefined ? { packages } : { depth, packages };
+
+    return layout(viewOf(analysis, view, options), positionsOf(readLayout(root, key)?.elements ?? null));
+  };
+
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    if (request.method !== "GET") return problem(response, 405, "GET only");
+    if (request.method !== "GET" && request.method !== "POST") return problem(response, 405, "GET or POST only");
     // A page on another site cannot read the sources through DNS rebinding: the Host header must be this server's own name.
     const hostHeader = (request.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
 
@@ -85,8 +126,47 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     const url = new URL(request.url ?? "/", "http://localhost");
     const path = url.pathname;
 
+    if (request.method === "POST") {
+      if (path !== "/api/layout") return problem(response, 404, "no such API");
+      const key = url.searchParams.get("view") ?? "";
+
+      if (!parseView(key) && !key.startsWith("review")) return problem(response, 400, "unknown view");
+      const body = await readBody(request, MAX_BODY);
+
+      if (body === null) return problem(response, 413, `the layout is over ${MAX_BODY / 1_000_000} MB`);
+
+      try {
+        const file = writeLayout(root, parseLayout(parseJson(body), key));
+
+        return json(response, { saved: file });
+      } catch (error) {
+        return problem(response, 400, error instanceof Error ? error.message : String(error));
+      }
+    }
+
     if (path.startsWith("/api/")) {
       switch (path) {
+        case "/api/layout": {
+          const key = url.searchParams.get("view") ?? "";
+          const saved = readLayout(root, key);
+
+          return json(response, saved ? { saved: saved.saved, mocks: saved.mocks, elements: saved.elements.length } : null);
+        }
+
+        case "/api/scene": {
+          const key = url.searchParams.get("view") ?? "";
+          const analysis = await fresh();
+          const depthText = url.searchParams.get("depth");
+          const diagram = placed(analysis, key, depthText === null || depthText === "" ? undefined : Number(depthText), url.searchParams.get("packages") === "1");
+
+          if (!diagram) return problem(response, 400, "unknown view");
+          // The code's picture at the saved places, then the saved drawing's own elements (pencil, notes) on top.
+          const generated = (JSON.parse(toExcalidraw(diagram)) as { elements: SceneElement[] }).elements;
+          const saved = readLayout(root, key);
+
+          return json(response, { elements: saved ? mergeScene(saved.elements, generated) : generated, mocks: saved?.mocks ?? [], diagram, markdown: diagramMarkdown(diagram, analysis), drawn: saved !== null });
+        }
+
         case "/api/views": {
           const analysis = await fresh();
 
@@ -102,9 +182,9 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
           if (depth !== undefined && !(Number.isInteger(depth) && depth >= 0)) return problem(response, 400, "depth must be a whole number");
           const analysis = await fresh();
-          const diagram = layout(viewOf(analysis, view, depth === undefined ? {} : { depth }));
+          const diagram = placed(analysis, url.searchParams.get("view") ?? "", depth)!;
 
-          return json(response, { diagram, markdown: diagramMarkdown(diagram, analysis) });
+          return json(response, { diagram, markdown: diagramMarkdown(diagram, analysis), drawn: readLayout(root, url.searchParams.get("view") ?? "") !== null });
         }
 
         case "/api/node": {
@@ -142,7 +222,9 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           try {
             const result = await review(root, base);
 
-            return json(response, { diff: result.diff, diagram: result.diagram, markdown: reviewMarkdown(result) });
+            const elements = (JSON.parse(toExcalidraw(result.diagram)) as { elements: SceneElement[] }).elements;
+
+            return json(response, { diff: result.diff, diagram: result.diagram, elements, markdown: reviewMarkdown(result) });
           } catch (error) {
             return problem(response, 400, error instanceof Error ? error.message : String(error));
           }
@@ -160,10 +242,9 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
             const result = await review(root, url.searchParams.get("base") || options.base);
             diagram = result.diagram;
           } else {
-            const view = parseView(key);
+            diagram = placed(analysis, key);
 
-            if (!view) return problem(response, 400, "unknown view");
-            diagram = layout(viewOf(analysis, view));
+            if (!diagram) return problem(response, 400, "unknown view");
           }
 
           const name = `${key.replace(/[^A-Za-z0-9._-]+/g, "_")}${EXPORT_EXTENSION[format as ExportFormat]}`;
@@ -177,14 +258,14 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
       }
     }
 
-    // Static files of the page, from dist/web only.
-    const file = path === "/" ? "index.html" : path.slice(1);
+    // Static files of the page, from dist/web only: the page, its chunks and the editor's fonts; never a path that climbs out.
+    const file = path === "/" ? "index.html" : decodeURIComponent(path.slice(1));
 
-    if (file.includes("..") || file.includes("/")) return problem(response, 404, "not found");
-    const full = join(web, file);
+    if (file.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) return problem(response, 404, "not found");
+    const full = join(web, ...file.split("/"));
     const extension = file.slice(file.lastIndexOf("."));
 
-    if (!existsSync(full) || !(extension in STATIC_TYPES)) return problem(response, 404, "not found");
+    if (!full.startsWith(web) || !existsSync(full) || !(extension in STATIC_TYPES)) return problem(response, 404, "not found");
 
     return send(response, 200, STATIC_TYPES[extension]!, readFileSync(full));
   };

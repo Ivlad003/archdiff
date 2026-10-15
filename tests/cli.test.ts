@@ -60,21 +60,37 @@ test("a calls view draws the call tree from an entry point in lanes, as Markdown
   assert.ok(stdout.includes("- **saveOrder** `(order: Order) → void` — src/db/store.ts:"), stdout);
 });
 
-test("the module view, with depth 0, is the module and its packages only", () => {
+test("the module view shows its neighbours; --packages adds the packages, --depth 0 the module alone", () => {
   const deep = archdiff(["diagram", "module:src/db/store.ts", fixture, "--format", "json"]);
   assert.equal(deep.status, 0);
   const diagram = JSON.parse(deep.stdout) as { nodes: { id: string; kind: string; x: number; w: number }[]; edges: { from: string; to: string }[] };
   assert.deepEqual(
     diagram.nodes.map((node) => node.id).sort(),
-    ["node:fs", "src/db/store.ts", "src/lib/orders.ts"],
+    ["src/db/store.ts", "src/lib/orders.ts"],
   );
   assert.ok(diagram.nodes.every((node) => node.w > 0));
-  const shallow = archdiff(["diagram", "module:src/db/store.ts", fixture, "--format", "json", "--depth", "0"]);
+  const packages = JSON.parse(archdiff(["diagram", "module:src/db/store.ts", fixture, "--format", "json", "--packages"]).stdout) as { nodes: { id: string }[] };
+  assert.deepEqual(
+    packages.nodes.map((node) => node.id).sort(),
+    ["node:fs", "src/db/store.ts", "src/lib/orders.ts"],
+  );
+  const shallow = archdiff(["diagram", "module:src/db/store.ts", fixture, "--format", "json", "--depth", "0", "--packages"]);
   const own = JSON.parse(shallow.stdout) as { nodes: { id: string }[] };
   assert.deepEqual(
     own.nodes.map((node) => node.id).sort(),
     ["node:fs", "src/db/store.ts"],
   );
+});
+
+test("a big view folds its tail into one shape and says so", () => {
+  const { status, stdout } = archdiff(["diagram", "layer:lib", fixture, "--format", "json", "--limit", "2"]);
+  assert.equal(status, 0);
+  const diagram = JSON.parse(stdout) as { nodes: { id: string; kind: string; count?: number }[]; edges: { from: string; to: string }[]; reason?: string };
+  assert.equal(diagram.nodes.length, 3);
+  const more = diagram.nodes.find((node) => node.kind === "more");
+  assert.ok(more && more.count === 2, stdout);
+  assert.ok(diagram.edges.some((edge) => edge.from === "more" || edge.to === "more"));
+  assert.ok(diagram.reason?.includes("folded"));
 });
 
 test("every export format is well formed and byte-stable", () => {

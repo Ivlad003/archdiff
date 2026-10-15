@@ -20,6 +20,7 @@ function style(node: DiagramNode): string {
     external: "shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#fafafa;strokeColor=#9e9e9e;",
     hole: "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;dashed=1;fillColor=#fff3e0;strokeColor=#ef6c00;",
     start: "ellipse;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;",
+    more: "rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=1 3;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontColor=#616161;",
   };
   const mark = node.diff ? `strokeColor=${DIFF_STROKE[node.diff]};strokeWidth=3;${node.diff === "removed" ? "dashed=1;" : ""}` : "";
 

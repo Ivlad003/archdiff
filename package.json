@@ -4,11 +4,34 @@
   "description": "Live diagrams of a TypeScript/JavaScript repository: structure, dependencies, call flows, and the architectural diff of a pull request — algorithmic, fast, no model",
   "license": "Apache-2.0",
   "type": "module",
-  "bin": { "archdiff": "bin/archdiff.js" },
-  "files": ["bin", "dist", "dist/wasm", "dist/web"],
-  "engines": { "node": ">=22.18" },
-  "keywords": ["architecture", "diagram", "call-graph", "dependency-graph", "pull-request", "review", "tree-sitter", "excalidraw", "drawio", "archimate", "mermaid"],
-  "publishConfig": { "access": "public" },
+  "bin": {
+    "archdiff": "bin/archdiff.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "dist/wasm",
+    "dist/web"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "keywords": [
+    "architecture",
+    "diagram",
+    "call-graph",
+    "dependency-graph",
+    "pull-request",
+    "review",
+    "tree-sitter",
+    "excalidraw",
+    "drawio",
+    "archimate",
+    "mermaid"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/copy-wasm.mjs && node scripts/build-web.mjs && node scripts/pack-entry.mjs publish",
     "postpack": "node scripts/pack-entry.mjs restore",
@@ -20,10 +43,17 @@
     "web-tree-sitter": "^0.27.1"
   },
   "devDependencies": {
-    "@maxgraph/core": "^0.25.0",
+    "@excalidraw/excalidraw": "^0.18.1",
+    "@types/dompurify": "^3.0.5",
     "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vscode/tree-sitter-wasm": "^0.3.1",
+    "dompurify": "^3.4.17",
     "esbuild": "^0.28.2",
+    "marked": "^18.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.9.0"
   }
 }

@@ -19,7 +19,14 @@ export type View = { kind: "layers" } | { kind: "layer"; name: string } | { kind
 export interface ViewOptions {
   /** How far from the subject the picture goes; each view has its default. */
   depth?: number;
+  /** Draw the packages and built-ins a module imports (the module view); off by default: they crowd the picture. */
+  packages?: boolean;
+  /** At most this many shapes; the rest fold into one `more` shape. Default `MAX_SHAPES`. */
+  limit?: number;
 }
+
+/** More shapes than this and a view folds the tail into one shape. */
+export const MAX_SHAPES = 80;
 
 export interface ViewEntry {
   key: string;
@@ -224,7 +231,9 @@ function layerView(graph: Graph, name: string, depth: number): Diagram {
 
   if (own.length === 0) return unplaced(`layer:${name}`, name, [], [], [], { reason: `no layer "${name}"` });
   const members = grow(graph, new Set(own), depth, "both");
-  const nodes = [...members].sort().map((id) => moduleNode(graph, id));
+  const ownSet = new Set(own);
+  // The layer's own modules first: a folded picture keeps them and folds the neighbours.
+  const nodes = [...members].sort((a, b) => Number(ownSet.has(b)) - Number(ownSet.has(a)) || (a < b ? -1 : 1)).map((id) => moduleNode(graph, id));
 
   return unplaced(`layer:${name}`, `Layer ${name}`, nodes, depEdges(graph, members, false), lanesOf(graph, nodes));
 }
@@ -252,17 +261,49 @@ function grow(graph: Graph, start: ReadonlySet<string>, depth: number, direction
   return members;
 }
 
-/** One module: what imports it (left) and what it imports (right), packages included; depth 1 default. */
-function moduleView(graph: Graph, id: string, depth: number): Diagram {
+/** One module: what imports it (left) and what it imports (right), and with `packages` the packages too; depth 1 default. */
+function moduleView(graph: Graph, id: string, depth: number, packages: boolean): Diagram {
   if (!graph.modules.has(id)) return unplaced(`module:${id}`, id, [], [], [], { reason: `no module "${id}"` });
   const members = grow(graph, new Set([id]), depth, "both");
   const nodes = [...members].sort().map((member) => moduleNode(graph, member));
-  const edges = depEdges(graph, members, true);
+  const edges = depEdges(graph, members, packages);
   const externals = new Set(edges.map((edge) => edge.to).filter((to) => graph.externals.has(to)));
 
   for (const external of [...externals].sort()) nodes.push(externalNode(graph, external));
 
   return unplaced(`module:${id}`, id, nodes, edges, lanesOf(graph, nodes));
+}
+
+/**
+ * A big picture folded: the first `limit` shapes stay (the subject first,
+ * then the diagram's order, which the views sort by importance), the rest
+ * become one `more` shape that the edges of the dropped shapes point to.
+ * The Markdown of the view still lists everything.
+ */
+function fold(diagram: Diagram, limit: number): Diagram {
+  if (diagram.nodes.length <= limit) return diagram;
+  const kept = diagram.nodes.slice(0, limit);
+  const dropped = diagram.nodes.slice(limit);
+  const keptIds = new Set(kept.map((node) => node.id));
+  const more: DiagramNode = { id: "more", kind: "more", label: `… ${dropped.length} more`, count: dropped.length, x: 0, y: 0, w: 0, h: 0 };
+  const seen = new Set<string>();
+  const edges: DiagramEdge[] = [];
+
+  for (const edge of diagram.edges) {
+    const from = keptIds.has(edge.from) ? edge.from : "more";
+    const to = keptIds.has(edge.to) ? edge.to : "more";
+
+    if (from === "more" && to === "more") continue;
+    const key = `${from}\u0000${to}\u0000${edge.kind}`;
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    edges.push(from === edge.from && to === edge.to ? edge : { from, to, kind: edge.kind });
+  }
+
+  const lanes = diagram.groups.filter((group) => kept.some((node) => node.group === group.id));
+
+  return { ...diagram, nodes: [...kept, more], edges, groups: lanes, reason: `${dropped.length} of ${diagram.nodes.length} shapes folded into "more"; the Markdown lists them all` };
 }
 
 /** The call tree from a function: the functions it calls, and theirs, `depth` levels (default 3); gaps as holes. */
@@ -339,21 +380,25 @@ function coverageView(graph: Graph): Diagram {
 
 const DEFAULT_DEPTH: Record<View["kind"], number> = { layers: 0, layer: 1, module: 1, calls: 3, coverage: 0 };
 
-/** The unplaced diagram of a view. */
+/** The unplaced diagram of a view, folded to `limit` shapes. */
 export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}): Diagram {
   const depth = options.depth ?? DEFAULT_DEPTH[view.kind];
   const { graph } = analysis;
 
-  switch (view.kind) {
-    case "layers":
-      return layersView(graph);
-    case "layer":
-      return layerView(graph, view.name, depth);
-    case "module":
-      return moduleView(graph, view.id, depth);
-    case "calls":
-      return callsView(graph, view.id, depth);
-    case "coverage":
-      return coverageView(graph);
-  }
+  const full = (): Diagram => {
+    switch (view.kind) {
+      case "layers":
+        return layersView(graph);
+      case "layer":
+        return layerView(graph, view.name, depth);
+      case "module":
+        return moduleView(graph, view.id, depth, options.packages === true);
+      case "calls":
+        return callsView(graph, view.id, depth);
+      case "coverage":
+        return coverageView(graph);
+    }
+  };
+
+  return fold(full(), options.limit ?? MAX_SHAPES);
 }

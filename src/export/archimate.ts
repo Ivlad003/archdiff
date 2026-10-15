@@ -30,6 +30,8 @@ function elementType(node: DiagramNode): string {
       return "SystemSoftware";
     case "start":
       return "ApplicationEvent";
+    case "more":
+      return "Grouping";
   }
 }
 

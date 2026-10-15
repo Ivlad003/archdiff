@@ -22,11 +22,14 @@ export interface ViewsResponse {
 export interface DiagramResponse {
   diagram: Diagram;
   markdown: string;
+  /** The view has a saved drawing: the shapes sit where the user put them. */
+  drawn: boolean;
 }
 
 export interface ReviewResponse {
   diff: { base: string; changedFiles: string[]; layerEdgesAdded: { from: string; to: string }[] };
   diagram: Diagram;
+  elements: import("../../src/scene.ts").SceneElement[];
   markdown: string;
 }
 
@@ -39,7 +42,25 @@ async function get<T>(url: string): Promise<T> {
   return body as T;
 }
 
+export interface SceneResponse {
+  elements: import("../../src/scene.ts").SceneElement[];
+  mocks: { id: string; kind: "input" | "storage"; value: string }[];
+  diagram: Diagram;
+  markdown: string;
+  /** The view has a saved drawing: the shapes sit where the user put them. */
+  drawn: boolean;
+}
+
 export const api = {
+  scene: (view: string, depth: number | null, packages: boolean) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}${packages ? "&packages=1" : ""}`),
+  saveLayout: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
+    const response = await fetch(`/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
+    const body = (await response.json()) as { saved: string } | { error: string };
+
+    if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : response.statusText);
+
+    return body;
+  },
   views: () => get<ViewsResponse>("/api/views"),
   diagram: (view: string, depth: number | null) => get<DiagramResponse>(`/api/diagram?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
   node: (view: string, id: string) => get<{ markdown: string }>(`/api/node?view=${encodeURIComponent(view)}&id=${encodeURIComponent(id)}`),
