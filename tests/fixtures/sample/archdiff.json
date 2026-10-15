@@ -1,0 +1,1 @@
+{ "layers": { "routes": ["src/routes/**"], "lib": ["src/lib/**"], "db": ["src/db/**"], "cartridge": ["cartridges/**"] } }

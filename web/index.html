@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>archdiff</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header id="top">
+      <strong>archdiff</strong>
+      <span id="root" class="muted"></span>
+      <span id="stats" class="muted"></span>
+      <span class="spacer"></span>
+      <label>depth <input id="depth" type="number" min="0" max="12" value="" placeholder="auto" /></label>
+      <button id="fit" title="Fit the diagram to the window">fit</button>
+      <label>base <input id="base" type="text" placeholder="merge-base" size="14" /></label>
+      <button id="review" title="The architectural diff of the working tree against the base">review</button>
+      <span id="export"></span>
+    </header>
+    <main>
+      <aside id="left">
+        <input id="search" type="search" placeholder="filter views (layer, module, function)" />
+        <ul id="views"></ul>
+      </aside>
+      <section id="centre">
+        <div id="title"></div>
+        <div id="canvas"></div>
+        <div id="minimap"></div>
+        <div id="reason" class="muted"></div>
+      </section>
+      <aside id="right">
+        <nav id="tabs">
+          <button data-tab="markdown" class="active">Markdown</button>
+          <button data-tab="code">Code</button>
+          <button data-tab="coverage">Coverage</button>
+        </nav>
+        <pre id="markdown" class="panel active"></pre>
+        <pre id="code" class="panel"></pre>
+        <pre id="coverage" class="panel"></pre>
+      </aside>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

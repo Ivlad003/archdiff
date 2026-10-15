@@ -1,0 +1,88 @@
+// The optional `archdiff.json` of a repository and the defaults without
+// one: which files to skip, which layers the modules fall into, and which
+// functions are entry points. Layers are globs; without any, a module's
+// layer is its top directory (`src/<dir>` when under `src/`). Validated on
+// read: a wrong field names the file and the field.
+//
+// Sits at the start of the pipeline: root → Config → files, graph.
+// Entry points: `loadConfig`, `layerOf`, `CONFIG_FILE`.
+
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { firstMatchingGlob } from "./glob.ts";
+import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
+
+export const CONFIG_FILE = "archdiff.json";
+
+/** The settings of one repository. */
+export interface Config {
+  /** Globs of files left out of the analysis, besides what git ignores. */
+  exclude: string[];
+  /** Layer name → globs of its files, in order; null: layers from the directories. */
+  layers: Record<string, string[]> | null;
+  /** Globs of files whose exported functions are entry points, besides what the code shows (`main`, `bin/`). */
+  entries: string[];
+  /** The layer of files no layer glob matches. */
+  otherLayer: string;
+}
+
+export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other" };
+
+function stringList(value: JsonValue | undefined, file: string, field: string): string[] {
+  if (value === undefined) return [];
+
+  if (!Array.isArray(value) || !value.every(isJsonString)) throw new Error(`${file}: "${field}" must be a list of strings`);
+
+  return value;
+}
+
+/** Reads `<root>/archdiff.json`; the defaults without one. Throws a message naming the file and field on a wrong shape. */
+export function loadConfig(root: string): Config {
+  const file = join(root, CONFIG_FILE);
+
+  if (!existsSync(file)) return DEFAULT_CONFIG;
+  const parsed = parseJson(readFileSync(file, "utf8"));
+
+  if (!isJsonObject(parsed)) throw new Error(`${CONFIG_FILE}: must be a JSON object`);
+  const exclude = stringList(parsed["exclude"], CONFIG_FILE, "exclude");
+  const entries = stringList(parsed["entries"], CONFIG_FILE, "entries");
+  let layers: Record<string, string[]> | null = null;
+
+  if (parsed["layers"] !== undefined) {
+    if (!isJsonObject(parsed["layers"])) throw new Error(`${CONFIG_FILE}: "layers" must be an object of layer name → globs`);
+    layers = {};
+
+    for (const [name, globs] of Object.entries(parsed["layers"])) {
+      if (name === "") throw new Error(`${CONFIG_FILE}: "layers" has an empty layer name`);
+      layers[name] = stringList(globs, CONFIG_FILE, `layers.${name}`);
+    }
+  }
+
+  const other = parsed["other"];
+
+  if (other !== undefined && !isJsonString(other)) throw new Error(`${CONFIG_FILE}: "other" must be a string`);
+
+  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer };
+}
+
+/**
+ * The layer of a file. With configured layers, the first whose glob matches,
+ * else `otherLayer`. Without any: `src/<dir>` for a file under a directory
+ * of `src/`, `src` for a file directly in it, else its top directory, and
+ * `(root)` for a file at the root.
+ */
+export function layerOf(path: string, config: Config): string {
+  if (config.layers) {
+    for (const [name, globs] of Object.entries(config.layers)) if (firstMatchingGlob(path, globs) !== null) return name;
+
+    return config.otherLayer;
+  }
+
+  const segments = path.split("/");
+
+  if (segments.length === 1) return "(root)";
+
+  if (segments[0] === "src") return segments.length > 2 ? `src/${segments[1]}` : "src";
+
+  return segments[0]!;
+}

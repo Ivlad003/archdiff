@@ -1,0 +1,359 @@
+// The views of the graph: which picture to draw of what, each a pure
+// function of the graph (and a depth) that returns an unplaced `Diagram`
+// for `layout`. Views: `layers` (the layers and the imports between them),
+// `layer:<name>` (its modules and their neighbours), `module:<path>` (what
+// imports it and what it imports), `calls:<path>#<fn>` (the call tree from a
+// function), `coverage` (the modules with calls archdiff could not follow).
+// Lanes are layers; the depth is how far from the subject the picture goes.
+//
+// Pipeline: Analysis → View → Diagram → layout → canvas/exports/markdown.
+// Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
+
+import type { Analysis } from "./analyze.ts";
+import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "./diagram.ts";
+import { matchesGlob } from "./glob.ts";
+import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
+
+export type View = { kind: "layers" } | { kind: "layer"; name: string } | { kind: "module"; id: string } | { kind: "calls"; id: string } | { kind: "coverage" };
+
+export interface ViewOptions {
+  /** How far from the subject the picture goes; each view has its default. */
+  depth?: number;
+}
+
+export interface ViewEntry {
+  key: string;
+  title: string;
+  kind: View["kind"];
+  /** The lane the subject sits in. */
+  layer?: string;
+}
+
+/** `layers`, `layer:<name>`, `module:<path>`, `calls:<path>#<fn>`, `coverage` → the view, or null. */
+export function parseView(key: string): View | null {
+  if (key === "layers") return { kind: "layers" };
+
+  if (key === "coverage") return { kind: "coverage" };
+  const at = key.indexOf(":");
+
+  if (at === -1) return null;
+  const kind = key.slice(0, at);
+  const rest = key.slice(at + 1);
+
+  if (rest === "") return null;
+
+  if (kind === "layer") return { kind, name: rest };
+
+  if (kind === "module") return { kind, id: rest };
+
+  if (kind === "calls") return { kind, id: rest };
+
+  return null;
+}
+
+export function viewKey(view: View): string {
+  switch (view.kind) {
+    case "layers":
+    case "coverage":
+      return view.kind;
+    case "layer":
+      return `layer:${view.name}`;
+    case "module":
+      return `module:${view.id}`;
+    case "calls":
+      return `calls:${view.id}`;
+  }
+}
+
+/** A function execution starts from, with how it is known. */
+export interface EntryPoint {
+  node: GraphNode;
+  /** `route cart.tsx: loader`, `hook …`, `bin`, `main`, `entries` (archdiff.json), `uncalled export`. */
+  label: string;
+}
+
+/**
+ * The functions execution starts from: what the frameworks declare (routes,
+ * hooks), exported functions of files under `bin/`, functions named `main`,
+ * exported functions of files the `entries` globs name (archdiff.json), and
+ * exported functions nothing in the repository calls or references but
+ * which call something.
+ */
+export function entryPoints(analysis: Analysis): EntryPoint[] {
+  const { graph, config, facts } = analysis;
+  const called = new Set(graph.calls.map((edge) => edge.to));
+  const entries = new Map<string, EntryPoint>();
+
+  // The node an export name of a module stands for, through the module's export table.
+  const exportedNode = (module: string, exportName: string): GraphNode | null => {
+    const row = facts.get(module)?.exportRows.find((candidate) => candidate.name === exportName);
+    const node = row?.local ? graph.nodes.get(`${module}#${row.local}`) : undefined;
+
+    return node && node.kind === "fn" ? node : null;
+  };
+
+  for (const declared of analysis.declaredEntries) {
+    if (declared.exportName === "*") {
+      for (const id of graph.modules.get(declared.module)?.decls ?? []) {
+        const node = graph.nodes.get(id)!;
+
+        if (node.kind === "fn" && node.exported && !entries.has(id)) entries.set(id, { node, label: declared.label });
+      }
+    } else {
+      const node = exportedNode(declared.module, declared.exportName);
+
+      if (node && !entries.has(node.id)) entries.set(node.id, { node, label: declared.label });
+    }
+  }
+
+  for (const node of graph.nodes.values()) {
+    if (node.kind !== "fn" || node.parent || !node.exported || entries.has(node.id)) continue;
+
+    if (node.module.startsWith("bin/")) entries.set(node.id, { node, label: "bin" });
+    else if (node.name === "main") entries.set(node.id, { node, label: "main" });
+    else if (config.entries.some((glob) => matchesGlob(node.module, glob))) entries.set(node.id, { node, label: "entries" });
+    else if (!called.has(node.id) && graph.calls.some((edge) => edge.from === node.id)) entries.set(node.id, { node, label: "uncalled export" });
+  }
+
+  return [...entries.values()].sort((a, b) => (a.node.id < b.node.id ? -1 : 1));
+}
+
+/** Every view the page lists: the layers, each layer, each module, each entry point's calls, the coverage. */
+export function viewList(analysis: Analysis): ViewEntry[] {
+  const { graph } = analysis;
+  const list: ViewEntry[] = [{ key: "layers", title: "Layers", kind: "layers" }];
+
+  for (const layer of graph.layers) list.push({ key: `layer:${layer}`, title: layer, kind: "layer", layer });
+
+  for (const module of [...graph.modules.keys()].sort()) list.push({ key: `module:${module}`, title: module, kind: "module", layer: graph.modules.get(module)!.layer });
+
+  for (const entry of entryPoints(analysis)) list.push({ key: `calls:${entry.node.id}`, title: `${entry.node.name} (${entry.node.module}) — ${entry.label}`, kind: "calls", layer: graph.modules.get(entry.node.module)!.layer });
+  list.push({ key: "coverage", title: "Coverage: what the diagrams cannot show", kind: "coverage" });
+
+  return list;
+}
+
+function lane(id: string): DiagramGroup {
+  return { id, label: id, kind: "lane", x: 0, y: 0, w: 0, h: 0 };
+}
+
+function unplaced(view: string, title: string, nodes: DiagramNode[], edges: DiagramEdge[], groups: DiagramGroup[], extra: Partial<Diagram> = {}): Diagram {
+  return { view, title, nodes, edges, groups, ...extra };
+}
+
+/** The lanes of the layers the nodes use, in the graph's order. */
+function lanesOf(graph: Graph, nodes: readonly DiagramNode[]): DiagramGroup[] {
+  const used = new Set(nodes.map((node) => node.group).filter((group): group is string => group !== undefined));
+
+  return graph.layers.filter((layer) => used.has(layer)).map(lane);
+}
+
+function moduleNode(graph: Graph, id: string): DiagramNode {
+  const module = graph.modules.get(id)!;
+  const node: DiagramNode = { id, kind: "module", label: id, ref: { id, file: id, line: 1 }, group: module.layer, x: 0, y: 0, w: 0, h: 0 };
+
+  if (module.doc) node.doc = module.doc;
+
+  return node;
+}
+
+function externalNode(graph: Graph, id: string): DiagramNode {
+  const external = graph.externals.get(id)!;
+
+  return { id, kind: "external", label: external.kind === "builtin" ? `node:${external.name}` : external.name, x: 0, y: 0, w: 0, h: 0 };
+}
+
+function fnNode(graph: Graph, id: string): DiagramNode {
+  const fn = graph.nodes.get(id)!;
+  const node: DiagramNode = { id, kind: "fn", label: fn.parent ? `${fn.parent}.${fn.name}` : fn.name, ref: { id, file: fn.module, line: fn.line, endLine: fn.endLine }, group: graph.modules.get(fn.module)!.layer, x: 0, y: 0, w: 0, h: 0 };
+
+  if (fn.signature) node.signature = fn.signature;
+
+  if (fn.doc) node.doc = fn.doc;
+
+  return node;
+}
+
+/** Module-level dependencies between the given modules (and to externals when `externals`), one edge per pair with its count. */
+function depEdges(graph: Graph, members: ReadonlySet<string>, externals: boolean): DiagramEdge[] {
+  const counts = new Map<string, number>();
+
+  for (const dep of graph.deps) {
+    if (!members.has(dep.from)) continue;
+
+    if (!(members.has(dep.to) || (externals && graph.externals.has(dep.to)))) continue;
+    const key = `${dep.from}\u0000${dep.to}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return [...counts].map(([key, count]) => {
+    const [from, to] = key.split("\u0000") as [string, string];
+
+    return { from, to, kind: "dependency", count };
+  });
+}
+
+/** The layers and the imports between them, each line counted. */
+function layersView(graph: Graph): Diagram {
+  const counts = new Map<string, number>();
+  const modulesOf = new Map<string, number>();
+
+  for (const module of graph.modules.values()) modulesOf.set(module.layer, (modulesOf.get(module.layer) ?? 0) + 1);
+
+  for (const dep of graph.deps) {
+    const from = graph.modules.get(dep.from)?.layer;
+    const to = graph.modules.get(dep.to)?.layer;
+
+    if (!from || !to || from === to || dep.typeOnly) continue;
+    counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
+  }
+
+  const nodes = graph.layers.map((layer): DiagramNode => ({ id: layer, kind: "layer", label: layer, count: modulesOf.get(layer) ?? 0, x: 0, y: 0, w: 0, h: 0 }));
+  const edges = [...counts].map(([key, count]): DiagramEdge => {
+    const [from, to] = key.split("\u0000") as [string, string];
+
+    return { from, to, kind: "dependency", count, label: String(count) };
+  });
+
+  return unplaced("layers", "Layers", nodes, edges, []);
+}
+
+/** The modules of a layer; depth 1 (default) adds the modules of other layers they import or are imported by. */
+function layerView(graph: Graph, name: string, depth: number): Diagram {
+  const own = [...graph.modules.values()].filter((module) => module.layer === name).map((module) => module.id);
+
+  if (own.length === 0) return unplaced(`layer:${name}`, name, [], [], [], { reason: `no layer "${name}"` });
+  const members = grow(graph, new Set(own), depth, "both");
+  const nodes = [...members].sort().map((id) => moduleNode(graph, id));
+
+  return unplaced(`layer:${name}`, `Layer ${name}`, nodes, depEdges(graph, members, false), lanesOf(graph, nodes));
+}
+
+/** Modules within `depth` import steps of `start`, in the given direction. */
+function grow(graph: Graph, start: ReadonlySet<string>, depth: number, direction: "both" | "out" | "in"): Set<string> {
+  const members = new Set(start);
+  let frontier = new Set(start);
+
+  for (let step = 0; step < depth && frontier.size > 0; step++) {
+    const next = new Set<string>();
+
+    for (const dep of graph.deps) {
+      if (dep.typeOnly || !graph.modules.has(dep.to)) continue;
+
+      if (direction !== "in" && frontier.has(dep.from) && !members.has(dep.to)) next.add(dep.to);
+
+      if (direction !== "out" && frontier.has(dep.to) && !members.has(dep.from)) next.add(dep.from);
+    }
+
+    for (const id of next) members.add(id);
+    frontier = next;
+  }
+
+  return members;
+}
+
+/** One module: what imports it (left) and what it imports (right), packages included; depth 1 default. */
+function moduleView(graph: Graph, id: string, depth: number): Diagram {
+  if (!graph.modules.has(id)) return unplaced(`module:${id}`, id, [], [], [], { reason: `no module "${id}"` });
+  const members = grow(graph, new Set([id]), depth, "both");
+  const nodes = [...members].sort().map((member) => moduleNode(graph, member));
+  const edges = depEdges(graph, members, true);
+  const externals = new Set(edges.map((edge) => edge.to).filter((to) => graph.externals.has(to)));
+
+  for (const external of [...externals].sort()) nodes.push(externalNode(graph, external));
+
+  return unplaced(`module:${id}`, id, nodes, edges, lanesOf(graph, nodes));
+}
+
+/** The call tree from a function: the functions it calls, and theirs, `depth` levels (default 3); gaps as holes. */
+function callsView(graph: Graph, id: string, depth: number): Diagram {
+  const start = graph.nodes.get(id);
+
+  if (!start) return unplaced(`calls:${id}`, id, [], [], [], { reason: `no function "${id}"` });
+  const members = new Set([id]);
+  const edges: DiagramEdge[] = [];
+  const seenEdges = new Set<string>();
+  let frontier = new Set([id]);
+  const callsFrom = new Map<string, typeof graph.calls>();
+
+  for (const call of graph.calls) callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call]);
+  const gapsFrom = new Map<string, typeof graph.gaps>();
+
+  for (const gap of graph.gaps) gapsFrom.set(gap.from, [...(gapsFrom.get(gap.from) ?? []), gap]);
+  const holes: DiagramNode[] = [];
+
+  for (let step = 0; step < depth && frontier.size > 0; step++) {
+    const next = new Set<string>();
+
+    for (const from of frontier) {
+      for (const call of callsFrom.get(from) ?? []) {
+        const key = `${call.from}\u0000${call.to}\u0000${call.kind}`;
+
+        if (seenEdges.has(key)) continue;
+        seenEdges.add(key);
+        edges.push({ from: call.from, to: call.to, kind: call.kind });
+
+        if (!members.has(call.to)) {
+          members.add(call.to);
+          next.add(call.to);
+        }
+      }
+
+      // The calls archdiff could not follow from this function: one hole per callee.
+      const reasons = new Map<string, string>();
+
+      for (const gap of gapsFrom.get(from) ?? []) if (gap.reason === "dynamic" || gap.reason === "unknown-member") reasons.set(gap.callee, gap.reason);
+
+      for (const [callee, reason] of reasons) {
+        const holeId = `hole:${from}:${callee}`;
+        holes.push({ id: holeId, kind: "hole", label: callee, reason, group: graph.modules.get(moduleOf(from))!.layer, ref: { file: moduleOf(from) }, x: 0, y: 0, w: 0, h: 0 });
+        edges.push({ from, to: holeId, kind: "call" });
+      }
+    }
+
+    frontier = next;
+  }
+
+  const nodes = [...members].map((member) => fnNode(graph, member));
+  nodes[0] = { ...nodes[0]!, kind: "fn" };
+
+  return unplaced(`calls:${id}`, `Calls from ${start.parent ? `${start.parent}.` : ""}${start.name}`, [...nodes, ...holes], edges, lanesOf(graph, [...nodes, ...holes]));
+}
+
+/** The modules with calls into the repository archdiff could not follow (blind spots) or imports it could not resolve, by layer, labelled with the counts. */
+function coverageView(graph: Graph): Diagram {
+  const gapsOf = new Map<string, number>();
+
+  for (const gap of graph.gaps) if (gap.reason === "dynamic" || gap.reason === "unknown-member") gapsOf.set(moduleOf(gap.from), (gapsOf.get(moduleOf(gap.from)) ?? 0) + 1);
+
+  for (const unresolved of graph.unresolvedImports) gapsOf.set(unresolved.from, (gapsOf.get(unresolved.from) ?? 0) + 1);
+  const callsOf = new Map<string, number>();
+
+  for (const call of graph.calls) callsOf.set(moduleOf(call.from), (callsOf.get(moduleOf(call.from)) ?? 0) + 1);
+  const nodes = [...gapsOf]
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+    .map(([id, gaps]): DiagramNode => ({ ...moduleNode(graph, id), label: `${id}\n${gaps} gaps / ${callsOf.get(id) ?? 0} calls`, count: gaps, diff: "changed" }));
+
+  return unplaced("coverage", "What the diagrams cannot show", nodes, [], lanesOf(graph, nodes), nodes.length === 0 ? { reason: "every import and call was followed" } : {});
+}
+
+const DEFAULT_DEPTH: Record<View["kind"], number> = { layers: 0, layer: 1, module: 1, calls: 3, coverage: 0 };
+
+/** The unplaced diagram of a view. */
+export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}): Diagram {
+  const depth = options.depth ?? DEFAULT_DEPTH[view.kind];
+  const { graph } = analysis;
+
+  switch (view.kind) {
+    case "layers":
+      return layersView(graph);
+    case "layer":
+      return layerView(graph, view.name, depth);
+    case "module":
+      return moduleView(graph, view.id, depth);
+    case "calls":
+      return callsView(graph, view.id, depth);
+    case "coverage":
+      return coverageView(graph);
+  }
+}

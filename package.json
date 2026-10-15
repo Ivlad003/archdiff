@@ -1,0 +1,29 @@
+{
+  "name": "archdiff",
+  "version": "0.1.0",
+  "description": "Live diagrams of a TypeScript/JavaScript repository: structure, dependencies, call flows, and the architectural diff of a pull request — algorithmic, fast, no model",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": { "archdiff": "bin/archdiff.js" },
+  "files": ["bin", "dist", "dist/wasm", "dist/web"],
+  "engines": { "node": ">=22.18" },
+  "keywords": ["architecture", "diagram", "call-graph", "dependency-graph", "pull-request", "review", "tree-sitter", "excalidraw", "drawio", "archimate", "mermaid"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/copy-wasm.mjs && node scripts/build-web.mjs && node scripts/pack-entry.mjs publish",
+    "postpack": "node scripts/pack-entry.mjs restore",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
+    "test": "node --test tests/*.test.ts",
+    "web:build": "node scripts/build-web.mjs"
+  },
+  "dependencies": {
+    "web-tree-sitter": "^0.27.1"
+  },
+  "devDependencies": {
+    "@maxgraph/core": "^0.25.0",
+    "@types/node": "^24.0.0",
+    "@vscode/tree-sitter-wasm": "^0.3.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.0"
+  }
+}
