@@ -43,6 +43,7 @@ export interface CoverageReport {
 const REASON_TEXT: Record<Gap["reason"], string> = {
   dynamic: "a callee archdiff cannot name (a computed or passed value): a blind spot",
   "unknown-member": "a known class or module without that member: a blind spot",
+  interface: "a call through an interface or type no class of the repository implements (injected from outside): a blind spot",
   "member-of-value": "a method of a local value whose type is not tracked (list.map, req.on): mostly built-ins",
   global: "a bare name the file neither declares nor imports (setTimeout, JSON.parse): a global",
   external: "a package or a Node built-in",
@@ -50,7 +51,7 @@ const REASON_TEXT: Record<Gap["reason"], string> = {
 };
 
 /** The reasons that hide a call into the repository's own code; the rest are calls out of it. */
-const BLIND: ReadonlySet<Gap["reason"]> = new Set(["dynamic", "unknown-member"]);
+const BLIND: ReadonlySet<Gap["reason"]> = new Set(["dynamic", "unknown-member", "interface"]);
 
 export function coverageReport(analysis: Analysis): CoverageReport {
   const { graph } = analysis;

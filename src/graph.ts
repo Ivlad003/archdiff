@@ -3,11 +3,14 @@
 // edge. A call it cannot follow (a dynamic callee, a method on a value of
 // unknown class) is a gap, counted and listed, never a guessed edge.
 //
-// Call resolution, in order: `name` → a declaration of the same file, else
-// an import binding → the export of the file it names (re-exports
-// followed); `this.m` → a member of the enclosing class; `X.m` → a static
-// or instance member of a class `X` the file declares or imports, or an
-// export `m` of a namespace import `X`; `new X().m` → a member of `X`.
+// Call resolution, in order: a call whose receiver type the extractor
+// saw (`const s = new X(); s.m()`, a parameter or field typed `X`) → the
+// member `m` of `X` (a class, interface or type the file declares or
+// imports, base classes followed); `name` → a declaration of the same
+// file, else an import binding → the export of the file it names
+// (re-exports followed); `this.m` → a member of the enclosing class;
+// `X.m` → a static or instance member of a class `X`, or an export `m` of
+// a namespace import `X`; `new X().m` → a member of `X`.
 //
 // Pipeline: FileFacts[] + Config + resolver → Graph. Entry points:
 // `buildGraph`, `nodeId`, `moduleOf`, and the types.
@@ -76,10 +79,11 @@ export interface Gap {
    * `dynamic`: a callee archdiff cannot name; `global`: a bare name the file neither
    * declares nor imports (`setTimeout`, `JSON.parse`); `member-of-value`: a member of a
    * local value whose type archdiff does not track (`list.map`, `req.on`);
-   * `unknown-member`: a known class without that member; `external`: a package or
-   * built-in; `parse-error`: the file did not parse.
+   * `unknown-member`: a known class without that member; `interface`: a call through
+   * an interface or type no class of the repository implements; `external`: a package
+   * or built-in; `parse-error`: the file did not parse.
    */
-  reason: "dynamic" | "global" | "member-of-value" | "unknown-member" | "external" | "parse-error";
+  reason: "dynamic" | "global" | "member-of-value" | "unknown-member" | "interface" | "external" | "parse-error";
   line: number;
 }
 
@@ -267,6 +271,13 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
     const owner = nodes.get(classId);
 
     if (!owner || depth > 8) return null;
+
+    // `type Alias = Repo`: the member of what the alias names.
+    if (owner.kind === "type" && owner.signature?.startsWith("= ")) {
+      const target = nameTarget(owner.module, owner.signature.slice(2).replace(/<.*$/, "").trim());
+
+      return "id" in target ? memberOf(target.id, member, depth + 1) : null;
+    }
     const direct = nodeId(owner.module, member, owner.parent ? `${owner.parent}.${owner.name}` : owner.name);
 
     if (nodes.has(direct)) return direct;
@@ -280,7 +291,30 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
   };
 
   // Pass 3: calls of every node (and the module's top level) resolved against the scopes.
-  const resolveCall = (module: string, enclosingClass: string | null, call: CallFact): { id: string } | { gap: Gap["reason"] } => {
+  // The classes implementing or extending a type or class, by the names written on `implements`/`extends`, resolved in each class's own file.
+  const implementerIndex = new Map<string, string[]>();
+
+  for (const file of sorted) {
+    const walkClasses = (decl: DeclFact, parent?: string): void => {
+      if (decl.kind === "class") {
+        const own = nodeId(file.path, decl.name, parent);
+
+        for (const name of [...(decl.implements ?? []), ...(decl.base ? [decl.base] : [])]) {
+          const target = nameTarget(file.path, name.replace(/<.*$/, ""));
+
+          if ("id" in target) implementerIndex.set(target.id, [...(implementerIndex.get(target.id) ?? []), own]);
+        }
+      }
+
+      for (const member of decl.members) walkClasses(member, parent ? `${parent}.${decl.name}` : decl.name);
+    };
+
+    for (const decl of file.decls) walkClasses(decl);
+  }
+
+  const implementers = (id: string): string[] => implementerIndex.get(id) ?? [];
+
+  const resolveCall = (module: string, enclosingClass: string | null, call: CallFact): { id: string } | { ids: string[] } | { gap: Gap["reason"] } => {
     if (call.opaque) return { gap: "dynamic" };
     const callee = call.callee;
 
@@ -297,22 +331,42 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
       return member ? { id: member } : { gap: "unknown-member" };
     }
 
+    // The extractor names the receiver's type when it can see it: a local made with `new X()`, a parameter typed `X`,
+    // a class field typed `X`. The member is then looked up on that class, interface or type.
+    if (call.receiver && !callee.includes("(")) {
+      const parts = callee.split(".");
+      const member = parts[parts.length - 1]!;
+      const owner = nameTarget(module, call.receiver);
+
+      // A receiver typed with a package's class (`req: Request` of express) is a call out of the repository, not a blind spot.
+      if (!("id" in owner)) return owner.gap === "global" ? { gap: "member-of-value" } : owner;
+      const found = memberOf(owner.id, member);
+
+      if (found) return { id: found };
+      // An interface or abstract class: the member of every class of the repository that implements or extends it.
+      const dispatched = implementers(owner.id).map((id) => memberOf(id, member)).filter((id): id is string => id !== null);
+
+      if (dispatched.length > 0) return { ids: dispatched };
+
+      return { gap: nodes.get(owner.id)?.kind === "type" ? "interface" : "unknown-member" };
+    }
+
     // `expect(x).toBe`, `vi.mocked(f).mockReturnValue`: a method of a call's result, whose type is not tracked.
     if (callee.includes("(")) return { gap: "member-of-value" };
     const parts = callee.split(".");
 
     if (parts.length === 1) return nameTarget(module, callee);
 
+    // `s.app.idle`, `this.state.records.at`, `[a].map`: a property of a property, or of a literal — a value whose type is not tracked.
+    if (parts.length > 2 || parts[0]!.startsWith("[") || parts[0]!.startsWith("{")) return { gap: "member-of-value" };
+
     if (parts[0] === "this" || parts[0] === "super") {
       if (!enclosingClass) return { gap: "dynamic" };
-
-      if (parts.length > 2) return { gap: "unknown-member" };
       const member = memberOf(enclosingClass, parts[1]!);
 
       return member ? { id: member } : { gap: "unknown-member" };
     }
 
-    if (parts.length > 2) return { gap: "unknown-member" };
     const [head, member] = parts as [string, string];
     const scope = scopes.get(module)!;
     const imported = scope.imports.get(head);
@@ -343,6 +397,7 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
         const target = resolveCall(file.path, ownClass, call);
 
         if ("id" in target) calls.push({ from: id, to: target.id, kind: "call", line: call.line });
+        else if ("ids" in target) for (const to of target.ids) calls.push({ from: id, to, kind: "call", line: call.line });
         else gaps.push({ from: id, callee: call.callee, reason: target.gap, line: call.line });
       }
 
@@ -355,6 +410,7 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
       const target = resolveCall(file.path, null, call);
 
       if ("id" in target) calls.push({ from: file.path, to: target.id, kind: "call", line: call.line });
+      else if ("ids" in target) for (const to of target.ids) calls.push({ from: file.path, to, kind: "call", line: call.line });
       else gaps.push({ from: file.path, callee: call.callee, reason: target.gap, line: call.line });
     }
 
