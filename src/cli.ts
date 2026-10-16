@@ -8,6 +8,8 @@ import { analyze } from "./analyze.ts";
 import { coverageReport } from "./coverage.ts";
 import { dataFlow, flowMarkdown } from "./flow.ts";
 import { readLayout } from "./layouts.ts";
+import { planFromScene, planMarkdown } from "./plan.ts";
+import { agentFromConfig } from "./agent.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
 import { reviewMarkdown, review } from "./diff.ts";
@@ -42,9 +44,15 @@ Commands:
                      merge-base with the main branch): modules, imports and calls added,
                      removed or changed, as Markdown with a Mermaid diagram (md, default),
                      json, or any diagram format. Exit 1 when a layer dependency appeared
-  web [dir] [--port N] [--base REF]
+  plan <view> [dir] [--json] [--out FILE]
+                     The task drawn on the saved drawing of a view (the page's ✎ edit): new
+                     shapes as modules or functions to add, arrows as imports or calls,
+                     deleted shapes as removals, notes — as a Markdown task for an agent
+  web [dir] [--port N] [--base REF] [--agent claude|cursor]
                      Serve the diagrams in a browser: views, the canvas, the code and the
-                     Markdown of a shape, the review against REF
+                     Markdown of a shape, the review against REF. --agent (or "agent" in
+                     archdiff.json) lets the Chat tab hand a drawn task to Claude Code or
+                     Cursor's CLI, run in this repository; every run starts from a button
 
 Exit codes: 0 ok, 1 differences found (review), 2 wrong invocation or I/O error.
 `;
@@ -67,7 +75,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "port", "host", "limit"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "port", "host", "limit", "agent"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -184,6 +192,19 @@ export async function main(argv: readonly string[]): Promise<number> {
         return writeOut(flags.has("json") ? `${JSON.stringify(flow, null, 2)}\n` : flowMarkdown(flow), flags.get("out"));
       }
 
+      case "plan": {
+        const key = positional[0];
+
+        if (!key || !parseView(key)) return fail("plan: a view is required (archdiff views lists them)");
+        const analysis = await analyze(dirArg(1));
+        const saved = readLayout(analysis.root, key);
+
+        if (!saved) return fail(`plan: ${key} has no saved drawing (draw and save it on the page first)`);
+        const plan = planFromScene(analysis, key, saved.elements);
+
+        return writeOut(flags.has("json") ? `${JSON.stringify(plan, null, 2)}\n` : planMarkdown(plan, analysis), flags.get("out"));
+      }
+
       case "coverage": {
         const analysis = await analyze(dirArg(0));
         const report = coverageReport(analysis);
@@ -208,7 +229,11 @@ export async function main(argv: readonly string[]): Promise<number> {
         const port = flags.has("port") ? Number(flags.get("port")) : 7080;
 
         if (!Number.isInteger(port) || port < 0 || port > 65535) return fail("web: --port must be a port number");
-        await serve(dirArg(0), { port, host: typeof flags.get("host") === "string" ? (flags.get("host") as string) : "127.0.0.1", base: typeof flags.get("base") === "string" ? (flags.get("base") as string) : null });
+        const agentFlag = flags.get("agent");
+
+        if (agentFlag === true) return fail("web: --agent needs claude or cursor");
+        const agent = typeof agentFlag === "string" ? agentFromConfig(agentFlag) : null;
+        await serve(dirArg(0), { port, host: typeof flags.get("host") === "string" ? (flags.get("host") as string) : "127.0.0.1", base: typeof flags.get("base") === "string" ? (flags.get("base") as string) : null, agent });
 
         return 0;
       }

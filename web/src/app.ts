@@ -356,6 +356,7 @@ async function load(): Promise<void> {
   renderViews(search.value);
   reason.textContent = "";
   element<HTMLButtonElement>("edit").disabled = state.review;
+  element("chat-tab").hidden = state.review;
 
   try {
     if (state.review) {
@@ -389,6 +390,8 @@ async function load(): Promise<void> {
 async function loadViews(): Promise<void> {
   const response = await api.views();
   views = response.views;
+  agentName = response.agent;
+  element("agent-name").textContent = agentName ? `agent: ${agentName}` : "no agent: start archdiff web --agent claude|cursor to run tasks";
   element("root").textContent = response.root;
   const s = response.stats;
   element("stats").textContent = `${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms`;
@@ -480,6 +483,94 @@ async function loadFlow(): Promise<void> {
 
   if (flow.steps.length === 0) flowSteps.textContent = "No such function in the graph.";
 }
+
+// ── The Chat tab: the task drawn on the view, and the agent that does it ─────
+
+const taskField = element<HTMLTextAreaElement>("task");
+const runButton = element<HTMLButtonElement>("run");
+const stopButton = element<HTMLButtonElement>("stop");
+const runState = element<HTMLSpanElement>("run-state");
+const transcript = element<HTMLDivElement>("transcript");
+const followup = element<HTMLInputElement>("followup");
+let agentName: string | null = null;
+let currentRun: { id: string; close: () => void; sessionId: string | null } | null = null;
+
+function appendEvent(kind: string, text: string): void {
+  const row = document.createElement("div");
+  row.className = `ev ${kind}`;
+  row.textContent = text;
+  transcript.append(row);
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+async function readTask(): Promise<void> {
+  const state = stateFromHash();
+
+  if (state.review) return;
+
+  // The current drawing first, so an unsaved stroke counts.
+  if (canvas && mode === "edit") await api.saveLayout(state.view, canvas.scene(), mocks);
+  const { markdown, drawn } = await api.plan(state.view);
+  taskField.value = markdown;
+  runButton.disabled = !agentName;
+  runState.textContent = drawn ? "" : "no drawing saved for this view: edit, draw, save";
+}
+
+function runTask(prompt: string, resume: string | null): void {
+  if (!agentName || prompt.trim() === "") return;
+  const state = stateFromHash();
+  runButton.disabled = true;
+  runButton.classList.add("running");
+  stopButton.disabled = false;
+  followup.disabled = true;
+  runState.textContent = `running ${agentName}…`;
+
+  if (!resume) transcript.replaceChildren();
+  appendEvent("you", `▸ ${prompt.length > 300 ? `${prompt.slice(0, 300)}…` : prompt}`);
+  void api
+    .runAgent(state.view, prompt, resume)
+    .then(({ id, task }) => {
+      runState.textContent = `running ${agentName} (${id}); task saved to ${task}`;
+      const run = { id, sessionId: resume, close: () => {} };
+      currentRun = run;
+      run.close = api.agentEvents(
+        id,
+        (event) => {
+          if (event.sessionId) run.sessionId = event.sessionId;
+
+          if (event.kind !== "init") appendEvent(event.kind, event.text);
+        },
+        () => {
+          runButton.disabled = false;
+          runButton.classList.remove("running");
+          stopButton.disabled = true;
+          followup.disabled = run.sessionId === null;
+          runState.textContent = `${agentName} finished; the diagram is reloaded — compare with review`;
+          // The agent changed the code: the live diagram and the views follow.
+          void loadViews().then(() => load());
+        },
+      );
+    })
+    .catch((error: unknown) => {
+      runState.textContent = error instanceof Error ? error.message : String(error);
+      runButton.disabled = false;
+      runButton.classList.remove("running");
+      stopButton.disabled = true;
+    });
+}
+
+element<HTMLButtonElement>("plan").addEventListener("click", () => void readTask().catch((error: unknown) => (runState.textContent = error instanceof Error ? error.message : String(error))));
+runButton.addEventListener("click", () => runTask(taskField.value, null));
+stopButton.addEventListener("click", () => {
+  if (currentRun) void api.stopAgent(currentRun.id);
+});
+followup.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && followup.value.trim() !== "" && currentRun) {
+    const message = followup.value.trim();
+    followup.value = "";
+    runTask(message, currentRun.sessionId);
+  }
+});
 
 // ── Controls ─────────────────────────────────────────────────────────────────
 

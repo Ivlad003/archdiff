@@ -1,6 +1,6 @@
 // The optional `archdiff.json` of a repository and the defaults without
-// one: which files to skip, which layers the modules fall into, and which
-// functions are entry points. Layers are globs; without any, a module's
+// one: which files to skip, which layers the modules fall into, which
+// functions are entry points, and which coding agent the page may run. Layers are globs; without any, a module's
 // layer is its top directory (`src/<dir>` when under `src/`). Validated on
 // read: a wrong field names the file and the field.
 //
@@ -10,6 +10,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { firstMatchingGlob } from "./glob.ts";
+import { agentFromConfig, type AgentSpec } from "./agent.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
 
 export const CONFIG_FILE = "archdiff.json";
@@ -24,9 +25,11 @@ export interface Config {
   entries: string[];
   /** The layer of files no layer glob matches. */
   otherLayer: string;
+  /** The coding agent the page may hand a task to; null: the Chat tab only writes the task. */
+  agent: AgentSpec | null;
 }
 
-export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other" };
+export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null };
 
 function stringList(value: JsonValue | undefined, file: string, field: string): string[] {
   if (value === undefined) return [];
@@ -62,7 +65,7 @@ export function loadConfig(root: string): Config {
 
   if (other !== undefined && !isJsonString(other)) throw new Error(`${CONFIG_FILE}: "other" must be a string`);
 
-  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer };
+  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: agentFromConfig(parsed["agent"]) };
 }
 
 /**

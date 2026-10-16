@@ -62,6 +62,16 @@ An analysis of archdiff 0.1 on real repositories (keylang, 480 files; storefront
 
 **Tapping in view mode** is read from pointer events; a drag over 6 scene pixels is a pan, not a tap. On a touch screen the second tap must land within half a second. *State:* works with a mouse; untested on touch.
 
+## The agent
+
+**An agent edits the repository from a web page.** The server runs `claude -p` or `cursor-agent -p` in the repository with the prompt the page sends. *State:* the feature is off unless `--agent` or `archdiff.json` names an agent; the server is loopback-only with a Host check, so only a page on this computer can ask; every run starts from a button with the prompt visible and is kept in `.archdiff/tasks/`. Claude Code runs with `acceptEdits` (file edits allowed, shell commands follow its own rules); Cursor's CLI in print mode has every tool, as its own help says. A reviewer should read the task before running it, and `review` after.
+
+**Cost and time.** A run is an agent session: minutes and tokens, outside archdiff's control. *State:* `stop` kills the process; the task file survives.
+
+**Stream formats drift.** The events are read with a tolerant parser: known shapes become text, tool and result events, anything else is shown raw. *State:* verified against Claude Code 2.1 and Cursor's CLI; a change in their stream-json shows as raw lines, not as a failure.
+
+**The plan is a guess from geometry.** A drawn function goes into the nearest module shape; a module into the lane it sits in. *State:* the task says why each place was chosen ("drawn next to …") so the reader can correct it before running.
+
 ## Writing files
 
 **`--out` overwrote any file.** A path typo could replace a hand-written document. *Now:* `--out` writes a new file or one that carries archdiff's marker (`<!-- archdiff:generated -->`, `%% archdiff:generated`, `host="archdiff"`, `"generator": "archdiff"`); any other existing file is refused with exit 2 and left intact. Every format carries such a marker.

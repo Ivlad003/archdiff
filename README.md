@@ -17,7 +17,8 @@ npx archdiff review         # the architectural diff against the main branch, as
 | `archdiff coverage [dir] [--json]` | The map of what the diagrams cannot show: blind calls, unresolved imports, syntax errors, by module | 0 |
 | `archdiff flow <calls:view> [dir] [--depth N] [--json]` | The data flow from an entry point without running it: the steps in call order with parameter and return types, the storages on the way, the saved mock values carried by name | 0 |
 | `archdiff review [dir] [--base REF] [--format F]` | Modules, functions, imports and calls added, removed or changed since REF (default: the merge-base with main); `1` when a new dependency between layers appeared | 0 / 1 |
-| `archdiff web [dir] [--port N] [--base REF]` | The page: views on the left, one Excalidraw canvas (reading, and drawing on demand), and the Markdown, code, coverage and data flow of what is picked | 0 |
+| `archdiff plan <view> [dir] [--json] [--out FILE]` | The task drawn on the saved drawing of a view: new shapes as modules or functions, arrows as imports or calls, deleted shapes as removals, notes — Markdown for an agent | 0 |
+| `archdiff web [dir] [--port N] [--base REF] [--agent claude\|cursor]` | The page: views on the left, one Excalidraw canvas (reading, and drawing on demand), and the Markdown, code, coverage and data flow of what is picked | 0 |
 
 Exit code `2` is a wrong invocation or an I/O error.
 
@@ -38,6 +39,12 @@ One canvas, Excalidraw, in its hand-drawn style. Reading: tap a shape for its co
 Drawing (`✎ edit`, or `e`): move shapes, draw with the pencil, write notes, take a PNG or SVG of the drawing or of the selected shapes. `save` writes `.archdiff/layouts/<view>.json`; the live diagram and every export then follow the saved places, and `re-layout` merges a fresh picture of the code into the drawing — shapes that still exist keep their place, your strokes stay, stale shapes go. Commit the layouts to share them in a pull request, or ignore `.archdiff/` to keep them local.
 
 The Markdown panel renders (a `raw` toggle shows the text to copy); `file:line` in it opens the code. The Flow tab, on a call-flow view, lists the steps in call order with their parameter and return types and the storages on the way (modules named `db`, `store`, `repository`, `cache`…, or importing `pg`, `prisma`, `redis`, `mongoose`…). Attach a mock input to the entry and mock contents to the storages: values are carried to parameters and properties of the same name, so the flow reads with data in it. Nothing is run; what reaches a step by another route is not claimed.
+
+## From a drawing to code: the Chat tab
+
+Draw the change on a view in `✎ edit`: a shape with a name is a new module (`src/lib/refunds.ts`) or a new function (`refund`, placed in the nearest module, or `path#name`), an arrow between shapes is an import or a call, a deleted shape is a removal, free text is a note. Save, open **Chat**, and *read the task*: archdiff diffs the drawing against the code graph and writes a Markdown task with the files and lines it touches, the layers it crosses (a new dependency between layers is flagged) and the rules to keep. Edit the task, then *run* it: the agent runs in this repository and its output streams into the tab; a follow-up message continues the same session. When it finishes the diagram reloads, and `review` shows what the agent changed against what was drawn.
+
+The agent comes from `archdiff web --agent claude` (Claude Code, `claude -p … --permission-mode acceptEdits`) or `--agent cursor` (Cursor's CLI, `cursor-agent -p --trust …`), or from `"agent"` in `archdiff.json`: `"claude"`, `"cursor"`, or `{ "command": ["…"], "resume": "--resume" }` for any CLI that prints stream-json. Without it the tab only writes the task (`archdiff plan` does the same from the terminal). Nothing runs by itself: every run starts from the button with the prompt as shown, and every prompt is kept in `.archdiff/tasks/`.
 
 ## Layers
 

@@ -10,8 +10,10 @@
 // /api/export?view=&format=, /api/scene?view= (the editor's scene: the
 // code's picture merged into the saved drawing), /api/layout?view=,
 // /api/flow?view= (the data flow of a calls view with its saved mocks).
-// POST /api/layout saves a drawing to .archdiff/layouts/. Entry point:
-// `serve`.
+// POST /api/layout saves a drawing to .archdiff/layouts/. /api/plan?view=
+// reads the task drawn on a view; POST /api/agent/run starts the agent on
+// a prompt (saved to .archdiff/tasks/), /api/agent/events?id= streams its
+// events, POST /api/agent/stop?id= ends it. Entry point: `serve`.
 
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -23,10 +25,15 @@ import { layout } from "./diagram.ts";
 import { review, reviewMarkdown } from "./diff.ts";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, type ExportFormat } from "./export/index.ts";
 import { toExcalidraw } from "./export/excalidraw.ts";
+import { AgentRunner, agentFromConfig, type AgentSpec } from "./agent.ts";
 import { dataFlow, flowMarkdown } from "./flow.ts";
+import { planFromScene, planMarkdown } from "./plan.ts";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { CACHE_DIRECTORY } from "./cache.ts";
+import { layoutSlug } from "./layouts.ts";
 import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type SceneElement } from "./layouts.ts";
 import { diagramMarkdown, nodeMarkdown } from "./markdown.ts";
-import { parseJson } from "./json.ts";
+import { isJsonObject, isJsonString, parseJson } from "./json.ts";
 import { parseView, viewList, viewOf } from "./views.ts";
 
 export interface ServeOptions {
@@ -34,7 +41,11 @@ export interface ServeOptions {
   host: string;
   /** The base ref of the review panel; null: the merge-base with the main branch. */
   base: string | null;
+  /** The agent of `--agent`, over the config's; null: the config decides. */
+  agent: AgentSpec | null;
 }
+
+export const TASKS_DIRECTORY = `${CACHE_DIRECTORY}/tasks`;
 
 /** The built page: dist/web beside dist/, or built now into it from a checkout. */
 async function webDirectory(): Promise<string> {
@@ -98,6 +109,9 @@ const STATIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-
 export async function serve(root: string, options: ServeOptions): Promise<void> {
   const web = await webDirectory();
   let current: Promise<Analysis> | null = null;
+  // The agent: --agent wins, else archdiff.json; the runner is made once the first run is asked for.
+  const agentSpec = options.agent ?? (await analyze(root)).config.agent;
+  let runner: AgentRunner | null = null;
 
   // One analysis per burst of requests: the page asks for several things at once after a reload.
   const fresh = (): Promise<Analysis> => {
@@ -129,20 +143,66 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     const path = url.pathname;
 
     if (request.method === "POST") {
-      if (path !== "/api/layout") return problem(response, 404, "no such API");
-      const key = url.searchParams.get("view") ?? "";
-
-      if (!parseView(key) && !key.startsWith("review")) return problem(response, 400, "unknown view");
       const body = await readBody(request, MAX_BODY);
 
-      if (body === null) return problem(response, 413, `the layout is over ${MAX_BODY / 1_000_000} MB`);
+      if (body === null) return problem(response, 413, `the body is over ${MAX_BODY / 1_000_000} MB`);
 
-      try {
-        const file = writeLayout(root, parseLayout(parseJson(body), key));
+      switch (path) {
+        case "/api/layout": {
+          const key = url.searchParams.get("view") ?? "";
 
-        return json(response, { saved: file });
-      } catch (error) {
-        return problem(response, 400, error instanceof Error ? error.message : String(error));
+          if (!parseView(key) && !key.startsWith("review")) return problem(response, 400, "unknown view");
+
+          try {
+            const file = writeLayout(root, parseLayout(parseJson(body), key));
+
+            return json(response, { saved: file });
+          } catch (error) {
+            return problem(response, 400, error instanceof Error ? error.message : String(error));
+          }
+        }
+
+        case "/api/agent/run": {
+          // An explicit request from the page: the prompt as the user saw it; `resume` continues the agent's session.
+          if (!agentSpec) return problem(response, 400, "no agent: start with --agent claude|cursor or set \"agent\" in archdiff.json");
+          let parsed;
+
+          try {
+            parsed = parseJson(body);
+          } catch {
+            return problem(response, 400, "the body must be JSON");
+          }
+
+          if (!isJsonObject(parsed) || !isJsonString(parsed["prompt"]) || parsed["prompt"].trim() === "") return problem(response, 400, '"prompt" is required');
+          const resume = isJsonString(parsed["resume"]) ? parsed["resume"] : null;
+          runner ??= new AgentRunner(root, agentSpec);
+          const run = runner.start(parsed["prompt"], resume);
+          // The agent edits the repository: the next request analyses afresh, however soon it comes.
+          run.subscribe(0, (event) => {
+            if (event.kind === "exit") current = null;
+          });
+          // The task as sent, kept beside the drawings so it can be read or resent without the page.
+          const view = isJsonString(parsed["view"]) ? parsed["view"] : "chat";
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const file = `${TASKS_DIRECTORY}/${layoutSlug(view)}-${stamp}.md`;
+          mkdirSync(join(root, TASKS_DIRECTORY), { recursive: true });
+          writeFileSync(join(root, file), `<!-- archdiff:generated — task for ${agentSpec.name}, run ${run.id} -->\n${parsed["prompt"]}\n`);
+
+          return json(response, { id: run.id, agent: agentSpec.name, task: file });
+        }
+
+        case "/api/agent/stop": {
+          const id = url.searchParams.get("id") ?? "";
+          const run = runner?.runs.get(id);
+
+          if (!run) return problem(response, 404, "no such run");
+          run.stop();
+
+          return json(response, { stopped: id });
+        }
+
+        default:
+          return problem(response, 404, "no such API");
       }
     }
 
@@ -185,7 +245,39 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
         case "/api/views": {
           const analysis = await fresh();
 
-          return json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis) });
+          return json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis), agent: agentSpec?.name ?? null });
+        }
+
+        case "/api/plan": {
+          // The task drawn on the saved scene of a view.
+          const key = url.searchParams.get("view") ?? "";
+
+          if (!parseView(key)) return problem(response, 400, "unknown view");
+          const analysis = await fresh();
+          const saved = readLayout(root, key);
+          const plan = planFromScene(analysis, key, saved?.elements ?? []);
+
+          return json(response, { plan, markdown: planMarkdown(plan, analysis), drawn: saved !== null });
+        }
+
+        case "/api/agent/events": {
+          // Server-sent events of a run from `after`, until it ends.
+          const id = url.searchParams.get("id") ?? "";
+          const run = runner?.runs.get(id);
+
+          if (!run) return problem(response, 404, "no such run");
+          const after = Number(url.searchParams.get("after") ?? "0");
+          response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+          const unsubscribe = run.subscribe(Number.isInteger(after) && after >= 0 ? after : 0, (event) => {
+            response.write(`data: ${JSON.stringify(event)}\n\n`);
+
+            if (event.kind === "exit") response.end();
+          });
+          request.on("close", unsubscribe);
+
+          if (run.done) response.end();
+
+          return;
         }
 
         case "/api/diagram": {
@@ -304,6 +396,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   // Runs until the process is stopped.
   await new Promise<void>((resolveStopped) => {
     const stop = (): void => {
+      runner?.stopAll();
       server.close(() => resolveStopped());
     };
     process.once("SIGINT", stop);

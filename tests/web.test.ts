@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
-import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -21,6 +21,8 @@ let base = "";
 before(async () => {
   dir = mkdtempSync(join(tmpdir(), "archdiff-web-"));
   cpSync(fixture, dir, { recursive: true });
+  // A fake agent (tests/fixtures/fake-agent.mjs) stands in for claude/cursor: same stream-json, writes the file the prompt names.
+  writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"], cartridge: ["cartridges/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" } }));
   server = spawn(process.execPath, [join(root, "bin/archdiff.js"), "web", dir, "--port", "0"], { stdio: ["ignore", "ignore", "pipe"] });
   base = await new Promise<string>((resolve, reject) => {
     let text = "";
@@ -116,4 +118,59 @@ test("a foreign Host header and a path out of the page directory are refused", a
   const page = await fetch(`${base}/`);
   assert.equal(page.status, 200);
   assert.ok((await page.text()).includes('<script type="module" src="app.js">'));
+});
+
+test("the task drawn on a view is read from its saved scene, and the agent runs it from the page", async () => {
+  const view = "module:src/lib/orders.ts";
+  const scene = await getJson<{ elements: Record<string, unknown>[] }>(`/api/scene?view=${encodeURIComponent(view)}`);
+  // The user draws a new module in the lib lane with a bound label, a function next to orders.ts, and an arrow from orders.ts to the new module.
+  const lane = scene.elements.find((element) => element["id"] === "lane:lib") as { x: number; y: number; width: number; height: number };
+  const orders = scene.elements.find((element) => element["id"] === "src/lib/orders.ts") as { x: number; y: number; width: number; height: number };
+  const drawn = [
+    ...scene.elements,
+    { id: "shape-1", type: "rectangle", x: lane.x + lane.width - 200, y: lane.y + 10, width: 170, height: 56, boundElements: [{ id: "shape-1-text", type: "text" }] },
+    { id: "shape-1-text", type: "text", x: 0, y: 0, width: 100, height: 20, text: "src/lib/refunds.ts", containerId: "shape-1" },
+    { id: "shape-2", type: "ellipse", x: orders.x, y: orders.y + orders.height + 8, width: 120, height: 40, boundElements: [{ id: "shape-2-text", type: "text" }] },
+    { id: "shape-2-text", type: "text", x: 0, y: 0, width: 100, height: 20, text: "refund", containerId: "shape-2" },
+    { id: "arrow-1", type: "arrow", x: 0, y: 0, width: 10, height: 10, startBinding: { elementId: "src/lib/orders.ts" }, endBinding: { elementId: "shape-1" } },
+    { id: "note-1", type: "text", x: 0, y: 300, width: 100, height: 20, text: "refunds go through the same store" },
+  ];
+  const saved = await fetch(`${base}/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: drawn, mocks: [] }) });
+  assert.equal(saved.status, 200, await saved.text());
+  const plan = await getJson<{ markdown: string; drawn: boolean; plan: { added: { kind: string; name: string; module?: string }[]; edges: { kind: string }[]; notes: string[] } }>(`/api/plan?view=${encodeURIComponent(view)}`);
+  assert.equal(plan.drawn, true);
+  assert.deepEqual(
+    plan.plan.added.map((node) => [node.kind, node.name, node.module]),
+    [
+      ["module", "src/lib/refunds.ts", undefined],
+      ["fn", "refund", "src/lib/orders.ts"],
+    ],
+  );
+  assert.equal(plan.plan.edges[0]?.kind, "import");
+  assert.deepEqual(plan.plan.notes, ["refunds go through the same store"]);
+  assert.ok(plan.markdown.includes("- A new module `src/lib/refunds.ts` in layer **lib**"), plan.markdown);
+  assert.ok(plan.markdown.includes("- An exported function `refund` in `src/lib/orders.ts` (drawn next to src/lib/orders.ts)"), plan.markdown);
+  assert.ok(plan.markdown.includes("- `src/lib/orders.ts` imports `src/lib/refunds.ts` (new)"), plan.markdown);
+  // The run: the fake agent writes the file the prompt names; its events stream back; the task is saved.
+  const prompt = `${plan.markdown}\nwrite-file: ${join(dir, "src/lib/refunds.ts")}`;
+  const started = await fetch(`${base}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, prompt, resume: null }) });
+  const run = JSON.parse(await started.text()) as { id: string; agent: string; task: string };
+  assert.equal(run.agent, "fake");
+  assert.ok(run.task.startsWith(".archdiff/tasks/module_src_lib_orders.ts-"));
+  const events = await (await fetch(`${base}/api/agent/events?id=${run.id}`)).text();
+  const kinds = events.split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => (JSON.parse(chunk.slice(6)) as { kind: string; text: string; sessionId?: string }));
+  assert.deepEqual(kinds.map((event) => event.kind), ["init", "text", "tool", "result", "exit"]);
+  assert.equal(kinds[0]?.sessionId, "fake-session-1");
+  assert.equal(kinds[2]?.text, `▶ Write file_path=${join(dir, "src/lib/refunds.ts")}`);
+  assert.ok(existsSync(join(dir, "src/lib/refunds.ts")));
+  assert.equal(readdirSync(join(dir, ".archdiff/tasks")).length, 1);
+  // The code changed: the next analysis sees the new module.
+  const views = await getJson<{ views: { key: string }[] }>("/api/views");
+  assert.ok(views.views.some((entry) => entry.key === "module:src/lib/refunds.ts"));
+  // A follow-up resumes the session.
+  const again = await fetch(`${base}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, prompt: "also add a test", resume: "fake-session-1" }) });
+  const second = JSON.parse(await again.text()) as { id: string };
+  const more = await (await fetch(`${base}/api/agent/events?id=${second.id}`)).text();
+  assert.ok(more.includes("resumed"));
+  assert.equal((await fetch(`${base}/api/agent/stop?id=nothing`, { method: "POST" })).status, 404);
 });

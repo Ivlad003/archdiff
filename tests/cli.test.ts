@@ -289,3 +289,12 @@ test("flow lists the steps from an entry with their types, the storages, and the
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("plan refuses a view without a drawing and web --agent refuses an unknown agent", () => {
+  const missing = archdiff(["plan", "module:src/lib/orders.ts", fixture]);
+  assert.equal(missing.status, 2);
+  assert.ok(missing.stderr.includes("has no saved drawing"));
+  const unknown = archdiff(["web", fixture, "--agent", "copilot"]);
+  assert.equal(unknown.status, 2);
+  assert.ok(unknown.stderr.includes("not claude or cursor"));
+});

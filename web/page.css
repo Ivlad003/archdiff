@@ -561,3 +561,76 @@ body.editing #reason {
   padding: 0 3px;
   border-radius: 3px;
 }
+
+#chat {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  font-family: inherit;
+  white-space: normal;
+}
+
+#chat.active {
+  display: flex;
+}
+
+#chat .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#chat .row input {
+  flex: 1;
+  font: inherit;
+  padding: 4px 6px;
+}
+
+#task {
+  width: 100%;
+  min-height: 160px;
+  font-family: var(--mono);
+  font-size: 12px;
+  resize: vertical;
+}
+
+#transcript {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #fff;
+}
+
+#transcript .ev {
+  margin: 2px 0;
+}
+
+#transcript .ev.tool {
+  color: var(--muted);
+}
+
+#transcript .ev.result {
+  color: #1b5e20;
+  font-weight: 600;
+}
+
+#transcript .ev.stderr {
+  color: #b71c1c;
+}
+
+#transcript .ev.exit {
+  color: var(--muted);
+  font-style: italic;
+}
+
+#run.running {
+  border-color: #ef6c00;
+  color: #ef6c00;
+}
