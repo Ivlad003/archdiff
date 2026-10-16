@@ -4,6 +4,10 @@
   --accent: #6a1b9a;
   --bg: #fafafa;
   --panel: #ffffff;
+  --text: #212121;
+  --soft: #f3f4f6;
+  --hover: #f3e5f5;
+  --active: #ede7f6;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --left: 280px;
   --right: 420px;
@@ -18,8 +22,45 @@ body {
   height: 100%;
   margin: 0;
   font: 13px/1.4 system-ui, sans-serif;
-  color: #212121;
+  color: var(--text);
   background: var(--bg);
+}
+
+html.dark {
+  --border: #37474f;
+  --muted: #90a4ae;
+  --accent: #ce93d8;
+  --bg: #121417;
+  --panel: #1b1f24;
+  --text: #e3e6ea;
+  --soft: #262b31;
+  --hover: #2a2330;
+  --active: #332740;
+  color-scheme: dark;
+}
+
+html.dark button,
+html.dark input,
+html.dark textarea,
+html.dark select,
+html.dark #export-menu summary,
+html.dark #export {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html.dark #transcript,
+html.dark .step {
+  background: var(--panel);
+}
+
+html.dark .step.storage {
+  background: #103a35;
+}
+
+html.dark #code .line.hit {
+  background: #3b3a1a;
 }
 
 body {
@@ -120,8 +161,12 @@ button.icon {
 }
 
 #export a:hover {
-  background: #f3e5f5;
+  background: var(--hover);
   color: var(--accent);
+}
+
+#export a {
+  color: var(--text);
 }
 
 main {
@@ -198,12 +243,12 @@ body.hide-right #right {
 }
 
 #views li.active {
-  background: #ede7f6;
+  background: var(--active);
   color: var(--accent);
 }
 
 #views li:hover:not(.group) {
-  background: #f3e5f5;
+  background: var(--hover);
 }
 
 #centre {
@@ -408,7 +453,7 @@ body.hide-right #right {
 .prose code {
   font-family: var(--mono);
   font-size: 12px;
-  background: #f3f4f6;
+  background: var(--soft);
   padding: 1px 4px;
   border-radius: 3px;
 }
@@ -419,7 +464,7 @@ body.hide-right #right {
 }
 
 .prose pre {
-  background: #f3f4f6;
+  background: var(--soft);
   padding: 8px;
   border-radius: 4px;
   overflow: auto;
@@ -633,4 +678,57 @@ body.editing #reason {
 #run.running {
   border-color: #ef6c00;
   color: #ef6c00;
+}
+
+#commits {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+#commits[hidden] {
+  display: none;
+}
+
+#commit-list {
+  max-width: 60%;
+  font: inherit;
+}
+
+#crumbs {
+  display: inline-flex;
+  gap: 4px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+#crumbs a {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+#crumbs a:hover {
+  text-decoration: underline;
+}
+
+#tasks {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 120px;
+  overflow: auto;
+  font-size: 11px;
+}
+
+#tasks li {
+  padding: 2px 0;
+  color: var(--muted);
+}
+
+#history-box {
+  margin-top: 8px;
 }

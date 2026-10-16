@@ -12,6 +12,7 @@
 
 import { spawnSync } from "node:child_process";
 import { analyze, type Analysis } from "./analyze.ts";
+import { loadConfig } from "./config.ts";
 import type { Diagram, DiagramEdge, DiagramNode } from "./diagram.ts";
 import { layout } from "./diagram.ts";
 import { toMermaid } from "./export/mermaid.ts";
@@ -98,10 +99,24 @@ export function mergeBase(root: string): string {
   return "HEAD";
 }
 
-/** The source files that differ between `base` and the working tree (tracked changes and untracked files), with the base content of each (null when the base lacks it). */
-export function changedFiles(root: string, base: string): Map<string, string | null> {
+/** A revision's content of a file, as `analyze` overrides: null when the revision lacks it. */
+function contentAt(root: string, ref: string, path: string): string | null {
+  const content = git(root, ["show", `${ref}:${path}`]);
+
+  return content.ok ? content.out : null;
+}
+
+/**
+ * The source files that differ between `base` and `head` (a ref, or the
+ * working tree when null: tracked changes and untracked files), as the
+ * overrides of each side's analysis: the base's content, and the head's
+ * when it is a ref. Null drops the file on that side.
+ */
+export function changedFiles(root: string, base: string, head: string | null = null): { base: Map<string, string | null>; head: Map<string, string | null> } {
   assertRef(base);
-  const diff = git(root, ["diff", "--name-status", "-z", "-M", base, "--"]);
+
+  if (head !== null) assertRef(head);
+  const diff = git(root, head === null ? ["diff", "--name-status", "-z", "-M", base, "--"] : ["diff", "--name-status", "-z", "-M", base, head, "--"]);
 
   if (!diff.ok) throw new Error(diff.error);
   const changed = new Map<string, string | null>();
@@ -124,23 +139,48 @@ export function changedFiles(root: string, base: string): Map<string, string | n
     }
   }
 
-  const untracked = git(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
+  if (head === null) {
+    const untracked = git(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
 
-  if (untracked.ok) for (const path of untracked.out.split("\0")) if (path !== "" && !changed.has(path)) changed.set(path, null);
-  const overrides = new Map<string, string | null>();
+    if (untracked.ok) for (const path of untracked.out.split("\0")) if (path !== "" && !changed.has(path)) changed.set(path, null);
+  }
+
+  const baseSide = new Map<string, string | null>();
+  const headSide = new Map<string, string | null>();
 
   for (const [path, marker] of changed) {
     if (!isSourceFile(path)) continue;
+    // Added since the base: the base does not have it.
+    baseSide.set(path, marker === null ? null : contentAt(root, base, path));
 
-    if (marker === null) {
-      // Added since the base: the base does not have it.
-      overrides.set(path, null);
-      continue;
-    }
-
-    const content = git(root, ["show", `${base}:${path}`]);
-    overrides.set(path, content.ok ? content.out : null);
+    if (head !== null) headSide.set(path, contentAt(root, head, path));
   }
+
+  // A head ref: every source file the working tree has but the head does not (or the reverse) must be read from the head too,
+  // else the head analysis would mix the working tree in. The diff lists them already when they differ from the base.
+  return { base: baseSide, head: headSide };
+}
+
+/** The whole tree of a ref as overrides against the working tree: files that differ get the ref's content, files the ref lacks null, files only the ref has their content. */
+export function treeAt(root: string, ref: string): Map<string, string | null> {
+  assertRef(ref);
+  const diff = git(root, ["diff", "--name-status", "-z", "-M", ref, "--"]);
+
+  if (!diff.ok) throw new Error(diff.error);
+  const overrides = new Map<string, string | null>();
+  const parts = diff.out.split("\0").filter((part) => part !== "");
+
+  for (let i = 0; i < parts.length; ) {
+    const status = parts[i]!;
+    const paths = status.startsWith("R") || status.startsWith("C") ? [parts[i + 1]!, parts[i + 2]!] : [parts[i + 1]!];
+    i += 1 + paths.length;
+
+    for (const path of paths) if (path && isSourceFile(path)) overrides.set(path, contentAt(root, ref, path));
+  }
+
+  const untracked = git(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
+
+  if (untracked.ok) for (const path of untracked.out.split("\0")) if (path !== "" && isSourceFile(path) && !overrides.has(path)) overrides.set(path, null);
 
   return overrides;
 }
@@ -299,16 +339,110 @@ export function diffDiagram(diff: GraphDiff, base: Graph, head: Graph): Diagram 
   return diagram;
 }
 
-/** Analyses the working tree and the base, and diffs them. `base` null: the merge-base with the main branch. */
-export async function review(root: string, base: string | null): Promise<ReviewResult> {
+/** Analyses the head (a ref, or the working tree when null) and the base, and diffs them. `base` null: the merge-base with the main branch. */
+export async function review(root: string, base: string | null, headRef: string | null = null): Promise<ReviewResult> {
   const ref = base ?? mergeBase(root);
-  const overrides = changedFiles(root, ref);
-  const head = await analyze(root);
-  const baseAnalysis = await analyze(root, { overrides, config: head.config });
-  const diff = graphDiff(baseAnalysis.graph, head.graph, ref, [...overrides.keys()]);
+  const config = loadConfig(root);
+  const head = headRef === null ? await analyze(root, { config }) : await analyze(root, { overrides: treeAt(root, headRef), config });
+  const baseAnalysis = await analyze(root, { overrides: treeAt(root, ref), config });
+  const changed = changedFiles(root, ref, headRef);
+  const diff = graphDiff(baseAnalysis.graph, head.graph, headRef === null ? ref : `${ref}..${headRef}`, [...changed.base.keys()]);
   const diagram = layout(diffDiagram(diff, baseAnalysis.graph, head.graph));
 
   return { head, base: baseAnalysis, diff, diagram };
+}
+
+/** One commit of a range, as `git log` lists it. */
+export interface Commit {
+  sha: string;
+  short: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+/** The commits from `base` (excluded) to `head`, oldest first. */
+export function commitsBetween(root: string, base: string, head: string): Commit[] {
+  assertRef(base);
+  assertRef(head);
+  const log = git(root, ["log", "--reverse", "--format=%H%x00%h%x00%an%x00%ad%x00%s", "--date=short", `${base}..${head}`]);
+
+  if (!log.ok) throw new Error(log.error);
+
+  return log.out
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [sha, short, author, date, subject] = line.split("\0") as [string, string, string, string, string];
+
+      return { sha, short, author, date, subject };
+    });
+}
+
+/** How the architecture moved at one commit of a range. */
+export interface HistoryRow {
+  commit: Commit;
+  modulesAdded: number;
+  modulesRemoved: number;
+  fnsChanged: number;
+  depsAdded: number;
+  depsRemoved: number;
+  layerEdgesAdded: { from: string; to: string }[];
+  layerEdgesRemoved: { from: string; to: string }[];
+  externalsAdded: string[];
+}
+
+/** The architectural diff of every commit from `base` to `head`, one analysis per commit (the fact cache makes each cheap). */
+export async function history(root: string, base: string, head: string): Promise<HistoryRow[]> {
+  const commits = commitsBetween(root, base, head);
+  const config = loadConfig(root);
+  let previous = (await analyze(root, { overrides: treeAt(root, base), config })).graph;
+  const rows: HistoryRow[] = [];
+
+  for (const commit of commits) {
+    const current = (await analyze(root, { overrides: treeAt(root, commit.sha), config })).graph;
+    const diff = graphDiff(previous, current, commit.sha, []);
+    rows.push({ commit, modulesAdded: diff.modulesAdded.length, modulesRemoved: diff.modulesRemoved.length, fnsChanged: diff.nodesAdded.length + diff.nodesRemoved.length + diff.nodesChanged.length, depsAdded: diff.depsAdded.length, depsRemoved: diff.depsRemoved.length, layerEdgesAdded: diff.layerEdgesAdded, layerEdgesRemoved: diff.layerEdgesRemoved, externalsAdded: diff.externalsAdded });
+    previous = current;
+  }
+
+  return rows;
+}
+
+/** The history as a Markdown table: one row per commit, the layer couplings it added or removed named. */
+export function historyMarkdown(rows: HistoryRow[], base: string, head: string): string {
+  const lines = [`<!-- archdiff:generated — history ${base}..${head} -->`, `# Architecture drift from ${base} to ${head}`, ""];
+
+  if (rows.length === 0) {
+    lines.push("_no commits in the range_");
+
+    return `${lines.join("\n")}\n`;
+  }
+
+  lines.push("| commit | date | author | modules | functions | imports | layer couplings | packages |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
+
+  for (const row of rows) {
+    const couplings = [...row.layerEdgesAdded.map((edge) => `+${edge.from}→${edge.to}`), ...row.layerEdgesRemoved.map((edge) => `−${edge.from}→${edge.to}`)].join(" ") || "";
+    lines.push(`| \`${row.commit.short}\` ${row.commit.subject.replace(/\|/g, "\\|")} | ${row.commit.date} | ${row.commit.author} | +${row.modulesAdded} −${row.modulesRemoved} | ~${row.fnsChanged} | +${row.depsAdded} −${row.depsRemoved} | ${couplings} | ${row.externalsAdded.map((id) => id.replace(/^pkg:/, "")).join(", ")} |`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+/** The commits that touched a file, newest first, for the history of a shape. */
+export function fileHistory(root: string, path: string, limit = 30): Commit[] {
+  const log = git(root, ["log", `-${limit}`, "--format=%H%x00%h%x00%an%x00%ad%x00%s", "--date=short", "--", path]);
+
+  if (!log.ok) return [];
+
+  return log.out
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [sha, short, author, date, subject] = line.split("\0") as [string, string, string, string, string];
+
+      return { sha, short, author, date, subject };
+    });
 }
 
 function fnLabel(change: NodeChange): string {

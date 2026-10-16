@@ -12,11 +12,13 @@ npx archdiff review         # the architectural diff against the main branch, as
 | Command | What it does | Exit |
 | --- | --- | --- |
 | `archdiff analyze [dir] [--json] [--no-cache]` | Parse the repository and print its size: files, functions, imports, calls followed and gaps | 0 |
-| `archdiff views [dir]` | List every view: `layers`, `layer:<name>`, `module:<path>`, `calls:<path>#<fn>`, `coverage` | 0 |
+| `archdiff views [dir]` | List every view: `layers`, `layer:<name>`, `dir:<path>`, `module:<path>`, `calls:<path>#<fn>`, `coverage` | 0 |
 | `archdiff diagram <view> [dir] [--format F] [--depth N] [--out FILE]` | Draw one view as `md` (Markdown with Mermaid, default), `mermaid`, `json`, `drawio`, `excalidraw` or `archimate` | 0 |
 | `archdiff coverage [dir] [--json]` | The map of what the diagrams cannot show: blind calls, unresolved imports, syntax errors, by module | 0 |
 | `archdiff flow <calls:view> [dir] [--depth N] [--json]` | The data flow from an entry point without running it: the steps in call order with parameter and return types, the storages on the way, the saved mock values carried by name | 0 |
-| `archdiff review [dir] [--base REF] [--format F]` | Modules, functions, imports and calls added, removed or changed since REF (default: the merge-base with main); `1` when a new dependency between layers appeared | 0 / 1 |
+| `archdiff review [dir] [--base REF] [--head REF] [--format F]` | Modules, functions, imports and calls added, removed or changed between the base (default: the merge-base with main) and the head (default: the working tree); `1` when a new dependency between layers appeared | 0 / 1 |
+| `archdiff history [dir] [--base REF] [--head REF] [--json]` | The drift commit by commit: modules, functions, imports, layer couplings and packages each commit added or removed | 0 |
+| `archdiff layouts [dir] [--prune]` | The saved drawings; `--prune` deletes those whose view the code no longer has | 0 |
 | `archdiff plan <view> [dir] [--json] [--out FILE]` | The task drawn on the saved drawing of a view: new shapes as modules or functions, arrows as imports or calls, deleted shapes as removals, notes — Markdown for an agent | 0 |
 | `archdiff web [dir] [--port N] [--base REF] [--agent claude\|cursor]` | The page: views on the left, one Excalidraw canvas (reading, and drawing on demand), and the Markdown, code, coverage and data flow of what is picked | 0 |
 
@@ -26,6 +28,7 @@ Exit code `2` is a wrong invocation or an I/O error.
 
 - **layers** — one shape per layer with its module count, one line per import direction with the count.
 - **layer:name** — the modules of a layer; `--depth 1` (default) adds the modules of other layers they import or are imported by.
+- **dir:path** — the modules of a directory (and below) with their neighbours: the rung between a layer and a module.
 - **module:path** — what the module imports (files and packages) and what imports it; `--depth 2` goes one step further.
 - **calls:path#fn** — the call tree from a function, `--depth 3` by default; a hexagon is a call archdiff could not follow, with the reason. Double-click a function on the page to open its own tree.
 - **coverage** — the modules with blind spots, biggest first.
@@ -34,11 +37,15 @@ Entry points come from the code and the frameworks: exported functions under `bi
 
 ## The page
 
-One canvas, Excalidraw, in its hand-drawn style. Reading: tap a shape for its code and Markdown, tap it again to open its own view (a layer → its modules, a module → its imports, a function → its calls), drag to pan, wheel to zoom, `0` fits, Backspace goes back. Big views fold their tail into one "… N more" shape so the picture stays readable; the Markdown lists everything. Packages are hidden unless the `packages` box is on.
+One canvas, Excalidraw, in its hand-drawn style. Reading: tap a shape for its code and Markdown, tap it again to open its own view (a layer → its modules, a module → its imports, a function → its calls), drag to pan, wheel to zoom, `0` fits, Backspace goes back. Big views fold their tail by directory into "… N in src/x/" shapes (a tap opens that directory) so the picture stays readable; the Markdown lists everything. Arrows leave a shape on the right, run in the gap before the next column and enter on the left; a backward arrow goes around below. Breadcrumbs in the title (layers › layer › directory › module › function) walk back up; the zoom and position of every view are remembered in the browser; the page reloads when a source file changes (`--no-watch` turns that off); ◐ switches the dark theme. Packages are hidden unless the `packages` box is on.
 
 Drawing (`✎ edit`, or `e`): move shapes, draw with the pencil, write notes, take a PNG or SVG of the drawing or of the selected shapes. `save` writes `.archdiff/layouts/<view>.json`; the live diagram and every export then follow the saved places, and `re-layout` merges a fresh picture of the code into the drawing — shapes that still exist keep their place, your strokes stay, stale shapes go. Commit the layouts to share them in a pull request, or ignore `.archdiff/` to keep them local.
 
 The Markdown panel renders (a `raw` toggle shows the text to copy); `file:line` in it opens the code. The Flow tab, on a call-flow view, lists the steps in call order with their parameter and return types and the storages on the way (modules named `db`, `store`, `repository`, `cache`…, or importing `pg`, `prisma`, `redis`, `mongoose`…). Attach a mock input to the entry and mock contents to the storages: values are carried to parameters and properties of the same name, so the flow reads with data in it. Nothing is run; what reaches a step by another route is not claimed.
+
+## Reviewing a branch
+
+`review` on the page takes a base and a head (a ref, or the working tree). In review mode a bar lists the commits from the base to the head; pick one, or step with ‹ ›, to see that commit's own change against the one before it. A tap on a shape in a review shows the commits that touched its file. In the terminal, `archdiff history` prints the same walk as a table, and [docs/ci.md](docs/ci.md) shows the GitHub Action that posts the review on every pull request.
 
 ## From a drawing to code: the Chat tab
 
@@ -77,7 +84,8 @@ Facts are cached by file content in `.archdiff/facts.json.gz` (add `.archdiff/` 
 ```bash
 npm install
 npm run typecheck
-npm test
+npm test          # the CLI and the HTTP API, through the real binary
+npm run test:web  # the page in headless Chrome (playwright-core; skipped without Chrome)
 node bin/archdiff.js web .
 ```
 

@@ -8,7 +8,7 @@ import type { Diagram } from "../../src/diagram.ts";
 export interface ViewEntry {
   key: string;
   title: string;
-  kind: "layers" | "layer" | "module" | "calls" | "coverage";
+  kind: "layers" | "layer" | "dir" | "module" | "calls" | "coverage";
   layer?: string;
 }
 
@@ -78,7 +78,29 @@ export interface AgentEvent {
   sessionId?: string;
 }
 
+export interface Commit {
+  sha: string;
+  short: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
 export const api = {
+  commits: (base: string | null, head: string | null) => get<{ base: string; head: string; commits: Commit[] }>(`/api/commits?${base ? `base=${encodeURIComponent(base)}&` : ""}${head ? `head=${encodeURIComponent(head)}` : ""}`),
+  fileHistory: (path: string) => get<{ path: string; commits: Commit[] }>(`/api/history?path=${encodeURIComponent(path)}`),
+  tasks: () => get<{ tasks: { file: string; head: string }[] }>("/api/tasks"),
+  /** Tells `onChange` whenever a source file changes; returns the closer. */
+  changes: (onChange: (path: string) => void): (() => void) => {
+    const source = new EventSource("/api/changes");
+    source.onmessage = (message) => {
+      const data = JSON.parse(message.data as string) as { path?: string };
+
+      if (data.path) onChange(data.path);
+    };
+
+    return () => source.close();
+  },
   plan: (view: string) => get<{ markdown: string; drawn: boolean; plan: { added: unknown[]; edges: unknown[]; removed: unknown[]; notes: string[] } }>(`/api/plan?view=${encodeURIComponent(view)}`),
   runAgent: async (view: string, prompt: string, resume: string | null): Promise<{ id: string; agent: string; task: string }> => {
     const response = await fetch("/api/agent/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, prompt, resume }) });
@@ -129,6 +151,6 @@ export const api = {
     return response.text();
   },
   coverage: () => get<{ markdown: string; ratio: number; gaps: number; calls: number }>("/api/coverage"),
-  review: (base: string | null) => get<ReviewResponse>(`/api/review${base ? `?base=${encodeURIComponent(base)}` : ""}`),
-  exportUrl: (view: string, format: string, base: string | null) => `/api/export?view=${encodeURIComponent(view)}&format=${format}${base ? `&base=${encodeURIComponent(base)}` : ""}`,
+  review: (base: string | null, head: string | null) => get<ReviewResponse>(`/api/review?${base ? `base=${encodeURIComponent(base)}&` : ""}${head ? `head=${encodeURIComponent(head)}` : ""}`),
+  exportUrl: (view: string, format: string, base: string | null, head: string | null = null) => `/api/export?view=${encodeURIComponent(view)}&format=${format}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}`,
 };

@@ -198,11 +198,16 @@ export function dataFlow(analysis: Analysis, entry: string, mocks: readonly Mock
     const { params, returns } = parseSignature(node.signature);
 
     for (const param of params) {
-      const carried = known.get(param.name);
+      // `{ request, context }`: each key of the pattern is a name of its own; the value carried is the object of those keys.
+      const names = param.name.startsWith("{") ? param.name.replace(/^\{|\}$/g, "").split(",").map((part) => part.split(":")[0]!.trim()).filter((name) => name !== "" && name !== "...") : [param.name];
+      const carried = names.map((name) => [name, known.get(name)] as const).filter((entry): entry is readonly [string, { value: string; from: string }] => entry[1] !== undefined);
 
-      if (carried) {
-        param.value = carried.value;
-        param.from = carried.from;
+      if (carried.length === 1 && names.length === 1) {
+        param.value = carried[0]![1].value;
+        param.from = carried[0]![1].from;
+      } else if (carried.length > 0) {
+        param.value = `{ ${carried.map(([name, entry]) => `${name}: ${entry.value}`).join(", ")} }`;
+        param.from = [...new Set(carried.map(([, entry]) => entry.from))].join(", ");
       }
     }
 

@@ -22,7 +22,8 @@ import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
 import { coverageReport } from "./coverage.ts";
 import { layout } from "./diagram.ts";
-import { review, reviewMarkdown } from "./diff.ts";
+import { commitsBetween, fileHistory, mergeBase, review, reviewMarkdown } from "./diff.ts";
+import { watch as watchFs } from "node:fs";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, type ExportFormat } from "./export/index.ts";
 import { toExcalidraw } from "./export/excalidraw.ts";
 import { AgentRunner, agentFromConfig, type AgentSpec } from "./agent.ts";
@@ -43,6 +44,8 @@ export interface ServeOptions {
   base: string | null;
   /** The agent of `--agent`, over the config's; null: the config decides. */
   agent: AgentSpec | null;
+  /** Reload the page when a source file changes. */
+  watch: boolean;
 }
 
 export const TASKS_DIRECTORY = `${CACHE_DIRECTORY}/tasks`;
@@ -112,6 +115,32 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   // The agent: --agent wins, else archdiff.json; the runner is made once the first run is asked for.
   const agentSpec = options.agent ?? (await analyze(root)).config.agent;
   let runner: AgentRunner | null = null;
+  // Who waits for a change of the sources (`/api/changes`), and the watcher that tells them.
+  const changeListeners = new Set<ServerResponse>();
+  let changeTimer: NodeJS.Timeout | null = null;
+
+  const notifyChange = (path: string): void => {
+    current = null;
+
+    if (changeTimer) clearTimeout(changeTimer);
+    changeTimer = setTimeout(() => {
+      for (const listener of changeListeners) listener.write(`data: ${JSON.stringify({ path })}\n\n`);
+    }, 300);
+  };
+
+  if (options.watch) {
+    try {
+      watchFs(root, { recursive: true }, (_event, name) => {
+        const path = typeof name === "string" ? name.split("\\").join("/") : "";
+
+        // Only a source file counts; the cache, the drawings, git and node_modules change for other reasons.
+        if (path === "" || path.startsWith(".archdiff/") || path.startsWith(".git/") || path.includes("node_modules/") || !/\.[cm]?[jt]sx?$/.test(path)) return;
+        notifyChange(path);
+      });
+    } catch (error) {
+      process.stderr.write(`archdiff web: not watching the files (${error instanceof Error ? error.message : String(error)})\n`);
+    }
+  }
 
   // One analysis per burst of requests: the page asks for several things at once after a reload.
   const fresh = (): Promise<Analysis> => {
@@ -323,11 +352,52 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           return json(response, coverageReport(analysis));
         }
 
+        case "/api/changes": {
+          // Server-sent events: one per change of a source file, debounced; the page reloads its view.
+          response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+          response.write(`data: ${JSON.stringify({ watching: options.watch })}\n\n`);
+          changeListeners.add(response);
+          request.on("close", () => changeListeners.delete(response));
+
+          return;
+        }
+
+        case "/api/commits": {
+          // The commits of the review range, oldest first, for stepping through a branch.
+          try {
+            const base = url.searchParams.get("base") || options.base || mergeBase(root);
+            const head = url.searchParams.get("head") || "HEAD";
+
+            return json(response, { base, head, commits: commitsBetween(root, base, head) });
+          } catch (error) {
+            return problem(response, 400, error instanceof Error ? error.message : String(error));
+          }
+        }
+
+        case "/api/tasks": {
+          // The tasks sent to the agent so far, newest first, with their first lines.
+          const directory = join(root, TASKS_DIRECTORY);
+          const { readdirSync } = await import("node:fs");
+          const files = existsSync(directory) ? readdirSync(directory).filter((name) => name.endsWith(".md")).sort().reverse() : [];
+
+          return json(response, { tasks: files.map((name) => ({ file: `${TASKS_DIRECTORY}/${name}`, head: readFileSync(join(directory, name), "utf8").split("\n").slice(1, 4).join(" ").slice(0, 200) })) });
+        }
+
+        case "/api/history": {
+          const file = url.searchParams.get("path") ?? "";
+          const analysis = await fresh();
+
+          if (!analysis.facts.has(file)) return problem(response, 404, "not an analysed file");
+
+          return json(response, { path: file, commits: fileHistory(root, file) });
+        }
+
         case "/api/review": {
           const base = url.searchParams.get("base") || options.base;
+          const head = url.searchParams.get("head") || null;
 
           try {
-            const result = await review(root, base);
+            const result = await review(root, base, head);
 
             const elements = (JSON.parse(toExcalidraw(result.diagram)) as { elements: SceneElement[] }).elements;
 
@@ -346,7 +416,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           let diagram;
 
           if (key.startsWith("review")) {
-            const result = await review(root, url.searchParams.get("base") || options.base);
+            const result = await review(root, url.searchParams.get("base") || options.base, url.searchParams.get("head") || null);
             diagram = result.diagram;
           } else {
             diagram = placed(analysis, key);

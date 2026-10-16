@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>archdiff</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="page.css" />
     <link rel="stylesheet" href="app.css" />
   </head>
@@ -18,8 +19,10 @@
       <label title="How far from the subject the picture goes">depth <input id="depth" type="number" min="0" max="12" value="" placeholder="auto" /></label>
       <label title="Draw the packages and Node built-ins a module imports"><input id="packages" type="checkbox" /> packages</label>
       <button id="fit" title="Fit the diagram to the window (0)">fit</button>
-      <label>base <input id="base" type="text" placeholder="merge-base" size="12" /></label>
-      <button id="review" title="The architectural diff of the working tree against the base">review</button>
+      <label>base <input id="base" type="text" placeholder="merge-base" size="10" /></label>
+      <label>head <input id="head" type="text" placeholder="working tree" size="10" /></label>
+      <button id="review" title="The architectural diff of head (the working tree, or a ref) against the base">review</button>
+      <button id="theme" class="icon" title="Light or dark">◐</button>
       <button id="edit" title="Move shapes, draw with the pencil, write notes; saved to .archdiff/layouts/ (e)">✎ edit</button>
       <span id="edit-tools" hidden>
         <button id="save" title="Save the drawing to .archdiff/layouts/<view>.json (Ctrl+S)">save</button>
@@ -42,8 +45,15 @@
       <section id="centre">
         <div id="title">
           <button id="back" class="icon" title="Back to the previous view (Backspace)">←</button>
+          <span id="crumbs"></span>
           <span id="title-text"></span>
           <span id="hint" class="muted">tap a shape for its code · tap it again to open its own view · drag to pan · wheel to zoom</span>
+        </div>
+        <div id="commits" hidden>
+          <button id="commit-prev" class="icon" title="The previous commit of the branch">‹</button>
+          <select id="commit-list" title="The commits from the base to the head, oldest first; pick one to review it against the previous"></select>
+          <button id="commit-next" class="icon" title="The next commit of the branch">›</button>
+          <span id="commit-note" class="muted"></span>
         </div>
         <div id="canvas-wrap">
           <div id="canvas"></div>
@@ -86,6 +96,7 @@
             <span id="run-state" class="muted"></span>
           </div>
           <div id="transcript"></div>
+          <details id="tasks-box"><summary class="muted">previous tasks</summary><ul id="tasks"></ul></details>
           <div class="row">
             <input id="followup" type="text" placeholder="a follow-up message to the agent (Enter)" disabled />
           </div>

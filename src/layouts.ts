@@ -65,15 +65,20 @@ export function parseLayout(value: JsonValue, view: string): LayoutFile {
 
 /** The saved layout of a view, or null; a file of another format is ignored as if absent. */
 export function readLayout(root: string, view: string): LayoutFile | null {
-  const file = layoutPath(root, view);
+  const layout = readLayoutFile(layoutPath(root, view));
 
+  return layout && layout.view === view ? layout : null;
+}
+
+/** A layout file by path, whatever view it names; null when missing or not a layout. */
+export function readLayoutFile(file: string): LayoutFile | null {
   if (!existsSync(file)) return null;
 
   try {
     const parsed = parseJson(readFileSync(file, "utf8"));
 
-    if (!isJsonObject(parsed) || parsed["format"] !== LAYOUT_FORMAT || parsed["view"] !== view) return null;
-    const layout = parseLayout(parsed, view);
+    if (!isJsonObject(parsed) || parsed["format"] !== LAYOUT_FORMAT || !isJsonString(parsed["view"])) return null;
+    const layout = parseLayout(parsed, parsed["view"]);
 
     return { ...layout, saved: isJsonString(parsed["saved"]) ? parsed["saved"] : layout.saved };
   } catch {

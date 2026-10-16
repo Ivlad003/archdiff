@@ -5,6 +5,7 @@
 // Byte-stable for the same placed diagram.
 
 import type { Diagram, DiagramNode } from "../diagram.ts";
+import { routeEdges } from "./excalidraw.ts";
 
 function escape(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\n/g, "&#xa;");
@@ -58,6 +59,8 @@ export function toDrawio(diagram: Diagram): string {
     cells.push(`<object ${attributes.join(" ")} id="${id}"><mxCell style="${style(node)}" vertex="1" parent="${lane ?? 1}"><mxGeometry x="${x}" y="${y}" width="${node.w}" height="${node.h}" as="geometry"/></mxCell></object>`);
   }
 
+  const routes = routeEdges(diagram);
+
   for (const edge of diagram.edges) {
     const from = cellOf.get(edge.from);
     const to = cellOf.get(edge.to);
@@ -66,8 +69,11 @@ export function toDrawio(diagram: Diagram): string {
     const id = next++;
     const dashed = edge.kind === "ref" || edge.diff === "removed" ? "dashed=1;" : "";
     const colour = edge.diff === "added" ? "strokeColor=#2e7d32;strokeWidth=2;" : edge.diff === "removed" ? "strokeColor=#c62828;strokeWidth=2;" : edge.kind === "call" ? "strokeColor=#1565c0;" : "strokeColor=#616161;";
+    // The bends of the route (without its two ends, which the cells give) as waypoints, so draw.io draws the same path.
+    const bends = (routes.get(edge) ?? []).slice(1, -1);
+    const points = bends.length > 0 ? `<Array as="points">${bends.map((point) => `<mxPoint x="${Math.round(point.x)}" y="${Math.round(point.y)}"/>`).join("")}</Array>` : "";
     cells.push(
-      `<object label="${escape(edge.label ?? "")}" archdiff_kind="${edge.kind}" id="${id}"><mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;${dashed}${colour}" edge="1" parent="1" source="${from}" target="${to}"><mxGeometry relative="1" as="geometry"/></mxCell></object>`,
+      `<object label="${escape(edge.label ?? "")}" archdiff_kind="${edge.kind}" id="${id}"><mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;${dashed}${colour}" edge="1" parent="1" source="${from}" target="${to}"><mxGeometry relative="1" as="geometry">${points}</mxGeometry></mxCell></object>`,
     );
   }
 

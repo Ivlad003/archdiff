@@ -7,12 +7,12 @@ import { resolve } from "node:path";
 import { analyze } from "./analyze.ts";
 import { coverageReport } from "./coverage.ts";
 import { dataFlow, flowMarkdown } from "./flow.ts";
-import { readLayout } from "./layouts.ts";
+import { LAYOUTS_DIRECTORY, readLayout, readLayoutFile } from "./layouts.ts";
 import { planFromScene, planMarkdown } from "./plan.ts";
 import { agentFromConfig } from "./agent.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
-import { reviewMarkdown, review } from "./diff.ts";
+import { history, historyMarkdown, mergeBase, reviewMarkdown, review } from "./diff.ts";
 import { serve } from "./server.ts";
 import { layout } from "./diagram.ts";
 import { parseView, viewOf, viewList, type ViewOptions } from "./views.ts";
@@ -32,6 +32,9 @@ Commands:
                      module:<path> | calls:<path>#<fn> | coverage. --packages draws the
                      packages a module imports; --limit folds a bigger picture into
                      "… N more" (default 80)
+  layouts [dir] [--prune]
+                     List the saved drawings (.archdiff/layouts/); --prune deletes those
+                     whose view the code no longer has (a renamed module, a removed function)
   flow <calls:view> [dir] [--depth N] [--json]
                      The data flow from an entry point without running it: the steps in call
                      order with their parameters and return types, the storages on the way,
@@ -39,20 +42,27 @@ Commands:
   coverage [dir] [--json]
                      The map of what the diagrams cannot cover: unresolved imports, calls
                      archdiff could not follow, files with syntax errors, by module
-  review [dir] [--base REF] [--format F] [--out FILE]
-                     The architectural diff of the working tree against REF (default: the
-                     merge-base with the main branch): modules, imports and calls added,
-                     removed or changed, as Markdown with a Mermaid diagram (md, default),
-                     json, or any diagram format. Exit 1 when a layer dependency appeared
+  review [dir] [--base REF] [--head REF] [--format F] [--out FILE]
+                     The architectural diff of the working tree (or --head REF) against
+                     --base REF (default: the merge-base with the main branch): modules,
+                     imports and calls added, removed or changed, as Markdown with a Mermaid
+                     diagram (md, default), json, or any diagram format. Exit 1 when a layer
+                     dependency appeared
+  history [dir] [--base REF] [--head REF] [--json] [--out FILE]
+                     The architecture drift commit by commit from --base (default: the
+                     merge-base) to --head (default: HEAD): modules, functions, imports,
+                     layer couplings and packages each commit added or removed
   plan <view> [dir] [--json] [--out FILE]
                      The task drawn on the saved drawing of a view (the page's ✎ edit): new
                      shapes as modules or functions to add, arrows as imports or calls,
                      deleted shapes as removals, notes — as a Markdown task for an agent
-  web [dir] [--port N] [--base REF] [--agent claude|cursor]
+  web [dir] [--port N] [--base REF] [--agent claude|cursor] [--no-watch]
                      Serve the diagrams in a browser: views, the canvas, the code and the
                      Markdown of a shape, the review against REF. --agent (or "agent" in
                      archdiff.json) lets the Chat tab hand a drawn task to Claude Code or
-                     Cursor's CLI, run in this repository; every run starts from a button
+                     Cursor's CLI, run in this repository; every run starts from a button.
+                     The page reloads when a source file changes (--no-watch: it does not)
+  --version          Print the version
 
 Exit codes: 0 ok, 1 differences found (review), 2 wrong invocation or I/O error.
 `;
@@ -75,7 +85,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "port", "host", "limit", "agent"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "head", "port", "host", "limit", "agent"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -121,6 +131,12 @@ const require = (await import("node:module")).createRequire(import.meta.url);
 export async function main(argv: readonly string[]): Promise<number> {
   const { command, positional, flags } = parseArgs(argv);
 
+  if (flags.has("version") || command === "version") {
+    process.stdout.write(`${(require("../package.json") as { version: string }).version}\n`);
+
+    return 0;
+  }
+
   if (command === null || flags.has("help") || command === "help") {
     process.stdout.write(HELP);
 
@@ -133,6 +149,11 @@ export async function main(argv: readonly string[]): Promise<number> {
     switch (command) {
       case "analyze": {
         const analysis = await analyze(dirArg(0), { cache: !flags.has("no-cache") });
+        const { existsSync, readFileSync } = require("node:fs") as typeof import("node:fs");
+        const ignore = resolve(dirArg(0), ".gitignore");
+
+        // The cache and the drawings live in .archdiff/; a repository that does not ignore it will see them in git status.
+        if (!flags.has("no-cache") && existsSync(resolve(dirArg(0), ".git")) && !(existsSync(ignore) && /^\.archdiff\/?\s*$/m.test(readFileSync(ignore, "utf8")))) process.stderr.write("archdiff: .archdiff/ (the cache) is not in .gitignore; add it, or commit .archdiff/layouts/ on purpose\n");
 
         if (flags.has("json")) {
           process.stdout.write(`${JSON.stringify(analysis.stats, null, 2)}\n`);
@@ -178,6 +199,30 @@ export async function main(argv: readonly string[]): Promise<number> {
         return writeOut(format === "md" ? diagramMarkdown(diagram, analysis) : exportDiagram(diagram, format as Exclude<ExportFormat, "md">), flags.get("out"));
       }
 
+      case "layouts": {
+        const root = dirArg(0);
+        const analysis = await analyze(root);
+        const { existsSync, readdirSync, rmSync } = require("node:fs") as typeof import("node:fs");
+        const directory = resolve(root, LAYOUTS_DIRECTORY);
+        const keys = new Set(viewList(analysis).map((view) => view.key));
+        const files = existsSync(directory) ? readdirSync(directory).filter((name) => name.endsWith(".json")).sort() : [];
+
+        for (const name of files) {
+          const saved = readLayoutFile(resolve(directory, name));
+          const alive = saved !== null && (keys.has(saved.view) || saved.view.startsWith("review"));
+          const line = `${LAYOUTS_DIRECTORY}/${name}\t${saved ? saved.view : "(unreadable)"}\t${alive ? "ok" : "orphan"}`;
+
+          if (!alive && flags.has("prune")) {
+            rmSync(resolve(directory, name));
+            process.stdout.write(`${line}\tdeleted\n`);
+          } else {
+            process.stdout.write(`${line}\n`);
+          }
+        }
+
+        return 0;
+      }
+
       case "flow": {
         const key = positional[0];
         const view = key ? parseView(key) : null;
@@ -215,7 +260,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         const format = (flags.get("format") ?? "md") as string;
 
         if (format !== "md" && format !== "json" && !EXPORT_FORMATS.includes(format as ExportFormat)) return fail(`review: unknown format "${format}"`);
-        const result = await review(dirArg(0), typeof flags.get("base") === "string" ? (flags.get("base") as string) : null);
+        const result = await review(dirArg(0), typeof flags.get("base") === "string" ? (flags.get("base") as string) : null, typeof flags.get("head") === "string" ? (flags.get("head") as string) : null);
 
         const text = format === "md" ? reviewMarkdown(result) : format === "json" ? `${JSON.stringify(result.diff, null, 2)}\n` : exportDiagram(result.diagram, format as Exclude<ExportFormat, "md">);
         const written = writeOut(text, flags.get("out"));
@@ -223,6 +268,15 @@ export async function main(argv: readonly string[]): Promise<number> {
         if (written !== 0) return written;
 
         return result.diff.layerEdgesAdded.length > 0 ? 1 : 0;
+      }
+
+      case "history": {
+        const root = dirArg(0);
+        const base = typeof flags.get("base") === "string" ? (flags.get("base") as string) : mergeBase(root);
+        const head = typeof flags.get("head") === "string" ? (flags.get("head") as string) : "HEAD";
+        const rows = await history(root, base, head);
+
+        return writeOut(flags.has("json") ? `${JSON.stringify(rows, null, 2)}\n` : historyMarkdown(rows, base, head), flags.get("out"));
       }
 
       case "web": {
@@ -233,7 +287,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
         if (agentFlag === true) return fail("web: --agent needs claude or cursor");
         const agent = typeof agentFlag === "string" ? agentFromConfig(agentFlag) : null;
-        await serve(dirArg(0), { port, host: typeof flags.get("host") === "string" ? (flags.get("host") as string) : "127.0.0.1", base: typeof flags.get("base") === "string" ? (flags.get("base") as string) : null, agent });
+        await serve(dirArg(0), { port, host: typeof flags.get("host") === "string" ? (flags.get("host") as string) : "127.0.0.1", base: typeof flags.get("base") === "string" ? (flags.get("base") as string) : null, agent, watch: !flags.has("no-watch") });
 
         return 0;
       }

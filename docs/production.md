@@ -46,7 +46,9 @@ An analysis of archdiff 0.1 on real repositories (keylang, 480 files; storefront
 
 **Path traversal.** `/api/file` serves only paths the analysis lists (it answers 404 for anything else), and static files are served from `dist/web` by basename only. *State:* covered by the design; a test should pin it.
 
-**Every request re-analyses.** The fact cache makes it 0.3–0.5 s, and requests within 300 ms share one analysis; a very large repository would make every click slow. *State:* acceptable at the tested sizes; a file watcher is the next step.
+**Every request re-analyses.** The fact cache makes it 0.3–0.5 s, and requests within 300 ms share one analysis; a very large repository would make every click slow. *Now:* the server watches the sources (`fs.watch`, recursive) and tells the page to reload after a change, debounced; `--no-watch` turns it off, and a platform without recursive watching logs it and goes on. An agent run or a watch event drops the shared analysis, so the next request is fresh.
+
+**History walks analyse every commit.** `history` and the commit bar analyse one revision per commit through overrides (no checkout); each is cheap with a warm cache but a hundred-commit range is a hundred analyses. *State:* fine for a branch; a release range needs patience.
 
 **Stale page after an update** of archdiff: the browser caches nothing (`no-store`), so a restart is enough. *State:* fine.
 

@@ -1,7 +1,8 @@
 // The views of the graph: which picture to draw of what, each a pure
 // function of the graph (and a depth) that returns an unplaced `Diagram`
 // for `layout`. Views: `layers` (the layers and the imports between them),
-// `layer:<name>` (its modules and their neighbours), `module:<path>` (what
+// `layer:<name>` (its modules and their neighbours), `dir:<path>` (the
+// modules of a directory and their neighbours), `module:<path>` (what
 // imports it and what it imports), `calls:<path>#<fn>` (the call tree from a
 // function), `coverage` (the modules with calls archdiff could not follow).
 // Lanes are layers; the depth is how far from the subject the picture goes.
@@ -14,7 +15,7 @@ import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "./diagram.
 import { matchesGlob } from "./glob.ts";
 import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
 
-export type View = { kind: "layers" } | { kind: "layer"; name: string } | { kind: "module"; id: string } | { kind: "calls"; id: string } | { kind: "coverage" };
+export type View = { kind: "layers" } | { kind: "layer"; name: string } | { kind: "dir"; path: string } | { kind: "module"; id: string } | { kind: "calls"; id: string } | { kind: "coverage" };
 
 export interface ViewOptions {
   /** How far from the subject the picture goes; each view has its default. */
@@ -51,6 +52,8 @@ export function parseView(key: string): View | null {
 
   if (kind === "layer") return { kind, name: rest };
 
+  if (kind === "dir") return { kind, path: rest.replace(/\/+$/, "") };
+
   if (kind === "module") return { kind, id: rest };
 
   if (kind === "calls") return { kind, id: rest };
@@ -65,6 +68,8 @@ export function viewKey(view: View): string {
       return view.kind;
     case "layer":
       return `layer:${view.name}`;
+    case "dir":
+      return `dir:${view.path}`;
     case "module":
       return `module:${view.id}`;
     case "calls":
@@ -131,6 +136,20 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   const list: ViewEntry[] = [{ key: "layers", title: "Layers", kind: "layers" }];
 
   for (const layer of graph.layers) list.push({ key: `layer:${layer}`, title: layer, kind: "layer", layer });
+
+  // Directories with at least two modules, as views of their own: the middle rung between a layer and a module.
+  const directories = new Map<string, number>();
+
+  for (const module of graph.modules.keys()) {
+    const parts = module.split("/");
+
+    for (let depth = 1; depth < parts.length; depth++) {
+      const directory = parts.slice(0, depth).join("/");
+      directories.set(directory, (directories.get(directory) ?? 0) + 1);
+    }
+  }
+
+  for (const [directory, count] of [...directories].sort()) if (count >= 2) list.push({ key: `dir:${directory}`, title: `${directory}/ (${count})`, kind: "dir" });
 
   for (const module of [...graph.modules.keys()].sort()) list.push({ key: `module:${module}`, title: module, kind: "module", layer: graph.modules.get(module)!.layer });
 
@@ -274,26 +293,114 @@ function moduleView(graph: Graph, id: string, depth: number, packages: boolean):
   return unplaced(`module:${id}`, id, nodes, edges, lanesOf(graph, nodes));
 }
 
+/** The modules of a directory (and below), with the imports among them; depth 1 (default) adds their neighbours outside it. */
+function dirView(graph: Graph, path: string, depth: number): Diagram {
+  const prefix = `${path}/`;
+  const own = [...graph.modules.keys()].filter((id) => id.startsWith(prefix));
+
+  if (own.length === 0) return unplaced(`dir:${path}`, path, [], [], [], { reason: `no modules under "${path}/"` });
+  const members = grow(graph, new Set(own), depth, "both");
+  const ownSet = new Set(own);
+  const nodes = [...members].sort((a, b) => Number(ownSet.has(b)) - Number(ownSet.has(a)) || (a < b ? -1 : 1)).map((id) => moduleNode(graph, id));
+
+  return unplaced(`dir:${path}`, `${path}/`, nodes, depEdges(graph, members, false), lanesOf(graph, nodes));
+}
+
+/** The deepest directory holding every path; "" when they share none. */
+function commonDirectory(paths: readonly string[]): string {
+  if (paths.length === 0) return "";
+  let parts = paths[0]!.split("/").slice(0, -1);
+
+  for (const path of paths) {
+    const own = path.split("/").slice(0, -1);
+    let n = 0;
+
+    while (n < parts.length && n < own.length && parts[n] === own[n]) n++;
+    parts = parts.slice(0, n);
+  }
+
+  return parts.join("/");
+}
+
 /**
  * A big picture folded: the first `limit` shapes stay (the subject first,
- * then the diagram's order, which the views sort by importance), the rest
- * become one `more` shape that the edges of the dropped shapes point to.
- * The Markdown of the view still lists everything.
+ * then the diagram's order, which the views sort by importance); the rest
+ * are grouped by directory into `more` shapes — one per directory with
+ * its count, which opens that directory's view on a tap — and the edges of
+ * the dropped shapes point to their group. Functions fold by module into
+ * one shape per module. The Markdown of the view still lists everything.
  */
 function fold(diagram: Diagram, limit: number): Diagram {
   if (diagram.nodes.length <= limit) return diagram;
   const kept = diagram.nodes.slice(0, limit);
   const dropped = diagram.nodes.slice(limit);
   const keptIds = new Set(kept.map((node) => node.id));
-  const more: DiagramNode = { id: "more", kind: "more", label: `… ${dropped.length} more`, count: dropped.length, x: 0, y: 0, w: 0, h: 0 };
+  // The group of a dropped shape: a module by the directory just below the common root of the dropped modules
+  // (the view's own directory folds into its subdirectories), a function by its module, anything else into one "more".
+  const droppedModules = dropped.filter((node) => node.kind === "module").map((node) => node.id);
+  const common = commonDirectory(droppedModules);
+
+  const groupOf = (node: DiagramNode): { id: string; label: string; view: string | null } => {
+    if (node.kind === "module") {
+      const rest = common === "" ? node.id : node.id.slice(common.length + 1);
+      const slash = rest.indexOf("/");
+      // A file directly under the common directory folds into that directory; a file deeper into its first subdirectory.
+      const folder = slash === -1 ? common : common === "" ? rest.slice(0, slash) : `${common}/${rest.slice(0, slash)}`;
+      const label = folder === "" ? "(root)" : `${folder}/`;
+
+      return { id: `more:${folder || "(root)"}`, label, view: folder === "" ? null : `dir:${folder}` };
+    }
+
+    if (node.kind === "fn") {
+      const module = moduleOf(node.ref?.id ?? node.id);
+
+      return { id: `more:${module}`, label: module, view: `module:${module}` };
+    }
+
+    return { id: "more", label: "more", view: null };
+  };
+
+  const groups = new Map<string, DiagramNode & { members: string[] }>();
+  const groupOfId = new Map<string, string>();
+
+  for (const node of dropped) {
+    const group = groupOf(node);
+    let shape = groups.get(group.id);
+
+    if (!shape) {
+      shape = { id: group.id, kind: "more", label: group.label, count: 0, x: 0, y: 0, w: 0, h: 0, members: [] };
+
+      if (group.view) shape.ref = { id: group.view };
+
+      if (node.group !== undefined) shape.group = node.group;
+      groups.set(group.id, shape);
+    }
+
+    shape.count = (shape.count ?? 0) + 1;
+    shape.members.push(node.id);
+    groupOfId.set(node.id, group.id);
+  }
+
+  // Too many groups is no better than too many shapes: beyond a dozen, the smallest merge into one "other".
+  let folded = [...groups.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0) || (a.id < b.id ? -1 : 1));
+
+  if (folded.length > 12) {
+    const rest = folded.slice(11);
+    const other: DiagramNode & { members: string[] } = { id: "more", kind: "more", label: "other", count: rest.reduce((sum, shape) => sum + (shape.count ?? 0), 0), x: 0, y: 0, w: 0, h: 0, members: rest.flatMap((shape) => shape.members) };
+
+    for (const member of other.members) groupOfId.set(member, "more");
+    folded = [...folded.slice(0, 11), other];
+  }
+
+  for (const shape of folded) shape.label = `… ${shape.count} in ${shape.label}`;
   const seen = new Set<string>();
   const edges: DiagramEdge[] = [];
 
   for (const edge of diagram.edges) {
-    const from = keptIds.has(edge.from) ? edge.from : "more";
-    const to = keptIds.has(edge.to) ? edge.to : "more";
+    const from = keptIds.has(edge.from) ? edge.from : (groupOfId.get(edge.from) ?? "more");
+    const to = keptIds.has(edge.to) ? edge.to : (groupOfId.get(edge.to) ?? "more");
 
-    if (from === "more" && to === "more") continue;
+    if (from === to) continue;
     const key = `${from}\u0000${to}\u0000${edge.kind}`;
 
     if (seen.has(key)) continue;
@@ -301,9 +408,10 @@ function fold(diagram: Diagram, limit: number): Diagram {
     edges.push(from === edge.from && to === edge.to ? edge : { from, to, kind: edge.kind });
   }
 
-  const lanes = diagram.groups.filter((group) => kept.some((node) => node.group === group.id));
+  const nodes = [...kept, ...folded.map(({ members: _members, ...shape }) => shape)];
+  const lanes = diagram.groups.filter((group) => nodes.some((node) => node.group === group.id));
 
-  return { ...diagram, nodes: [...kept, more], edges, groups: lanes, reason: `${dropped.length} of ${diagram.nodes.length} shapes folded into "more"; the Markdown lists them all` };
+  return { ...diagram, nodes, edges, groups: lanes, reason: `${dropped.length} of ${diagram.nodes.length} shapes folded by directory; tap a folded shape to open it, the Markdown lists them all` };
 }
 
 /** The call tree from a function: the functions it calls, and theirs, `depth` levels (default 3); gaps as holes. */
@@ -378,7 +486,7 @@ function coverageView(graph: Graph): Diagram {
   return unplaced("coverage", "What the diagrams cannot show", nodes, [], lanesOf(graph, nodes), nodes.length === 0 ? { reason: "every import and call was followed" } : {});
 }
 
-const DEFAULT_DEPTH: Record<View["kind"], number> = { layers: 0, layer: 1, module: 1, calls: 3, coverage: 0 };
+const DEFAULT_DEPTH: Record<View["kind"], number> = { layers: 0, layer: 1, dir: 1, module: 1, calls: 3, coverage: 0 };
 
 /** The unplaced diagram of a view, folded to `limit` shapes. */
 export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}): Diagram {
@@ -391,6 +499,8 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
         return layersView(graph);
       case "layer":
         return layerView(graph, view.name, depth);
+      case "dir":
+        return dirView(graph, view.path, depth);
       case "module":
         return moduleView(graph, view.id, depth, options.packages === true);
       case "calls":

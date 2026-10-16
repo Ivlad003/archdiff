@@ -34,10 +34,13 @@ export interface CanvasHandle {
   /** A PNG or SVG of the whole scene, or of the selected elements when there are some. */
   screenshot(kind: "png" | "svg"): Promise<Blob>;
   scrollToContent(): void;
+  /** Where the viewport is, to remember per view. */
+  viewport(): { scrollX: number; scrollY: number; zoom: number } | null;
+  setViewport(viewport: { scrollX: number; scrollY: number; zoom: number }): void;
   unmount(): void;
 }
 
-/** The link archdiff puts on a shape that has its own view. */
+/** The prefix of the view a shape opens (`customData.view` of a generated shape). */
 export const VIEW_LINK = "archdiff://view/";
 
 interface CanvasProps {
@@ -65,60 +68,27 @@ function shapeAt(elements: readonly SceneElement[], x: number, y: number): Scene
 function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
   const [mode, setMode] = useState(modeState[0]);
   useEffect(() => modeState[1](setMode), [modeState]);
-  let api: ExcalidrawImperativeAPI | null = null;
-  let lastTap: { id: string; at: number } | null = null;
-  let down: { x: number; y: number } | null = null;
-
   return (
     <Excalidraw
       initialData={{ elements: elements as never, appState: { viewBackgroundColor: "#ffffff" }, scrollToContent: true }}
       excalidrawAPI={(ready) => {
-        api = ready;
-        // The container may still be laid out when Excalidraw mounts: fit once the frame is drawn, and whenever the window changes.
+        // The container may still be laid out when Excalidraw mounts: fit once the frame is drawn.
         const fit = (): void => ready.scrollToContent(undefined, { fitToContent: true, animate: false });
         requestAnimationFrame(() => requestAnimationFrame(fit));
         onApi(ready);
       }}
       viewModeEnabled={mode === "view"}
-      onChange={(_elements, appState) => {
+      onChange={(changed, appState) => {
+        // Excalidraw reports a change on mount and on every mode switch too: only a scene whose elements' versions moved counts.
+        const fingerprint = changed.map((element) => `${element.id}:${element.version}:${element.isDeleted ? 1 : 0}`).join("|");
+        const window_ = window as unknown as { archdiffScene?: { fingerprint: string; baseline: string | null } };
+        const known = window_.archdiffScene ?? { fingerprint, baseline: null };
+        window_.archdiffScene = { fingerprint, baseline: known.baseline };
+
         if (mode === "edit") {
-          events.changed();
+          if (known.baseline !== null && fingerprint !== known.baseline) events.changed();
           const selected = Object.keys(appState.selectedElementIds);
           events.pick(selected.length === 1 ? (selected[0] ?? null) : null);
-        }
-      }}
-      onPointerUpdate={({ pointer, button }) => {
-        if (mode !== "view") return;
-
-        if (button === "down") {
-          down = { x: pointer.x, y: pointer.y };
-
-          return;
-        }
-
-        if (!down) return;
-        const moved = Math.hypot(pointer.x - down.x, pointer.y - down.y);
-        down = null;
-
-        // A drag is a pan, not a tap.
-        if (moved > 6 || !api) return;
-        const hit = shapeAt(api.getSceneElements() as unknown as SceneElement[], pointer.x, pointer.y);
-        const now = Date.now();
-
-        if (hit && lastTap && lastTap.id === hit.id && now - lastTap.at < 500) {
-          lastTap = null;
-          events.open(hit.id, typeof hit.customData?.["view"] === "string" && hit.customData["view"] !== "" ? hit.customData["view"] : null);
-
-          return;
-        }
-
-        lastTap = hit ? { id: hit.id, at: now } : null;
-        events.pick(hit?.id ?? null);
-      }}
-      onLinkOpen={(element, event) => {
-        if (element.link?.startsWith(VIEW_LINK)) {
-          event.preventDefault();
-          events.open(element.id, element.link);
         }
       }}
       UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: true, toggleTheme: false, clearCanvas: false, changeViewBackgroundColor: false } }}
@@ -142,6 +112,57 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       },
     ];
 
+    // Taps in view mode, from the container's own pointer events (Excalidraw reports none of its own there):
+    // client coordinates become scene coordinates through the app state's scroll and zoom.
+    let down: { x: number; y: number } | null = null;
+    let lastTap: { id: string; at: number } | null = null;
+
+    const scenePoint = (event: PointerEvent): { x: number; y: number } | null => {
+      if (!api) return null;
+      const canvas = container.querySelector<HTMLCanvasElement>(".excalidraw__canvas.interactive");
+
+      if (!canvas) return null;
+      const box = canvas.getBoundingClientRect();
+      const state = api.getAppState();
+
+      return { x: (event.clientX - box.left) / state.zoom.value - state.scrollX, y: (event.clientY - box.top) / state.zoom.value - state.scrollY };
+    };
+
+    container.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (mode === "view") down = scenePoint(event);
+      },
+      true,
+    );
+    container.addEventListener(
+      "pointerup",
+      (event) => {
+        if (mode !== "view" || !down || !api) return;
+        const at = scenePoint(event);
+        const from = down;
+        down = null;
+
+        if (!at) return;
+
+        // A drag is a pan, not a tap.
+        if (Math.hypot(at.x - from.x, at.y - from.y) > 6 / api.getAppState().zoom.value) return;
+        const hit = shapeAt(api.getSceneElements() as unknown as SceneElement[], at.x, at.y);
+        const now = Date.now();
+
+        if (hit && lastTap && lastTap.id === hit.id && now - lastTap.at < 500) {
+          lastTap = null;
+          events.open(hit.id, typeof hit.customData?.["view"] === "string" && hit.customData["view"] !== "" ? hit.customData["view"] : null);
+
+          return;
+        }
+
+        lastTap = hit ? { id: hit.id, at: now } : null;
+        events.pick(hit?.id ?? null);
+      },
+      true,
+    );
+
     const handle: CanvasHandle = {
       scene: () => (api ? (api.getSceneElementsIncludingDeleted() as unknown as SceneElement[]) : elements),
       replace: (next) => {
@@ -150,6 +171,10 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       },
       setMode: (next) => {
         mode = next;
+        // Entering the editor: the scene as it is now is the baseline a change is measured from.
+        const window_ = window as unknown as { archdiffScene?: { fingerprint: string; baseline: string | null } };
+
+        if (window_.archdiffScene) window_.archdiffScene.baseline = next === "edit" ? window_.archdiffScene.fingerprint : null;
 
         for (const listener of listeners) listener(next);
       },
@@ -170,6 +195,13 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         return exportToBlob({ elements: chosen, appState, files, mimeType: "image/png", quality: 1, exportPadding: 24 });
       },
       scrollToContent: () => api?.scrollToContent(undefined, { fitToContent: true, animate: false }),
+      viewport: () => {
+        if (!api) return null;
+        const state = api.getAppState();
+
+        return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom.value };
+      },
+      setViewport: (viewport) => api?.updateScene({ appState: { scrollX: viewport.scrollX, scrollY: viewport.scrollY, zoom: { value: viewport.zoom as never } } }),
       unmount: () => {
         root?.unmount();
         root = null;

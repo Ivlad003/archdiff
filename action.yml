@@ -1,0 +1,60 @@
+# The archdiff review as a GitHub Action: the architectural diff of the pull
+# request against its base, posted as a comment, and a failing check when a
+# new dependency between layers appeared. Needs the whole history
+# (fetch-depth: 0) for the merge-base.
+name: archdiff review
+description: Architectural diff of a pull request (modules, imports, calls, layer couplings) as a comment and a check
+inputs:
+  base:
+    description: The base ref; default the PR base branch
+    required: false
+    default: ""
+  fail-on-layer-coupling:
+    description: Fail the check when a new dependency between layers appeared
+    required: false
+    default: "true"
+  comment:
+    description: Post (or update) the review as a comment on the pull request
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Cache the facts
+      uses: actions/cache@v4
+      with:
+        path: .archdiff/facts.json.gz
+        key: archdiff-${{ runner.os }}-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml', '**/yarn.lock') }}-${{ github.sha }}
+        restore-keys: |
+          archdiff-${{ runner.os }}-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml', '**/yarn.lock') }}-
+          archdiff-${{ runner.os }}-
+    - name: Review
+      id: review
+      shell: bash
+      env:
+        BASE_INPUT: ${{ inputs.base }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set +e
+        base="${BASE_INPUT:-$PR_BASE}"
+        if [ -n "$base" ]; then npx --yes archdiff review --base "$base" > archdiff-review.md; else npx --yes archdiff review > archdiff-review.md; fi
+        code=$?
+        echo "code=$code" >> "$GITHUB_OUTPUT"
+        cat archdiff-review.md >> "$GITHUB_STEP_SUMMARY"
+        exit 0
+    - name: Comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        marker="<!-- archdiff:generated"
+        existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -1)
+        if [ -n "$existing" ]; then gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@archdiff-review.md > /dev/null; else gh pr comment "$PR" --body-file archdiff-review.md; fi
+    - name: Check
+      if: inputs.fail-on-layer-coupling == 'true' && steps.review.outputs.code == '1'
+      shell: bash
+      run: |
+        echo "::error::archdiff: a new dependency between layers appeared (see the review comment)"
+        exit 1

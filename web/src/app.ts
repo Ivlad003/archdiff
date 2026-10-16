@@ -38,6 +38,8 @@ interface State {
   review: boolean;
   /** Draw packages and built-ins in the module views. */
   packages: boolean;
+  /** The head of a review: a ref, or null for the working tree. */
+  head: string | null;
 }
 
 let views: ViewEntry[] = [];
@@ -53,7 +55,7 @@ function stateFromHash(): State {
   const params = new URLSearchParams(location.hash.slice(1));
   const depth = params.get("depth");
 
-  return { view: params.get("view") ?? "layers", depth: depth === null || depth === "" ? null : Number(depth), review: params.get("review") === "1", packages: params.get("packages") === "1" };
+  return { view: params.get("view") ?? "layers", depth: depth === null || depth === "" ? null : Number(depth), review: params.get("review") === "1", packages: params.get("packages") === "1", head: params.get("head") || null };
 }
 
 function setHash(state: State): void {
@@ -68,8 +70,12 @@ function setHash(state: State): void {
   const base = baseInput.value.trim();
 
   if (base) params.set("base", base);
+
+  if (state.head) params.set("head", state.head);
   location.hash = params.toString();
 }
+
+const headInput = element<HTMLInputElement>("head");
 
 /** The view a shape opens: a layer its modules, a module its imports, a function its calls. */
 function ownView(node: DiagramNode): string | null {
@@ -82,8 +88,104 @@ function ownView(node: DiagramNode): string | null {
       return `module:${id}`;
     case "fn":
       return `calls:${id}`;
+    case "more":
+      return node.ref?.id ?? null;
     default:
       return null;
+  }
+}
+
+/** The path above a view, for the breadcrumbs: layers › layer › directories › module › function. */
+function crumbsOf(view: string): { label: string; key: string }[] {
+  const crumbs: { label: string; key: string }[] = [{ label: "layers", key: "layers" }];
+  const at = view.indexOf(":");
+  const kind = at === -1 ? view : view.slice(0, at);
+  const rest = at === -1 ? "" : view.slice(at + 1);
+  const layerOf = (module: string): string | null => views.find((entry) => entry.key === `module:${module}`)?.layer ?? null;
+
+  const directories = (module: string): void => {
+    const parts = module.split("/");
+
+    for (let depth = 1; depth < parts.length; depth++) {
+      const key = `dir:${parts.slice(0, depth).join("/")}`;
+
+      if (views.some((entry) => entry.key === key)) crumbs.push({ label: `${parts[depth - 1]}/`, key });
+    }
+  };
+
+  if (kind === "layer") crumbs.push({ label: rest, key: view });
+  else if (kind === "dir") {
+    const parts = rest.split("/");
+
+    for (let depth = 1; depth <= parts.length; depth++) crumbs.push({ label: `${parts[depth - 1]}/`, key: `dir:${parts.slice(0, depth).join("/")}` });
+  } else if (kind === "module" || kind === "calls") {
+    const module = kind === "module" ? rest : rest.slice(0, rest.indexOf("#"));
+    const layer = layerOf(module);
+
+    if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
+    directories(module);
+    crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: `module:${module}` });
+
+    if (kind === "calls") crumbs.push({ label: rest.slice(rest.indexOf("#") + 1), key: view });
+  } else if (kind === "coverage") crumbs.push({ label: "coverage", key: view });
+
+  return crumbs;
+}
+
+function renderCrumbs(state: State): void {
+  const box = element<HTMLSpanElement>("crumbs");
+  box.replaceChildren();
+
+  if (state.review) {
+    box.append("review");
+
+    return;
+  }
+
+  const crumbs = crumbsOf(state.view);
+
+  for (const [i, crumb] of crumbs.entries()) {
+    if (i > 0) box.append(" › ");
+
+    if (i === crumbs.length - 1) {
+      box.append(crumb.label);
+    } else {
+      const link = document.createElement("a");
+      link.textContent = crumb.label;
+      link.addEventListener("click", () => setHash({ ...stateFromHash(), view: crumb.key, review: false }));
+      box.append(link);
+    }
+  }
+}
+
+// ── The viewport of every view, remembered in this browser ──────────────────
+
+function viewportKey(state: State): string {
+  return `archdiff.viewport.${state.review ? "review" : state.view}`;
+}
+
+function rememberViewport(): void {
+  const viewport = canvas?.viewport();
+
+  if (!viewport) return;
+
+  try {
+    localStorage.setItem(viewportKey(stateFromHash()), JSON.stringify(viewport));
+  } catch {
+    // No storage: the viewport is not remembered.
+  }
+}
+
+function restoreViewport(state: State): boolean {
+  try {
+    const saved = localStorage.getItem(viewportKey(state));
+
+    if (!saved || !canvas) return false;
+    canvas.setViewport(JSON.parse(saved) as { scrollX: number; scrollY: number; zoom: number });
+
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -206,7 +308,20 @@ async function showNode(id: string | null): Promise<void> {
       setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
     }
   } else {
-    setMarkdown(markdownPanel, `# ${node.label}\n\n${node.diff ?? "context"} — ${node.ref?.file ?? ""}`);
+    // A review: what changed, and the commits that touched the file.
+    const file = node.ref?.file;
+    let history = "";
+
+    if (file) {
+      try {
+        const { commits } = await api.fileHistory(file);
+        history = commits.length > 0 ? `\n\n## Commits that touched it\n\n${commits.map((commit) => `- \`${commit.short}\` ${commit.date} ${commit.author}: ${commit.subject}`).join("\n")}` : "";
+      } catch {
+        history = "";
+      }
+    }
+
+    setMarkdown(markdownPanel, `# ${node.label}\n\n${node.diff ?? "context"} — ${file ?? ""}${history}`);
   }
 
   showTab("markdown");
@@ -256,12 +371,12 @@ function renderViews(filter: string): void {
 
 search.addEventListener("input", () => renderViews(search.value));
 
-function renderExports(view: string, base: string | null): void {
+function renderExports(view: string, base: string | null, head: string | null = null): void {
   exportLinks.replaceChildren();
 
   for (const format of ["mermaid", "drawio", "excalidraw", "archimate", "json"]) {
     const link = document.createElement("a");
-    link.href = api.exportUrl(view, format, base);
+    link.href = api.exportUrl(view, format, base, head);
     link.textContent = format;
     link.title = `Download the diagram as ${format}`;
     exportLinks.append(link);
@@ -285,6 +400,7 @@ function fileName(extension: string): string {
 async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[]): Promise<CanvasHandle> {
   if (canvas) {
     canvas.replace(elements);
+    restoreViewport(stateFromHash());
 
     return canvas;
   }
@@ -359,14 +475,19 @@ async function load(): Promise<void> {
   element("chat-tab").hidden = state.review;
 
   try {
+    renderCrumbs(state);
+    headInput.value = state.head ?? "";
+    element("commits").hidden = !state.review;
+
     if (state.review) {
-      const result = await api.review(baseInput.value.trim() || null);
+      const result = await api.review(baseInput.value.trim() || null, state.head);
       title.textContent = `${result.diagram.title} — ${result.diff.changedFiles.length} source files changed${result.diff.layerEdgesAdded.length > 0 ? ` — ⚠ ${result.diff.layerEdgesAdded.length} new layer dependencies` : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
-      renderExports(`review:${result.diff.base}`, baseInput.value.trim() || null);
+      renderExports(`review:${result.diff.base}`, baseInput.value.trim() || null, state.head);
+      void loadCommits(state);
     } else {
       const result = await api.scene(state.view, state.depth, state.packages);
       title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
@@ -548,6 +669,7 @@ function runTask(prompt: string, resume: string | null): void {
           runState.textContent = `${agentName} finished; the diagram is reloaded — compare with review`;
           // The agent changed the code: the live diagram and the views follow.
           void loadViews().then(() => load());
+          void loadTasks();
         },
       );
     })
@@ -572,12 +694,126 @@ followup.addEventListener("keydown", (event) => {
   }
 });
 
+// ── The commits of a review: step through the branch ────────────────────────
+
+const commitList = element<HTMLSelectElement>("commit-list");
+let commits: import("./api.ts").Commit[] = [];
+
+async function loadCommits(state: State): Promise<void> {
+  try {
+    const result = await api.commits(baseInput.value.trim() || null, state.head);
+    commits = result.commits;
+    commitList.replaceChildren();
+    const whole = document.createElement("option");
+    whole.value = "";
+    whole.textContent = `whole range: ${result.base.slice(0, 10)} → ${state.head ?? "working tree"} (${commits.length} commits)`;
+    commitList.append(whole);
+
+    for (const commit of commits) {
+      const option = document.createElement("option");
+      option.value = commit.sha;
+      option.textContent = `${commit.short} ${commit.date} ${commit.subject}`;
+      commitList.append(option);
+    }
+
+    // The picked commit is the head whose base is the commit before it.
+    const picked = commits.find((commit) => commit.sha === state.head || commit.short === state.head);
+    commitList.value = picked ? picked.sha : "";
+    element("commit-note").textContent = picked ? `this commit against the one before it` : commits.length === 0 ? "no commits between the base and the head" : "pick a commit to see its own change";
+  } catch (error) {
+    element("commit-note").textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function reviewCommit(index: number): void {
+  const commit = commits[index];
+
+  if (!commit) return;
+  const previous = commits[index - 1];
+  baseInput.value = previous ? previous.sha : "";
+  setHash({ ...stateFromHash(), review: true, head: commit.sha });
+}
+
+commitList.addEventListener("change", () => {
+  const index = commits.findIndex((commit) => commit.sha === commitList.value);
+
+  if (index === -1) {
+    baseInput.value = "";
+    setHash({ ...stateFromHash(), review: true, head: null });
+  } else reviewCommit(index);
+});
+element<HTMLButtonElement>("commit-prev").addEventListener("click", () => {
+  const index = commits.findIndex((commit) => commit.sha === commitList.value);
+  reviewCommit(index <= 0 ? commits.length - 1 : index - 1);
+});
+element<HTMLButtonElement>("commit-next").addEventListener("click", () => {
+  const index = commits.findIndex((commit) => commit.sha === commitList.value);
+  reviewCommit(index === -1 ? 0 : Math.min(commits.length - 1, index + 1));
+});
+headInput.addEventListener("change", () => {
+  if (stateFromHash().review) setHash({ ...stateFromHash(), head: headInput.value.trim() || null });
+});
+
+// ── Theme ────────────────────────────────────────────────────────────────────
+
+function applyTheme(dark: boolean): void {
+  document.documentElement.classList.toggle("dark", dark);
+
+  try {
+    localStorage.setItem("archdiff.theme", dark ? "dark" : "light");
+  } catch {
+    // Not remembered.
+  }
+}
+
+element<HTMLButtonElement>("theme").addEventListener("click", () => applyTheme(!document.documentElement.classList.contains("dark")));
+
+try {
+  const saved = localStorage.getItem("archdiff.theme");
+  applyTheme(saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches);
+} catch {
+  // Light.
+}
+
+// ── Previous tasks ───────────────────────────────────────────────────────────
+
+async function loadTasks(): Promise<void> {
+  try {
+    const { tasks } = await api.tasks();
+    const list = element<HTMLUListElement>("tasks");
+    list.replaceChildren();
+
+    for (const task of tasks.slice(0, 30)) {
+      const item = document.createElement("li");
+      item.textContent = `${task.file.slice(task.file.lastIndexOf("/") + 1)} — ${task.head}`;
+      list.append(item);
+    }
+
+    element("tasks-box").hidden = tasks.length === 0;
+  } catch {
+    element("tasks-box").hidden = true;
+  }
+}
+
+// ── Live reload: the server watches the sources ─────────────────────────────
+
+api.changes((path) => {
+  if (mode === "edit") {
+    reason.textContent = `${path} changed; the drawing stays until you leave the editor`;
+
+    return;
+  }
+
+  reason.textContent = `${path} changed — reloaded`;
+  void loadViews().then(() => load());
+});
+
 // ── Controls ─────────────────────────────────────────────────────────────────
 
 element<HTMLButtonElement>("fit").addEventListener("click", () => canvas?.scrollToContent());
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 element<HTMLButtonElement>("review").addEventListener("click", () => {
-  if (leaveEdit()) setHash({ ...stateFromHash(), review: true });
+  if (leaveEdit()) setHash({ ...stateFromHash(), review: true, head: headInput.value.trim() || null });
 });
 element<HTMLButtonElement>("edit").addEventListener("click", () => (mode === "edit" ? leaveEdit() : setMode("edit")));
 saveButton.addEventListener("click", () => void saveDrawing().catch((error: unknown) => (reason.textContent = error instanceof Error ? error.message : String(error))));
@@ -654,9 +890,15 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("hashchange", () => {
   if (leaveEdit()) void load();
 });
+window.addEventListener("beforeunload", rememberViewport);
+setInterval(rememberViewport, 2000);
+
+// A handle for the browser tests and for debugging in the console: the canvas and the state of the page.
+(window as unknown as { archdiff: unknown }).archdiff = { canvas: () => canvas, state: stateFromHash, nodes: () => nodes };
 
 void (async () => {
   await loadViews();
   await load();
   await loadCoverage();
+  await loadTasks();
 })();

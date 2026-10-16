@@ -2,11 +2,14 @@
 // built-in, or nowhere archdiff can see. Relative specifiers are probed
 // against the file list the way TypeScript and Node do (extensions, `.js`
 // written for a `.ts` file, `index` files); bare specifiers go through the
-// `paths` of the root tsconfig.json first, then are read as packages.
-// Nothing here reads a file but the tsconfig; the file list is the input.
+// `paths` of the nearest tsconfig.json (a monorepo package has its own;
+// `extends` followed, into node_modules too) first, then are read as
+// packages. Nothing here reads a file but the tsconfigs; the file list is
+// the input.
 //
 // Sits between extraction and the graph: ImportFact.source → Resolution.
-// Entry points: `createResolver`, `packageName`, `readTsconfigPaths`.
+// Entry points: `createResolver`, `packageName`, `readTsconfigPaths`,
+// `tsconfigResolver`.
 
 import { existsSync, readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
@@ -66,10 +69,14 @@ function parseJsonc(text: string): JsonValue {
   return parseJson(out.replace(/,(\s*[}\]])/g, "$1"));
 }
 
-/** The `paths` of `<root>/tsconfig.json` (following one level of `extends` of a relative file), or null without any. */
-export function readTsconfigPaths(root: string): TsconfigPaths | null {
+/**
+ * The `paths` of a tsconfig (following `extends`: a relative file, or a
+ * package's config under node_modules), or null without any. `root` is
+ * the directory holding node_modules for a package `extends`.
+ */
+export function readTsconfigPaths(root: string, file = join(root, "tsconfig.json")): TsconfigPaths | null {
   const read = (file: string, depth: number): TsconfigPaths | null => {
-    if (!existsSync(file) || depth > 3) return null;
+    if (!existsSync(file) || depth > 5) return null;
     let config: JsonValue;
 
     try {
@@ -97,19 +104,83 @@ export function readTsconfigPaths(root: string): TsconfigPaths | null {
 
     const parent = config["extends"];
 
-    if (isJsonString(parent) && parent.startsWith(".")) return read(posix.join(directory, parent.endsWith(".json") ? parent : `${parent}.json`), depth + 1);
+    if (isJsonString(parent)) {
+      if (parent.startsWith(".")) return read(posix.join(directory, parent.endsWith(".json") ? parent : `${parent}.json`), depth + 1);
+      // `extends: "@tsconfig/node20/tsconfig.json"` or a package name: its config under node_modules, from the config's directory up to the root.
+      const candidates = [posix.join(directory, "node_modules", parent), posix.join(root.split("\\").join("/"), "node_modules", parent)];
+
+      for (const candidate of candidates) {
+        for (const resolved of [candidate, `${candidate}.json`, posix.join(candidate, "tsconfig.json")]) if (existsSync(resolved)) return read(resolved, depth + 1);
+      }
+    }
 
     return null;
   };
 
-  return read(join(root, "tsconfig.json").split("\\").join("/"), 0);
+  return read(file.split("\\").join("/"), 0);
+}
+
+/**
+ * The tsconfig that governs a file: the nearest `tsconfig.json` in its
+ * directory or above (a monorepo package has its own), read once per
+ * directory. Falls back to the root's.
+ */
+export function tsconfigResolver(root: string, _files: Iterable<string>): (from: string) => TsconfigPaths | null {
+  const present = new Map<string, boolean>();
+  const has = (directory: string): boolean => {
+    let known = present.get(directory);
+
+    if (known === undefined) {
+      known = existsSync(join(root, directory, "tsconfig.json"));
+      present.set(directory, known);
+    }
+
+    return known;
+  };
+
+  const ownerOf = new Map<string, string | null>();
+  const configs = new Map<string, TsconfigPaths | null>();
+
+  return (from) => {
+    let directory = posix.dirname(from);
+    const walked: string[] = [];
+    let owner: string | null = null;
+
+    // Up from the file's directory to the first tsconfig.json; every directory walked remembers the answer.
+    while (true) {
+      const cached = ownerOf.get(directory);
+
+      if (cached !== undefined) {
+        owner = cached;
+        break;
+      }
+
+      walked.push(directory);
+
+      if (has(directory)) {
+        owner = directory;
+        break;
+      }
+
+      if (directory === ".") break;
+      directory = posix.dirname(directory);
+    }
+
+    for (const step of walked) ownerOf.set(step, owner);
+
+    if (owner === null) return null;
+
+    if (!configs.has(owner)) configs.set(owner, readTsconfigPaths(root, join(root, owner, "tsconfig.json")));
+
+    return configs.get(owner)!;
+  };
 }
 
 /**
  * A resolver over the repository's file list: `(from, specifier)` → where
  * it points. `from` and the files are POSIX paths relative to `root`.
  */
-export function createResolver(root: string, files: Iterable<string>, tsconfig: TsconfigPaths | null = readTsconfigPaths(root)): (from: string, specifier: string) => Resolution {
+export function createResolver(root: string, files: Iterable<string>, tsconfigOf: (from: string) => TsconfigPaths | null = tsconfigResolver(root, files)): (from: string, specifier: string) => Resolution {
   const known = new Set(files);
   const rootPosix = root.split("\\").join("/");
 
@@ -152,6 +223,7 @@ export function createResolver(root: string, files: Iterable<string>, tsconfig: 
     }
 
     if (BUILTINS.has(clean)) return { kind: "builtin", name: clean.replace(/^node:/, "") };
+    const tsconfig = tsconfigOf(from);
 
     if (tsconfig) {
       for (const { pattern, targets } of tsconfig.paths) {
