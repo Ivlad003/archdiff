@@ -5,14 +5,14 @@
 // than one core. Below `MIN_PARALLEL` files the main thread parses alone:
 // starting workers costs more than it saves.
 //
-// Sits between analyze.ts and extractTs: paths + contents → FileFacts.
+// Sits between analyze.ts and the extractors: paths + contents → FileFacts.
 // Entry point: `extractAll`.
 
 import { cpus } from "node:os";
 import { existsSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import type { FileFacts } from "./facts.ts";
-import { extractTs } from "./ts.ts";
+import { extractAny } from "./any.ts";
 
 /** Fewer files than this are parsed on the main thread. */
 const MIN_PARALLEL = 40;
@@ -45,7 +45,7 @@ export async function extractAll(jobs: readonly ExtractJob[], threads = Math.max
   if (jobs.length < MIN_PARALLEL || threads <= 1) {
     const out: FileFacts[] = [];
 
-    for (const job of jobs) out.push(await extractTs(job.path, job.content));
+    for (const job of jobs) out.push(await extractAny(job.path, job.content));
 
     return out;
   }

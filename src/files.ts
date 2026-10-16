@@ -1,5 +1,5 @@
-// Which files of a repository archdiff reads: TypeScript and JavaScript
-// sources, as git lists them when the root is a repository (so .gitignore
+// Which files of a repository archdiff reads: TypeScript, JavaScript,
+// Python, Rust and PHP sources, as git lists them when the root is a repository (so .gitignore
 // holds, and it is one process call), else a walk that skips the usual
 // generated directories. Paths are POSIX, relative to the root, sorted.
 //
@@ -10,9 +10,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { matchesGlob } from "./glob.ts";
+import { LANGUAGES } from "./languages.ts";
 
-/** Extensions archdiff parses. */
-export const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"] as const;
+/** Extensions archdiff parses: every language of `LANGUAGES`. */
+export const SOURCE_EXTENSIONS: readonly string[] = Object.values(LANGUAGES).flatMap((language) => language.extensions);
 
 /** A file larger than this (a vendored bundle, generated code) is not parsed: it would cost seconds and tell nothing about the architecture. */
 export const MAX_FILE_BYTES = 1_500_000;

@@ -130,6 +130,8 @@ interface Scope {
 class ExportTable {
   private readonly rows = new Map<string, Map<string, { local: string | null; from: string | null; form: string | undefined }>>();
   private readonly reexportsAll = new Map<string, string[]>();
+  /** Local name → the import that binds it, per module: an exported name that is an import is a re-export. */
+  private readonly importsOf = new Map<string, Map<string, { source: string; imported: string }>>();
 
   private readonly nodes: Map<string, GraphNode>;
   private readonly resolve: (from: string, specifier: string) => Resolution;
@@ -141,6 +143,10 @@ class ExportTable {
     for (const file of facts) {
       this.rows.set(file.path, new Map(file.exportRows.map((row) => [row.name, { local: row.local, from: row.from ?? null, form: row.form }])));
       this.reexportsAll.set(file.path, file.reexportsAll);
+      const bindings = new Map<string, { source: string; imported: string }>();
+
+      for (const fact of file.imports) for (const binding of fact.bindings) if (binding.kind === "named") bindings.set(binding.local, { source: fact.source, imported: binding.imported });
+      this.importsOf.set(file.path, bindings);
     }
   }
 
@@ -157,10 +163,18 @@ class ExportTable {
         return target.kind === "file" ? this.find(target.path, row.local ?? name, depth + 1) : null;
       }
 
-      if (row.local !== null) {
-        const id = nodeId(module, row.local);
+      // A row without a local name (Python, Rust, PHP) exports the name as declared.
+      const local = row.local ?? name;
+      const id = nodeId(module, local);
 
-        if (this.nodes.has(id)) return id;
+      if (this.nodes.has(id)) return id;
+      // An exported name the file imported (`from .m import x` at the top of a package, `export { x }` after an import): one hop on.
+      const bound = this.importsOf.get(module)?.get(local);
+
+      if (bound) {
+        const target = this.resolve(module, bound.source);
+
+        if (target.kind === "file" && target.path !== module) return this.find(target.path, bound.imported, depth + 1);
       }
 
       return null;

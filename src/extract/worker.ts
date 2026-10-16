@@ -2,7 +2,7 @@
 // `{path, facts}` (or `{path, error}`), and exits on `null`.
 
 import { parentPort } from "node:worker_threads";
-import { extractTs } from "./ts.ts";
+import { extractAny } from "./any.ts";
 
 const port = parentPort;
 
@@ -15,7 +15,7 @@ port.on("message", (job: { path: string; content: string } | null) => {
     return;
   }
 
-  extractTs(job.path, job.content).then(
+  extractAny(job.path, job.content).then(
     (facts) => port.postMessage({ path: job.path, facts }),
     (error: unknown) => port.postMessage({ path: job.path, error: error instanceof Error ? error.message : String(error) }),
   );

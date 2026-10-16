@@ -1,0 +1,1 @@
+{ "layers": { "python": ["app/**"], "rust": ["crate/**"], "php-domain": ["php/src/Domain/**"], "php-store": ["php/src/Store/**"], "php-http": ["php/src/Http/**"] } }

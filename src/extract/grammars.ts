@@ -4,7 +4,7 @@
 // published package.
 
 /** Every grammar archdiff ships. */
-export const GRAMMARS = ["typescript", "tsx", "javascript"] as const;
+export const GRAMMARS = ["typescript", "tsx", "javascript", "rust", "python", "php"] as const;
 
 /** The name of one shipped grammar. */
 export type Grammar = (typeof GRAMMARS)[number];

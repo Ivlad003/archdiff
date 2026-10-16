@@ -416,3 +416,21 @@ test("layouts lists the drawings and --prune deletes the orphans", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("Python, Rust and PHP are read with the same graph: imports resolve and calls are followed", () => {
+  const polyglot = join(root, "tests/fixtures/polyglot");
+  const stats = JSON.parse(archdiff(["analyze", polyglot, "--json", "--no-cache"]).stdout) as { files: number; unresolvedImports: number; calls: number };
+  assert.equal(stats.files, 10);
+  assert.equal(stats.unresolvedImports, 0);
+  const python = archdiff(["diagram", "calls:app/services/orders.py#place_order", polyglot, "--format", "mermaid"]).stdout;
+  assert.ok(python.includes("app_services_orders_py_place_order ==> app_store_py_save_order"), python);
+  const rust = archdiff(["diagram", "calls:crate/src/orders.rs#place_order", polyglot, "--format", "mermaid"]).stdout;
+  assert.ok(rust.includes("crate_src_orders_rs_place_order ==> crate_src_store_rs_save_order"), rust);
+  const php = archdiff(["diagram", "calls:php/src/Http/Checkout.php#checkout", polyglot, "--format", "mermaid", "--depth", "3"]).stdout;
+  assert.ok(php.includes("php_src_Http_Checkout_php_checkout ==> php_src_Domain_Orders_php_Orders_place"), php);
+  assert.ok(php.includes("php_src_Domain_Orders_php_Orders_place ==> php_src_Store_OrderStore_php_OrderStore_save"), php);
+  const layers = archdiff(["diagram", "layers", polyglot, "--format", "mermaid"]).stdout;
+  assert.ok(layers.includes('php_http -->|"1"| php_domain'), layers);
+  const coverage = JSON.parse(archdiff(["coverage", polyglot, "--json"]).stdout) as { blind: number };
+  assert.equal(coverage.blind, 0);
+});

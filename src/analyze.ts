@@ -97,7 +97,7 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
 
   const extracted = performance.now();
   cache?.save();
-  const graph = buildGraph([...facts.values()], config, createResolver(root, files));
+  const graph = buildGraph([...facts.values()], config, createResolver(root, files, [...facts.values()]));
   const declaredEntries = frameworkEntries(root, files, listAllFiles(root));
   const built = performance.now();
   const kinds = [...graph.nodes.values()].reduce((counts, node) => ({ ...counts, [node.kind]: (counts[node.kind] ?? 0) + 1 }), {} as Record<string, number>);

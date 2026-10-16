@@ -14,7 +14,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { join, posix } from "node:path";
+import type { FileFacts } from "./extract/facts.ts";
+import type { Resolution as LanguageResolution, SourceResolver } from "./imports.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
+import { languageOf } from "./languages.ts";
+import { PhpResolver } from "./php-imports.ts";
+import { PythonResolver } from "./python-imports.ts";
+import { RustResolver } from "./rust-imports.ts";
 
 /** What an import specifier names. */
 export type Resolution = { kind: "file"; path: string } | { kind: "package"; name: string } | { kind: "builtin"; name: string } | { kind: "unresolved"; reason: string };
@@ -176,12 +182,61 @@ export function tsconfigResolver(root: string, _files: Iterable<string>): (from:
   };
 }
 
+/** A language resolver's answer as the graph's. */
+function fromLanguage(resolution: LanguageResolution, specifier: string): Resolution {
+  switch (resolution.kind) {
+    case "internal":
+      return { kind: "file", path: resolution.file };
+    case "external":
+      return { kind: "package", name: resolution.pkg };
+    case "builtin":
+    case "stdlib":
+      return { kind: "builtin", name: specifier.replace(/^(class|function|const|include) /, "").split(/[.:\\]/)[0] ?? specifier };
+    case "local":
+      return { kind: "unresolved", reason: "the file itself" };
+    case "generated":
+      return { kind: "unresolved", reason: `generated: ${specifier}` };
+    case "unresolved":
+      return { kind: "unresolved", reason: `no such module: ${specifier}` };
+  }
+}
+
 /**
  * A resolver over the repository's file list: `(from, specifier)` → where
- * it points. `from` and the files are POSIX paths relative to `root`.
+ * it points, by the language of `from`: TypeScript/JavaScript here, Python,
+ * Rust and PHP through the resolvers ported from keylang (PHP needs the
+ * facts: its imports name declarations). `from` and the files are POSIX
+ * paths relative to `root`.
  */
-export function createResolver(root: string, files: Iterable<string>, tsconfigOf: (from: string) => TsconfigPaths | null = tsconfigResolver(root, files)): (from: string, specifier: string) => Resolution {
+export function createResolver(root: string, files: Iterable<string>, facts: readonly FileFacts[] = [], tsconfigOf: (from: string) => TsconfigPaths | null = tsconfigResolver(root, files)): (from: string, specifier: string) => Resolution {
   const known = new Set(files);
+  const ecmascript = createEcmascriptResolver(root, known, tsconfigOf);
+  let python: SourceResolver | null = null;
+  let rust: SourceResolver | null = null;
+  let php: SourceResolver | null = null;
+
+  return (from, specifier) => {
+    switch (languageOf(from)) {
+      case "python":
+        python ??= new PythonResolver(root, known);
+
+        return fromLanguage(python.resolve(from, specifier), specifier);
+      case "rust":
+        rust ??= new RustResolver(root, known);
+
+        return fromLanguage(rust.resolve(from, specifier), specifier);
+      case "php":
+        php ??= new PhpResolver(root, known, facts);
+
+        return fromLanguage(php.resolve(from, specifier), specifier);
+      default:
+        return ecmascript(from, specifier);
+    }
+  };
+}
+
+/** The TypeScript/JavaScript resolver: relative paths, `.js` for `.ts`, index files, tsconfig `paths`, packages, built-ins. */
+function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsconfigOf: (from: string) => TsconfigPaths | null): (from: string, specifier: string) => Resolution {
   const rootPosix = root.split("\\").join("/");
 
   // A repository-relative candidate, as written or with an extension or index file added.

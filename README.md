@@ -1,6 +1,6 @@
 # archdiff
 
-Live diagrams of a TypeScript/JavaScript repository, computed from the code: the layers and the imports between them, every module with what it imports and what imports it, the call tree from every entry point, the map of what the analysis cannot see, and the architectural diff of a change for reviewing pull requests. Algorithmic (tree-sitter and graph algorithms, no model), fast (a fact cache keyed by file content, parallel parsing), one npm package.
+Live diagrams of a TypeScript, JavaScript, Python, Rust or PHP repository, computed from the code: the layers and the imports between them, every module with what it imports and what imports it, the call tree from every entry point, the map of what the analysis cannot see, and the architectural diff of a change for reviewing pull requests. Algorithmic (tree-sitter and graph algorithms, no model), fast (a fact cache keyed by file content, parallel parsing), one npm package.
 
 ```bash
 npx archdiff web            # the diagrams of the current repository in a browser
@@ -65,7 +65,7 @@ Without configuration a module's layer is its top directory, or `src/<dir>` unde
 }
 ```
 
-Imports resolve like TypeScript: relative paths with or without extensions, `.js` written for a `.ts` file, `index` files, and the `paths` of the root `tsconfig.json`. Everything else is a package or a Node built-in.
+Imports resolve per language: TypeScript/JavaScript like the compiler (relative paths with or without extensions, `.js` written for a `.ts` file, `index` files, the `paths` of the nearest `tsconfig.json`, `extends` into node_modules), Python by dotted path from the repository root or `src/` (the standard library known by name), Rust by `crate::`/`self::`/`super::` paths over the targets of each `Cargo.toml` (workspace members and dependencies known), PHP by qualified name against the declarations of the repository and the namespaces of the composer lock. Everything else is a package or a built-in. One repository may mix them; the layers and the diagrams are the same.
 
 ## What the diagrams cannot show
 
