@@ -75,6 +75,9 @@ export function parseAgentLine(line: string): Omit<AgentEvent, "seq"> {
 
   if (type === "system" && parsed["subtype"] === "init") return withSession({ kind: "init", text: `session ${sessionId ?? "?"}` });
 
+  // Other system events (thinking tokens, status): a one-line note, not the JSON.
+  if (type === "system") return withSession({ kind: "init", text: isJsonString(parsed["subtype"]) ? parsed["subtype"].replace(/_/g, " ") : "system" });
+
   if (type === "result") return withSession({ kind: "result", text: isJsonString(parsed["result"]) ? parsed["result"] : "" });
 
   if ((type === "assistant" || type === "user") && isJsonObject(parsed["message"]) && Array.isArray(parsed["message"]["content"])) {

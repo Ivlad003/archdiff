@@ -112,7 +112,8 @@ export function planFromScene(analysis: Analysis, viewKey: string, elements: rea
       continue;
     }
 
-    if (label.includes("/") || MODULE_LABEL.test(label)) {
+    // `path#name` is a function of that module, however the path looks; a path or a file name is a module.
+    if (!label.includes("#") && (label.includes("/") || MODULE_LABEL.test(label))) {
       const name = MODULE_LABEL.test(label) ? label : `${label}.ts`;
       const node: PlannedNode = { id: element.id, kind: "module", name, because: lane ? `drawn in the lane of ${layer}` : "drawn outside every lane" };
 

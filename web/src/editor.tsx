@@ -9,7 +9,7 @@
 // Entry point: `mountCanvas` (returns a handle: scene, replace, mode,
 // screenshot, scrollToContent, unmount), used by app.ts.
 
-import { Excalidraw, exportToBlob, exportToSvg } from "@excalidraw/excalidraw";
+import { Excalidraw, exportToBlob, exportToSvg, restoreElements } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
 import { useEffect, useState } from "react";
@@ -70,7 +70,7 @@ function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
   useEffect(() => modeState[1](setMode), [modeState]);
   return (
     <Excalidraw
-      initialData={{ elements: elements as never, appState: { viewBackgroundColor: "#ffffff" }, scrollToContent: true }}
+      initialData={{ elements: restoreElements(elements as never, null), appState: { viewBackgroundColor: "#ffffff" }, scrollToContent: true }}
       excalidrawAPI={(ready) => {
         // The container may still be laid out when Excalidraw mounts: fit once the frame is drawn.
         const fit = (): void => ready.scrollToContent(undefined, { fitToContent: true, animate: false });
@@ -166,7 +166,8 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
     const handle: CanvasHandle = {
       scene: () => (api ? (api.getSceneElementsIncludingDeleted() as unknown as SceneElement[]) : elements),
       replace: (next) => {
-        api?.updateScene({ elements: next as never });
+        // A saved element may lack fields Excalidraw needs (a scene saved through the API, an older version): restore fills them.
+        api?.updateScene({ elements: restoreElements(next as never, null) });
         api?.scrollToContent(undefined, { fitToContent: true, animate: false });
       },
       setMode: (next) => {
