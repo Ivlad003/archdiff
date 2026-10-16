@@ -434,3 +434,66 @@ test("Python, Rust and PHP are read with the same graph: imports resolve and cal
   const coverage = JSON.parse(archdiff(["coverage", polyglot, "--json"]).stdout) as { blind: number };
   assert.equal(coverage.blind, 0);
 });
+
+test("CommonJS: chained exports, a re-exporting index and a module binding called as a function all resolve", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-cjs-"));
+
+  try {
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(join(dir, "lib"), { recursive: true });
+    mkdirSync(join(dir, "test"), { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "sample-lib", main: "index.js" }));
+    writeFileSync(join(dir, "index.js"), "module.exports = require('./lib/app');\n");
+    writeFileSync(join(dir, "lib/app.js"), "exports = module.exports = createApp;\nfunction createApp() {\n  return mount();\n}\nfunction mount() {\n  return 1;\n}\nexports.Router = function Router() {\n  return 2;\n};\n");
+    writeFileSync(join(dir, "test/app.test.js"), "var app = require('..');\nvar lib = require('../lib/app');\nfunction t() {\n  app();\n  app.Router();\n  lib.Router();\n}\nt();\n");
+    const stats = JSON.parse(archdiff(["analyze", dir, "--json", "--no-cache"]).stdout) as { unresolvedImports: number; calls: number };
+    assert.equal(stats.unresolvedImports, 0);
+    const calls = archdiff(["diagram", "calls:test/app.test.js#t", dir, "--format", "mermaid"]).stdout;
+    assert.ok(calls.includes("test_app_test_js_t ==> lib_app_js_createApp"), calls);
+    assert.ok(calls.includes("test_app_test_js_t ==> lib_app_js_Router"), calls);
+    assert.ok(calls.includes("lib_app_js_createApp ==> lib_app_js_mount"), calls);
+    // The package's main file is an entry point, even though the tests call it.
+    const views = archdiff(["views", dir]).stdout;
+    assert.ok(views.includes("calls:index.js#default\tdefault (index.js) — main of sample-lib") || views.includes("main of sample-lib"), views);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Rust: a facade crate's renamed re-exports and `use self::` of the file's own types resolve", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-rust-"));
+
+  try {
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(join(dir, "crates/facade/src"), { recursive: true });
+    mkdirSync(join(dir, "crates/printer/src"), { recursive: true });
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "Cargo.toml"), '[package]\nname = "app"\nversion = "0.1.0"\n\n[dependencies]\nfacade = { path = "crates/facade" }\n\n[workspace]\nmembers = ["crates/facade", "crates/printer"]\n');
+    writeFileSync(join(dir, "crates/facade/Cargo.toml"), '[package]\nname = "facade"\nversion = "0.1.0"\n\n[dependencies]\ngrep-printer = { path = "../printer" }\n');
+    writeFileSync(join(dir, "crates/facade/src/lib.rs"), "pub use grep_printer as printer;\n");
+    writeFileSync(join(dir, "crates/printer/Cargo.toml"), '[package]\nname = "grep-printer"\nversion = "0.1.0"\n');
+    writeFileSync(join(dir, "crates/printer/src/lib.rs"), "pub struct ColorSpecs;\n\npub fn specs() -> ColorSpecs {\n    ColorSpecs\n}\n");
+    writeFileSync(join(dir, "src/main.rs"), "use facade::printer::specs;\n\nenum Kind {\n    A,\n}\n\nuse self::Kind::*;\n\nfn main() {\n    let _ = specs();\n    let _ = A;\n}\n");
+    const stats = JSON.parse(archdiff(["analyze", dir, "--json", "--no-cache"]).stdout) as { unresolvedImports: number; deps: number };
+    assert.equal(stats.unresolvedImports, 0);
+    const calls = archdiff(["diagram", "calls:src/main.rs#main", dir, "--format", "mermaid"]).stdout;
+    assert.ok(calls.includes("src_main_rs_main ==> crates_printer_src_lib_rs_specs"), calls);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a class extending a package's class: a missing member is the package's, not a blind spot", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-base-"));
+
+  try {
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/view.ts"), 'import { Component } from "react";\n\nexport class View extends Component {\n  render() {\n    this.setState({});\n    return this.own();\n  }\n  own() {\n    return 1;\n  }\n}\n');
+    const coverage = JSON.parse(archdiff(["coverage", dir, "--json"]).stdout) as { blind: number; byReason: Record<string, number> };
+    assert.equal(coverage.blind, 0);
+    assert.equal(coverage.byReason["external"], 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

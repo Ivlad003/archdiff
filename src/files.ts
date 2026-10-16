@@ -27,10 +27,8 @@ export interface SkippedFile {
 /** Directories the walk never enters when git does not list the files. */
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", "coverage", ".archdiff", ".next", ".cache", "out"]);
 
-/** A source file archdiff parses: a known extension, not a declaration file. */
+/** A source file archdiff parses: a known extension (a `.d.ts` declaration file too: types and their imports live there). */
 export function isSourceFile(path: string): boolean {
-  if (/\.d\.[cm]?ts$/.test(path)) return false;
-
   return SOURCE_EXTENSIONS.some((extension) => path.endsWith(extension));
 }
 

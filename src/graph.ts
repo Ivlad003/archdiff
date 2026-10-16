@@ -105,6 +105,8 @@ export interface Graph {
   gaps: Gap[];
   /** Imports that resolve to no file, package or built-in, with the reason. */
   unresolvedImports: { from: string; specifier: string; reason: string; line: number }[];
+  /** Per module, every exported name → the node it stands for, re-exports followed (`module.exports = require("./x")`, `export * from`). */
+  resolvedExports: Map<string, Map<string, string>>;
 }
 
 export function nodeId(module: string, name: string, parent?: string): string {
@@ -132,6 +134,8 @@ class ExportTable {
   private readonly reexportsAll = new Map<string, string[]>();
   /** Local name → the import that binds it, per module: an exported name that is an import is a re-export. */
   private readonly importsOf = new Map<string, Map<string, { source: string; imported: string }>>();
+  /** Imports binding no name, per module (`module.exports = require("./x")`, a bare `require`). */
+  private readonly bareImports = new Map<string, string[]>();
 
   private readonly nodes: Map<string, GraphNode>;
   private readonly resolve: (from: string, specifier: string) => Resolution;
@@ -147,6 +151,10 @@ class ExportTable {
 
       for (const fact of file.imports) for (const binding of fact.bindings) if (binding.kind === "named") bindings.set(binding.local, { source: fact.source, imported: binding.imported });
       this.importsOf.set(file.path, bindings);
+      this.bareImports.set(
+        file.path,
+        file.imports.filter((fact) => fact.bindings.length === 0 && (fact.source.startsWith(".") || fact.source.startsWith("/"))).map((fact) => fact.source),
+      );
     }
   }
 
@@ -177,7 +185,7 @@ class ExportTable {
         if (target.kind === "file" && target.path !== module) return this.find(target.path, bound.imported, depth + 1);
       }
 
-      return null;
+      return this.throughBareImport(module, name, depth);
     }
 
     // `export * from "./y"`: the name may come from any of them.
@@ -185,6 +193,43 @@ class ExportTable {
       const target = this.resolve(module, specifier);
 
       if (target.kind !== "file") continue;
+      const found = this.find(target.path, name, depth + 1);
+
+      if (found) return found;
+    }
+
+    return this.throughBareImport(module, name, depth);
+  }
+
+  /** Every exported name of `module` with its node: its own rows, then what `export *` and a bare re-export bring, depth-limited. */
+  allOf(module: string, depth = 0): Map<string, string> {
+    const out = new Map<string, string>();
+
+    if (depth > 8) return out;
+
+    for (const name of this.rows.get(module)?.keys() ?? []) {
+      const found = this.find(module, name);
+
+      if (found) out.set(name, found);
+    }
+
+    for (const specifier of [...(this.reexportsAll.get(module) ?? []), ...(this.bareImports.get(module) ?? [])]) {
+      const target = this.resolve(module, specifier);
+
+      if (target.kind !== "file" || target.path === module) continue;
+
+      for (const [name, id] of this.allOf(target.path, depth + 1)) if (!out.has(name)) out.set(name, id);
+    }
+
+    return out;
+  }
+
+  /** `module.exports = require("./lib/x")`: every export of the file is the other file's; the import binds no name of its own. */
+  private throughBareImport(module: string, name: string, depth: number): string | null {
+    for (const specifier of this.bareImports.get(module) ?? []) {
+      const target = this.resolve(module, specifier);
+
+      if (target.kind !== "file" || target.path === module) continue;
       const found = this.find(target.path, name, depth + 1);
 
       if (found) return found;
@@ -249,6 +294,8 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
         scope.imports.set(binding.local, { target, imported: binding.kind === "named" ? binding.imported : binding.kind === "default" ? "default" : "*" });
       }
 
+      if (target.kind === "self") continue;
+
       if (target.kind === "file") {
         deps.push({ from: file.path, to: target.path, typeOnly: fact.typeOnly === true, reexport: fact.reexport, line: fact.line });
       } else if (target.kind === "package" || target.kind === "builtin") {
@@ -263,6 +310,9 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
   }
 
   const exports = new ExportTable(sorted, nodes, resolve);
+  const resolvedExports = new Map<string, Map<string, string>>();
+
+  for (const file of sorted) resolvedExports.set(file.path, exports.allOf(file.path));
 
   // The node a local name of `module` stands for: a declaration, or an import followed to its export.
   const nameTarget = (module: string, name: string): { id: string } | { gap: Gap["reason"] } => {
@@ -275,7 +325,8 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
     if (!imported) return { gap: "global" };
 
     if (imported.target.kind !== "file") return { gap: "external" };
-    const found = exports.find(imported.target.path, imported.imported);
+    // `const express = require("..")` then `express()`: the module binding stands for the module's default.
+    const found = exports.find(imported.target.path, imported.imported === "*" ? "default" : imported.imported);
 
     return found ? { id: found } : { gap: "unknown-member" };
   };
@@ -328,6 +379,19 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
 
   const implementers = (id: string): string[] => implementerIndex.get(id) ?? [];
 
+  // Whether a class (or a class up its `extends` chain) extends something outside the repository: a member not found on it is the package's.
+  const externalAncestor = (classId: string, depth = 0): boolean => {
+    const owner = nodes.get(classId);
+
+    if (!owner || depth > 8) return false;
+    const base = facts.find((file) => file.path === owner.module)?.decls.find((decl) => decl.name === owner.name && decl.kind === "class")?.base;
+
+    if (!base) return false;
+    const target = nameTarget(owner.module, base.replace(/<.*$/, ""));
+
+    return "id" in target ? externalAncestor(target.id, depth + 1) : target.gap === "external";
+  };
+
   const resolveCall = (module: string, enclosingClass: string | null, call: CallFact): { id: string } | { ids: string[] } | { gap: Gap["reason"] } => {
     if (call.opaque) return { gap: "dynamic" };
     const callee = call.callee;
@@ -362,6 +426,8 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
 
       if (dispatched.length > 0) return { ids: dispatched };
 
+      if (externalAncestor(owner.id)) return { gap: "external" };
+
       return { gap: nodes.get(owner.id)?.kind === "type" ? "interface" : "unknown-member" };
     }
 
@@ -378,7 +444,10 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
       if (!enclosingClass) return { gap: "dynamic" };
       const member = memberOf(enclosingClass, parts[1]!);
 
-      return member ? { id: member } : { gap: "unknown-member" };
+      if (member) return { id: member };
+
+      // `$this->assertSame()` in a test extending PHPUnit's TestCase, `this.setState()` in a React component: the package's member.
+      return externalAncestor(enclosingClass) ? { gap: "external" } : { gap: "unknown-member" };
     }
 
     const [head, member] = parts as [string, string];
@@ -399,7 +468,9 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
     if (!("id" in owner)) return owner.gap === "global" ? { gap: "member-of-value" } : owner;
     const found = memberOf(owner.id, member);
 
-    return found ? { id: found } : { gap: "unknown-member" };
+    if (found) return { id: found };
+
+    return externalAncestor(owner.id) ? { gap: "external" } : { gap: "unknown-member" };
   };
 
   for (const file of sorted) {
@@ -441,5 +512,5 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
 
   const layers = [...new Set([...modules.values()].map((module) => module.layer))].sort();
 
-  return { layers, modules, nodes, deps, calls, externals, gaps, unresolvedImports };
+  return { layers, modules, nodes, deps, calls, externals, gaps, unresolvedImports, resolvedExports };
 }

@@ -95,9 +95,15 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
     cache?.store(job.path, job.hash, fresh[i]!);
   }
 
+  // A file too large to parse is still a module of the repository: imports of it resolve, its own content stays unknown (opaque).
+  for (const skipped of listed0.skipped) {
+    if (overrides.get(skipped.path) === null || facts.has(skipped.path)) continue;
+    facts.set(skipped.path, { path: skipped.path, endLine: 1, endCol: 1, imports: [], decls: [], exports: new Set(), reexportsAll: [], exportRows: [], unsupported: [], valueRefs: [], moduleCalls: [], completeness: "opaque", parseError: null });
+  }
+
   const extracted = performance.now();
   cache?.save();
-  const graph = buildGraph([...facts.values()], config, createResolver(root, files, [...facts.values()]));
+  const graph = buildGraph([...facts.values()], config, createResolver(root, [...facts.keys()], [...facts.values()]));
   const declaredEntries = frameworkEntries(root, files, listAllFiles(root));
   const built = performance.now();
   const kinds = [...graph.nodes.values()].reduce((counts, node) => ({ ...counts, [node.kind]: (counts[node.kind] ?? 0) + 1 }), {} as Record<string, number>);

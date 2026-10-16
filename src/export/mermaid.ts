@@ -49,7 +49,10 @@ function shape(node: DiagramNode, id: string): string {
 
 export function toMermaid(diagram: Diagram): string {
   const ids = mermaidIds(diagram.nodes);
-  const lines = [`%% archdiff:generated — view ${diagram.view}`, `flowchart ${diagram.direction === "down" ? "TB" : "LR"}`];
+  const lines = [`%% archdiff:generated — view ${diagram.view}`];
+
+  if (diagram.reason) lines.push(`%% ${diagram.reason}`);
+  lines.push(`flowchart ${diagram.direction === "down" ? "TB" : "LR"}`);
   const byGroup = new Map<string | undefined, DiagramNode[]>();
 
   for (const node of diagram.nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);

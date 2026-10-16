@@ -1,4 +1,5 @@
-// Entry points frameworks declare outside the call graph: React Router
+// Entry points frameworks and packages declare outside the call graph: the
+// files a package.json names (`main`, `bin`, `exports`), React Router
 // route modules (file-based routes under a `routes/` directory, whose
 // `loader`, `action`, `clientLoader`, `clientAction`, `default` and
 // `ErrorBoundary` exports the framework calls), and SFCC cartridge hooks
@@ -60,10 +61,61 @@ function cartridgeHooks(root: string, files: ReadonlySet<string>, manifests: rea
   return entries;
 }
 
+/** The files a package.json names as the package's entry (`main`, `module`, `bin`, the `.` export): what users of the library call. */
+function packageEntries(root: string, files: ReadonlySet<string>, manifests: readonly string[]): DeclaredEntry[] {
+  const entries: DeclaredEntry[] = [];
+
+  const probe = (directory: string, written: string): string | null => {
+    const base = posix.normalize(posix.join(directory, written.replace(/^\.\//, "")));
+    const candidates = [base, `${base}.js`, `${base}.ts`, `${base}.mjs`, `${base}.cjs`, posix.join(base, "index.js"), posix.join(base, "index.ts")];
+
+    return candidates.find((candidate) => files.has(candidate)) ?? null;
+  };
+
+  for (const manifest of manifests) {
+    let parsed;
+
+    try {
+      parsed = parseJson(readFileSync(join(root, manifest), "utf8"));
+    } catch {
+      continue;
+    }
+
+    if (!isJsonObject(parsed)) continue;
+    const directory = posix.dirname(manifest) === "." ? "" : posix.dirname(manifest);
+    const name = isJsonString(parsed["name"]) ? parsed["name"] : manifest;
+    const named: [string, string][] = [];
+
+    for (const field of ["main", "module"]) if (isJsonString(parsed[field])) named.push([parsed[field] as string, `${field} of ${name}`]);
+    const bin = parsed["bin"];
+
+    if (isJsonString(bin)) named.push([bin, `bin of ${name}`]);
+    else if (isJsonObject(bin)) for (const [command, file] of Object.entries(bin)) if (isJsonString(file)) named.push([file, `bin ${command}`]);
+    const exportsField = parsed["exports"];
+    const dot = isJsonString(exportsField) ? exportsField : isJsonObject(exportsField) ? exportsField["."] : undefined;
+    const dotFile = isJsonString(dot) ? dot : isJsonObject(dot) ? [dot["import"], dot["default"], dot["require"]].find(isJsonString) : undefined;
+
+    if (dotFile) named.push([dotFile, `export of ${name}`]);
+
+    // Without any of them npm loads index.js, as the package's own entry.
+    if (named.length === 0) named.push(["index.js", `index of ${name}`]);
+
+    for (const [written, label] of named) {
+      const file = probe(directory, written);
+
+      if (file && !entries.some((entry) => entry.module === file)) entries.push({ module: file, exportName: "*", label });
+    }
+  }
+
+  return entries;
+}
+
 /** Every entry the frameworks of the repository declare, sorted by module and label. `allFiles` is every path git lists (hooks.json is not a source file). */
 export function frameworkEntries(root: string, sourceFiles: readonly string[], allFiles: readonly string[]): DeclaredEntry[] {
   const sources = new Set(sourceFiles);
   const entries: DeclaredEntry[] = [];
+  // The package's own entry files (not those of vendored packages).
+  entries.push(...packageEntries(root, sources, allFiles.filter((path) => /(^|\/)package\.json$/.test(path) && !path.includes("node_modules/")).sort()));
 
   for (const path of sourceFiles) {
     if (!isRouteModule(path)) continue;

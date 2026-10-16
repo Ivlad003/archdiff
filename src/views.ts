@@ -77,6 +77,9 @@ export function viewKey(view: View): string {
   }
 }
 
+/** Modules whose public methods a framework calls: controllers, handlers, commands, jobs, listeners, middleware, routes. */
+const HANDLER_MODULE = /(controller|handler|command|job|listener|subscriber|middleware|route|resolver|consumer|action)s?[/.]|[/.](controllers?|handlers?|commands?|jobs?|listeners?|middlewares?|routes?|actions?)\//i;
+
 /** A function execution starts from, with how it is known. */
 export interface EntryPoint {
   node: GraphNode;
@@ -92,24 +95,24 @@ export interface EntryPoint {
  * which call something.
  */
 export function entryPoints(analysis: Analysis): EntryPoint[] {
-  const { graph, config, facts } = analysis;
+  const { graph, config } = analysis;
   const called = new Set(graph.calls.map((edge) => edge.to));
   const entries = new Map<string, EntryPoint>();
 
-  // The node an export name of a module stands for, through the module's export table.
+  // The node an export name of a module stands for, re-exports followed.
   const exportedNode = (module: string, exportName: string): GraphNode | null => {
-    const row = facts.get(module)?.exportRows.find((candidate) => candidate.name === exportName);
-    const node = row?.local ? graph.nodes.get(`${module}#${row.local}`) : undefined;
+    const id = graph.resolvedExports.get(module)?.get(exportName);
+    const node = id ? graph.nodes.get(id) : undefined;
 
     return node && node.kind === "fn" ? node : null;
   };
 
   for (const declared of analysis.declaredEntries) {
     if (declared.exportName === "*") {
-      for (const id of graph.modules.get(declared.module)?.decls ?? []) {
-        const node = graph.nodes.get(id)!;
+      for (const id of graph.resolvedExports.get(declared.module)?.values() ?? []) {
+        const node = graph.nodes.get(id);
 
-        if (node.kind === "fn" && node.exported && !entries.has(id)) entries.set(id, { node, label: declared.label });
+        if (node && node.kind === "fn" && !entries.has(id)) entries.set(id, { node, label: declared.label });
       }
     } else {
       const node = exportedNode(declared.module, declared.exportName);
@@ -119,12 +122,15 @@ export function entryPoints(analysis: Analysis): EntryPoint[] {
   }
 
   for (const node of graph.nodes.values()) {
-    if (node.kind !== "fn" || node.parent || !node.exported || entries.has(node.id)) continue;
+    if (node.kind !== "fn" || entries.has(node.id)) continue;
 
-    if (node.module.startsWith("bin/")) entries.set(node.id, { node, label: "bin" });
-    else if (node.name === "main") entries.set(node.id, { node, label: "main" });
-    else if (config.entries.some((glob) => matchesGlob(node.module, glob))) entries.set(node.id, { node, label: "entries" });
-    else if (!called.has(node.id) && graph.calls.some((edge) => edge.from === node.id)) entries.set(node.id, { node, label: "uncalled export" });
+    // A `main` is an entry whether or not it is exported (Rust's and Python's are not); a method of a handler-like class
+    // (controller, handler, command, job, listener, middleware, route) that nothing calls is one the framework calls.
+    if (!node.parent && node.name === "main") entries.set(node.id, { node, label: "main" });
+    else if (!node.parent && node.exported && node.module.startsWith("bin/")) entries.set(node.id, { node, label: "bin" });
+    else if (!node.parent && node.exported && config.entries.some((glob) => matchesGlob(node.module, glob))) entries.set(node.id, { node, label: "entries" });
+    else if (!node.parent && node.exported && !called.has(node.id) && graph.calls.some((edge) => edge.from === node.id)) entries.set(node.id, { node, label: "uncalled export" });
+    else if (node.parent && node.exported && HANDLER_MODULE.test(node.module) && !called.has(node.id) && !node.name.startsWith("_") && node.name !== "constructor" && graph.calls.some((edge) => edge.from === node.id)) entries.set(node.id, { node, label: "uncalled method of a handler" });
   }
 
   return [...entries.values()].sort((a, b) => (a.node.id < b.node.id ? -1 : 1));
@@ -248,7 +254,7 @@ function layersView(graph: Graph): Diagram {
 function layerView(graph: Graph, name: string, depth: number): Diagram {
   const own = [...graph.modules.values()].filter((module) => module.layer === name).map((module) => module.id);
 
-  if (own.length === 0) return unplaced(`layer:${name}`, name, [], [], [], { reason: `no layer "${name}"` });
+  if (own.length === 0) return unplaced(`layer:${name}`, name, [], [], [], { reason: `no layer "${name}"`, missing: true });
   const members = grow(graph, new Set(own), depth, "both");
   const ownSet = new Set(own);
   // The layer's own modules first: a folded picture keeps them and folds the neighbours.
@@ -282,7 +288,7 @@ function grow(graph: Graph, start: ReadonlySet<string>, depth: number, direction
 
 /** One module: what imports it (left) and what it imports (right), and with `packages` the packages too; depth 1 default. */
 function moduleView(graph: Graph, id: string, depth: number, packages: boolean): Diagram {
-  if (!graph.modules.has(id)) return unplaced(`module:${id}`, id, [], [], [], { reason: `no module "${id}"` });
+  if (!graph.modules.has(id)) return unplaced(`module:${id}`, id, [], [], [], { reason: `no module "${id}"`, missing: true });
   const members = grow(graph, new Set([id]), depth, "both");
   const nodes = [...members].sort().map((member) => moduleNode(graph, member));
   const edges = depEdges(graph, members, packages);
@@ -298,7 +304,7 @@ function dirView(graph: Graph, path: string, depth: number): Diagram {
   const prefix = `${path}/`;
   const own = [...graph.modules.keys()].filter((id) => id.startsWith(prefix));
 
-  if (own.length === 0) return unplaced(`dir:${path}`, path, [], [], [], { reason: `no modules under "${path}/"` });
+  if (own.length === 0) return unplaced(`dir:${path}`, path, [], [], [], { reason: `no modules under "${path}/"`, missing: true });
   const members = grow(graph, new Set(own), depth, "both");
   const ownSet = new Set(own);
   const nodes = [...members].sort((a, b) => Number(ownSet.has(b)) - Number(ownSet.has(a)) || (a < b ? -1 : 1)).map((id) => moduleNode(graph, id));
@@ -418,7 +424,7 @@ function fold(diagram: Diagram, limit: number): Diagram {
 function callsView(graph: Graph, id: string, depth: number): Diagram {
   const start = graph.nodes.get(id);
 
-  if (!start) return unplaced(`calls:${id}`, id, [], [], [], { reason: `no function "${id}"` });
+  if (!start) return unplaced(`calls:${id}`, id, [], [], [], { reason: `no function "${id}"`, missing: true });
   const members = new Set([id]);
   const edges: DiagramEdge[] = [];
   const seenEdges = new Set<string>();

@@ -117,7 +117,9 @@ function writeOut(text: string, out: string | true | undefined): number {
     return 0;
   }
 
-  const { existsSync, readFileSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+  const { existsSync, readFileSync, statSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+
+  if (existsSync(out) && statSync(out).isDirectory()) return fail(`--out ${out}: a directory; name a file`);
 
   if (existsSync(out) && !isGenerated(readFileSync(out, "utf8"))) return fail(`--out ${out}: the file exists and was not written by archdiff; nothing written`);
   writeFileSync(out, text);
@@ -144,6 +146,10 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   const dirArg = (index: number): string => resolve(positional[index] ?? ".");
+  // How many positional arguments each command takes; one more is a typo, not a silent extra.
+  const arity: Record<string, number> = { analyze: 1, views: 1, diagram: 2, coverage: 1, review: 1, history: 1, layouts: 1, flow: 2, plan: 2, web: 1 };
+
+  if (command in arity && positional.length > arity[command]!) return fail(`${command}: unexpected argument "${positional[arity[command]!]}" (archdiff --help)`);
 
   try {
     switch (command) {
@@ -196,6 +202,9 @@ export async function main(argv: readonly string[]): Promise<number> {
 
         if (limit !== undefined) options.limit = limit;
         const diagram = layout(viewOf(analysis, view, options));
+
+        if (diagram.missing) return fail(`diagram: ${diagram.reason} (archdiff views lists them)`);
+
         return writeOut(format === "md" ? diagramMarkdown(diagram, analysis) : exportDiagram(diagram, format as Exclude<ExportFormat, "md">), flags.get("out"));
       }
 

@@ -64,7 +64,18 @@ function git(root: string, args: string[]): { ok: true; out: string } | { ok: fa
 
   if (result.error) return { ok: false, error: `git: ${result.error.message}` };
 
-  if (result.status !== 0) return { ok: false, error: result.stderr.trim() || `git ${args[0]} failed` };
+  if (result.status !== 0) {
+    // The first line of what git said, not its usage text; the usual causes named plainly.
+    const text = result.stderr.trim();
+
+    if (/not a git repository/i.test(text)) return { ok: false, error: `${root} is not a git repository` };
+
+    if (/bad revision 'HEAD'|ambiguous argument 'HEAD'/.test(text)) return { ok: false, error: `${root} has no commits yet` };
+
+    if (/unknown revision|bad revision|ambiguous argument/.test(text)) return { ok: false, error: text.split("\n")[0] ?? text };
+
+    return { ok: false, error: text.split("\n")[0] || `git ${args[0]} failed` };
+  }
 
   return { ok: true, out: result.stdout };
 }

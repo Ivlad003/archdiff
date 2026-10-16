@@ -23,7 +23,13 @@ import { PythonResolver } from "./python-imports.ts";
 import { RustResolver } from "./rust-imports.ts";
 
 /** What an import specifier names. */
-export type Resolution = { kind: "file"; path: string } | { kind: "package"; name: string } | { kind: "builtin"; name: string } | { kind: "unresolved"; reason: string };
+export type Resolution =
+  | { kind: "file"; path: string }
+  | { kind: "package"; name: string }
+  | { kind: "builtin"; name: string }
+  /** The importing file itself (Rust `use self::Kind::*`, a Python relative import of the package's own module): no dependency, nothing unresolved. */
+  | { kind: "self" }
+  | { kind: "unresolved"; reason: string };
 
 /** The `paths` of a tsconfig, patterns to candidate prefixes, resolved against `baseUrl` (or the config's directory). */
 export interface TsconfigPaths {
@@ -38,7 +44,7 @@ const BUILTINS = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]
 const EXTENSIONS = [".ts", ".tsx", ".d.ts", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"];
 
 /** A `.js` import of a TypeScript file: the extensions a written one may stand for. */
-const REWRITES: Record<string, string[]> = { ".js": [".ts", ".tsx"], ".jsx": [".tsx"], ".mjs": [".mts"], ".cjs": [".cts"] };
+const REWRITES: Record<string, string[]> = { ".js": [".ts", ".tsx", ".d.ts"], ".jsx": [".tsx"], ".mjs": [".mts", ".d.mts"], ".cjs": [".cts", ".d.cts"] };
 
 /** The package of a bare specifier: `@scope/name/deep` → `@scope/name`, `lodash/fp` → `lodash`. */
 export function packageName(specifier: string): string {
@@ -193,7 +199,7 @@ function fromLanguage(resolution: LanguageResolution, specifier: string): Resolu
     case "stdlib":
       return { kind: "builtin", name: specifier.replace(/^(class|function|const|include) /, "").split(/[.:\\]/)[0] ?? specifier };
     case "local":
-      return { kind: "unresolved", reason: "the file itself" };
+      return { kind: "self" };
     case "generated":
       return { kind: "unresolved", reason: `generated: ${specifier}` };
     case "unresolved":
@@ -210,6 +216,7 @@ function fromLanguage(resolution: LanguageResolution, specifier: string): Resolu
  */
 export function createResolver(root: string, files: Iterable<string>, facts: readonly FileFacts[] = [], tsconfigOf: (from: string) => TsconfigPaths | null = tsconfigResolver(root, files)): (from: string, specifier: string) => Resolution {
   const known = new Set(files);
+  const factsByPath = new Map(facts.map((file) => [file.path, file]));
   const ecmascript = createEcmascriptResolver(root, known, tsconfigOf);
   let python: SourceResolver | null = null;
   let rust: SourceResolver | null = null;
@@ -221,10 +228,45 @@ export function createResolver(root: string, files: Iterable<string>, facts: rea
         python ??= new PythonResolver(root, known);
 
         return fromLanguage(python.resolve(from, specifier), specifier);
-      case "rust":
+      case "rust": {
         rust ??= new RustResolver(root, known);
+        const direct = rust.resolve(from, specifier);
 
-        return fromLanguage(rust.resolve(from, specifier), specifier);
+        if (direct.kind !== "unresolved") return fromLanguage(direct, specifier);
+
+        // `use self::Kind::*`, `use self::Kind`: a declaration of the file itself, not a module.
+        if (specifier.startsWith("self::")) {
+          const head = specifier.split("::")[1]!;
+
+          if (factsByPath.get(from)?.decls.some((decl) => decl.name === head)) return { kind: "self" };
+        }
+
+        // A facade crate: `grep::printer::X` where grep's lib.rs says `pub use grep_printer as printer`. The longest prefix
+        // that is a file names the facade; the next segment is looked up among that file's own imports and followed.
+        const segments = specifier.split("::");
+
+        for (let n = segments.length - 1; n >= 1; n--) {
+          const prefix = rust.resolve(from, segments.slice(0, n).join("::"));
+
+          if (prefix.kind !== "internal") continue;
+          const facade = factsByPath.get(prefix.file);
+          const next = segments[n]!;
+          const rest = segments.slice(n + 1);
+          const through = facade?.imports.find((fact) => fact.bindings.some((binding) => binding.local === next));
+
+          // The prefix names a file but the next segment is no import of it: a shorter prefix may be the facade.
+          if (!through) continue;
+          const binding = through.bindings.find((candidate) => candidate.local === next)!;
+          const target = binding.kind === "named" ? binding.imported : through.source.split("::").pop()!;
+          const base = through.source.endsWith(`::${target}`) || through.source === target ? through.source : `${through.source}::${target}`;
+          const hop = rust.resolve(prefix.file, rest.length === 0 ? base : `${base}::${rest.join("::")}`);
+
+          if (hop.kind !== "unresolved") return fromLanguage(hop, specifier);
+          break;
+        }
+
+        return fromLanguage(direct, specifier);
+      }
       case "php":
         php ??= new PhpResolver(root, known, facts);
 

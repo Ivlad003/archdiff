@@ -76,6 +76,8 @@ export interface Diagram {
   groups: DiagramGroup[];
   /** Why the diagram is empty or cut short. */
   reason?: string;
+  /** The subject of the view does not exist (no such module, function, layer or directory): the reason says which. */
+  missing?: true;
   /** `down`: a stack, one shape per row (the layers view); else ranks as columns from the left. */
   direction?: "down";
 }

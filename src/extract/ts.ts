@@ -2487,9 +2487,11 @@ function superModuleSource(value: Node): { source: string; namespace: boolean } 
  * `run` and `go`; `module.exports = function () {}` declares `default`.
  */
 function commonJsExports(stmt: Node, facts: FileFacts, declCalls: (n: Node) => CallFact[]): void {
-  const expr = stmt.namedChildren[0];
+  let expr = stmt.namedChildren[0];
 
   if (!expr || expr.type !== "assignment_expression") return;
+  // `exports = module.exports = f`: the chained assignment on the right is the one that exports.
+  while (expr.childForFieldName("left")?.text.replace(/\s+/g, "") === "exports" && expr.childForFieldName("right")?.type === "assignment_expression") expr = expr.childForFieldName("right")!;
   const left = expr.childForFieldName("left")?.text.replace(/\s+/g, "");
   const written = expr.childForFieldName("right");
 

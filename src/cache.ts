@@ -8,13 +8,13 @@
 // `store` after. Entry points: `FactCache`, `contentHash`, `CACHE_FILE`.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import type { FileFacts } from "./extract/facts.ts";
 
 /** Bumped when the extractor changes what it records: every cached entry is then stale. */
-export const EXTRACTOR_VERSION = 1;
+export const EXTRACTOR_VERSION = 2;
 
 export const CACHE_DIRECTORY = ".archdiff";
 
@@ -111,5 +111,9 @@ export class FactCache {
     const temporary = `${this.file}.${process.pid}.tmp`;
     writeFileSync(temporary, gzipSync(stringify(content), { level: 4 }));
     renameSync(temporary, this.file);
+    // The uncompressed cache of an earlier version, when it is still there.
+    const old = this.file.replace(/\.gz$/, "");
+
+    if (existsSync(old)) rmSync(old, { force: true });
   }
 }
