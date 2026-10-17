@@ -56,6 +56,8 @@ export interface AgentEvent {
   kind: "text" | "tool" | "result" | "init" | "raw" | "stderr" | "exit";
   text: string;
   sessionId?: string;
+  /** The files a tool event names (file_path, path, notebook_path of a tool_use), repository-relative when they are under it: the page lights their shapes. */
+  files?: string[];
 }
 
 /** One stream-json line of Claude Code or Cursor read into an event; an unreadable line is kept raw. */
@@ -82,6 +84,7 @@ export function parseAgentLine(line: string): Omit<AgentEvent, "seq"> {
 
   if ((type === "assistant" || type === "user") && isJsonObject(parsed["message"]) && Array.isArray(parsed["message"]["content"])) {
     const parts: string[] = [];
+    const files: string[] = [];
     let kind: AgentEvent["kind"] = "text";
 
     for (const block of parsed["message"]["content"]) {
@@ -91,6 +94,8 @@ export function parseAgentLine(line: string): Omit<AgentEvent, "seq"> {
       else if (block["type"] === "tool_use") {
         kind = "tool";
         const input = block["input"];
+
+        if (isJsonObject(input)) for (const key of ["file_path", "path", "notebook_path"]) if (isJsonString(input[key])) files.push(input[key] as string);
         const summary = isJsonObject(input) ? Object.entries(input).map(([key, item]) => `${key}=${isJsonString(item) ? item.slice(0, 120) : JSON.stringify(item).slice(0, 120)}`).join(" ") : "";
         parts.push(`▶ ${isJsonString(block["name"]) ? block["name"] : "tool"} ${summary}`);
       } else if (block["type"] === "tool_result") {
@@ -100,7 +105,7 @@ export function parseAgentLine(line: string): Omit<AgentEvent, "seq"> {
       }
     }
 
-    if (parts.length > 0) return withSession({ kind, text: parts.join("\n") });
+    if (parts.length > 0) return withSession(files.length > 0 ? { kind, text: parts.join("\n"), files } : { kind, text: parts.join("\n") });
   }
 
   return withSession({ kind: "raw", text: line.slice(0, 400) });
@@ -183,6 +188,21 @@ export class AgentRunner {
     this.runs.set(id, run);
 
     return run;
+  }
+
+  /** Runs `prompt` to its end and gives the result text (the agent's final answer), or the texts joined when there is no result event. */
+  runToResult(prompt: string, timeoutMs = 180_000): Promise<string> {
+    const run = this.start(prompt, null);
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => run.stop(), timeoutMs);
+      run.subscribe(0, (event) => {
+        if (event.kind !== "exit") return;
+        clearTimeout(timer);
+        const result = run.events.find((candidate) => candidate.kind === "result")?.text;
+        resolve(result && result.trim() !== "" ? result : run.events.filter((candidate) => candidate.kind === "text").map((candidate) => candidate.text).join("\n"));
+      });
+    });
   }
 
   stopAll(): void {

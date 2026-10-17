@@ -40,6 +40,8 @@ interface State {
   packages: boolean;
   /** The head of a review: a ref, or null for the working tree. */
   head: string | null;
+  /** The heads of a comparison (two or more branches, `WORKTREE` the working tree); empty: a plain review. */
+  heads: string[];
 }
 
 let views: ViewEntry[] = [];
@@ -55,7 +57,7 @@ function stateFromHash(): State {
   const params = new URLSearchParams(location.hash.slice(1));
   const depth = params.get("depth");
 
-  return { view: params.get("view") ?? "layers", depth: depth === null || depth === "" ? null : Number(depth), review: params.get("review") === "1", packages: params.get("packages") === "1", head: params.get("head") || null };
+  return { view: params.get("view") ?? "layers", depth: depth === null || depth === "" ? null : Number(depth), review: params.get("review") === "1", packages: params.get("packages") === "1", head: params.get("head") || null, heads: (params.get("heads") ?? "").split(",").filter((head) => head !== "") };
 }
 
 function setHash(state: State): void {
@@ -72,6 +74,8 @@ function setHash(state: State): void {
   if (base) params.set("base", base);
 
   if (state.head) params.set("head", state.head);
+
+  if (state.heads.length > 0) params.set("heads", state.heads.join(","));
   location.hash = params.toString();
 }
 
@@ -102,9 +106,9 @@ function siblingViews(view: string): { label: string; key: string }[] {
   const kind = view.slice(0, at);
   const rest = view.slice(at + 1);
 
-  if (kind === "module" || kind === "inside") return [{ label: "dependencies", key: `module:${rest}` }, { label: "inside: functions and calls", key: `inside:${rest}` }];
+  if (kind === "module" || kind === "inside" || kind === "contract" || kind === "cycle") return [{ label: "dependencies", key: `module:${rest}` }, { label: "inside: functions and calls", key: `inside:${rest}` }, { label: "contract: exports and their users", key: `contract:${rest}` }, { label: "its import cycle", key: `cycle:${rest}` }];
 
-  if (kind === "calls" || kind === "sequence") return [{ label: "call tree", key: `calls:${rest}` }, { label: "sequence of calls", key: `sequence:${rest}` }];
+  if (kind === "calls" || kind === "sequence" || kind === "path") return [{ label: "call tree", key: `calls:${rest}` }, { label: "sequence of calls", key: `sequence:${rest}` }, { label: "path to the storages", key: `path:${rest}` }];
 
   return [];
 }
@@ -132,20 +136,23 @@ function crumbsOf(view: string): { label: string; key: string }[] {
     const parts = rest.split("/");
 
     for (let depth = 1; depth <= parts.length; depth++) crumbs.push({ label: `${parts[depth - 1]}/`, key: `dir:${parts.slice(0, depth).join("/")}` });
-  } else if (kind === "module" || kind === "inside" || kind === "calls" || kind === "sequence") {
-    const module = kind === "module" || kind === "inside" ? rest : rest.slice(0, rest.indexOf("#"));
+  } else if (["module", "inside", "contract", "cycle", "calls", "sequence", "path", "type"].includes(kind)) {
+    const hash = rest.indexOf("#");
+    const module = hash === -1 ? rest : rest.slice(0, hash);
     const layer = layerOf(module);
 
     if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
     directories(module);
     crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: `module:${module}` });
 
-    if (kind === "inside") crumbs.push({ label: "inside", key: view });
+    if (kind === "inside" || kind === "contract" || kind === "cycle") crumbs.push({ label: kind, key: view });
 
-    if (kind === "calls" || kind === "sequence") crumbs.push({ label: rest.slice(rest.indexOf("#") + 1), key: `calls:${rest}` });
+    if (kind === "calls" || kind === "sequence" || kind === "path") crumbs.push({ label: rest.slice(hash + 1), key: `calls:${rest}` });
 
-    if (kind === "sequence") crumbs.push({ label: "sequence", key: view });
-  } else if (kind === "coverage") crumbs.push({ label: "coverage", key: view });
+    if (kind === "sequence" || kind === "path") crumbs.push({ label: kind, key: view });
+
+    if (kind === "type") crumbs.push({ label: `type ${rest.slice(hash + 1)}`, key: view });
+  } else if (kind !== "layers") crumbs.push({ label: kind, key: view });
 
   return crumbs;
 }
@@ -369,10 +376,11 @@ function renderViews(filter: string): void {
   viewsList.replaceChildren();
   const needle = filter.trim().toLowerCase();
   const groups: [string, ViewEntry["kind"][]][] = [
-    ["Overview", ["layers", "coverage"]],
+    ["Overview", ["layers", "coverage", "matrix", "cycles", "events", "tests", "hotspots", "packages", "timeline"]],
     ["Layers", ["layer"]],
     ["Directories", ["dir"]],
     ["Entry points (call flows)", ["calls"]],
+    ["Types (where they flow)", ["type"]],
     ["Modules", ["module"]],
   ];
 
@@ -406,12 +414,12 @@ function renderViews(filter: string): void {
 
 search.addEventListener("input", () => renderViews(search.value));
 
-function renderExports(view: string, base: string | null, head: string | null = null): void {
+function renderExports(view: string, base: string | null, head: string | null = null, heads: string[] = []): void {
   exportLinks.replaceChildren();
 
   for (const format of ["mermaid", "drawio", "excalidraw", "archimate", "json"]) {
     const link = document.createElement("a");
-    link.href = api.exportUrl(view, format, base, head);
+    link.href = api.exportUrl(view, format, base, head, heads);
     link.textContent = format;
     link.title = `Download the diagram as ${format}`;
     exportLinks.append(link);
@@ -514,7 +522,21 @@ async function load(): Promise<void> {
     headInput.value = state.head ?? "";
     element("commits").hidden = !state.review;
 
-    if (state.review) {
+    element("branches").hidden = !state.review;
+
+    if (state.review && state.heads.length > 0) {
+      // Several heads against the base: the comparison picture, every module marked with the heads that touched it.
+      const result = await api.compare(baseInput.value.trim() || null, state.heads);
+      const warnings = result.heads.filter((head) => head.diff.layerEdgesAdded.length > 0).length;
+      title.textContent = `${result.diagram.title}${warnings > 0 ? ` — ⚠ ${warnings} head${warnings === 1 ? "" : "s"} add a layer dependency` : ""}`;
+      diagramMarkdown = result.markdown;
+      nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
+      await ensureCanvas(result.elements);
+      reason.textContent = result.diagram.reason ?? "";
+      renderExports("compare", baseInput.value.trim() || null, null, state.heads);
+      element("commits").hidden = true;
+      void loadBranches(state);
+    } else if (state.review) {
       const result = await api.review(baseInput.value.trim() || null, state.head);
       title.textContent = `${result.diagram.title} — ${result.diff.changedFiles.length} source files changed${result.diff.layerEdgesAdded.length > 0 ? ` — ⚠ ${result.diff.layerEdgesAdded.length} new layer dependencies` : ""}`;
       diagramMarkdown = result.markdown;
@@ -523,8 +545,9 @@ async function load(): Promise<void> {
       reason.textContent = result.diagram.reason ?? "";
       renderExports(`review:${result.diff.base}`, baseInput.value.trim() || null, state.head);
       void loadCommits(state);
+      void loadBranches(state);
     } else {
-      const result = await api.scene(state.view, state.depth, state.packages);
+      const result = await api.scene(state.view, state.depth, state.packages, state.view === "timeline" ? baseInput.value.trim() || null : null, state.view === "timeline" ? state.head : null);
       title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
@@ -579,6 +602,10 @@ function textarea(label: string, value: string, placeholder: string): HTMLTextAr
   return field;
 }
 
+let lastFlow: import("./api.ts").FlowResponse["flow"] | null = null;
+let mockInput: HTMLTextAreaElement | null = null;
+let mockStorages: { id: string; field: HTMLTextAreaElement }[] = [];
+
 async function loadFlow(): Promise<void> {
   const state = stateFromHash();
   flowMocks.replaceChildren();
@@ -587,9 +614,12 @@ async function loadFlow(): Promise<void> {
 
   if (element("flow-tab").hidden) return;
   const { flow } = await api.flow(state.view, state.depth);
+  lastFlow = flow;
   const entryId = state.view.slice("calls:".length);
   const input = textarea(`Mock input of ${entryId.slice(entryId.indexOf("#") + 1)} (JSON object: a key per parameter)`, flow.input ?? "", '{"request": {"total": 42}}');
   const storageFields = flow.storages.map((storage) => ({ id: storage.id, field: textarea(`Mock content of ${storage.module} (${storage.storage})`, storage.content ?? "", '{"rows": [{"id": 1}]}') }));
+  mockInput = input;
+  mockStorages = storageFields;
   const apply = document.createElement("button");
   apply.textContent = "apply mocks";
   apply.title = "Save the mocks with the drawing of this view and carry the values through the steps";
@@ -607,6 +637,7 @@ async function loadFlow(): Promise<void> {
   for (const step of flow.steps) {
     const box = document.createElement("div");
     box.className = `step${step.storage ? " storage" : ""}`;
+    box.dataset["id"] = step.id;
     box.style.marginLeft = `${step.depth * 14}px`;
     const head = document.createElement("div");
     const name = document.createElement("strong");
@@ -640,6 +671,56 @@ async function loadFlow(): Promise<void> {
   if (flow.steps.length === 0) flowSteps.textContent = "No such function in the graph.";
 }
 
+/** Mocks for the entry and the storages: the agent with the description when there is one, else the types; the fields are filled, not saved. */
+async function generateMocks(): Promise<void> {
+  const state = stateFromHash();
+  const note = element<HTMLInputElement>("mock-description");
+
+  if (!state.view.startsWith("calls:") || !mockInput) return;
+  note.disabled = true;
+  flowSteps.prepend(Object.assign(document.createElement("div"), { className: "muted", id: "mock-note", textContent: "generating mocks…" }));
+
+  try {
+    const result = await api.mocks(state.view, note.value);
+    mockInput.value = JSON.stringify(result.input, null, 2);
+
+    for (const { id, field } of mockStorages) if (result.storages[id] !== undefined) field.value = JSON.stringify(result.storages[id], null, 2);
+    element("mock-note").textContent = `mocks from ${result.source}${result.note ? ` (${result.note})` : ""}; apply to carry them through the steps`;
+  } catch (error) {
+    element("mock-note").textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    note.disabled = false;
+  }
+}
+
+/** Plays the steps of the flow on the diagram: each step's shape lights up in turn, its row in the panel too, as a run would pass through them. */
+async function playFlow(): Promise<void> {
+  const state = stateFromHash();
+
+  if (!lastFlow || !canvas || !state.view.startsWith("calls:")) return;
+  const button = element<HTMLButtonElement>("flow-play");
+  button.disabled = true;
+  showTab("flow");
+
+  try {
+    for (const step of lastFlow.steps) {
+      canvas.highlight([step.id]);
+
+      for (const row of flowSteps.querySelectorAll<HTMLElement>(".step")) row.classList.toggle("playing", row.dataset["id"] === step.id);
+      flowSteps.querySelector<HTMLElement>(".step.playing")?.scrollIntoView({ block: "nearest" });
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+  } finally {
+    canvas.highlight([]);
+
+    for (const row of flowSteps.querySelectorAll<HTMLElement>(".step")) row.classList.remove("playing");
+    button.disabled = false;
+  }
+}
+
+element<HTMLButtonElement>("mock-generate").addEventListener("click", () => void generateMocks());
+element<HTMLButtonElement>("flow-play").addEventListener("click", () => void playFlow());
+
 // ── The Chat tab: the task drawn on the view, and the agent that does it ─────
 
 const taskField = element<HTMLTextAreaElement>("task");
@@ -659,6 +740,114 @@ function appendEvent(kind: string, text: string): void {
   transcript.scrollTop = transcript.scrollHeight;
 }
 
+/** The shapes of the current diagram that stand for `files` (a path, or its end), to light while the agent works on them. */
+function shapesOfFiles(files: readonly string[]): string[] {
+  const ids: string[] = [];
+
+  for (const node of nodes.values()) {
+    const file = node.ref?.file;
+
+    if (!file) continue;
+
+    if (files.some((candidate) => candidate === file || candidate.endsWith(`/${file}`))) ids.push(node.id);
+  }
+
+  return ids;
+}
+
+/** Tags in a text (@module:…, @fn:…, @layer:…, @dir:…, @flow:…, @type:…) become their context for the agent. */
+async function withContext(prompt: string): Promise<string> {
+  if (!/@(module|fn|layer|dir|flow|type):\S/.test(prompt)) return prompt;
+
+  try {
+    const context = await api.expand(prompt);
+
+    return context ? `${prompt}\n\n${context}` : prompt;
+  } catch {
+    return prompt;
+  }
+}
+
+// `@` in the task or the follow-up opens suggestions; Enter or a click inserts the tag.
+const suggest = element<HTMLUListElement>("tag-suggest");
+let suggestFor: HTMLTextAreaElement | HTMLInputElement | null = null;
+let suggestIndex = 0;
+
+function tagAtCursor(field: HTMLTextAreaElement | HTMLInputElement): { start: number; query: string } | null {
+  const upTo = field.value.slice(0, field.selectionStart ?? field.value.length);
+  const match = upTo.match(/@([\w:/#.\-]*)$/);
+
+  return match ? { start: upTo.length - match[0].length, query: match[1] ?? "" } : null;
+}
+
+async function showSuggestions(field: HTMLTextAreaElement | HTMLInputElement): Promise<void> {
+  const at = tagAtCursor(field);
+
+  if (!at) {
+    suggest.hidden = true;
+
+    return;
+  }
+
+  const { tags } = await api.tags(at.query);
+  suggest.replaceChildren();
+  suggestFor = field;
+  suggestIndex = 0;
+
+  for (const [i, tag] of tags.entries()) {
+    const item = document.createElement("li");
+    item.className = i === 0 ? "active" : "";
+    const code = document.createElement("code");
+    code.textContent = tag.tag;
+    item.append(code, tag.title);
+    item.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      insertTag(tag.tag);
+    });
+    suggest.append(item);
+  }
+
+  suggest.hidden = tags.length === 0;
+  const box = field.getBoundingClientRect();
+  const parent = element("chat").getBoundingClientRect();
+  suggest.style.left = `${box.left - parent.left}px`;
+  suggest.style.top = `${box.bottom - parent.top}px`;
+}
+
+function insertTag(tag: string): void {
+  if (!suggestFor) return;
+  const at = tagAtCursor(suggestFor);
+
+  if (!at) return;
+  const after = suggestFor.value.slice(suggestFor.selectionStart ?? suggestFor.value.length);
+  suggestFor.value = `${suggestFor.value.slice(0, at.start)}${tag} ${after}`;
+  const caret = at.start + tag.length + 1;
+  suggestFor.setSelectionRange(caret, caret);
+  suggest.hidden = true;
+  suggestFor.focus();
+}
+
+for (const field of [element<HTMLTextAreaElement>("task"), element<HTMLInputElement>("followup")]) {
+  field.addEventListener("input", () => void showSuggestions(field));
+  field.addEventListener("blur", () => setTimeout(() => (suggest.hidden = true), 150));
+  field.addEventListener("keydown", (event: Event) => {
+    if (suggest.hidden) return;
+    const key = (event as KeyboardEvent).key;
+    const items = [...suggest.querySelectorAll("li")];
+
+    if (key === "ArrowDown" || key === "ArrowUp") {
+      event.preventDefault();
+      suggestIndex = (suggestIndex + (key === "ArrowDown" ? 1 : items.length - 1)) % Math.max(1, items.length);
+      items.forEach((item, i) => item.classList.toggle("active", i === suggestIndex));
+    } else if (key === "Enter" || key === "Tab") {
+      event.preventDefault();
+      const code = items[suggestIndex]?.querySelector("code")?.textContent;
+
+      if (code) insertTag(code);
+    } else if (key === "Escape") suggest.hidden = true;
+  });
+}
+
 async function readTask(): Promise<void> {
   const state = stateFromHash();
 
@@ -672,8 +861,8 @@ async function readTask(): Promise<void> {
   runState.textContent = drawn ? "" : "no drawing saved for this view: edit, draw, save";
 }
 
-function runTask(prompt: string, resume: string | null): void {
-  if (!agentName || prompt.trim() === "") return;
+function runTask(written: string, resume: string | null): void {
+  if (!agentName || written.trim() === "") return;
   const state = stateFromHash();
   runButton.disabled = true;
   runButton.classList.add("running");
@@ -682,9 +871,11 @@ function runTask(prompt: string, resume: string | null): void {
   runState.textContent = `running ${agentName}…`;
 
   if (!resume) transcript.replaceChildren();
-  appendEvent("you", `▸ ${prompt.length > 300 ? `${prompt.slice(0, 300)}…` : prompt}`);
-  void api
-    .runAgent(state.view, prompt, resume)
+  appendEvent("you", `▸ ${written.length > 300 ? `${written.slice(0, 300)}…` : written}`);
+  const touched = new Set<string>();
+  let lightTimer: ReturnType<typeof setTimeout> | null = null;
+  void withContext(written)
+    .then((prompt) => api.runAgent(state.view, prompt, resume))
     .then(({ id, task }) => {
       runState.textContent = `running ${agentName} (${id}); task saved to ${task}`;
       const run = { id, sessionId: resume, close: () => {} };
@@ -695,6 +886,20 @@ function runTask(prompt: string, resume: string | null): void {
           if (event.sessionId) run.sessionId = event.sessionId;
 
           if (event.kind !== "init") appendEvent(event.kind, event.text);
+
+          // The shapes of the files the agent touches light up as it works, like a run passing through them.
+          if (event.files && canvas) {
+            const ids = shapesOfFiles(event.files);
+
+            for (const id of ids) touched.add(id);
+
+            if (ids.length > 0) {
+              canvas.highlight(ids);
+
+              if (lightTimer) clearTimeout(lightTimer);
+              lightTimer = setTimeout(() => canvas?.highlight([...touched], "#ffb74d"), 1200);
+            }
+          }
         },
         () => {
           runButton.disabled = false;
@@ -702,6 +907,7 @@ function runTask(prompt: string, resume: string | null): void {
           stopButton.disabled = true;
           followup.disabled = run.sessionId === null;
           runState.textContent = `${agentName} finished; the diagram is reloaded — compare with review`;
+          canvas?.highlight([]);
           // The agent changed the code: the live diagram and the views follow.
           void loadViews().then(() => load());
           void loadTasks();
@@ -787,6 +993,84 @@ element<HTMLButtonElement>("commit-next").addEventListener("click", () => {
 });
 headInput.addEventListener("change", () => {
   if (stateFromHash().review) setHash({ ...stateFromHash(), head: headInput.value.trim() || null });
+});
+
+// ── The branches: a base and any number of heads to compare ────────────────
+
+let branchesLoaded = false;
+
+async function loadBranches(state: State): Promise<void> {
+  const note = element<HTMLSpanElement>("compare-note");
+
+  try {
+    const result = await api.branches();
+    const baseSelect = element<HTMLSelectElement>("base-select");
+    const list = element<HTMLSpanElement>("head-list");
+
+    if (!branchesLoaded) {
+      baseSelect.replaceChildren();
+      const own = document.createElement("option");
+      own.value = "";
+      own.textContent = result.base ? `${result.base} (default)` : "merge-base";
+      baseSelect.append(own);
+
+      for (const branch of result.branches) {
+        const option = document.createElement("option");
+        option.value = branch.name;
+        option.textContent = `${branch.name}${branch.remote ? " (remote)" : ""}`;
+        baseSelect.append(option);
+      }
+
+      list.replaceChildren();
+      const worktree = document.createElement("label");
+      worktree.className = "current";
+      const tick = document.createElement("input");
+      tick.type = "checkbox";
+      tick.value = "WORKTREE";
+      worktree.append(tick, ` working tree${result.current ? ` (${result.current})` : ""}`);
+      list.append(worktree);
+
+      for (const branch of result.branches) {
+        const label = document.createElement("label");
+        label.className = `${branch.current ? "current" : ""} ${branch.remote ? "remote" : ""}`.trim();
+        label.title = `${branch.sha} ${branch.date} ${branch.subject}`;
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.value = branch.name;
+        label.append(box, ` ${branch.name}`);
+        list.append(label);
+      }
+
+      branchesLoaded = true;
+    }
+
+    baseSelect.value = baseInput.value.trim();
+    const ticked = new Set(state.heads.length > 0 ? state.heads : ["WORKTREE"]);
+
+    for (const box of list.querySelectorAll<HTMLInputElement>("input")) box.checked = ticked.has(box.value);
+    note.textContent = state.heads.length > 1 ? `${state.heads.length} heads against ${baseInput.value.trim() || result.base || "the merge-base"}` : "tick two or more heads to compare branches";
+  } catch (error) {
+    note.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+element<HTMLSelectElement>("base-select").addEventListener("change", () => {
+  baseInput.value = element<HTMLSelectElement>("base-select").value;
+  setHash(stateFromHash());
+});
+element<HTMLButtonElement>("compare").addEventListener("click", () => {
+  const heads = [...element("head-list").querySelectorAll<HTMLInputElement>("input:checked")].map((box) => box.value);
+
+  if (heads.length === 0) {
+    element("compare-note").textContent = "tick at least one head";
+
+    return;
+  }
+
+  // One head that is the working tree is the plain review; anything else is a comparison.
+  if (heads.length === 1 && heads[0] === "WORKTREE") setHash({ ...stateFromHash(), review: true, head: null, heads: [] });
+  else if (heads.length === 1) setHash({ ...stateFromHash(), review: true, head: heads[0]!, heads: [] });
+  else setHash({ ...stateFromHash(), review: true, head: null, heads });
 });
 
 // ── Theme ────────────────────────────────────────────────────────────────────

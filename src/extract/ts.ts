@@ -42,8 +42,8 @@ const MAX_CALLEE = 80;
 /** Members whose first string argument framework adapters read: the global route prefix (`CallFact.literal`). */
 const LITERAL_CALLS = new Set(["setGlobalPrefix"]);
 
-/** Members whose first argument names an event (`CallFact.nameArg`): NestJS `EventEmitter2.emit('order.created')`. */
-const NAME_ARG_CALLS = new Set(["emit", "emitAsync"]);
+/** Members whose first argument names an event (`CallFact.nameArg`): emitters (`emit('order.created')`, `publish`, `dispatch`) and listeners (`on`, `once`, `addEventListener`, `subscribe`). */
+const NAME_ARG_CALLS = new Set(["emit", "emitAsync", "publish", "dispatch", "trigger", "fire", "on", "once", "addListener", "addEventListener", "subscribe", "listen"]);
 
 /** The facts of one TypeScript or JavaScript file: what the graph reads to build nodes, edges and holes. */
 export function extractTs(path: string, src: string): Promise<FileFacts> {

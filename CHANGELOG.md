@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 — 2026-10-17
+
+- Ten views that each answer one architectural question: `cycles`/`cycle:`, `matrix`, `type:`, `path:`, `contract:`, `events`, `tests`, `hotspots`, `packages`, `timeline`.
+- Branches: a branch bar with the base (develop, main or master by default) and any number of heads; `compare` draws several heads against one base, every module labelled with what each head did; `archdiff branches` and `archdiff compare --heads a,b,WORKTREE` in the terminal.
+- Flow: mocks generated from the types or by the agent from a description; ▶ play lights the steps on the diagram.
+- Chat: `@module:` / `@fn:` / `@layer:` / `@dir:` / `@flow:` / `@type:` tags with suggestions, expanded into context for the agent; the shapes of files the agent touches light up while it works.
+- The extractor records the event name of listeners (`on`, `subscribe`, `addEventListener`…) beside emitters.
+
 ## 0.1.1 — 2026-10-17
 
 - Two views: `inside:<module>` (its functions and the calls among them, modules as lanes) and `sequence:<fn>` (the calls from a function as a sequence diagram, Mermaid `sequenceDiagram` in the Markdown); a second tap on a module opens its inside; a select beside the title switches between the pictures of one subject.

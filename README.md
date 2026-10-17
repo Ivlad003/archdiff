@@ -34,6 +34,16 @@ Exit code `2` is a wrong invocation or an I/O error.
 - **module:path** — what the module imports (files and packages) and what imports it; `--depth 2` goes one step further.
 - **inside:path** — the functions, classes and methods of a module and the calls among them, each module a lane; `--depth 1` (default) adds the functions of other modules they call. What a file does, as a map.
 - **sequence:path#fn** — the calls from a function as a sequence diagram: the modules on the way across the top, every call a numbered message in the order the code makes them (Mermaid `sequenceDiagram` in the Markdown).
+- **path:path#fn** — from an entry point to the storages only: every branch that leads to no store, database or cache is pruned.
+- **type:path#Type** — where a type flows: the functions that produce it, consume it or transform it, storages marked.
+- **contract:path** — the exports of a module and who uses each from outside; an export nothing uses says so.
+- **cycles** / **cycle:path** — modules importing each other, one lane per strongly connected component.
+- **matrix** — the dependency structure matrix of the layers: rows import columns, counts in the cells, imports against the layer order in red.
+- **events** — emitters → event names → listeners (`emit`/`publish`/`dispatch` and `on`/`subscribe`/`addEventListener` with a literal name).
+- **tests** — which modules the test files import; a module no test imports is marked.
+- **hotspots** — every module as a box sized by its lines and shaded by the calls into it from other modules.
+- **packages** — the package.json files of a monorepo as a system: declared dependencies, imports between packages, and imports no package.json admits.
+- **timeline** — the drift of the architecture commit by commit as bars (`--base`, `--head`), red when a commit coupled two layers.
 - **calls:path#fn** — the call tree from a function, `--depth 3` by default; a hexagon is a call archdiff could not follow, with the reason. Double-click a function on the page to open its own tree.
 - **coverage** — the modules with blind spots, biggest first.
 
@@ -45,11 +55,13 @@ One canvas, Excalidraw, in its hand-drawn style. Reading: tap a shape for its co
 
 Drawing (`✎ edit`, or `e`): move shapes, draw with the pencil, write notes, take a PNG or SVG of the drawing or of the selected shapes. `save` writes `.archdiff/layouts/<view>.json`; the live diagram and every export then follow the saved places, and `re-layout` merges a fresh picture of the code into the drawing — shapes that still exist keep their place, your strokes stay, stale shapes go. Commit the layouts to share them in a pull request, or ignore `.archdiff/` to keep them local.
 
-The Markdown panel renders (a `raw` toggle shows the text to copy); `file:line` in it opens the code. The Flow tab, on a call-flow view, lists the steps in call order with their parameter and return types and the storages on the way (modules named `db`, `store`, `repository`, `cache`…, or importing `pg`, `prisma`, `redis`, `mongoose`…). Attach a mock input to the entry and mock contents to the storages: values are carried to parameters and properties of the same name, so the flow reads with data in it. Nothing is run; what reaches a step by another route is not claimed.
+The Markdown panel renders (a `raw` toggle shows the text to copy); `file:line` in it opens the code. The Flow tab, on a call-flow view, lists the steps in call order with their parameter and return types and the storages on the way (modules named `db`, `store`, `repository`, `cache`…, or importing `pg`, `prisma`, `redis`, `mongoose`…). Attach a mock input to the entry and mock contents to the storages — typed by hand, or *generate mocks* from the types, or from a description of the scenario when an agent is configured — and values are carried to parameters and properties of the same name, so the flow reads with data in it. *▶ play* lights the steps on the diagram one after another, like a run. Nothing is run; what reaches a step by another route is not claimed.
 
-## Reviewing a branch
+In the Chat tab, `@` names what the diagrams know — `@module:src/lib/orders.ts`, `@fn:src/lib/orders.ts#placeOrder`, `@layer:db`, `@dir:src/lib`, `@flow:src/routes/checkout.tsx#action`, `@type:src/lib/orders.ts#Order` — with suggestions as you type; each tag is sent to the agent with its context (the shape's Markdown: declarations, calls, callers, code). While the agent works, the shapes of the files it reads or edits light up on the diagram.
 
-`review` on the page takes a base and a head (a ref, or the working tree). In review mode a bar lists the commits from the base to the head; pick one, or step with ‹ ›, to see that commit's own change against the one before it. A tap on a shape in a review shows the commits that touched its file. In the terminal, `archdiff history` prints the same walk as a table, and [docs/ci.md](docs/ci.md) shows the GitHub Action that posts the review on every pull request.
+## Reviewing branches
+
+`review` on the page opens the branch bar: a base (develop, main or master by default, or any branch) and the heads — the working tree, the current branch, any other local or remote branch. One head is the review; tick two or more and `compare` draws every module any head touched, labelled with what each head did to it (`+ feature-a  ~ feature-b`, or "every head"), the imports each head added or removed labelled with the head, and a table per head with the layer couplings it introduced. A bar below lists the commits of the range; pick one, or step with ‹ ›, to see that commit's own change against the one before it. A tap on a shape in a review shows the commits that touched its file. In the terminal: `archdiff branches`, `archdiff compare --base develop --heads feature-a,feature-b,WORKTREE`, `archdiff history`; [docs/ci.md](docs/ci.md) shows the GitHub Action that posts the review on every pull request.
 
 ## From a drawing to code: the Chat tab
 

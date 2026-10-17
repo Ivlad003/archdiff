@@ -275,3 +275,122 @@ export function flowMarkdown(flow: DataFlow): string {
 
   return `${lines.join("\n")}\n`;
 }
+
+/** A JSON value for a TypeScript-ish type, for a mock: `string` → "example", `number` → 1, an object literal type field by field, an array empty, a union its first literal. */
+export function mockFromType(type: string, name = "value"): unknown {
+  const text = type.trim().replace(/\s*\|\s*(undefined|null)$/, "");
+
+  // A union: its first member stands for it (`'a' | 'b'` → "a").
+  if (text.includes("|") && !/^\{/.test(text)) return mockFromType(text.split("|")[0]!, name);
+
+  if (/^['"`]/.test(text)) return text.replace(/^['"`]|['"`]$/g, "");
+
+  if (/^(string|String)$/.test(text)) return /id$/i.test(name) ? `${name.replace(/Id$|_id$/i, "") || "id"}-1` : "example";
+
+  if (/^(number|bigint|Number)$/.test(text)) return 1;
+
+  if (/^(boolean|Boolean)$/.test(text)) return true;
+
+  if (/^(Date)$/.test(text)) return "2026-01-01T00:00:00.000Z";
+
+  if (/\[\]$/.test(text) || /^(Array|ReadonlyArray|Set)</.test(text)) return [];
+
+  if (/^(Record|Map)</.test(text)) return {};
+
+  if (/^\{/.test(text)) {
+    // `{ a: T; b?: U }`: shallow, one level of nesting kept by the balanced split.
+    const inside = text.slice(1, text.lastIndexOf("}"));
+    const out: Record<string, unknown> = {};
+    let depth = 0;
+    let current = "";
+    const fields: string[] = [];
+
+    for (const char of inside) {
+      if (char === "{" || char === "(" || char === "<") depth++;
+      else if (char === "}" || char === ")" || char === ">") depth--;
+
+      if ((char === ";" || char === ",") && depth === 0) {
+        fields.push(current);
+        current = "";
+      } else current += char;
+    }
+
+    fields.push(current);
+
+    for (const field of fields) {
+      const at = field.indexOf(":");
+
+      if (at === -1) continue;
+      const key = field.slice(0, at).replace(/\?$/, "").trim();
+
+      if (key) out[key] = mockFromType(field.slice(at + 1), key);
+    }
+
+    return out;
+  }
+
+  if (/^(void|undefined|null|never|unknown|any)$/.test(text)) return null;
+
+  // A named type: an object with the name as a hint, so the user sees what to fill.
+  return { [`<${text}>`]: "fill in" };
+}
+
+/** Mocks from the types alone: the entry's parameters as an object, every storage as `{ "rows": [] }`. */
+export function mocksFromTypes(flow: DataFlow): { input: Record<string, unknown>; storages: Record<string, unknown> } {
+  const entry = flow.steps[0];
+  const input: Record<string, unknown> = {};
+
+  for (const param of entry?.params ?? []) {
+    if (param.name.startsWith("{")) {
+      const object = mockFromType(param.type, param.name);
+
+      if (object && typeof object === "object" && !Array.isArray(object)) Object.assign(input, object);
+    } else input[param.name] = mockFromType(param.type, param.name);
+  }
+
+  const storages: Record<string, unknown> = {};
+
+  for (const storage of flow.storages) storages[storage.module] = { rows: [] };
+
+  return { input, storages };
+}
+
+/** What to ask an agent for: JSON mocks for the entry's parameters and the storages, shaped by the types, following the description. */
+export function mockPrompt(flow: DataFlow, description: string): string {
+  const entry = flow.steps[0];
+  const lines = [
+    `Produce realistic mock data for a run of \`${flow.entry}\`, as one JSON object and nothing else (no prose, no code fence).`,
+    "",
+    "Shape:",
+    '{ "input": { <one key per parameter of the entry> }, "storages": { "<module path>": <what that storage holds before the run, as JSON> } }',
+    "",
+    "Parameters of the entry:",
+    ...(entry?.params.map((param) => `- ${param.name}: ${param.type}`) ?? ["- (none)"]),
+    "",
+    "Storages on the way (module — what it is):",
+    ...(flow.storages.length > 0 ? flow.storages.map((storage) => `- ${storage.module} — ${storage.storage}`) : ["- (none)"]),
+    "",
+    "Steps the run goes through, with their parameter types, to make the values consistent:",
+    ...flow.steps.slice(0, 20).map((step) => `- ${step.name}(${step.params.map((param) => `${param.name}: ${param.type}`).join(", ")})${step.returns ? ` → ${step.returns}` : ""} — ${step.module}:${step.line}`),
+  ];
+
+  if (description.trim() !== "") lines.push("", "The user describes the scenario as:", description.trim());
+
+  return lines.join("\n");
+}
+
+/** The JSON object in an agent's answer, when there is one. */
+export function jsonInAnswer(text: string): { input?: Record<string, unknown>; storages?: Record<string, unknown> } | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+
+  if (start === -1 || end <= start) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as { input?: Record<string, unknown>; storages?: Record<string, unknown> }) : null;
+  } catch {
+    return null;
+  }
+}

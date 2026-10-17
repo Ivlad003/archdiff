@@ -14,7 +14,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import type { FileFacts } from "./extract/facts.ts";
 
 /** Bumped when the extractor changes what it records: every cached entry is then stale. */
-export const EXTRACTOR_VERSION = 2;
+export const EXTRACTOR_VERSION = 3;
 
 export const CACHE_DIRECTORY = ".archdiff";
 

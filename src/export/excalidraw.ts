@@ -4,6 +4,7 @@
 // derive from the archdiff IDs, so the same diagram gives the same file.
 
 import type { Diagram, DiagramEdge, DiagramNode } from "../diagram.ts";
+import { heatColour } from "./drawio.ts";
 
 interface ExcalidrawElement {
   id: string;
@@ -88,10 +89,12 @@ function text(id: string, container: string | null, x: number, y: number, width:
 }
 
 function shapeOf(node: DiagramNode): { type: string; fill: string; stroke: string; style: ExcalidrawElement["strokeStyle"]; width: number } {
-  const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "external" || node.kind === "more" ? "#757575" : "#1e1e1e";
-  const fill = node.kind === "layer" || node.kind === "participant" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "more" ? "#f5f5f5" : "#ffffff";
+  const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
+  const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : "#ffffff";
+  // Heat darkens the fill; a diff mark keeps its own colour.
+  const fill = node.heat !== undefined && node.heat > 0 && !node.diff ? heatColour(node.heat) : plain;
 
-  return { type: node.kind === "start" || node.kind === "external" ? "ellipse" : node.kind === "hole" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.kind === "hole" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
+  return { type: node.kind === "start" || node.kind === "external" || node.kind === "event" ? "ellipse" : node.kind === "hole" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.kind === "hole" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
 }
 
 /** The view a shape opens on the page (`customData.view`, read by the page on a second tap); not an Excalidraw link, whose icon would clutter every shape. */
@@ -247,9 +250,10 @@ export function toExcalidraw(diagram: Diagram): string {
     if (node.ref?.line !== undefined) customData["line"] = node.ref.line;
     elements.push({ ...base(node.id, look.type, node.x, node.y, node.w, node.h), backgroundColor: look.fill, strokeColor: look.stroke, strokeStyle: look.style, strokeWidth: look.width, roundness: look.type === "rectangle" && node.kind !== "layer" ? { type: 3 } : null, boundElements: bound, link: null, customData: { ...customData, view: viewLink(node) ?? "" } });
     const label = wrapLabel(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
-    const fontSize = node.kind === "layer" ? 15 : 12;
+    const fontSize = node.kind === "layer" ? 15 : node.kind === "cell" ? 10 : 12;
     const lines = label.split("\n").length;
-    elements.push({ ...text(`${node.id}:text`, node.id, node.x + 6, node.y + node.h / 2 - (lines * fontSize * 1.25) / 2, node.w - 12, lines * fontSize * 1.25, label, fontSize), customData: { archdiff: "label" } });
+    const dark = node.heat !== undefined && node.heat > 0.55 && !node.diff;
+    elements.push({ ...text(`${node.id}:text`, node.id, node.x + 6, node.y + node.h / 2 - (lines * fontSize * 1.25) / 2, node.w - 12, lines * fontSize * 1.25, label, fontSize), ...(dark ? { strokeColor: "#ffffff" } : {}), customData: { archdiff: "label" } });
     centre.set(node.id, { x: node.x + node.w / 2, y: node.y + node.h / 2 });
   }
 

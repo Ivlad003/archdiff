@@ -25,6 +25,18 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis): string {
   if (diagram.reason) lines.push(`_${diagram.reason}_`, "");
   lines.push(`${diagram.nodes.length} shapes, ${diagram.edges.length} lines; ${analysis.files.length} files analysed.`, "", "```mermaid", toMermaid(diagram).trimEnd(), "```", "");
 
+  // The matrix reads as a table: rows import columns.
+  if (diagram.view === "matrix") {
+    const layers = diagram.nodes.filter((node) => node.id.startsWith("row:")).map((node) => node.id.slice(4));
+    const cell = new Map(diagram.nodes.filter((node) => node.id.startsWith("cell:")).map((node) => [node.id.slice(5), node]));
+    lines.push(`| imports → | ${layers.join(" | ")} |`, `| --- | ${layers.map(() => "---").join(" | ")} |`);
+
+    for (const from of layers) lines.push(`| **${from}** | ${layers.map((to) => (from === to ? "·" : cell.get(`${from}>${to}`)?.diff === "removed" ? `**${cell.get(`${from}>${to}`)!.label}** ⚠` : cell.get(`${from}>${to}`)?.label || "")).join(" | ")} |`);
+    lines.push("", "A cell in bold with ⚠ is an import against the layer order (a lower layer importing a higher one).");
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
   // A sequence reads as a numbered list: who calls what, in order, with the line of each call.
   if (diagram.sequence) {
     lines.push("## Messages", "");

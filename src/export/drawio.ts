@@ -24,10 +24,23 @@ function style(node: DiagramNode): string {
     more: "rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=1 3;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontColor=#616161;",
     participant: "rounded=0;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#455a64;fontStyle=1;",
     anchor: "shape=ellipse;fillColor=none;strokeColor=none;",
+    event: "ellipse;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#f9a825;",
+    cell: "rounded=0;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#9e9e9e;fontSize=10;",
+    package: "rounded=0;whiteSpace=wrap;html=1;fillColor=#e8eaf6;strokeColor=#3949ab;fontStyle=1;",
   };
+  // The heat of a shape darkens its fill (a hotspot's calls in, a matrix cell's count).
+  const heat = node.heat !== undefined && node.heat > 0 && !node.diff ? `fillColor=${heatColour(node.heat)};` : "";
   const mark = node.diff ? `strokeColor=${DIFF_STROKE[node.diff]};strokeWidth=3;${node.diff === "removed" ? "dashed=1;" : ""}` : "";
 
-  return base[node.kind] + mark;
+  return base[node.kind] + heat + mark;
+}
+
+/** A fill from near white to a deep blue by `heat` 0–1. */
+export function heatColour(heat: number): string {
+  const t = Math.max(0, Math.min(1, heat));
+  const channel = (from: number, to: number): string => Math.round(from + (to - from) * t).toString(16).padStart(2, "0");
+
+  return `#${channel(0xf7, 0x1e)}${channel(0xf9, 0x5a)}${channel(0xfc, 0x9e)}`;
 }
 
 export function toDrawio(diagram: Diagram): string {

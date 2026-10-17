@@ -174,3 +174,30 @@ test("the task drawn on a view is read from its saved scene, and the agent runs 
   assert.ok(more.includes("resumed"));
   assert.equal((await fetch(`${base}/api/agent/stop?id=nothing`, { method: "POST" })).status, 404);
 });
+
+test("branches and a multi-head comparison through the API", async () => {
+  // The scratch copy is no git repository: the branch list says so plainly.
+  const branches = await fetch(`${base}/api/branches`);
+  assert.equal(branches.status, 400);
+  assert.ok(((await branches.json()) as { error: string }).error.includes("not a git repository"));
+  const compare = await fetch(`${base}/api/compare?heads=a,b`);
+  assert.equal(compare.status, 400);
+});
+
+test("chat tags are suggested and expanded into context; mocks come from the types when the agent gives no JSON", async () => {
+  const tags = await getJson<{ tags: { tag: string; title: string }[] }>("/api/tags?q=orders");
+  assert.ok(tags.tags.some((tag) => tag.tag === "@module:src/lib/orders.ts"), JSON.stringify(tags.tags.slice(0, 5)));
+  assert.ok(tags.tags.some((tag) => tag.tag === "@fn:src/lib/orders.ts#placeOrder"));
+  assert.ok(tags.tags.some((tag) => tag.tag === "@type:src/lib/orders.ts#Order"));
+  const expanded = await fetch(`${base}/api/expand`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Refactor @fn:src/lib/orders.ts#placeOrder and keep @layer:db small." }) });
+  const context = ((await expanded.json()) as { context: string }).context;
+  assert.ok(context.startsWith("## Context from the diagrams"), context.slice(0, 80));
+  assert.ok(context.includes("### @fn:src/lib/orders.ts#placeOrder") && context.includes("## Calls"), context);
+  assert.ok(context.includes("### @layer:db") && context.includes("src/db/store.ts"), context);
+  // The fake agent answers "Done.", no JSON: the mocks fall back to the types of the signature.
+  const mocks = await fetch(`${base}/api/flow/mocks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "calls:src/lib/orders.ts#placeOrder", description: "an order of 42" }) });
+  const body = (await mocks.json()) as { source: string; input: Record<string, unknown>; storages: Record<string, unknown> };
+  assert.equal(body.source, "types");
+  assert.deepEqual(body.input, { id: "id-1", total: 1 });
+  assert.deepEqual(Object.keys(body.storages), ["src/db/store.ts"]);
+});

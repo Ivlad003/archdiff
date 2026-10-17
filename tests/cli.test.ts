@@ -40,7 +40,7 @@ test("views list the layers of archdiff.json, the modules, the route and hook en
   assert.ok(keys.includes("module:src/lib/orders.ts"));
   assert.ok(stdout.includes("calls:src/routes/checkout.tsx#action\taction (src/routes/checkout.tsx) — route checkout.tsx: action"));
   assert.ok(stdout.includes("hook dw.ocapi.shop.basket.modifyGETResponse"));
-  assert.equal(keys[keys.length - 1], "coverage");
+  assert.ok(keys.includes("coverage") && keys.includes("matrix") && keys.includes("timeline"));
 });
 
 test("the layers diagram follows tsconfig paths and counts the imports between layers", () => {
@@ -513,4 +513,138 @@ test("inside shows a module's functions and their calls in module lanes; sequenc
   assert.ok(json.nodes.some((node) => node.kind === "participant"));
   assert.ok(json.edges.every((edge) => edge.kind === "lifeline" || edge.kind === "message") && json.edges.every((edge) => Array.isArray(edge.route)));
   assert.equal(archdiff(["diagram", "inside:nope.ts", fixture]).status, 2);
+});
+
+test("matrix, contract, type flow, path to the storages and hotspots on the fixture", () => {
+  const matrix = JSON.parse(archdiff(["diagram", "matrix", fixture, "--format", "json"]).stdout) as { placed?: boolean; nodes: { id: string; label: string; diff?: string }[]; reason?: string };
+  assert.equal(matrix.placed, true);
+  assert.ok(matrix.nodes.some((node) => node.id === "cell:routes>lib" && node.label === "1"), JSON.stringify(matrix.nodes.filter((node) => node.label !== "")));
+  assert.ok(matrix.reason?.includes("every import follows the layer order"), matrix.reason);
+  const contract = archdiff(["diagram", "contract:src/lib/orders.ts", fixture, "--format", "mermaid"]).stdout;
+  assert.ok(contract.includes("src_routes_checkout_tsx --> src_lib_orders_ts_OrderService"), contract);
+  assert.ok(contract.includes("findOrder<br/>(unused outside)"), contract);
+  const type = archdiff(["diagram", "type:src/lib/orders.ts#Order", fixture]).stdout;
+  assert.ok(type.includes("# Where Order flows"), type);
+  assert.ok(type.includes("placeOrder<br/>produces"), type);
+  assert.ok(type.includes("saveOrder<br/>consumes · storage"), type);
+  const path = archdiff(["diagram", "path:src/routes/checkout.tsx#action", fixture, "--format", "mermaid"]).stdout;
+  assert.ok(path.includes("src_lib_orders_ts_placeOrder ==> src_db_store_ts_saveOrder"), path);
+  assert.ok(!path.includes("validate"), path);
+  const hotspots = JSON.parse(archdiff(["diagram", "hotspots", fixture, "--format", "json"]).stdout) as { nodes: { id: string; w: number; heat?: number }[] };
+  const orders = hotspots.nodes.find((node) => node.id === "src/lib/orders.ts")!;
+  const log = hotspots.nodes.find((node) => node.id === "src/lib/log.ts")!;
+  assert.ok(orders.w > log.w);
+  assert.ok((orders.heat ?? 0) > 0);
+});
+
+test("cycles, events, tests, packages and timeline on a repository that has them", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-views-"));
+
+  try {
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(join(dir, "packages/app/src"), { recursive: true });
+    mkdirSync(join(dir, "packages/lib/src"), { recursive: true });
+    mkdirSync(join(dir, "packages/app/test"), { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "root", workspaces: ["packages/*"] }));
+    writeFileSync(join(dir, "packages/app/package.json"), JSON.stringify({ name: "@acme/app", dependencies: { "@acme/lib": "1" } }));
+    writeFileSync(join(dir, "packages/lib/package.json"), JSON.stringify({ name: "@acme/lib" }));
+    writeFileSync(join(dir, "packages/app/src/a.ts"), 'import { b } from "./b.ts";\nimport { bus } from "./bus.ts";\nexport function a(): number {\n  bus.emit("order:placed", 1);\n  return b();\n}\n');
+    writeFileSync(join(dir, "packages/app/src/b.ts"), 'import { a } from "./a.ts";\nimport { bus } from "./bus.ts";\nexport function b(): number {\n  bus.on("order:placed", onPlaced);\n  return a();\n}\nfunction onPlaced(): void {}\n');
+    writeFileSync(join(dir, "packages/app/src/bus.ts"), 'import { EventEmitter } from "node:events";\nexport const bus = new EventEmitter();\n');
+    writeFileSync(join(dir, "packages/lib/src/index.ts"), "export function util(): number {\n  return 1;\n}\n");
+    writeFileSync(join(dir, "packages/app/test/a.test.ts"), 'import { a } from "../src/a.ts";\nimport { util } from "../../lib/src/index.ts";\na();\nutil();\n');
+    const cycles = archdiff(["diagram", "cycles", dir, "--format", "json"]).stdout;
+    const parsed = JSON.parse(cycles) as { groups: { id: string }[]; nodes: { id: string }[] };
+    assert.deepEqual(parsed.groups.map((group) => group.id), ["cycle 1 (2)"]);
+    assert.deepEqual(parsed.nodes.map((node) => node.id).sort(), ["packages/app/src/a.ts", "packages/app/src/b.ts"]);
+    const one = archdiff(["diagram", "cycle:packages/app/src/bus.ts", dir]).stdout;
+    assert.ok(one.includes("is in no import cycle"), one);
+    const events = archdiff(["diagram", "events", dir, "--format", "mermaid"]).stdout;
+    assert.ok(events.includes('event_order_placed(("order:placed"))'), events);
+    assert.ok(events.includes("packages_app_src_a_ts_a ==>|\"emit\"| event_order_placed"), events);
+    assert.ok(events.includes("event_order_placed -.->|\"on\"| packages_app_src_b_ts_onPlaced"), events);
+    const tests = JSON.parse(archdiff(["diagram", "tests", dir, "--format", "json"]).stdout) as { nodes: { id: string; count?: number; diff?: string }[] };
+    assert.equal(tests.nodes.find((node) => node.id === "packages/app/src/a.ts")?.count, 1);
+    assert.equal(tests.nodes.find((node) => node.id === "packages/app/src/b.ts")?.diff, "changed");
+    assert.ok(!tests.nodes.some((node) => node.id.includes("test/")));
+    const packages = archdiff(["diagram", "packages", dir, "--format", "mermaid"]).stdout;
+    // app declares lib and its test imports one file of it.
+    assert.ok(packages.includes('acme_app -->|"declared, 1 imports"| acme_lib'), packages);
+    // The timeline needs commits.
+    const git = (...args: string[]): void => {
+      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git("init", "-q", "-b", "main");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    writeFileSync(join(dir, "packages/lib/src/extra.ts"), "export function extra(): number {\n  return 2;\n}\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "lib: extra");
+    const timeline = JSON.parse(archdiff(["diagram", "timeline", dir, "--base", "main~1", "--head", "main", "--format", "json"]).stdout) as { placed?: boolean; nodes: { id: string; label: string }[]; title: string };
+    assert.equal(timeline.placed, true);
+    assert.ok(timeline.title.includes("1 commits"), timeline.title);
+    assert.ok(timeline.nodes.some((node) => node.id.startsWith("commit:") && node.label.includes("lib: extra")), JSON.stringify(timeline.nodes));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("branches lists the branches with the default base, and compare puts several heads against it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-branches-"));
+
+  try {
+    cpSync(fixture, dir, { recursive: true });
+    const git = (...args: string[]): void => {
+      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git("init", "-q", "-b", "develop");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "feature-a");
+    writeFileSync(join(dir, "src/lib/extra.ts"), "export function extra(): number {\n  return 1;\n}\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "a: extra module");
+    git("checkout", "-q", "develop");
+    git("checkout", "-q", "-b", "feature-b");
+    writeFileSync(join(dir, "src/routes/checkout.tsx"), 'import { OrderService } from "@/lib/orders";\nimport { readOrder } from "@/db/store";\n\nexport async function action(request: { total: number }) {\n  readOrder("x");\n  return new OrderService("web").place(request.total);\n}\n');
+    writeFileSync(join(dir, "src/lib/log.ts"), "export function log(message: string): void {\n  console.error(message);\n}\n");
+    git("commit", "-q", "-am", "b: route reads the store, log to stderr");
+    git("checkout", "-q", "develop");
+    // A third head: the working tree on develop with a change of its own.
+    writeFileSync(join(dir, "src/lib/log.ts"), "export function log(message: string): void {\n  console.warn(message);\n}\n");
+    const branches = archdiff(["branches", dir]);
+    assert.equal(branches.status, 0, branches.stderr);
+    assert.ok(branches.stdout.startsWith("base: develop\ncurrent: develop\n"), branches.stdout);
+    assert.ok(branches.stdout.includes("  feature-a\t") && branches.stdout.includes("* develop\t"), branches.stdout);
+    const compare = archdiff(["compare", dir, "--heads", "feature-a,feature-b,WORKTREE"]);
+    assert.equal(compare.status, 1, compare.stdout);
+    assert.ok(compare.stdout.includes("# 3 heads against develop"), compare.stdout);
+    assert.ok(compare.stdout.includes("| feature-a | 1 | +1 −0 |"), compare.stdout);
+    assert.ok(compare.stdout.includes("| feature-b | 2 |") && compare.stdout.includes("⚠ +routes→db"), compare.stdout);
+    assert.ok(compare.stdout.includes("## Touched by every head\n\n- none"), compare.stdout);
+    assert.ok(compare.stdout.includes("- src/lib/extra.ts — feature-a"), compare.stdout);
+    const json = JSON.parse(archdiff(["compare", dir, "--heads", "feature-a,feature-b,WORKTREE", "--format", "json"]).stdout) as { base: string; heads: { head: string }[] };
+    assert.equal(json.base, "develop");
+    assert.deepEqual(json.heads.map((head) => head.head), ["feature-a", "feature-b", "WORKTREE"]);
+    const picture = JSON.parse(archdiff(["compare", dir, "--heads", "feature-a,feature-b,WORKTREE", "--format", "json"]).stdout);
+    assert.ok(picture);
+    const excalidraw = archdiff(["compare", dir, "--heads", "feature-b,WORKTREE", "--format", "excalidraw"]).stdout;
+    // log.ts changed in both heads: the shape says so.
+    assert.ok(excalidraw.includes("every head") || excalidraw.includes("~ feature-b"), excalidraw.slice(0, 200));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent events name the files a tool touches, for the page to light their shapes", async () => {
+  const { parseAgentLine } = await import("../src/agent.ts");
+  const event = parseAgentLine(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/repo/src/lib/orders.ts", old_string: "a", new_string: "b" } }] } }));
+  assert.equal(event.kind, "tool");
+  assert.deepEqual(event.files, ["/repo/src/lib/orders.ts"]);
+  const { mockFromType } = await import("../src/flow.ts");
+  assert.deepEqual(mockFromType("{ total: number; customer?: { name: string } }", "request"), { total: 1, customer: { name: "example" } });
+  assert.equal(mockFromType("'a' | 'b'"), "a");
+  assert.deepEqual(mockFromType("Order[]"), []);
 });

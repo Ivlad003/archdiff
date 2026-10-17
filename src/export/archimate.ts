@@ -33,9 +33,14 @@ function elementType(node: DiagramNode): string {
     case "more":
       return "Grouping";
     case "participant":
+    case "package":
       return "ApplicationComponent";
     case "anchor":
       return "Junction";
+    case "event":
+      return "ApplicationEvent";
+    case "cell":
+      return "Grouping";
   }
 }
 

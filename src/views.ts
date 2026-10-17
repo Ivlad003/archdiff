@@ -17,8 +17,34 @@ import type { Analysis } from "./analyze.ts";
 import { SIZE, type Diagram, type DiagramEdge, type DiagramGroup, type DiagramNode } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
+import { contractView, cyclesView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 
-export type View = { kind: "layers" } | { kind: "layer"; name: string } | { kind: "dir"; path: string } | { kind: "module"; id: string } | { kind: "inside"; id: string } | { kind: "calls"; id: string } | { kind: "sequence"; id: string } | { kind: "coverage" };
+export type View =
+  | { kind: "layers" }
+  | { kind: "layer"; name: string }
+  | { kind: "dir"; path: string }
+  | { kind: "module"; id: string }
+  | { kind: "inside"; id: string }
+  | { kind: "contract"; id: string }
+  | { kind: "calls"; id: string }
+  | { kind: "sequence"; id: string }
+  | { kind: "path"; id: string }
+  | { kind: "type"; id: string }
+  | { kind: "cycles" }
+  | { kind: "cycle"; id: string }
+  | { kind: "matrix" }
+  | { kind: "events" }
+  | { kind: "tests" }
+  | { kind: "hotspots" }
+  | { kind: "packages" }
+  | { kind: "timeline" }
+  | { kind: "coverage" };
+
+/** The views without a subject. */
+const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "matrix", "events", "tests", "hotspots", "packages", "timeline"]);
+
+/** The views with a subject (`kind:<subject>`). */
+const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle"]);
 
 export interface ViewOptions {
   /** How far from the subject the picture goes; each view has its default. */
@@ -42,50 +68,30 @@ export interface ViewEntry {
 
 /** `layers`, `layer:<name>`, `module:<path>`, `calls:<path>#<fn>`, `coverage` → the view, or null. */
 export function parseView(key: string): View | null {
-  if (key === "layers") return { kind: "layers" };
-
-  if (key === "coverage") return { kind: "coverage" };
+  if (PLAIN_VIEWS.has(key)) return { kind: key } as View;
   const at = key.indexOf(":");
 
   if (at === -1) return null;
   const kind = key.slice(0, at);
   const rest = key.slice(at + 1);
 
-  if (rest === "") return null;
+  if (rest === "" || !SUBJECT_VIEWS.has(kind)) return null;
 
   if (kind === "layer") return { kind, name: rest };
 
   if (kind === "dir") return { kind, path: rest.replace(/\/+$/, "") };
 
-  if (kind === "module") return { kind, id: rest };
-
-  if (kind === "inside") return { kind, id: rest };
-
-  if (kind === "calls") return { kind, id: rest };
-
-  if (kind === "sequence") return { kind, id: rest };
-
-  return null;
+  return { kind, id: rest } as View;
 }
 
 export function viewKey(view: View): string {
-  switch (view.kind) {
-    case "layers":
-    case "coverage":
-      return view.kind;
-    case "layer":
-      return `layer:${view.name}`;
-    case "dir":
-      return `dir:${view.path}`;
-    case "module":
-      return `module:${view.id}`;
-    case "inside":
-      return `inside:${view.id}`;
-    case "calls":
-      return `calls:${view.id}`;
-    case "sequence":
-      return `sequence:${view.id}`;
-  }
+  if ("name" in view) return `${view.kind}:${view.name}`;
+
+  if ("path" in view) return `${view.kind}:${view.path}`;
+
+  if ("id" in view) return `${view.kind}:${view.id}`;
+
+  return view.kind;
 }
 
 /** Modules whose public methods a framework calls: controllers, handlers, commands, jobs, listeners, middleware, routes. */
@@ -171,27 +177,38 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   for (const module of [...graph.modules.keys()].sort()) list.push({ key: `module:${module}`, title: module, kind: "module", layer: graph.modules.get(module)!.layer });
 
   for (const entry of entryPoints(analysis)) list.push({ key: `calls:${entry.node.id}`, title: `${entry.node.name} (${entry.node.module}) — ${entry.label}`, kind: "calls", layer: graph.modules.get(entry.node.module)!.layer });
+
+  // The types with a declaration of their own, for the type flow view.
+  for (const node of [...graph.nodes.values()].filter((candidate) => candidate.kind === "type" && !candidate.parent && candidate.exported).sort((a, b) => (a.id < b.id ? -1 : 1))) list.push({ key: `type:${node.id}`, title: `${node.name} (${node.module})`, kind: "type", layer: graph.modules.get(node.module)!.layer });
   list.push({ key: "coverage", title: "Coverage: what the diagrams cannot show", kind: "coverage" });
+  list.push({ key: "matrix", title: "Matrix: who imports whom, layer by layer", kind: "matrix" });
+  list.push({ key: "cycles", title: "Cycles: modules importing each other", kind: "cycles" });
+  list.push({ key: "events", title: "Events: emitters and listeners", kind: "events" });
+  list.push({ key: "tests", title: "Tests: which modules the tests cover", kind: "tests" });
+  list.push({ key: "hotspots", title: "Hotspots: size and calls in", kind: "hotspots" });
+
+  if (analysis.packages.length > 1) list.push({ key: "packages", title: `Packages: ${analysis.packages.length} package.json as a system`, kind: "packages" });
+  list.push({ key: "timeline", title: "Timeline: the drift of the architecture, commit by commit", kind: "timeline" });
 
   return list;
 }
 
-function lane(id: string): DiagramGroup {
+export function lane(id: string): DiagramGroup {
   return { id, label: id, kind: "lane", x: 0, y: 0, w: 0, h: 0 };
 }
 
-function unplaced(view: string, title: string, nodes: DiagramNode[], edges: DiagramEdge[], groups: DiagramGroup[], extra: Partial<Diagram> = {}): Diagram {
+export function unplaced(view: string, title: string, nodes: DiagramNode[], edges: DiagramEdge[], groups: DiagramGroup[], extra: Partial<Diagram> = {}): Diagram {
   return { view, title, nodes, edges, groups, ...extra };
 }
 
 /** The lanes of the layers the nodes use, in the graph's order. */
-function lanesOf(graph: Graph, nodes: readonly DiagramNode[]): DiagramGroup[] {
+export function lanesOf(graph: Graph, nodes: readonly DiagramNode[]): DiagramGroup[] {
   const used = new Set(nodes.map((node) => node.group).filter((group): group is string => group !== undefined));
 
   return graph.layers.filter((layer) => used.has(layer)).map(lane);
 }
 
-function moduleNode(graph: Graph, id: string): DiagramNode {
+export function moduleNode(graph: Graph, id: string): DiagramNode {
   const module = graph.modules.get(id)!;
   const node: DiagramNode = { id, kind: "module", label: id, ref: { id, file: id, line: 1 }, group: module.layer, x: 0, y: 0, w: 0, h: 0 };
 
@@ -200,13 +217,13 @@ function moduleNode(graph: Graph, id: string): DiagramNode {
   return node;
 }
 
-function externalNode(graph: Graph, id: string): DiagramNode {
+export function externalNode(graph: Graph, id: string): DiagramNode {
   const external = graph.externals.get(id)!;
 
   return { id, kind: "external", label: external.kind === "builtin" ? `node:${external.name}` : external.name, x: 0, y: 0, w: 0, h: 0 };
 }
 
-function fnNode(graph: Graph, id: string): DiagramNode {
+export function fnNode(graph: Graph, id: string): DiagramNode {
   const fn = graph.nodes.get(id)!;
   const node: DiagramNode = { id, kind: "fn", label: fn.parent ? `${fn.parent}.${fn.name}` : fn.name, ref: { id, file: fn.module, line: fn.line, endLine: fn.endLine }, group: graph.modules.get(fn.module)!.layer, x: 0, y: 0, w: 0, h: 0 };
 
@@ -218,7 +235,7 @@ function fnNode(graph: Graph, id: string): DiagramNode {
 }
 
 /** Module-level dependencies between the given modules (and to externals when `externals`), one edge per pair with its count. */
-function depEdges(graph: Graph, members: ReadonlySet<string>, externals: boolean): DiagramEdge[] {
+export function depEdges(graph: Graph, members: ReadonlySet<string>, externals: boolean): DiagramEdge[] {
   const counts = new Map<string, number>();
 
   for (const dep of graph.deps) {
@@ -275,7 +292,7 @@ function layerView(graph: Graph, name: string, depth: number): Diagram {
 }
 
 /** Modules within `depth` import steps of `start`, in the given direction. */
-function grow(graph: Graph, start: ReadonlySet<string>, depth: number, direction: "both" | "out" | "in"): Set<string> {
+export function grow(graph: Graph, start: ReadonlySet<string>, depth: number, direction: "both" | "out" | "in"): Set<string> {
   const members = new Set(start);
   let frontier = new Set(start);
 
@@ -620,11 +637,11 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
   return diagram;
 }
 
-const DEFAULT_DEPTH: Record<View["kind"], number> = { layers: 0, layer: 1, dir: 1, module: 1, inside: 1, calls: 3, sequence: 4, coverage: 0 };
+const DEFAULT_DEPTH: Partial<Record<View["kind"], number>> = { layer: 1, dir: 1, module: 1, inside: 1, calls: 3, sequence: 4, path: 8, type: 1 };
 
 /** The unplaced diagram of a view, folded to `limit` shapes. */
 export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}): Diagram {
-  const depth = options.depth ?? DEFAULT_DEPTH[view.kind];
+  const depth = options.depth ?? DEFAULT_DEPTH[view.kind] ?? 0;
   const { graph } = analysis;
 
   const full = (): Diagram => {
@@ -639,10 +656,33 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
         return moduleView(graph, view.id, depth, options.packages === true);
       case "inside":
         return insideView(graph, view.id, depth);
+      case "contract":
+        return contractView(analysis, view.id);
       case "calls":
         return callsView(graph, view.id, depth);
       case "sequence":
         return sequenceView(graph, view.id, depth, options.limit ?? MAX_SHAPES);
+      case "path":
+        return pathView(analysis, view.id, depth);
+      case "type":
+        return typeView(analysis, view.id);
+      case "cycles":
+        return cyclesView(graph, null);
+      case "cycle":
+        return cyclesView(graph, view.id);
+      case "matrix":
+        return matrixView(graph);
+      case "events":
+        return eventsView(analysis);
+      case "tests":
+        return testsView(graph);
+      case "hotspots":
+        return hotspotsView(graph);
+      case "packages":
+        return packagesView(analysis);
+      case "timeline":
+        // The timeline needs git (commits): the server and the CLI build it with `timelineDiagram`; here it is a placeholder.
+        return unplaced("timeline", "Timeline", [], [], [], { placed: true, reason: "the timeline is built from the commits (archdiff diagram timeline --base --head)" });
       case "coverage":
         return coverageView(graph);
     }

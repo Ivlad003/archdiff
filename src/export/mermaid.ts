@@ -45,9 +45,14 @@ function shape(node: DiagramNode, id: string): string {
     case "more":
       return `${id}[/${text}/]`;
     case "participant":
+    case "cell":
       return `${id}[${text}]`;
+    case "package":
+      return `${id}[[${text}]]`;
     case "anchor":
       return `${id}(( ))`;
+    case "event":
+      return `${id}((${text}))`;
   }
 }
 

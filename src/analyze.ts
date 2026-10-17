@@ -15,7 +15,7 @@ import { loadConfig, type Config } from "./config.ts";
 import type { FileFacts } from "./extract/facts.ts";
 import { extractAll } from "./extract/pool.ts";
 import { listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
-import { frameworkEntries, type DeclaredEntry } from "./frameworks.ts";
+import { frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
 import { buildGraph, type Graph } from "./graph.ts";
 import { createResolver } from "./resolve.ts";
 
@@ -45,6 +45,8 @@ export interface Analysis {
   graph: Graph;
   /** What the frameworks of the repository call (routes, hooks). */
   declaredEntries: DeclaredEntry[];
+  /** The packages of the repository (package.json files), for the packages view. */
+  packages: RepositoryPackage[];
   stats: AnalysisStats;
 }
 
@@ -104,7 +106,9 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
   const extracted = performance.now();
   cache?.save();
   const graph = buildGraph([...facts.values()], config, createResolver(root, [...facts.keys()], [...facts.values()]));
-  const declaredEntries = frameworkEntries(root, files, listAllFiles(root));
+  const allFiles = listAllFiles(root);
+  const declaredEntries = frameworkEntries(root, files, allFiles);
+  const packages = repositoryPackages(root, allFiles);
   const built = performance.now();
   const kinds = [...graph.nodes.values()].reduce((counts, node) => ({ ...counts, [node.kind]: (counts[node.kind] ?? 0) + 1 }), {} as Record<string, number>);
   const stats: AnalysisStats = {
@@ -122,5 +126,5 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
     ms: { list: Math.round(listed - started), extract: Math.round(extracted - listed), graph: Math.round(built - extracted), total: Math.round(built - started) },
   };
 
-  return { root, config, files, skipped: listed0.skipped, facts, graph, declaredEntries, stats };
+  return { root, config, files, skipped: listed0.skipped, facts, graph, declaredEntries, packages, stats };
 }

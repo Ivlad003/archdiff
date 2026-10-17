@@ -34,6 +34,8 @@ export interface CanvasHandle {
   /** A PNG or SVG of the whole scene, or of the selected elements when there are some. */
   screenshot(kind: "png" | "svg"): Promise<Blob>;
   scrollToContent(): void;
+  /** Lights the shapes of `ids` (a run passing through them); an empty list clears every light. */
+  highlight(ids: readonly string[], colour?: string): void;
   /** Where the viewport is, to remember per view. */
   viewport(): { scrollX: number; scrollY: number; zoom: number } | null;
   setViewport(viewport: { scrollX: number; scrollY: number; zoom: number }): void;
@@ -182,10 +184,42 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       api.updateScene({ appState: { scrollX, scrollY, zoom: { value: zoom as never } } });
     };
 
+    // Highlight: the original look of every lit shape, to put back when the light goes.
+    const lit = new Map<string, { strokeColor: string; strokeWidth: number; backgroundColor: string }>();
+
+    const highlight = (ids: readonly string[], colour = "#ff6f00"): void => {
+      if (!api) return;
+      const wanted = new Set(ids);
+      const elements = api.getSceneElementsIncludingDeleted() as unknown as (SceneElement & { strokeColor: string; strokeWidth: number; backgroundColor: string })[];
+      let changed = false;
+      const next = elements.map((element) => {
+        const original = lit.get(element.id);
+
+        if (wanted.has(element.id) && element.customData?.["archdiff"] === "node") {
+          if (!original) lit.set(element.id, { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth, backgroundColor: element.backgroundColor });
+          changed = true;
+
+          return { ...element, strokeColor: colour, strokeWidth: 4, backgroundColor: "#ffe0b2" };
+        }
+
+        if (original) {
+          lit.delete(element.id);
+          changed = true;
+
+          return { ...element, ...original };
+        }
+
+        return element;
+      });
+
+      if (changed) api.updateScene({ elements: next as never });
+    };
+
     const handle: CanvasHandle = {
       scene: () => (api ? (api.getSceneElementsIncludingDeleted() as unknown as SceneElement[]) : elements),
       replace: (next) => {
         // A saved element may lack fields Excalidraw needs (a scene saved through the API, an older version): restore fills them.
+        lit.clear();
         api?.updateScene({ elements: restoreElements(next as never, null) });
         requestAnimationFrame(fit);
       },
@@ -215,6 +249,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         return exportToBlob({ elements: chosen, appState, files, mimeType: "image/png", quality: 1, exportPadding: 24 });
       },
       scrollToContent: fit,
+      highlight,
       viewport: () => {
         if (!api) return null;
         const state = api.getAppState();

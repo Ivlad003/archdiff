@@ -775,3 +775,91 @@ body.editing #reason {
 #view-type[hidden] {
   display: none;
 }
+
+#branches {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+#branches[hidden] {
+  display: none;
+}
+
+#branches select {
+  font: inherit;
+  max-width: 220px;
+}
+
+#head-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  max-width: 60vw;
+}
+
+#head-list label {
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+#head-list label.current {
+  font-weight: 600;
+}
+
+#head-list label.remote {
+  color: var(--muted);
+}
+
+#tag-suggest {
+  position: absolute;
+  z-index: 20;
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 220px;
+  overflow: auto;
+  min-width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+}
+
+#tag-suggest[hidden] {
+  display: none;
+}
+
+#tag-suggest li {
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#tag-suggest li.active,
+#tag-suggest li:hover {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+#tag-suggest code {
+  font-family: var(--mono);
+  font-size: 11px;
+  margin-right: 6px;
+}
+
+.step.playing {
+  border-color: #ff6f00;
+  background: #ffe0b2;
+}
+
+#chat {
+  position: relative;
+}

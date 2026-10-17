@@ -110,6 +110,42 @@ function packageEntries(root: string, files: ReadonlySet<string>, manifests: rea
   return entries;
 }
 
+/** A package of the repository (a package.json outside node_modules): its name, directory and the packages it declares as dependencies. */
+export interface RepositoryPackage {
+  name: string;
+  /** The directory, "" for the root. */
+  dir: string;
+  dependencies: string[];
+}
+
+/** Every package.json of the repository, read for its name and dependency names, sorted by directory. */
+export function repositoryPackages(root: string, allFiles: readonly string[]): RepositoryPackage[] {
+  const packages: RepositoryPackage[] = [];
+
+  for (const manifest of allFiles.filter((path) => /(^|\/)package\.json$/.test(path) && !path.includes("node_modules/")).sort()) {
+    let parsed;
+
+    try {
+      parsed = parseJson(readFileSync(join(root, manifest), "utf8"));
+    } catch {
+      continue;
+    }
+
+    if (!isJsonObject(parsed) || !isJsonString(parsed["name"])) continue;
+    const dependencies: string[] = [];
+
+    for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+      const list = parsed[field];
+
+      if (isJsonObject(list)) dependencies.push(...Object.keys(list));
+    }
+
+    packages.push({ name: parsed["name"], dir: posix.dirname(manifest) === "." ? "" : posix.dirname(manifest), dependencies: [...new Set(dependencies)].sort() });
+  }
+
+  return packages;
+}
+
 /** Every entry the frameworks of the repository declare, sorted by module and label. `allFiles` is every path git lists (hooks.json is not a source file). */
 export function frameworkEntries(root: string, sourceFiles: readonly string[], allFiles: readonly string[]): DeclaredEntry[] {
   const sources = new Set(sourceFiles);

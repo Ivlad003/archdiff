@@ -21,13 +21,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
 import { coverageReport } from "./coverage.ts";
-import { layout } from "./diagram.ts";
-import { commitsBetween, fileHistory, mergeBase, review, reviewMarkdown } from "./diff.ts";
+import { layout, type DiagramNode } from "./diagram.ts";
+import { commitsBetween, compareBranches, comparisonMarkdown, defaultBase, fileHistory, history, listBranches, mergeBase, review, reviewMarkdown } from "./diff.ts";
+import { timelineDiagram } from "./views-more.ts";
 import { watch as watchFs } from "node:fs";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, type ExportFormat } from "./export/index.ts";
 import { toExcalidraw } from "./export/excalidraw.ts";
 import { AgentRunner, agentFromConfig, type AgentSpec } from "./agent.ts";
-import { dataFlow, flowMarkdown } from "./flow.ts";
+import { dataFlow, flowMarkdown, jsonInAnswer, mockPrompt, mocksFromTypes } from "./flow.ts";
 import { planFromScene, planMarkdown } from "./plan.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { CACHE_DIRECTORY } from "./cache.ts";
@@ -153,13 +154,22 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   };
 
   // The placed diagram of a view, at the saved places when the view was drawn by hand.
-  const placed = (analysis: Analysis, key: string, depth?: number, packages = false): ReturnType<typeof layout> | null => {
+  const placed = async (analysis: Analysis, key: string, depth?: number, packages = false, base: string | null = null, head: string | null = null): Promise<ReturnType<typeof layout> | null> => {
     const view = parseView(key);
 
     if (!view) return null;
-    const options = depth === undefined ? { packages } : { depth, packages };
 
-    return layout(viewOf(analysis, view, options), positionsOf(readLayout(root, key)?.elements ?? null));
+    // The timeline is built from the commits of a range, not from one analysis.
+    if (view.kind === "timeline") {
+      const from = base || options.base || mergeBase(root);
+      const to = head || "HEAD";
+
+      return layout(timelineDiagram(await history(root, from, to), from, to), positionsOf(readLayout(root, key)?.elements ?? null));
+    }
+
+    const viewOptions = depth === undefined ? { packages } : { depth, packages };
+
+    return layout(viewOf(analysis, view, viewOptions), positionsOf(readLayout(root, key)?.elements ?? null));
   };
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -220,6 +230,72 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           return json(response, { id: run.id, agent: agentSpec.name, task: file });
         }
 
+        case "/api/flow/mocks": {
+          // Mocks for a calls view: from the agent (with the user's description) when there is one and it answers JSON, else from the types.
+          let parsed;
+
+          try {
+            parsed = parseJson(body);
+          } catch {
+            return problem(response, 400, "the body must be JSON");
+          }
+
+          const key = isJsonObject(parsed) && isJsonString(parsed["view"]) ? parsed["view"] : "";
+          const view = parseView(key);
+
+          if (!view || view.kind !== "calls") return problem(response, 400, "the mocks need a calls: view");
+          const description = isJsonObject(parsed) && isJsonString(parsed["description"]) ? parsed["description"] : "";
+          const analysis = await fresh();
+          const flow = dataFlow(analysis, view.id, [], 4);
+          const typed = mocksFromTypes(flow);
+
+          if (!agentSpec) return json(response, { source: "types", ...typed });
+          runner ??= new AgentRunner(root, agentSpec);
+          const answer = jsonInAnswer(await runner.runToResult(mockPrompt(flow, description)));
+
+          if (!answer) return json(response, { source: "types", note: "the agent gave no JSON; the types did", ...typed });
+
+          return json(response, { source: agentSpec.name, input: answer.input ?? typed.input, storages: answer.storages ?? typed.storages });
+        }
+
+        case "/api/expand": {
+          // The tags of a text (@module:path, @fn:path#name, @layer:name, @dir:path, @flow:path#fn, @type:path#Name) as context for an agent.
+          let parsed;
+
+          try {
+            parsed = parseJson(body);
+          } catch {
+            return problem(response, 400, "the body must be JSON");
+          }
+
+          const text = isJsonObject(parsed) && isJsonString(parsed["text"]) ? parsed["text"] : "";
+          const analysis = await fresh();
+          const readSource = (file: string): string | null => (analysis.facts.has(file) ? readFileSync(join(root, file), "utf8") : null);
+          const sections: string[] = [];
+          const seenTags = new Set<string>();
+
+          for (const match of text.matchAll(/@(module|fn|layer|dir|flow|type):(\S+)/g)) {
+            const tag = match[0];
+
+            if (seenTags.has(tag)) continue;
+            seenTags.add(tag);
+            const kind = match[1]!;
+            const subject = match[2]!.replace(/[.,;:)]+$/, "");
+            const key = kind === "fn" ? `calls:${subject}` : kind === "flow" ? `calls:${subject}` : kind === "type" ? `type:${subject}` : `${kind}:${subject}`;
+            const view = parseView(key);
+
+            if (!view) continue;
+            const diagram = viewOf(analysis, view);
+
+            if (kind === "module" || kind === "fn" || kind === "type") {
+              const node = diagram.nodes.find((candidate) => (candidate.ref?.id ?? candidate.id) === subject);
+              sections.push(`### ${tag}\n\n${node ? nodeMarkdown(node, analysis, readSource) : diagramMarkdown(diagram, analysis)}`);
+            } else sections.push(`### ${tag}\n\n${diagramMarkdown(diagram, analysis)}`);
+          }
+
+          return json(response, { context: sections.length > 0 ? `## Context from the diagrams\n\n${sections.join("\n\n")}` : "" });
+        }
+
         case "/api/agent/stop": {
           const id = url.searchParams.get("id") ?? "";
           const run = runner?.runs.get(id);
@@ -261,7 +337,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           const key = url.searchParams.get("view") ?? "";
           const analysis = await fresh();
           const depthText = url.searchParams.get("depth");
-          const diagram = placed(analysis, key, depthText === null || depthText === "" ? undefined : Number(depthText), url.searchParams.get("packages") === "1");
+          const diagram = await placed(analysis, key, depthText === null || depthText === "" ? undefined : Number(depthText), url.searchParams.get("packages") === "1", url.searchParams.get("base"), url.searchParams.get("head"));
 
           if (!diagram) return problem(response, 400, "unknown view");
           // The code's picture at the saved places, then the saved drawing's own elements (pencil, notes) on top.
@@ -318,7 +394,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
           if (depth !== undefined && !(Number.isInteger(depth) && depth >= 0)) return problem(response, 400, "depth must be a whole number");
           const analysis = await fresh();
-          const diagram = placed(analysis, url.searchParams.get("view") ?? "", depth)!;
+          const diagram = (await placed(analysis, url.searchParams.get("view") ?? "", depth, url.searchParams.get("packages") === "1", url.searchParams.get("base"), url.searchParams.get("head")))!;
 
           return json(response, { diagram, markdown: diagramMarkdown(diagram, analysis), drawn: readLayout(root, url.searchParams.get("view") ?? "") !== null });
         }
@@ -329,7 +405,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
           if (!view) return problem(response, 400, "unknown view");
           const analysis = await fresh();
-          const diagram = viewOf(analysis, view);
+          const diagram = view.kind === "timeline" ? { nodes: [] as DiagramNode[] } : viewOf(analysis, view);
           const node = diagram.nodes.find((candidate) => candidate.id === id);
 
           if (!node) return problem(response, 404, "no such shape in the view");
@@ -376,6 +452,26 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           }
         }
 
+        case "/api/tags": {
+          // What `@` can name in the chat: layers, directories, modules, functions, flows (entry points), types; filtered by `q`.
+          const q = (url.searchParams.get("q") ?? "").toLowerCase();
+          const analysis = await fresh();
+          const tags: { tag: string; title: string }[] = [];
+
+          for (const entry of viewList(analysis)) {
+            if (entry.kind === "layer") tags.push({ tag: `@layer:${entry.key.slice(6)}`, title: entry.title });
+            else if (entry.kind === "dir") tags.push({ tag: `@dir:${entry.key.slice(4)}`, title: entry.title });
+            else if (entry.kind === "module") tags.push({ tag: `@module:${entry.key.slice(7)}`, title: entry.title });
+            else if (entry.kind === "calls") tags.push({ tag: `@flow:${entry.key.slice(6)}`, title: entry.title });
+            else if (entry.kind === "type") tags.push({ tag: `@type:${entry.key.slice(5)}`, title: entry.title });
+          }
+
+          for (const node of analysis.graph.nodes.values()) if (node.kind === "fn") tags.push({ tag: `@fn:${node.id}`, title: `${node.parent ? `${node.parent}.` : ""}${node.name} (${node.module})` });
+          const hits = tags.filter((candidate) => q === "" || candidate.tag.toLowerCase().includes(q) || candidate.title.toLowerCase().includes(q)).slice(0, 40);
+
+          return json(response, { tags: hits });
+        }
+
         case "/api/tasks": {
           // The tasks sent to the agent so far, newest first, with their first lines.
           const directory = join(root, TASKS_DIRECTORY);
@@ -383,6 +479,31 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           const files = existsSync(directory) ? readdirSync(directory).filter((name) => name.endsWith(".md")).sort().reverse() : [];
 
           return json(response, { tasks: files.map((name) => ({ file: `${TASKS_DIRECTORY}/${name}`, head: readFileSync(join(directory, name), "utf8").split("\n").slice(1, 4).join(" ").slice(0, 200) })) });
+        }
+
+        case "/api/branches": {
+          // Local and remote branches for the pickers, with the base to start from and the current branch.
+          try {
+            return json(response, { ...listBranches(root), base: options.base || defaultBase(root) });
+          } catch (error) {
+            return problem(response, 400, error instanceof Error ? error.message : String(error));
+          }
+        }
+
+        case "/api/compare": {
+          // Several heads against one base: `heads=a,b,c`, `WORKTREE` for the working tree.
+          const heads = (url.searchParams.get("heads") ?? "").split(",").filter((head) => head !== "");
+
+          if (heads.length === 0) return problem(response, 400, "heads=a,b,… is required (WORKTREE for the working tree)");
+
+          try {
+            const result = await compareBranches(root, url.searchParams.get("base") || options.base, heads);
+            const elements = (JSON.parse(toExcalidraw(result.diagram)) as { elements: SceneElement[] }).elements;
+
+            return json(response, { base: result.base, heads: result.heads.map(({ head, diff }) => ({ head, diff })), diagram: result.diagram, elements, markdown: comparisonMarkdown(result) });
+          } catch (error) {
+            return problem(response, 400, error instanceof Error ? error.message : String(error));
+          }
         }
 
         case "/api/history": {
@@ -420,8 +541,11 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           if (key.startsWith("review")) {
             const result = await review(root, url.searchParams.get("base") || options.base, url.searchParams.get("head") || null);
             diagram = result.diagram;
+          } else if (key.startsWith("compare")) {
+            const result = await compareBranches(root, url.searchParams.get("base") || null, (url.searchParams.get("heads") ?? "WORKTREE").split(",").filter((head) => head !== ""));
+            diagram = result.diagram;
           } else {
-            diagram = placed(analysis, key);
+            diagram = await placed(analysis, key, undefined, false, url.searchParams.get("base"), url.searchParams.get("head"));
 
             if (!diagram) return problem(response, 400, "unknown view");
           }

@@ -21,9 +21,13 @@ export interface DiagramNode {
    * `more`: the shapes a big view folds away (`count` of them), so the
    * picture stays readable — the Markdown lists them all; `participant`:
    * a module at the top of a sequence view; `anchor`: an invisible point
-   * (the foot of a lifeline).
+   * (the foot of a lifeline); `event`: an event name (emitted, listened
+   * to); `cell`: a box of a table or a bar of a chart, sized by the view;
+   * `package`: a package of a monorepo.
    */
-  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor";
+  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package";
+  /** How hot the shape is, 0–1 (a hotspot's calls in, a matrix cell's count): the fill darkens with it. */
+  heat?: number;
   label: string;
   /** The code the shape stands for: a graph ID and a position. */
   ref?: { id?: string; file?: string; line?: number; endLine?: number };
@@ -107,6 +111,9 @@ export const SIZE: Record<DiagramNode["kind"], { w: number; h: number }> = {
   more: { w: 150, h: 50 },
   participant: { w: 150, h: 44 },
   anchor: { w: 2, h: 2 },
+  event: { w: 150, h: 44 },
+  cell: { w: 70, h: 34 },
+  package: { w: 180, h: 60 },
 };
 
 /** One cell of the grid: the largest shape and the gaps around it. */

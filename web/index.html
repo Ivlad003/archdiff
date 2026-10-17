@@ -21,7 +21,7 @@
       <button id="fit" title="Fit the diagram to the window (0)">fit</button>
       <label>base <input id="base" type="text" placeholder="merge-base" size="10" /></label>
       <label>head <input id="head" type="text" placeholder="working tree" size="10" /></label>
-      <button id="review" title="The architectural diff of head (the working tree, or a ref) against the base">review</button>
+      <button id="review" title="The architectural diff of head (the working tree, or a ref) against the base; opens the branch bar">review</button>
       <button id="theme" class="icon" title="Light or dark">◐</button>
       <button id="edit" title="Move shapes, draw with the pencil, write notes; saved to .archdiff/layouts/ (e)">✎ edit</button>
       <span id="edit-tools" hidden>
@@ -49,6 +49,13 @@
           <span id="title-text"></span>
           <select id="view-type" title="Another picture of the same subject" hidden></select>
           <span id="hint" class="muted">tap a shape for its code · tap it again to open its own view · drag to pan · wheel to zoom</span>
+        </div>
+        <div id="branches" hidden>
+          <label>base <select id="base-select" title="The branch every head is compared against (develop, main or master by default)"></select></label>
+          <span class="muted">heads:</span>
+          <span id="head-list" title="Tick two or more to compare several branches at once"></span>
+          <button id="compare" title="Compare the ticked heads against the base">compare</button>
+          <span id="compare-note" class="muted"></span>
         </div>
         <div id="commits" hidden>
           <button id="commit-prev" class="icon" title="The previous commit of the branch">‹</button>
@@ -90,7 +97,8 @@
             <button id="plan">read the task from the drawing</button>
             <span id="agent-name" class="muted"></span>
           </div>
-          <textarea id="task" placeholder="The task appears here; edit it before running."></textarea>
+          <textarea id="task" placeholder="The task appears here; edit it before running. Type @ to name a module, function, layer, directory, flow or type: it is sent to the agent with its context."></textarea>
+          <ul id="tag-suggest" hidden></ul>
           <div class="row">
             <button id="run" disabled>run</button>
             <button id="stop" disabled>stop</button>
@@ -104,6 +112,11 @@
         </div>
         <div id="flow" class="panel prose">
           <p class="muted">Open a call flow (an entry point) to see its data flow: the steps in call order with their parameter and return types. Attach a mock input and mock storages; values are carried to parameters and properties of the same name. Nothing is run.</p>
+          <div class="row">
+            <input id="mock-description" type="text" placeholder="describe the scenario (optional): an order of 42 with no customer…" />
+            <button id="mock-generate" title="Mocks for the entry and the storages: from the agent with this description, else from the types">generate mocks</button>
+            <button id="flow-play" title="Play the steps on the diagram, one by one, like a run (▶)">▶ play</button>
+          </div>
           <div id="flow-mocks"></div>
           <div id="flow-steps"></div>
         </div>

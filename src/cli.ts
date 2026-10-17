@@ -12,7 +12,8 @@ import { planFromScene, planMarkdown } from "./plan.ts";
 import { agentFromConfig } from "./agent.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
-import { history, historyMarkdown, mergeBase, reviewMarkdown, review } from "./diff.ts";
+import { compareBranches, comparisonMarkdown, defaultBase, history, historyMarkdown, listBranches, mergeBase, reviewMarkdown, review } from "./diff.ts";
+import { timelineDiagram } from "./views-more.ts";
 import { serve } from "./server.ts";
 import { layout } from "./diagram.ts";
 import { parseView, viewOf, viewList, type ViewOptions } from "./views.ts";
@@ -29,8 +30,10 @@ Commands:
   diagram <view> [dir] [--format F] [--depth N] [--packages] [--limit N] [--out FILE]
                      Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,
                      drawio, excalidraw, archimate. Views: layers | layer:<name> | dir:<path> |
-                     module:<path> | inside:<path> | calls:<path>#<fn> | sequence:<path>#<fn> |
-                     coverage. --packages draws the
+                     module:<path> | inside:<path> | contract:<path> | calls:<path>#<fn> |
+                     sequence:<path>#<fn> | path:<path>#<fn> | type:<path>#<Type> | cycles |
+                     cycle:<path> | matrix | events | tests | hotspots | packages |
+                     timeline [--base --head] | coverage. --packages draws the
                      packages a module imports; --limit folds a bigger picture into
                      "… N more" (default 80)
   layouts [dir] [--prune]
@@ -49,6 +52,11 @@ Commands:
                      imports and calls added, removed or changed, as Markdown with a Mermaid
                      diagram (md, default), json, or any diagram format. Exit 1 when a layer
                      dependency appeared
+  branches [dir]     List the branches (local, then remote) with the base the comparisons start from
+  compare [dir] [--base REF] [--heads A,B,C] [--format F] [--out FILE]
+                     The architectural diff of several heads (branches, tags, commits; WORKTREE
+                     for the working tree) against one base (default: develop, main or master):
+                     a table per head, one picture of what every head touched, marked by head
   history [dir] [--base REF] [--head REF] [--json] [--out FILE]
                      The architecture drift commit by commit from --base (default: the
                      merge-base) to --head (default: HEAD): modules, functions, imports,
@@ -86,7 +94,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "head", "port", "host", "limit", "agent"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -202,7 +210,14 @@ export async function main(argv: readonly string[]): Promise<number> {
         if (depth !== undefined) options.depth = depth;
 
         if (limit !== undefined) options.limit = limit;
-        const diagram = layout(viewOf(analysis, view, options));
+        let diagram;
+
+        if (view.kind === "timeline") {
+          // From the commits: --base (default the merge-base) to --head (default HEAD).
+          const from = typeof flags.get("base") === "string" ? (flags.get("base") as string) : mergeBase(analysis.root);
+          const to = typeof flags.get("head") === "string" ? (flags.get("head") as string) : "HEAD";
+          diagram = layout(timelineDiagram(await history(analysis.root, from, to), from, to));
+        } else diagram = layout(viewOf(analysis, view, options));
 
         if (diagram.missing) return fail(`diagram: ${diagram.reason} (archdiff views lists them)`);
 
@@ -278,6 +293,31 @@ export async function main(argv: readonly string[]): Promise<number> {
         if (written !== 0) return written;
 
         return result.diff.layerEdgesAdded.length > 0 ? 1 : 0;
+      }
+
+      case "branches": {
+        const root = dirArg(0);
+        const { current, branches } = listBranches(root);
+        const base = defaultBase(root);
+        process.stdout.write(`base: ${base ?? "(none of develop, main, master)"}\ncurrent: ${current ?? "(detached)"}\n`);
+
+        for (const branch of branches) process.stdout.write(`${branch.current ? "* " : "  "}${branch.name}\t${branch.sha}\t${branch.date}\t${branch.subject}${branch.remote ? "\t(remote)" : ""}\n`);
+
+        return 0;
+      }
+
+      case "compare": {
+        const format = (flags.get("format") ?? "md") as string;
+
+        if (format !== "md" && format !== "json" && !EXPORT_FORMATS.includes(format as ExportFormat)) return fail(`compare: unknown format "${format}"`);
+        const heads = typeof flags.get("heads") === "string" ? (flags.get("heads") as string).split(",").filter((head) => head !== "") : ["WORKTREE"];
+        const result = await compareBranches(dirArg(0), typeof flags.get("base") === "string" ? (flags.get("base") as string) : null, heads);
+        const text = format === "md" ? comparisonMarkdown(result) : format === "json" ? `${JSON.stringify({ base: result.base, heads: result.heads }, null, 2)}\n` : exportDiagram(result.diagram, format as Exclude<ExportFormat, "md">);
+        const written = writeOut(text, flags.get("out"));
+
+        if (written !== 0) return written;
+
+        return result.heads.some((head) => head.diff.layerEdgesAdded.length > 0) ? 1 : 0;
       }
 
       case "history": {
