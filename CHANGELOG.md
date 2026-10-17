@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- TypeScript: an import type expression (`import("./x.ts").T`, `typeof import("./x.ts")`) no longer makes the whole file a syntax error (it is masked before parsing, positions kept); a dynamic import call is still a call. Found by running archdiff on itself.
+- Monkey testing (random taps, keys, options, hashes; fuzzed API and CLI) found and fixed: a plain view got siblings like `module:modules`; the depth field took -1; a shape's page was built with the default options, so a function of a module opened in place had no page; the file route refused a package shape's package.json. `drawio.ts` and `excalidraw.ts` imported each other; the colour scale moved to `export/colour.ts`.
+
 - The Spec tab: the repository's OpenSpec specs and Gherkin features listed and shown; *spec this view* and *review all specs* have the agent write or review them (the task goes through the Chat tab), *validate* runs the OpenSpec CLI; `archdiff spec [--prompt view|all|update] [--validate]` in the terminal. A **copy** button beside the tabs copies what the active tab shows.
 - The specification: `openspec/specs/*/spec.md` (OpenSpec: requirements and scenarios for analysis, views, page, intent, agent, exports, review, cli; all validate) and `features/*.feature` (Gherkin, the scenarios the tests run).
 - Simpler code, same behaviour: git plumbing in `git.ts`, shape builders in `nodes.ts`, the steps after a view in `shape.ts`, the server's routes in `routes/pictures.ts`, `routes/agent.ts`, `routes/git.ts` over a context; the page's state, navigation and graph helpers in their own modules. The duplicate view select beside the title is gone (the canvas toolbar has it).

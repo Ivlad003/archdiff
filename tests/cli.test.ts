@@ -837,3 +837,20 @@ test("new scaffolds a project with its intent and first commit; import, intent a
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("an import type expression does not make a file a syntax error; a dynamic import call is still a call", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-import-type-"));
+
+  try {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/scene.ts"), "export interface SceneElement {\n  id: string;\n}\n");
+    writeFileSync(join(dir, "src/page.ts"), "export function elements(list: import(\"./scene.ts\").SceneElement[]): number {\n  return list.length;\n}\nexport type Scene = typeof import(\"./scene.ts\");\nexport async function load(): Promise<unknown> {\n  return import(\"./scene.ts\").then((m) => m);\n}\n");
+    const report = JSON.parse(archdiff(["coverage", dir, "--json"]).stdout) as { parseErrors: string[]; modules: unknown[] };
+    assert.deepEqual(report.parseErrors, []);
+    const inside = JSON.parse(archdiff(["diagram", "inside:src/page.ts", dir, "--format", "json"]).stdout) as { nodes: { id: string; ref?: { line?: number } }[] };
+    assert.deepEqual(inside.nodes.map((node) => node.id).filter((id) => id.startsWith("src/page.ts#")).sort(), ["src/page.ts#elements", "src/page.ts#load"]);
+    assert.equal(inside.nodes.find((node) => node.id === "src/page.ts#load")?.ref?.line, 5);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

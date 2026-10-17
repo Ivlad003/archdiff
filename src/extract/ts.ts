@@ -45,11 +45,27 @@ const LITERAL_CALLS = new Set(["setGlobalPrefix"]);
 /** Members whose first argument names an event (`CallFact.nameArg`): emitters (`emit('order.created')`, `publish`, `dispatch`) and listeners (`on`, `once`, `addEventListener`, `subscribe`). */
 const NAME_ARG_CALLS = new Set(["emit", "emitAsync", "publish", "dispatch", "trigger", "fire", "on", "once", "addListener", "addEventListener", "subscribe", "listen"]);
 
+/**
+ * Import type expressions — `import("./scene.ts").SceneElement`,
+ * `typeof import("./x.ts")` — are not in the tree-sitter grammar, and one of
+ * them makes the whole file a syntax error. They are masked before parsing
+ * by an identifier padded to the same length (`Imp     .SceneElement`), so
+ * every position stays the same; a dynamic import call (`import("x").then`)
+ * is left alone, told apart by the lowercase member after it.
+ */
+export function maskImportTypes(src: string): string {
+  if (!src.includes("import(")) return src;
+
+  const mask = (text: string): string => `Imp${" ".repeat(Math.max(0, text.length - 3))}`;
+
+  return src.replace(/typeof\s+import\(\s*["'][^"']*["']\s*\)/g, (text) => mask(text)).replace(/import\(\s*["'][^"']*["']\s*\)(?=\s*\.\s*[A-Z_$])/g, (text) => mask(text));
+}
+
 /** The facts of one TypeScript or JavaScript file: what the graph reads to build nodes, edges and holes. */
 export function extractTs(path: string, src: string): Promise<FileFacts> {
   const g = grammarFor(path);
 
-  return withTsTree(path, src, (tree, language, typeStars) => extractTree(path, tree.rootNode, language, g, typeStars));
+  return withTsTree(path, maskImportTypes(src), (tree, language, typeStars) => extractTree(path, tree.rootNode, language, g, typeStars));
 }
 
 /**
