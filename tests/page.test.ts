@@ -324,3 +324,26 @@ test("the agent's question shows its options; an answer resumes the session", { 
     rmSync(agentDir, { recursive: true, force: true });
   }
 });
+
+test("copy takes the active tab's text; the Spec tab lists the repository's specs", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page!.goto(`${base}/#view=layer%3Alib`);
+  await page!.waitForSelector(".excalidraw canvas");
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "Layer lib"`);
+  await page!.click("#copy");
+  await page!.waitForFunction(`document.querySelector("#copy").textContent.startsWith("copied")`);
+  const copied = (await page!.evaluate("navigator.clipboard.readText()")) as string;
+  assert.ok(copied.startsWith("<!-- archdiff:generated — view layer:lib"), copied.slice(0, 80));
+  // The Code tab copies the file, without line numbers.
+  const orders = await screenPointOf("layer:lib", "src/lib/orders.ts");
+  await page!.mouse.click(orders.x, orders.y);
+  await page!.waitForFunction(`(document.querySelector("#code")?.textContent ?? "").includes("placeOrder")`, undefined, { timeout: 8000 });
+  await page!.click("#copy");
+  await page!.waitForFunction(`document.querySelector("#copy").textContent.startsWith("copied")`);
+  const code = (await page!.evaluate("navigator.clipboard.readText()")) as string;
+  assert.ok(code.includes("export function placeOrder") && !/^\s*1\s/.test(code), code.slice(0, 80));
+  // The Spec tab: no specs in the fixture, the buttons are there.
+  await page!.click("#tabs button[data-tab='spec']");
+  await page!.waitForFunction(`(document.querySelector("#spec-state")?.textContent ?? "").includes("no openspec/ yet")`);
+  assert.equal(await page!.isVisible("#spec-generate"), true);
+});

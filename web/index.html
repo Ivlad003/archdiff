@@ -146,6 +146,8 @@
           <button data-tab="coverage">Coverage</button>
           <button data-tab="flow" id="flow-tab" title="The data flow from this entry point, with mock inputs and storages (no code is run)">Flow</button>
           <button data-tab="chat" id="chat-tab" title="The task drawn on this view, and the agent that does it">Chat</button>
+          <button data-tab="spec" id="spec-tab" title="The specification of the repository: OpenSpec specs and Gherkin features, written by the agent from the code">Spec</button>
+          <button id="copy" class="small" title="Copy what this tab shows: the Markdown, the code, the coverage, the flow, the transcript or the spec">copy</button>
           <button id="raw" class="small" title="Show the Markdown as text, to copy it">raw</button>
         </nav>
         <div id="neighbours" hidden></div>
@@ -179,6 +181,17 @@
           <div class="row">
             <input id="followup" type="text" placeholder="a follow-up message to the agent (Enter)" disabled />
           </div>
+        </div>
+        <div id="spec" class="panel prose">
+          <p class="muted">The specification lives in the repository, in formats tools open: <code>openspec/specs/&lt;capability&gt;/spec.md</code> (OpenSpec: requirements with SHALL, scenarios with WHEN and THEN) and <code>features/*.feature</code> (Gherkin). The agent writes and reviews them from the code, the contract and the pictures; every run starts from a button.</p>
+          <div class="row">
+            <select id="spec-list" title="The specs and features of the repository"></select>
+            <button id="spec-generate" title="Have the agent write the spec of this view's subject (or of every layer on an overview) — the task goes to the Chat tab">spec this view</button>
+            <button id="spec-update" title="Have the agent review every spec against the code">review all specs</button>
+            <button id="spec-validate" class="small" title="Run the OpenSpec CLI's validation">validate</button>
+            <span id="spec-state" class="muted"></span>
+          </div>
+          <div id="spec-text"></div>
         </div>
         <div id="flow" class="panel prose">
           <p class="muted">Open a call flow (an entry point) to see its data flow: the steps in call order with their parameter and return types. Attach a mock input and mock storages; values are carried to parameters and properties of the same name. Nothing is run.</p>

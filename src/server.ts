@@ -38,6 +38,7 @@ import { problem, send, type PictureOptions, type RouteContext } from "./routes/
 import { routes as pictureRoutes } from "./routes/pictures.ts";
 import { routes as agentRoutes } from "./routes/agent.ts";
 import { routes as gitRoutes } from "./routes/git.ts";
+import { routes as specRoutes } from "./routes/spec.ts";
 import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, mergePlan, parseIntent, writeIntent } from "./intent.ts";
 import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type SceneElement } from "./layouts.ts";
 import { diagramMarkdown, edgeMarkdown, nodeMarkdown } from "./markdown.ts";
@@ -203,7 +204,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     return stamp ? { ...diagram, stamp } : diagram;
   };
 
-  const routes = { ...pictureRoutes, ...agentRoutes, ...gitRoutes };
+  const routes = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes };
   const ctx: RouteContext = {
     root,
     options,

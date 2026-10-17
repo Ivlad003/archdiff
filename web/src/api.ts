@@ -149,6 +149,10 @@ export const api = {
 
     return () => source.close();
   },
+  specs: () => get<{ initialised: boolean; specs: { path: string; title: string; kind: "openspec" | "gherkin" }[] }>("/api/specs"),
+  spec: (path: string) => get<{ path: string; text: string }>(`/api/spec?path=${encodeURIComponent(path)}`),
+  specPrompt: (mode: "generate" | "update", view: string | null) => get<{ markdown: string }>(`/api/spec/prompt?mode=${mode}${view ? `&view=${encodeURIComponent(view)}` : ""}`),
+  validateSpecs: () => post<{ ok: boolean; output: string }>("/api/spec/validate", {}),
   code: (view: string) => post<{ markdown: string; intent: string; planned: number }>("/api/code", { view }),
   intent: () => get<{ exists: boolean; markdown: string; file: string }>("/api/intent"),
   saveIntent: (markdown: string) => post<{ file: string; layers: number; modules: number; edges: number }>("/api/intent", { markdown }),

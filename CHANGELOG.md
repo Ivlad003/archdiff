@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The Spec tab: the repository's OpenSpec specs and Gherkin features listed and shown; *spec this view* and *review all specs* have the agent write or review them (the task goes through the Chat tab), *validate* runs the OpenSpec CLI; `archdiff spec [--prompt view|all|update] [--validate]` in the terminal. A **copy** button beside the tabs copies what the active tab shows.
 - The specification: `openspec/specs/*/spec.md` (OpenSpec: requirements and scenarios for analysis, views, page, intent, agent, exports, review, cli; all validate) and `features/*.feature` (Gherkin, the scenarios the tests run).
 - Simpler code, same behaviour: git plumbing in `git.ts`, shape builders in `nodes.ts`, the steps after a view in `shape.ts`, the server's routes in `routes/pictures.ts`, `routes/agent.ts`, `routes/git.ts` over a context; the page's state, navigation and graph helpers in their own modules. The duplicate view select beside the title is gone (the canvas toolbar has it).
 

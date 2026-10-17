@@ -52,3 +52,12 @@ Feature: The page
     Then orders.ts is picked again
     When I click the checkout.tsx chip and press Enter
     Then the link holds "inside:src/routes/checkout.tsx"
+
+  Scenario: Copy and the Spec tab
+    Given the page open on "layer:lib"
+    When I press copy
+    Then the clipboard holds the Markdown of the picture
+    When I tap orders.ts and press copy
+    Then the clipboard holds the file without line numbers
+    When I open the Spec tab in a repository without openspec/
+    Then it says "no openspec/ yet" and offers "spec this view"

@@ -109,7 +109,147 @@ function showTab(name: string): void {
   for (const panel of document.querySelectorAll<HTMLElement>(".panel")) panel.classList.toggle("active", panel.id === name);
 }
 
-for (const button of document.querySelectorAll<HTMLButtonElement>("#tabs button")) button.addEventListener("click", () => showTab(button.dataset["tab"]!));
+for (const button of document.querySelectorAll<HTMLButtonElement>("#tabs button")) {
+  if (!button.dataset["tab"]) continue;
+  button.addEventListener("click", () => {
+    showTab(button.dataset["tab"]!);
+
+    if (button.dataset["tab"] === "spec") void loadSpecs();
+  });
+}
+
+// ── The Spec tab ──────────────────────────────────────────────────────────────
+
+/** The text of the spec shown, for copy. */
+let specText = "";
+
+/** The Markdown of the flow shown, for copy. */
+let flowMarkdown = "";
+
+/** Lists the specs and features of the repository and shows the picked one. */
+async function loadSpecs(): Promise<void> {
+  const list = element<HTMLSelectElement>("spec-list");
+  const state = element<HTMLSpanElement>("spec-state");
+  const picked = list.value;
+
+  try {
+    const { initialised, specs } = await api.specs();
+    list.replaceChildren();
+
+    for (const spec of specs) list.append(new Option(`${spec.kind === "openspec" ? "spec" : "feature"}: ${spec.title}`, spec.path, false, spec.path === picked));
+    list.hidden = specs.length === 0;
+    state.textContent = specs.length === 0 ? (initialised ? "no specs yet: spec this view, or review all" : "no openspec/ yet: the first run creates it") : `${specs.length} files`;
+
+    if (specs.length > 0) await showSpec(list.value);
+    else {
+      specText = "";
+      element<HTMLDivElement>("spec-text").replaceChildren();
+    }
+  } catch (error) {
+    state.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/** Shows one spec: Markdown rendered, a feature as text. */
+async function showSpec(path: string): Promise<void> {
+  const target = element<HTMLDivElement>("spec-text");
+
+  try {
+    const { text } = await api.spec(path);
+    specText = text;
+
+    if (path.endsWith(".feature")) target.replaceChildren(Object.assign(document.createElement("pre"), { textContent: text }));
+    else renderMarkdown(target, text);
+  } catch (error) {
+    target.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+element<HTMLSelectElement>("spec-list").addEventListener("change", () => void showSpec(element<HTMLSelectElement>("spec-list").value));
+
+/** Puts the agent's spec task in the Chat tab and runs it there; the Spec tab reloads when the run ends. */
+async function specTask(mode: "generate" | "update"): Promise<void> {
+  const state = element<HTMLSpanElement>("spec-state");
+
+  try {
+    const view = stateFromHash().view;
+    const { markdown } = await api.specPrompt(mode, mode === "generate" && view.includes(":") ? view : null);
+    taskField.value = markdown;
+    showTab("chat");
+
+    if (agentName) runTask(markdown, null);
+    else runState.textContent = "no agent: the task is in the box; start web with --agent claude to run it, or copy it";
+  } catch (error) {
+    state.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+element<HTMLButtonElement>("spec-generate").addEventListener("click", () => void specTask("generate"));
+element<HTMLButtonElement>("spec-update").addEventListener("click", () => void specTask("update"));
+element<HTMLButtonElement>("spec-validate").addEventListener("click", () => {
+  const state = element<HTMLSpanElement>("spec-state");
+  state.textContent = "validating…";
+  void api
+    .validateSpecs()
+    .then((result) => {
+      state.textContent = result.ok ? "valid" : "problems";
+      element<HTMLDivElement>("spec-text").replaceChildren(Object.assign(document.createElement("pre"), { textContent: result.output }));
+      specText = result.output;
+    })
+    .catch((error: unknown) => (state.textContent = error instanceof Error ? error.message : String(error)));
+});
+
+// ── Copy ──────────────────────────────────────────────────────────────────────
+
+/** The text of the active tab: the Markdown, the file, the coverage, the flow, the transcript or the spec. */
+function activeText(): string {
+  const active = document.querySelector<HTMLElement>(".panel.active")?.id ?? "markdown";
+
+  switch (active) {
+    case "code":
+      return codePanel.dataset["text"] ?? "";
+    case "coverage":
+      return coveragePanel.dataset["markdown"] ?? "";
+    case "flow":
+      return flowMarkdown;
+    case "chat":
+      return [...transcript.querySelectorAll<HTMLElement>(".ev")].map((row) => row.textContent ?? "").join("\n");
+    case "spec":
+      return specText;
+    default:
+      return markdownPanel.dataset["markdown"] ?? "";
+  }
+}
+
+/** Copies the text to the clipboard: the async API, else a selection in a hidden textarea. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+
+    return true;
+  } catch {
+    const field = document.createElement("textarea");
+    field.value = text;
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.append(field);
+    field.select();
+    const done = document.execCommand("copy");
+    field.remove();
+
+    return done;
+  }
+}
+
+element<HTMLButtonElement>("copy").addEventListener("click", () => {
+  const button = element<HTMLButtonElement>("copy");
+  const text = activeText();
+
+  void copyText(text).then((done) => {
+    button.textContent = done ? `copied ${text.length > 999 ? `${Math.round(text.length / 1000)}k` : text.length}` : "copy failed";
+    setTimeout(() => (button.textContent = "copy"), 1500);
+  });
+});
 
 /** Markdown as HTML (sanitised: a doc comment of the repository is not trusted), or as text when the raw toggle is on. */
 function renderMarkdown(target: HTMLElement, markdown: string): void {
@@ -183,6 +323,7 @@ async function showCode(node: DiagramNode): Promise<void> {
   const to = node.ref?.endLine ?? from;
   const mark = node.kind !== "module";
   codePanel.replaceChildren();
+  codePanel.dataset["text"] = text;
   const lines = text.split("\n");
   let first: HTMLElement | null = null;
 
@@ -881,8 +1022,9 @@ async function loadFlow(): Promise<void> {
   element("flow-tab").hidden = !state.view.startsWith("calls:") || state.review;
 
   if (element("flow-tab").hidden) return;
-  const { flow } = await api.flow(state.view, state.depth);
+  const { flow, markdown } = await api.flow(state.view, state.depth);
   lastFlow = flow;
+  flowMarkdown = markdown;
   const entryId = state.view.slice("calls:".length);
   const input = textarea(`Mock input of ${entryId.slice(entryId.indexOf("#") + 1)} (JSON object: a key per parameter)`, flow.input ?? "", '{"request": {"total": 42}}');
   const storageFields = flow.storages.map((storage) => ({ id: storage.id, field: textarea(`Mock content of ${storage.module} (${storage.storage})`, storage.content ?? "", '{"rows": [{"id": 1}]}') }));

@@ -714,6 +714,16 @@ test("--mermaid picks a Mermaid type that fits the view", () => {
   assert.equal(archdiff(["diagram", "layers", fixture, "--mermaid", "venn"]).status, 2);
 });
 
+test("spec lists the specification and prints the agent's task", () => {
+  assert.ok(archdiff(["spec", fixture]).stdout.includes("no specs yet"));
+  const listed = archdiff(["spec", root]).stdout;
+  assert.ok(listed.includes("openspec/specs/views/spec.md\tViews Specification") && listed.includes("features/page.feature\tThe page"), listed);
+  const prompt = archdiff(["spec", fixture, "--prompt", "module:src/lib/orders.ts"]).stdout;
+  assert.ok(prompt.startsWith("# Specify src/lib/orders.ts") && prompt.includes("The system SHALL"), prompt.slice(0, 200));
+  assert.ok(archdiff(["spec", fixture, "--prompt", "update"]).stdout.includes("Review the specification"));
+  assert.equal(archdiff(["spec", fixture, "--prompt", "nope:x"]).status, 2);
+});
+
 test("modules is the whole map: every module in its layer and every import between them", () => {
   const json = JSON.parse(archdiff(["diagram", "modules", fixture, "--format", "json"]).stdout) as { title: string; nodes: { id: string; kind: string; group?: string }[]; edges: { from: string; to: string }[]; groups: { id: string }[]; question?: string };
   assert.equal(json.title, "Modules: 5 in 4 layers");

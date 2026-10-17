@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
-import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -106,6 +106,27 @@ test("a drawing saved by the editor places the shapes of the live diagram and me
   // A wrong body is refused and nothing changes.
   const bad = await fetch(`${base}/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", body: JSON.stringify({ elements: "no" }) });
   assert.equal(bad.status, 400);
+});
+
+test("the specs are listed and read from openspec/ and features/ only; the prompt names the subject", async () => {
+  const before = await getJson<{ initialised: boolean; specs: unknown[] }>("/api/specs");
+  assert.equal(before.initialised, false);
+  assert.deepEqual(before.specs, []);
+  mkdirSync(join(dir, "openspec/specs/orders"), { recursive: true });
+  writeFileSync(join(dir, "openspec/specs/orders/spec.md"), "# Orders Specification\n\n## Purpose\n\nOrders.\n\n## Requirements\n\n### Requirement: Orders are placed\n\nThe system SHALL place an order.\n\n#### Scenario: One order\n\n- **WHEN** placeOrder runs\n- **THEN** the order is saved\n");
+  mkdirSync(join(dir, "features"), { recursive: true });
+  writeFileSync(join(dir, "features/orders.feature"), "Feature: Orders\n  Scenario: One order\n    When placeOrder runs\n    Then the order is saved\n");
+  const after = await getJson<{ initialised: boolean; specs: { path: string; title: string; kind: string }[] }>("/api/specs");
+  assert.deepEqual(after.specs, [{ path: "openspec/specs/orders/spec.md", title: "Orders Specification", kind: "openspec" }, { path: "features/orders.feature", title: "Orders", kind: "gherkin" }]);
+  const spec = await getJson<{ text: string }>(`/api/spec?path=${encodeURIComponent("features/orders.feature")}`);
+  assert.ok(spec.text.startsWith("Feature: Orders"));
+  assert.equal((await fetch(`${base}/api/spec?path=${encodeURIComponent("../package.json")}`)).status, 404);
+  assert.equal((await fetch(`${base}/api/spec?path=package.json`)).status, 404);
+  const prompt = await getJson<{ markdown: string }>(`/api/spec/prompt?mode=generate&view=${encodeURIComponent("layer:lib")}`);
+  assert.ok(prompt.markdown.includes("Specify the layer lib") && prompt.markdown.includes("openspec/specs/orders/spec.md") && prompt.markdown.includes("#### Scenario:"), prompt.markdown.slice(0, 400));
+  const update = await getJson<{ markdown: string }>("/api/spec/prompt?mode=update");
+  assert.ok(update.markdown.startsWith("# Review the specification against the code"));
+  assert.equal((await fetch(`${base}/api/spec/prompt?mode=generate&view=nope`)).status, 400);
 });
 
 test("a line's page names its ends and the imports and calls behind it", async () => {

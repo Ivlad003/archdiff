@@ -75,6 +75,20 @@ The system SHALL show a picked shape's neighbours in this picture as chips (← 
 - **WHEN** `orders.ts` is picked and → is pressed
 - **THEN** a module `orders.ts` imports is picked, centred and shown
 
+### Requirement: Every panel can be copied, and the specification has a tab
+
+The system SHALL copy, with one button beside the tabs, what the active tab shows (the Markdown, the file without line numbers, the coverage, the flow, the transcript, the spec) and say how much was copied. The Spec tab SHALL list `openspec/specs/*/spec.md` and `features/*.feature`, show the picked one, and offer "spec this view" and "review all specs" (the agent's task, through the Chat tab) and "validate" (the OpenSpec CLI).
+
+#### Scenario: Copy the code
+
+- **WHEN** the Code tab shows a file and copy is pressed
+- **THEN** the clipboard holds the file's text without line numbers and the button says "copied"
+
+#### Scenario: No specs yet
+
+- **WHEN** the Spec tab opens in a repository without `openspec/`
+- **THEN** it says "no openspec/ yet" and "spec this view" is offered
+
 ### Requirement: Drawing is a mode, saved beside the repository
 
 The system SHALL switch the canvas to Excalidraw's full editor on `✎ edit`, save a drawing to `.archdiff/layouts/<view>.json` on `save`, follow the saved places in the live picture and every export, and merge a fresh picture of the code into the drawing on `re-layout` (shapes that still exist keep their place, strokes stay, stale shapes go).

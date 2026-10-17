@@ -21,6 +21,7 @@ import { layout } from "./diagram.ts";
 import { parseView, viewOf, viewList, type ViewOptions } from "./views.ts";
 import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, mergePlan, parseIntent, readIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
+import { listSpecs, specPrompt, validateSpecs } from "./spec.ts";
 import { existsSync, readFileSync } from "node:fs";
 
 const HELP = `archdiff: live diagrams of a TypeScript/JavaScript repository, and the architectural diff of a change
@@ -90,6 +91,10 @@ Commands:
   intent [dir] [--init [--force]] [--view V] [--json] [--out FILE]
                      Print ARCHITECTURE.md; --init writes it from the code; --view folds the
                      saved drawing of a view into it
+  spec [dir] [--json] [--prompt <view>|all|update] [--validate] [--out FILE]
+                     The specification: list openspec/specs and features/; --prompt prints
+                     the task that has the agent write the spec of a view's subject (or of
+                     every layer, or review every spec); --validate runs the OpenSpec CLI
   check [dir] [--json] [--out FILE]
                      The code against ARCHITECTURE.md: imports between layers the intent does
                      not allow (exit 1), what is planned and not built, what is built beyond it
@@ -127,7 +132,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid", "overlay", "weight", "expand", "hide-lanes", "lang", "template", "view"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid", "overlay", "weight", "expand", "hide-lanes", "lang", "template", "view", "prompt"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -189,7 +194,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   const dirArg = (index: number): string => resolve(positional[index] ?? ".");
   // How many positional arguments each command takes; one more is a typo, not a silent extra.
-  const arity: Record<string, number> = { analyze: 1, views: 1, diagram: 2, coverage: 1, review: 1, history: 1, layouts: 1, flow: 2, plan: 2, web: 1, new: 1, import: 2, check: 1, intent: 1 };
+  const arity: Record<string, number> = { analyze: 1, views: 1, diagram: 2, coverage: 1, review: 1, history: 1, layouts: 1, flow: 2, plan: 2, web: 1, new: 1, import: 2, check: 1, intent: 1, spec: 1 };
 
   if (command in arity && positional.length > arity[command]!) return fail(`${command}: unexpected argument "${positional[arity[command]!]}" (archdiff --help)`);
 
@@ -393,6 +398,38 @@ export async function main(argv: readonly string[]): Promise<number> {
         if (!intent) return fail(`intent: no ${INTENT_FILE} (archdiff intent --init writes one from the code; archdiff import <file> from a document)`);
 
         return writeOut(flags.has("json") ? `${JSON.stringify({ layers: intent.layers, modules: intent.modules, edges: intent.edges }, null, 2)}\n` : intentMarkdown(intent), flags.get("out"));
+      }
+
+      case "spec": {
+        // List the specs; --prompt <view|all|update> prints the agent's task; --validate runs the OpenSpec CLI.
+        const analysis = await analyze(dirArg(0));
+
+        if (flags.has("validate")) {
+          const result = validateSpecs(analysis.root);
+          process.stdout.write(`${result.output}\n`);
+
+          return result.ok ? 0 : 1;
+        }
+
+        const prompt = flags.get("prompt");
+
+        if (prompt !== undefined) {
+          if (prompt === true) return fail("spec: --prompt needs a view, all or update");
+          const mode = prompt === "update" ? "update" : "generate";
+          const view = prompt === "all" || prompt === "update" ? null : parseView(prompt);
+
+          if (prompt !== "all" && prompt !== "update" && !view) return fail(`spec: unknown view "${prompt}"`);
+          const subject = view && "id" in view ? view.id : view && "name" in view ? `the layer ${view.name}` : view && "path" in view ? `the directory ${view.path}` : null;
+
+          return writeOut(specPrompt(analysis, mode, subject), flags.get("out"));
+        }
+
+        const { initialised, specs } = listSpecs(analysis.root);
+
+        if (flags.has("json")) return writeOut(`${JSON.stringify({ initialised, specs }, null, 2)}\n`, flags.get("out"));
+        process.stdout.write(specs.length === 0 ? `no specs yet${initialised ? "" : " (no openspec/)"}: archdiff spec --prompt all writes the agent's task\n` : `${specs.map((spec) => `${spec.path}\t${spec.title}`).join("\n")}\n`);
+
+        return 0;
       }
 
       case "check": {

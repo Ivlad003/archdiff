@@ -130,6 +130,8 @@ Facts are cached by file content in `.archdiff/facts.json.gz` (add `.archdiff/` 
 
 ## Specification
 
+The **Spec** tab of the page lists the specification and has the agent write it: *spec this view* writes the OpenSpec spec and the Gherkin feature of the view's subject (a layer, a directory, a module; every layer from an overview), *review all specs* checks every spec against the code, *validate* runs the OpenSpec CLI; the task goes through the Chat tab like any other, and the agent asks when a behaviour is a real choice. In the terminal, `archdiff spec` lists them, `archdiff spec --prompt <view>|all|update` prints the task (pipe it to any agent), `archdiff spec --validate` validates. The **copy** button beside the tabs copies what the active tab shows: the Markdown, the file, the coverage, the flow, the transcript or the spec.
+
 The behaviour is specified twice, for tools and for people: `openspec/specs/<capability>/spec.md` in the [OpenSpec](https://github.com/Fission-AI/OpenSpec) format (requirements with SHALL, scenarios with WHEN and THEN; `npx @fission-ai/openspec validate --specs` checks them, `openspec view` browses them) and `features/*.feature` in Gherkin (the scenarios the end-to-end tests run, readable by Cucumber and IDE plugins). `openspec/project.md` holds the context: the stack, the pipelines, the conventions. When a behaviour changes, its requirement and its scenario change with it.
 
 ## Development
