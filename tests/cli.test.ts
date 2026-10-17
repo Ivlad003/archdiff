@@ -710,6 +710,18 @@ test("--mermaid picks a Mermaid type that fits the view", () => {
   assert.equal(archdiff(["diagram", "layers", fixture, "--mermaid", "venn"]).status, 2);
 });
 
+test("--expand opens a module in place: a lane of its functions, the lines landing on the functions they concern", () => {
+  const json = JSON.parse(archdiff(["diagram", "layer:lib", fixture, "--expand", "src/lib/orders.ts", "--format", "json"]).stdout) as { groups: { id: string }[]; nodes: { id: string; kind: string; group?: string }[]; edges: { kind: string; from: string; to: string }[]; reason?: string };
+  assert.ok(json.groups.some((group) => group.id === "inside:src/lib/orders.ts"), JSON.stringify(json.groups));
+  assert.ok(!json.nodes.some((node) => node.id === "src/lib/orders.ts"), "the module shape stayed");
+  assert.equal(json.nodes.find((node) => node.id === "src/lib/orders.ts#placeOrder")?.group, "inside:src/lib/orders.ts");
+  assert.ok(json.nodes.some((node) => node.id === "src/lib/orders.ts#(rest)" && node.kind === "module"));
+  assert.ok(json.edges.some((edge) => edge.from === "src/routes/checkout.tsx" && edge.to === "src/lib/orders.ts#OrderService.place" && edge.kind === "call"), JSON.stringify(json.edges));
+  assert.ok(json.edges.some((edge) => edge.from === "src/lib/orders.ts#placeOrder" && edge.to === "src/db/store.ts"));
+  assert.ok(json.edges.some((edge) => edge.from === "src/db/store.ts" && edge.to === "src/lib/orders.ts#(rest)"));
+  assert.ok(json.reason?.includes("opened in place: src/lib/orders.ts"), json.reason);
+});
+
 test("matrix:<dir> is the dependency structure matrix of a directory's modules; --weight leaves light lines out", () => {
   const matrix = archdiff(["diagram", "matrix:src", fixture]).stdout;
   assert.ok(matrix.includes("# Matrix of src: rows import columns"), matrix.slice(0, 200));

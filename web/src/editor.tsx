@@ -42,6 +42,8 @@ export interface CanvasHandle {
   highlight(ids: readonly string[], colour?: string): void;
   /** Lights the line under the pointer, under the tap's own light; null puts it out. */
   hover(id: string | null): void;
+  /** Dims every generated shape and line not in `keep` (and the labels of the dimmed); null clears the dimming. */
+  dim(keep: readonly string[] | null): void;
   /** Where the viewport is, to remember per view. */
   viewport(): { scrollX: number; scrollY: number; zoom: number } | null;
   setViewport(viewport: { scrollX: number; scrollY: number; zoom: number }): void;
@@ -312,6 +314,42 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       if (changed) api.updateScene({ elements: next as never });
     };
 
+    // Dimming: the opacity of everything outside the focus, put back when the focus clears.
+    const dimmed = new Map<string, number>();
+
+    const dim = (keep: readonly string[] | null): void => {
+      if (!api) return;
+      const kept = keep === null ? null : new Set(keep);
+      const elements = api.getSceneElementsIncludingDeleted() as unknown as (SceneElement & { opacity: number; containerId?: string | null })[];
+      const byId = new Map(elements.map((element) => [element.id, element]));
+      let changed = false;
+      const next = elements.map((element) => {
+        const role = element.customData?.["archdiff"];
+        // A label follows its shape or line; a lane is never dimmed.
+        const owner = role === "label" && element.containerId ? byId.get(element.containerId) : role === "label" ? byId.get(element.id.replace(/:text$/, "")) : element;
+        const wanted = kept !== null && owner !== undefined && (role === "node" || role === "edge" || role === "label") && !kept.has(owner.id);
+        const original = dimmed.get(element.id);
+
+        if (wanted && original === undefined) {
+          dimmed.set(element.id, element.opacity);
+          changed = true;
+
+          return { ...element, opacity: 18 };
+        }
+
+        if (!wanted && original !== undefined) {
+          dimmed.delete(element.id);
+          changed = true;
+
+          return { ...element, opacity: original };
+        }
+
+        return element;
+      });
+
+      if (changed) api.updateScene({ elements: next as never });
+    };
+
     // The hover light sits under the tap light: a line the tap lit keeps its look; one line at a time.
     const hoverLit = new Map<string, { strokeColor: string; strokeWidth: number }>();
 
@@ -378,6 +416,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       scrollToContent: fit,
       highlight,
       hover,
+      dim,
       viewport: () => {
         if (!api) return null;
         const state = api.getAppState();

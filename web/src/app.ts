@@ -54,6 +54,8 @@ interface State {
   weight: number | null;
   /** Hubs (modules most of the picture imports) as badges rather than lines. */
   hubs: boolean;
+  /** Modules opened in place as lanes of their functions (the mix tool). */
+  expand: string[];
 }
 
 /** The options a link may leave out, remembered in this browser as defaults ("remember as defaults"). */
@@ -119,6 +121,7 @@ function stateFromHash(): State {
     mermaid: params.get("mermaid") ?? defaults.mermaid,
     weight: params.get("weight") === null ? (defaults.weight ?? null) : params.get("weight") === "" ? null : Number(params.get("weight")),
     hubs: params.has("hubs") ? params.get("hubs") !== "0" : (defaults.hubs ?? true),
+    expand: (params.get("expand") ?? "").split(",").filter((id) => id !== ""),
   };
 }
 
@@ -154,6 +157,8 @@ function setHash(state: State): void {
   if (state.weight !== (defaults.weight ?? null)) params.set("weight", state.weight === null ? "" : String(state.weight));
 
   if (state.hubs !== (defaults.hubs ?? true)) params.set("hubs", state.hubs ? "1" : "0");
+
+  if (state.expand.length > 0) params.set("expand", state.expand.join(","));
   location.hash = params.toString();
 }
 
@@ -459,6 +464,63 @@ async function showNode(id: string | null): Promise<void> {
   await showCode(node);
 }
 
+/** The tools of the canvas that change what a tap does. */
+const tools = { mix: false, focus: false };
+
+/** A shape, its lines and the shapes at their other ends: what stays lit under the focus tool. */
+function neighbourhoodOf(id: string): string[] {
+  const keep = new Set([id]);
+  edges.forEach((edge, index) => {
+    if (edge.from === id || edge.to === id) {
+      keep.add(lineElementId(edge, index));
+      keep.add(edge.from);
+      keep.add(edge.to);
+    }
+  });
+
+  return [...keep];
+}
+
+/** The detail presets of the canvas toolbar: how much a picture shows at once. */
+const DETAIL: Record<string, Partial<State>> = {
+  minimal: { depth: 1, limit: 20, weight: 2, hubs: true },
+  normal: { depth: null, limit: null, weight: null, hubs: true },
+  full: { depth: null, limit: 200, weight: null, hubs: false },
+};
+
+/** The overview pictures of the picture select, after those of the current subject. */
+const OVERVIEWS: [string, string][] = [["layers", "layers"], ["matrix", "matrix of the layers"], ["cycles", "import cycles"], ["classes", "class diagram"], ["hotspots", "hotspots"], ["tests", "test coverage"], ["events", "events"], ["packages", "packages"], ["coverage", "blind spots"], ["timeline", "timeline"]];
+
+/** The canvas toolbar: the picture select (this subject's pictures, then the overviews), the detail buttons and the tool states. */
+function renderCanvasTools(state: State): void {
+  const select = element<HTMLSelectElement>("picture");
+  select.replaceChildren();
+  const siblings = state.review ? [] : siblingViews(state.view);
+
+  if (siblings.length > 0) {
+    const group = document.createElement("optgroup");
+    group.label = "this subject";
+
+    for (const sibling of siblings) group.append(new Option(sibling.label, sibling.key, false, sibling.key === state.view));
+    select.append(group);
+  }
+
+  const overview = document.createElement("optgroup");
+  overview.label = "overview";
+
+  for (const [key, label] of OVERVIEWS) overview.append(new Option(label, key, false, key === state.view));
+  select.append(overview);
+
+  if (!siblings.some((sibling) => sibling.key === state.view) && !OVERVIEWS.some(([key]) => key === state.view)) select.prepend(new Option(state.view, state.view, true, true));
+  const detail = Object.entries(DETAIL).find(([, preset]) => (preset.depth ?? null) === state.depth && (preset.limit ?? null) === state.limit && (preset.weight ?? null) === state.weight && preset.hubs === state.hubs)?.[0];
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) button.classList.toggle("active", button.dataset["detail"] === detail);
+  element<HTMLButtonElement>("tool-mix").classList.toggle("active", tools.mix);
+  element<HTMLButtonElement>("tool-focus").classList.toggle("active", tools.focus);
+  element<HTMLButtonElement>("mix-clear").hidden = state.expand.length === 0;
+  element<HTMLButtonElement>("mix-clear").textContent = `close opened (${state.expand.length})`;
+}
+
 /** The page of a tapped line: what it joins and the imports and calls behind it. */
 /** The canvas element ID of a line, as the export names it (a message by its index, since one pair may exchange several). */
 function lineElementId(edge: DiagramEdge, index: number): string {
@@ -659,10 +721,25 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
       // A tap on lines lights them with their ends (or the chain onward, with Shift); a shape or nothing puts the light out.
       if (lines && lines.length > 0) {
         void showEdge(lines, follow === true);
-      } else {
-        canvas?.highlight([]);
-        void showNode(id);
+
+        return;
       }
+
+      canvas?.highlight([]);
+      const node = id === null ? null : nodes.get(id);
+
+      // The mix tool: a module opens in place, an opened module's "rest" shape closes it.
+      if (tools.mix && node && (node.kind === "module" || node.kind === "participant")) {
+        const module = node.ref?.id ?? node.id;
+        const now = stateFromHash();
+        setHash({ ...now, expand: now.expand.includes(module) ? now.expand.filter((each) => each !== module) : [...now.expand, module] });
+
+        return;
+      }
+
+      // The focus tool: everything but the shape and its neighbours dims; a tap on nothing clears it.
+      if (tools.focus) canvas?.dim(node ? neighbourhoodOf(node.id) : null);
+      void showNode(id);
     },
     open: (id, link) => {
       const key = link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : nodes.has(id) ? ownView(nodes.get(id)!) : null;
@@ -714,7 +791,7 @@ async function relayout(): Promise<void> {
   if (!canvas) return;
   await saveDrawing();
   const now = stateFromHash();
-  const scene = await api.scene(now.view, { depth: now.depth, limit: now.limit, weight: now.weight, hubs: now.hubs, packages: now.packages, changes: false, overlays: now.overlays, mermaid: now.mermaid, base: null, head: null });
+  const scene = await api.scene(now.view, { depth: now.depth, limit: now.limit, weight: now.weight, hubs: now.hubs, expand: now.expand, packages: now.packages, changes: false, overlays: now.overlays, mermaid: now.mermaid, base: null, head: null });
   canvas.replace(scene.elements);
 }
 
@@ -731,6 +808,7 @@ async function load(): Promise<void> {
   element<HTMLInputElement>("limit").value = state.limit === null ? "" : String(state.limit);
   element<HTMLInputElement>("weight").value = state.weight === null ? "" : String(state.weight);
   element<HTMLInputElement>("hubs").checked = state.hubs;
+  renderCanvasTools(state);
   element<HTMLSelectElement>("mermaid").value = state.mermaid;
 
   for (const box of document.querySelectorAll<HTMLInputElement>("#options .overlay")) box.checked = state.overlays.includes(box.value);
@@ -775,7 +853,7 @@ async function load(): Promise<void> {
       void loadCommits(state);
       void loadBranches(state);
     } else {
-      const result = await api.scene(state.view, { depth: state.depth, limit: state.limit, weight: state.weight, hubs: state.hubs, packages: state.packages, changes: state.changes, overlays: state.overlays, mermaid: state.mermaid, base: state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, head: state.view === "timeline" || state.changes ? state.head : null });
+      const result = await api.scene(state.view, { depth: state.depth, limit: state.limit, weight: state.weight, hubs: state.hubs, expand: state.expand, packages: state.packages, changes: state.changes, overlays: state.overlays, mermaid: state.mermaid, base: state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, head: state.view === "timeline" || state.changes ? state.head : null });
       title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
@@ -1362,6 +1440,38 @@ api.changes((path) => {
 
 element<HTMLButtonElement>("fit").addEventListener("click", () => canvas?.scrollToContent());
 element<HTMLSelectElement>("view-type").addEventListener("change", () => setHash({ ...stateFromHash(), view: element<HTMLSelectElement>("view-type").value, review: false }));
+element<HTMLSelectElement>("picture").addEventListener("change", () => setHash({ ...stateFromHash(), view: element<HTMLSelectElement>("picture").value, review: false, expand: [] }));
+
+for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) {
+  button.addEventListener("click", () => applyOptions({ ...stateFromHash(), ...DETAIL[button.dataset["detail"]!] }));
+}
+
+element<HTMLButtonElement>("depth-less").addEventListener("click", () => {
+  const now = stateFromHash();
+  const current = now.depth ?? (Number(depthInput.placeholder) || 1);
+  setHash({ ...now, depth: Math.max(0, current - 1) });
+});
+element<HTMLButtonElement>("depth-more").addEventListener("click", () => {
+  const now = stateFromHash();
+  const current = now.depth ?? (Number(depthInput.placeholder) || 1);
+  setHash({ ...now, depth: Math.min(12, current + 1) });
+});
+element<HTMLButtonElement>("tool-mix").addEventListener("click", () => {
+  tools.mix = !tools.mix;
+
+  if (tools.mix) tools.focus = false;
+  renderCanvasTools(stateFromHash());
+  reason.textContent = tools.mix ? "mix: tap a module to open it in place; tap its rest shape to close it" : (reason.title || "");
+});
+element<HTMLButtonElement>("tool-focus").addEventListener("click", () => {
+  tools.focus = !tools.focus;
+
+  if (tools.focus) tools.mix = false;
+  else canvas?.dim(null);
+  renderCanvasTools(stateFromHash());
+  reason.textContent = tools.focus ? "focus: tap a shape to dim all but its neighbours; tap nothing to clear" : (reason.title || "");
+});
+element<HTMLButtonElement>("mix-clear").addEventListener("click", () => setHash({ ...stateFromHash(), expand: [] }));
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 element<HTMLButtonElement>("review").addEventListener("click", () => {
   if (leaveEdit()) setHash({ ...stateFromHash(), review: true, head: headInput.value.trim() || null });
@@ -1444,7 +1554,7 @@ element<HTMLButtonElement>("options-reset").addEventListener("click", () => {
     // Nothing stored.
   }
 
-  applyOptions({ ...stateFromHash(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false, weight: null, hubs: true });
+  applyOptions({ ...stateFromHash(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false, weight: null, hubs: true, expand: [] });
 });
 baseInput.addEventListener("change", () => {
   if (stateFromHash().review) setHash(stateFromHash());
@@ -1504,6 +1614,10 @@ window.addEventListener("keydown", (event) => {
     search.focus();
   } else if (event.key === "o") {
     element<HTMLDetailsElement>("options-menu").toggleAttribute("open");
+  } else if (event.key === "m" && !stateFromHash().review) {
+    element<HTMLButtonElement>("tool-mix").click();
+  } else if (event.key === "f" && !stateFromHash().review) {
+    element<HTMLButtonElement>("tool-focus").click();
   } else if (event.key === "e" && !stateFromHash().review) {
     setMode("edit");
   } else if (event.key === "Escape") {

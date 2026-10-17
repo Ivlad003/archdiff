@@ -178,3 +178,32 @@ test("a tap on a line lights it with its ends and shows where it leads", { skip:
   await page!.click(".line-strip button:has-text('stop following')");
   await page!.waitForFunction(`![...document.querySelectorAll("#markdown h2")].some((h) => h.textContent?.startsWith("Chain onward"))`);
 });
+
+test("the canvas toolbar switches the picture, sets the detail and opens a module in place with the mix tool", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.evaluate("localStorage.clear()");
+  await page!.goto(`${base}/?fresh=5#view=layer%3Alib`);
+  await page!.waitForSelector(".excalidraw canvas");
+  await page!.waitForFunction(`document.querySelector("#picture option[value='matrix']")`);
+  await page!.selectOption("#picture", "matrix");
+  await page!.waitForFunction(`location.hash.includes("view=matrix")`);
+  await page!.selectOption("#picture", "layers");
+  await page!.waitForFunction(`location.hash === "#view=layers"`);
+  await page!.click("#canvas-tools [data-detail='minimal']");
+  await page!.waitForFunction(`location.hash.includes("limit=20") && location.hash.includes("weight=2") && location.hash.includes("depth=1")`);
+  await page!.waitForFunction(`document.querySelector("#canvas-tools [data-detail='minimal']").classList.contains("active")`);
+  await page!.click("#depth-more");
+  await page!.waitForFunction(`location.hash.includes("depth=2")`);
+  // The mix tool: a tap on the single module of a depth-0 module view opens it in place.
+  await page!.goto(`${base}/?fresh=6#view=module%3Asrc%2Flib%2Forders.ts&depth=0`);
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent === "src/lib/orders.ts"`);
+  await page!.waitForTimeout(1000);
+  await page!.click("#tool-mix");
+  const canvasBox = (await page!.evaluate(`document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect().toJSON()`)) as { left: number; top: number; width: number; height: number };
+  await page!.mouse.move(canvasBox.left + canvasBox.width / 2, canvasBox.top + canvasBox.height / 2);
+  await page!.mouse.down();
+  await page!.mouse.up();
+  await page!.waitForFunction(`location.hash.includes("expand=src%2Flib%2Forders.ts")`, undefined, { timeout: 8000 });
+  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("opened in place")`);
+  await page!.click("#mix-clear");
+  await page!.waitForFunction(`!location.hash.includes("expand=")`);
+});

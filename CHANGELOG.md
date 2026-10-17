@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The canvas toolbar: a picture select (this subject's pictures, then the overviews), detail presets minimal / normal / full and depth −/+, **mix** (a tapped module opens in place as a lane of its functions, the lines landing on the functions they concern; `--expand` in the terminal) and **focus** (everything but a tapped shape and its neighbours dims).
+
 ## 0.3.0 — 2026-10-17
 
 (0.2.0 was committed but never published; its changes are here.)

@@ -961,3 +961,59 @@ body.editing #reason {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+#canvas-tools {
+  position: absolute;
+  top: 8px;
+  left: 52px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 64px);
+}
+
+#canvas-tools select,
+#canvas-tools button {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: inherit;
+  cursor: pointer;
+}
+
+#canvas-tools select {
+  max-width: 260px;
+}
+
+#canvas-tools .group {
+  display: inline-flex;
+}
+
+#canvas-tools .group button {
+  border-radius: 0;
+  margin-left: -1px;
+}
+
+#canvas-tools .group button:first-child {
+  border-radius: 4px 0 0 4px;
+  margin-left: 0;
+}
+
+#canvas-tools .group button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+#canvas-tools button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--panel);
+}
+
+body.editing #canvas-tools {
+  display: none;
+}

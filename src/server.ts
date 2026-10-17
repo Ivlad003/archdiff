@@ -163,11 +163,11 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
   // The placed diagram of a view, at the saved places when the view was drawn by hand.
   /** The options of a picture as the query names them: depth, limit, packages, changes, overlays. */
-  const optionsOf = (url: URL): { depth?: number; limit?: number; weight?: number; hubs: boolean; packages: boolean; changes: boolean; overlays: Overlay[] } => {
+  const optionsOf = (url: URL): { depth?: number; limit?: number; weight?: number; hubs: boolean; packages: boolean; changes: boolean; overlays: Overlay[]; expand: string[] } => {
     const depthText = url.searchParams.get("depth");
     const limitText = url.searchParams.get("limit");
     const weightText = url.searchParams.get("weight");
-    const out: { depth?: number; limit?: number; weight?: number; hubs: boolean; packages: boolean; changes: boolean; overlays: Overlay[] } = { hubs: url.searchParams.get("hubs") !== "0", packages: url.searchParams.get("packages") === "1", changes: url.searchParams.get("changes") === "1", overlays: parseOverlays(url.searchParams.get("overlay")) };
+    const out: { depth?: number; limit?: number; weight?: number; hubs: boolean; packages: boolean; changes: boolean; overlays: Overlay[]; expand: string[] } = { hubs: url.searchParams.get("hubs") !== "0", packages: url.searchParams.get("packages") === "1", changes: url.searchParams.get("changes") === "1", overlays: parseOverlays(url.searchParams.get("overlay")), expand: (url.searchParams.get("expand") ?? "").split(",").filter((id) => id !== "") };
 
     if (depthText !== null && depthText !== "" && Number.isInteger(Number(depthText)) && Number(depthText) >= 0) out.depth = Number(depthText);
 
@@ -183,7 +183,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     const view = parseView(key);
 
     if (!view) return null;
-    const viewOptions: ViewOptions = { packages: picked.packages, hubs: picked.hubs };
+    const viewOptions: ViewOptions = { packages: picked.packages, hubs: picked.hubs, expand: picked.expand };
 
     if (picked.depth !== undefined) viewOptions.depth = picked.depth;
 

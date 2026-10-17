@@ -28,7 +28,8 @@ Commands:
                      Parse the repository and print its size: files, functions, imports,
                      resolved calls and gaps. --json: the stats as JSON
   views [dir]        List the views that can be drawn: layers, every module, every entry point
-  diagram <view> [dir] [--format F] [--depth N] [--packages] [--limit N] [--weight N] [--no-hubs] [--out FILE]
+  diagram <view> [dir] [--format F] [--depth N] [--packages] [--limit N] [--weight N] [--no-hubs]
+                 [--expand a.ts,b.ts] [--out FILE]
                      Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,
                      drawio, excalidraw, archimate. Views: layers | layer:<name> | dir:<path> |
                      module:<path> | inside:<path> | contract:<path> | calls:<path>#<fn> |
@@ -45,7 +46,10 @@ Commands:
                      "… N more" (default 40). --weight N leaves out lines standing for fewer
                      than N imports or calls. A module most of a picture imports (a logger,
                      the types) is a badge "+ log.ts" on its importers, not a tangle of lines;
-                     --no-hubs draws it. Every export names the commit it was drawn from.
+                     --no-hubs draws it. --expand opens modules in place: each becomes a lane
+                     of its functions, with the lines landing on the functions they concern (the
+                     mix of a module view and an inside view). Every export names the commit it
+                     was drawn from.
   layouts [dir] [--prune]
                      List the saved drawings (.archdiff/layouts/); --prune deletes those
                      whose view the code no longer has (a renamed module, a removed function)
@@ -105,7 +109,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid", "overlay", "weight"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid", "overlay", "weight", "expand"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -219,7 +223,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         const weight = flags.has("weight") ? Number(flags.get("weight")) : undefined;
 
         if (weight !== undefined && !(Number.isInteger(weight) && weight >= 1)) return fail("diagram: --weight must be a whole number above 0");
-        const options: ViewOptions = { packages: flags.has("packages"), hubs: !flags.has("no-hubs") };
+        const options: ViewOptions = { packages: flags.has("packages"), hubs: !flags.has("no-hubs"), expand: typeof flags.get("expand") === "string" ? (flags.get("expand") as string).split(",").filter((id) => id !== "") : [] };
 
         if (depth !== undefined) options.depth = depth;
 

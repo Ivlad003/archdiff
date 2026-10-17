@@ -103,6 +103,18 @@
         </div>
         <div id="canvas-wrap">
           <div id="canvas"></div>
+          <div id="canvas-tools">
+            <select id="picture" title="Which picture the canvas draws: another picture of this subject, or an overview"></select>
+            <span class="group" title="How much the picture shows at once: minimal (depth 1, 20 shapes, lines of weight 2+), normal (the defaults), full (one level deeper, 200 shapes, every line, hubs drawn)">
+              <button data-detail="minimal">minimal</button><button data-detail="normal">normal</button><button data-detail="full">full</button>
+            </span>
+            <span class="group" title="Depth: how far from the subject the picture goes">
+              <button id="depth-less">depth −</button><button id="depth-more">depth +</button>
+            </span>
+            <button id="tool-mix" title="Mix: tap a module to open it in place as a lane of its functions, with the lines landing on the functions they concern; tap it again to close it (m)">mix</button>
+            <button id="tool-focus" title="Focus: tap a shape to dim everything but it and its neighbours; tap nothing to clear (f)">focus</button>
+            <button id="mix-clear" hidden title="Close every module opened in place">close opened</button>
+          </div>
           <div id="reason" class="muted"></div>
         </div>
         <div id="legend">

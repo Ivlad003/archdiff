@@ -58,6 +58,8 @@ export interface ViewOptions {
   weight?: number;
   /** Modules most of a picture imports (a logger, the types) become a badge on their importers instead of a tangle of lines. Default on. */
   hubs?: boolean;
+  /** Modules opened in place: each becomes a lane of its functions, and the lines into and out of it land on the functions they concern (the mix of a module view and an inside view). */
+  expand?: readonly string[];
 }
 
 /**
@@ -779,7 +781,8 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
 
   // Hubs leave before the fold (they would eat its budget); the weight filter runs after it, on the merged lines.
   const subject = "id" in view ? view.id : null;
-  const slimmed = options.hubs === false || !MODULE_VIEWS.has(view.kind) ? diagram : hubsAsBadges(diagram, subject);
+  const mixed = options.expand && options.expand.length > 0 && MODULE_VIEWS.has(view.kind) ? expandInPlace(diagram, graph, options.expand) : diagram;
+  const slimmed = options.hubs === false || !MODULE_VIEWS.has(view.kind) ? mixed : hubsAsBadges(mixed, subject);
   const answered = slimmed.question ? slimmed : { ...slimmed, question: QUESTION[view.kind] };
 
   return dropLightLines(answered.placed || answered.classes ? answered : fold(answered, options.limit ?? MAX_SHAPES), options.weight ?? 1);
@@ -830,4 +833,92 @@ export function dropLightLines(diagram: Diagram, weight: number): Diagram {
   if (dropped === 0) return diagram;
 
   return { ...diagram, edges: kept, reason: [diagram.reason, `${dropped} lines lighter than ${weight} left out`].filter(Boolean).join("; ") };
+}
+
+/**
+ * The mix of a module view and the inside of some of its modules: each
+ * module named in `expand` leaves its lane and becomes a lane of its own
+ * functions and classes, with the calls among them; a line into the module
+ * lands on the functions the source actually calls (the rest on a small
+ * "rest of the module" shape), a line out of it leaves from the functions
+ * that make the calls. Structure and detail in one picture, where it is
+ * wanted and nowhere else.
+ */
+export function expandInPlace(diagram: Diagram, graph: Graph, expand: readonly string[]): Diagram {
+  const present = new Set(diagram.nodes.filter((node) => node.kind === "module").map((node) => node.id));
+  const opened = expand.filter((id) => present.has(id) && graph.modules.has(id));
+
+  if (opened.length === 0) return diagram;
+  const openedSet = new Set(opened);
+  const nodes: DiagramNode[] = diagram.nodes.filter((node) => !openedSet.has(node.id));
+  const edges: DiagramEdge[] = [];
+  const groups: DiagramGroup[] = [...diagram.groups];
+  const restOf = (module: string): string => `${module}#(rest)`;
+  // The functions of every opened module, by module, and the calls among them.
+  const fnsOf = new Map<string, string[]>();
+
+  for (const module of opened) {
+    const laneId = `inside:${module}`;
+    const own = [...graph.nodes.values()].filter((node) => node.module === module && node.kind !== "type").map((node) => node.id);
+    fnsOf.set(module, own);
+    groups.push({ id: laneId, label: `${module} (inside)`, kind: "lane", x: 0, y: 0, w: 0, h: 0 });
+
+    for (const id of own) nodes.push({ ...fnNode(graph, id), group: laneId });
+    nodes.push({ id: restOf(module), kind: "module", label: `${module.slice(module.lastIndexOf("/") + 1)}\n(rest of the module)`, ref: { id: module, file: module, line: 1 }, group: laneId, x: 0, y: 0, w: 0, h: 0 });
+  }
+
+  const seen = new Set<string>();
+
+  const push = (edge: DiagramEdge): void => {
+    const key = `${edge.from}\u0000${edge.to}\u0000${edge.kind}`;
+
+    if (seen.has(key)) return;
+    seen.add(key);
+    edges.push(edge);
+  };
+
+  for (const module of opened) {
+    const own = new Set(fnsOf.get(module)!);
+
+    for (const call of graph.calls) if (own.has(call.from) && own.has(call.to) && call.from !== call.to) push({ from: call.from, to: call.to, kind: call.kind });
+  }
+
+  // The lines of the picture: those touching an opened module land on its functions where a call names one.
+  for (const edge of diagram.edges) {
+    const fromOpen = openedSet.has(edge.from);
+    const toOpen = openedSet.has(edge.to);
+
+    if (!fromOpen && !toOpen) {
+      push(edge);
+      continue;
+    }
+
+    if (fromOpen && toOpen) {
+      // Between two opened modules: the calls between their functions, else rest → rest.
+      const calls = graph.calls.filter((call) => moduleOf(call.from) === edge.from && moduleOf(call.to) === edge.to && fnsOf.get(edge.from)!.includes(call.from) && fnsOf.get(edge.to)!.includes(call.to));
+
+      if (calls.length === 0) push({ from: restOf(edge.from), to: restOf(edge.to), kind: edge.kind });
+      else for (const call of calls) push({ from: call.from, to: call.to, kind: call.kind });
+    } else if (toOpen) {
+      // Into the module: the functions called from the source's module (or from the source function itself).
+      const sourceModule = diagram.nodes.find((node) => node.id === edge.from);
+      const fromModule = sourceModule?.kind === "fn" ? moduleOf(sourceModule.ref?.id ?? edge.from) : edge.from;
+      const targets = new Set(graph.calls.filter((call) => moduleOf(call.from) === fromModule && fnsOf.get(edge.to)!.includes(call.to)).map((call) => call.to));
+
+      if (targets.size === 0) push({ from: edge.from, to: restOf(edge.to), kind: edge.kind });
+      else for (const target of targets) push({ from: edge.from, to: target, kind: "call" });
+    } else {
+      // Out of the module: the functions that call into the target's module.
+      const targetModule = diagram.nodes.find((node) => node.id === edge.to);
+      const toModule = targetModule?.kind === "fn" ? moduleOf(targetModule.ref?.id ?? edge.to) : edge.to;
+      const sources = new Set(graph.calls.filter((call) => fnsOf.get(edge.from)!.includes(call.from) && (moduleOf(call.to) === toModule || call.to === toModule)).map((call) => call.from));
+
+      if (sources.size === 0) push({ from: restOf(edge.from), to: edge.to, kind: edge.kind });
+      else for (const source of sources) push({ from: source, to: edge.to, kind: "call" });
+    }
+  }
+
+  const note = `opened in place: ${opened.join(", ")}`;
+
+  return { ...diagram, nodes, edges, groups, reason: [diagram.reason, note].filter(Boolean).join("; ") };
 }
