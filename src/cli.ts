@@ -18,6 +18,9 @@ import { applyOverlays, parseOverlays } from "./overlays.ts";
 import { serve } from "./server.ts";
 import { layout } from "./diagram.ts";
 import { parseView, viewOf, viewList, type ViewOptions } from "./views.ts";
+import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, mergePlan, parseIntent, readIntent, writeIntent } from "./intent.ts";
+import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
+import { existsSync, readFileSync } from "node:fs";
 
 const HELP = `archdiff: live diagrams of a TypeScript/JavaScript repository, and the architectural diff of a change
 
@@ -76,6 +79,19 @@ Commands:
                      The architecture drift commit by commit from --base (default: the
                      merge-base) to --head (default: HEAD): modules, functions, imports,
                      layer couplings and packages each commit added or removed
+  new <dir> [--lang ts|js] [--template blank|lib|cli|api|web] [--agent claude|cursor] [--no-git]
+                     A project from scratch: package.json, tsconfig, archdiff.json with the
+                     template's layers, ARCHITECTURE.md with its intent, the first commit.
+                     Then: web opens the intent view to draw in; the agent builds what is drawn
+  import <file> [dir] A Markdown document with a Mermaid flowchart (a design note, an ISD, a
+                     tool's export) becomes ARCHITECTURE.md: subgraphs are layers, nodes are
+                     modules (the label is the path, then what it does), arrows are imports
+  intent [dir] [--init [--force]] [--view V] [--json] [--out FILE]
+                     Print ARCHITECTURE.md; --init writes it from the code; --view folds the
+                     saved drawing of a view into it
+  check [dir] [--json] [--out FILE]
+                     The code against ARCHITECTURE.md: imports between layers the intent does
+                     not allow (exit 1), what is planned and not built, what is built beyond it
   plan <view> [dir] [--json] [--out FILE]
                      The task drawn on the saved drawing of a view (the page's ✎ edit): new
                      shapes as modules or functions to add, arrows as imports or calls,
@@ -110,7 +126,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid", "overlay", "weight", "expand", "hide-lanes"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid", "overlay", "weight", "expand", "hide-lanes", "lang", "template", "view"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -172,7 +188,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   const dirArg = (index: number): string => resolve(positional[index] ?? ".");
   // How many positional arguments each command takes; one more is a typo, not a silent extra.
-  const arity: Record<string, number> = { analyze: 1, views: 1, diagram: 2, coverage: 1, review: 1, history: 1, layouts: 1, flow: 2, plan: 2, web: 1 };
+  const arity: Record<string, number> = { analyze: 1, views: 1, diagram: 2, coverage: 1, review: 1, history: 1, layouts: 1, flow: 2, plan: 2, web: 1, new: 1, import: 2, check: 1, intent: 1 };
 
   if (command in arity && positional.length > arity[command]!) return fail(`${command}: unexpected argument "${positional[arity[command]!]}" (archdiff --help)`);
 
@@ -305,6 +321,93 @@ export async function main(argv: readonly string[]): Promise<number> {
         const plan = planFromScene(analysis, key, saved.elements);
 
         return writeOut(flags.has("json") ? `${JSON.stringify(plan, null, 2)}\n` : planMarkdown(plan, analysis), flags.get("out"));
+      }
+
+      case "new": {
+        const target = positional[0];
+
+        if (!target) return fail("new: a directory is required (archdiff new my-app --lang ts)");
+        const lang = flags.get("lang") ?? "ts";
+
+        if (lang !== "ts" && lang !== "js") return fail("new: --lang must be ts or js");
+        const template = (flags.get("template") ?? "blank") as string;
+
+        if (!TEMPLATES.includes(template as Template)) return fail(`new: --template must be one of ${TEMPLATES.join(", ")}`);
+        const agentFlag = flags.get("agent");
+
+        if (agentFlag !== undefined && agentFlag !== "claude" && agentFlag !== "cursor") return fail("new: --agent must be claude or cursor");
+        let written: string[];
+
+        try {
+          written = scaffold(resolve(target), { lang, template: template as Template, agent: (agentFlag as "claude" | "cursor" | undefined) ?? null, git: !flags.has("no-git") });
+        } catch (error) {
+          return fail(`new: ${error instanceof Error ? error.message : String(error)}`);
+        }
+
+        process.stdout.write(`${written.map((file) => `${target}/${file}`).join("\n")}\n`);
+        process.stderr.write(`archdiff new: ${template} (${lang}) in ${resolve(target)}${flags.has("no-git") ? "" : ", committed on main"}. Next: cd ${target} && npx @ivlad003/archdiff web${agentFlag ? "" : " --agent claude"}\n`);
+
+        return 0;
+      }
+
+      case "import": {
+        // A document with a Mermaid flowchart (an ISD, a design note, an export of another tool) becomes the intent.
+        const file = positional[0];
+
+        if (!file) return fail("import: a Markdown file with a Mermaid flowchart is required");
+
+        if (!existsSync(resolve(file))) return fail(`import: ${file} does not exist`);
+        const root = dirArg(1);
+        const intent = parseIntent(readFileSync(resolve(file), "utf8"));
+
+        if (intent.modules.length === 0 && intent.layers.length === 0) return fail(`import: no Mermaid flowchart with layers or modules in ${file}`);
+        const wrote = writeIntent(root, intent);
+        process.stderr.write(`archdiff import: ${intent.layers.length} layers, ${intent.modules.length} modules, ${intent.edges.length} imports → ${wrote}\n`);
+
+        return 0;
+      }
+
+      case "intent": {
+        // Print the intent; --init writes one from the code; --from <view> folds the drawing of a view into it.
+        const analysis = await analyze(dirArg(0));
+        let intent = analysis.intent;
+
+        if (flags.has("init")) {
+          if (intent && !flags.has("force")) return fail(`intent: ${INTENT_FILE} exists; --force overwrites it from the code`);
+          intent = intentFromCode(analysis);
+          writeIntent(analysis.root, intent);
+          process.stderr.write(`archdiff intent: ${INTENT_FILE} written from the code (${intent.layers.length} layers, ${intent.modules.length} modules)\n`);
+        }
+
+        if (typeof flags.get("view") === "string") {
+          const key = flags.get("view") as string;
+          const saved = readLayout(analysis.root, key);
+
+          if (!saved) return fail(`intent: ${key} has no saved drawing`);
+          intent = mergePlan(intent ?? parseIntent(""), planFromScene(analysis, key, saved.elements), analysis.graph);
+          writeIntent(analysis.root, intent);
+          process.stderr.write(`archdiff intent: the drawing of ${key} folded into ${INTENT_FILE}\n`);
+        }
+
+        if (!intent) return fail(`intent: no ${INTENT_FILE} (archdiff intent --init writes one from the code; archdiff import <file> from a document)`);
+
+        return writeOut(flags.has("json") ? `${JSON.stringify({ layers: intent.layers, modules: intent.modules, edges: intent.edges }, null, 2)}\n` : intentMarkdown(intent), flags.get("out"));
+      }
+
+      case "check": {
+        const analysis = await analyze(dirArg(0));
+
+        if (!analysis.intent) {
+          process.stderr.write(`archdiff check: no ${INTENT_FILE}, nothing to check against (archdiff intent --init)\n`);
+
+          return 0;
+        }
+
+        const report = checkIntent(analysis, analysis.intent);
+        const code = writeOut(flags.has("json") ? `${JSON.stringify(report, null, 2)}\n` : checkMarkdown(report, analysis.root), flags.get("out"));
+        process.stderr.write(report.ok ? "archdiff check: the code follows the intent\n" : `archdiff check: ${report.violations.length} imports go against the intent\n`);
+
+        return code !== 0 ? code : report.ok ? 0 : 1;
       }
 
       case "coverage": {

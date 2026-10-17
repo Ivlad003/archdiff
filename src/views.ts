@@ -16,6 +16,7 @@
 import type { Analysis } from "./analyze.ts";
 import { SIZE, type Diagram, type DiagramEdge, type DiagramGroup, type DiagramNode } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
+import { INTENT_FILE, intentView } from "./intent.ts";
 import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
 import { classesView, contractView, cyclesView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 
@@ -39,10 +40,11 @@ export type View =
   | { kind: "hotspots" }
   | { kind: "packages" }
   | { kind: "timeline" }
-  | { kind: "coverage" };
+  | { kind: "coverage" }
+  | { kind: "intent" };
 
 /** The views without a subject. */
-const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "events", "tests", "hotspots", "packages", "timeline"]);
+const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "events", "tests", "hotspots", "packages", "timeline", "intent"]);
 
 /** The views with a subject (`kind:<subject>`). */
 const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "classes", "matrix"]);
@@ -99,6 +101,7 @@ const QUESTION: Record<View["kind"], string> = {
   packages: "which packages depend on which, declared or not",
   timeline: "how the coupling between layers drifted, commit by commit",
   coverage: "where the diagrams are blind: calls and imports archdiff could not follow",
+  intent: "what was intended, what is built, and where the code went beyond the intent",
 };
 
 export interface ViewEntry {
@@ -232,6 +235,7 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   // The types with a declaration of their own, for the type flow view.
   for (const node of [...graph.nodes.values()].filter((candidate) => candidate.kind === "type" && !candidate.parent && candidate.exported).sort((a, b) => (a.id < b.id ? -1 : 1))) list.push({ key: `type:${node.id}`, title: `${node.name} (${node.module})`, kind: "type", layer: graph.modules.get(node.module)!.layer });
   list.push({ key: "coverage", title: "Coverage: what the diagrams cannot show", kind: "coverage" });
+  list.push({ key: "intent", title: `Intent: ${INTENT_FILE} against the code`, kind: "intent" });
   list.push({ key: "classes", title: "Classes: every class and interface, fields and methods", kind: "classes" });
   list.push({ key: "matrix", title: "Matrix: who imports whom, layer by layer", kind: "matrix" });
   list.push({ key: "cycles", title: "Cycles: modules importing each other", kind: "cycles" });
@@ -776,6 +780,8 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
         return unplaced("timeline", "Timeline", [], [], [], { placed: true, reason: "the timeline is built from the commits (archdiff diagram timeline --base --head)" });
       case "coverage":
         return coverageView(graph);
+      case "intent":
+        return intentView(analysis, analysis.intent);
     }
   };
 
@@ -792,7 +798,7 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
 }
 
 /** The views whose shapes are modules, where a hub (a module most of them import) is noise rather than news. */
-const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests"]);
+const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests", "intent"]);
 
 /**
  * Modules that most of a picture's modules import — a logger, the shared

@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -758,4 +758,59 @@ test("--overlay marks untested modules, labels storages and shades by calls in, 
   assert.ok((store.heat ?? 0) > 0 && store.label.includes("calls in"), store.label);
   assert.ok(json.reason?.includes("storages") && json.reason.includes("no test"), json.reason);
   assert.equal(archdiff(["diagram", "layers", fixture, "--overlay", "nope"]).status, 2);
+});
+
+test("new scaffolds a project with its intent and first commit; import, intent and check work on it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-new-"));
+
+  try {
+    const target = join(dir, "shop-api");
+    const made = archdiff(["new", target, "--lang", "ts", "--template", "api"]);
+    assert.equal(made.status, 0, made.stderr);
+
+    for (const file of ["package.json", "tsconfig.json", "archdiff.json", "ARCHITECTURE.md", ".gitignore", "README.md", "src/routes/.gitkeep"]) assert.ok(existsSync(join(target, file)), file);
+    assert.ok(made.stderr.includes("committed on main"), made.stderr);
+    assert.equal(spawnSync("git", ["-C", target, "log", "--oneline"], { encoding: "utf8" }).stdout.trim().split("\n").length, 1);
+    assert.equal(archdiff(["new", target]).status, 2, "a non-empty directory was scaffolded again");
+    assert.equal(archdiff(["new", join(dir, "x"), "--template", "nope"]).status, 2);
+    // The intent view: every module planned, nothing built; check: no violation, four planned.
+    const intent = JSON.parse(archdiff(["diagram", "intent", target, "--format", "json"]).stdout) as { nodes: { id: string; diff?: string }[]; groups: { id: string }[] };
+    assert.equal(intent.nodes.length, 4);
+    assert.ok(intent.nodes.every((node) => node.diff === "planned"));
+    assert.deepEqual(intent.groups.map((group) => group.id), ["routes", "services", "domain", "db"]);
+    const check = archdiff(["check", target]);
+    assert.equal(check.status, 0, check.stderr);
+    assert.ok(check.stdout.includes("## Planned, not built (4)"), check.stdout);
+    // Code built to the contract, plus one import against it: check fails and names it.
+    mkdirSync(join(target, "src/routes"), { recursive: true });
+    mkdirSync(join(target, "src/services"), { recursive: true });
+    mkdirSync(join(target, "src/db"), { recursive: true });
+    writeFileSync(join(target, "src/db/store.ts"), "export function read(): string {\n  return 'ok';\n}\n");
+    writeFileSync(join(target, "src/services/health.ts"), "import { read } from '../db/store.ts';\nexport function health(): string {\n  return read();\n}\n");
+    writeFileSync(join(target, "src/routes/health.ts"), "import { health } from '../services/health.ts';\nimport { read } from '../db/store.ts';\nexport function get(): string {\n  return health() + read();\n}\n");
+    const failing = archdiff(["check", target]);
+    assert.equal(failing.status, 1, failing.stdout);
+    assert.ok(failing.stdout.includes("`src/routes/health.ts:2` imports `src/db/store.ts`: layer **routes** → **db** is not in the intent"), failing.stdout);
+    assert.ok(failing.stdout.includes("- `src/domain/types.ts`"), "the unbuilt module is not listed");
+    const drawn = JSON.parse(archdiff(["diagram", "intent", target, "--format", "json"]).stdout) as { nodes: { id: string; diff?: string }[]; edges: { from: string; to: string; diff?: string }[] };
+    assert.equal(drawn.nodes.find((node) => node.id === "src/db/store.ts")?.diff, undefined);
+    assert.equal(drawn.edges.find((edge) => edge.from === "src/routes/health.ts" && edge.to === "src/db/store.ts")?.diff, "warning");
+    // A design note with a flowchart replaces the intent; archdiff.json's layers follow it.
+    writeFileSync(join(dir, "note.md"), "# Note\n\n```mermaid\nflowchart TD\n  subgraph http[\"http — the edge\"]\n    A[\"src/http/orders.ts<br>POST /orders\"]\n  end\n  subgraph app\n    S[\"src/app/orders.ts: places orders\"]\n  end\n  A -->|validated| S\n```\n");
+    const imported = archdiff(["import", join(dir, "note.md"), target]);
+    assert.equal(imported.status, 0, imported.stderr);
+    const config = JSON.parse(readFileSync(join(target, "archdiff.json"), "utf8")) as { layers: Record<string, string[]> };
+    assert.deepEqual(config.layers, { routes: ["src/routes/**"], services: ["src/services/**"], domain: ["src/domain/**"], db: ["src/db/**"], http: ["src/http/**"], app: ["src/app/**"] });
+    const printed = JSON.parse(archdiff(["intent", target, "--json"]).stdout) as { layers: { name: string; description?: string }[]; modules: { id: string; description?: string }[]; edges: { from: string; to: string; label?: string }[] };
+    assert.deepEqual(printed.layers, [{ name: "http", description: "the edge" }, { name: "app" }]);
+    assert.equal(printed.modules.find((module) => module.id === "src/app/orders.ts")?.description, "places orders");
+    assert.deepEqual(printed.edges, [{ from: "src/http/orders.ts", to: "src/app/orders.ts", label: "validated" }]);
+    // --init from the code refuses to overwrite without --force.
+    assert.equal(archdiff(["intent", target, "--init"]).status, 2);
+    assert.equal(archdiff(["intent", target, "--init", "--force"]).status, 0);
+    const seeded = JSON.parse(archdiff(["intent", target, "--json"]).stdout) as { modules: { id: string }[] };
+    assert.ok(seeded.modules.some((module) => module.id === "src/services/health.ts"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

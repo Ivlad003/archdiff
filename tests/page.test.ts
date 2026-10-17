@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -264,4 +264,40 @@ test("the canvas toolbar switches the picture, sets the detail and opens a modul
   await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("opened in place")`);
   await page!.click("#mix-clear");
   await page!.waitForFunction(`!location.hash.includes("expand=")`);
+});
+
+test("the agent's question shows its options; an answer resumes the session", { skip: !CHROME && "no Chrome installed" }, async () => {
+  // A server of its own, on a copy with the fake agent configured (the shared one has no agent).
+  const agentDir = mkdtempSync(join(tmpdir(), "archdiff-page-agent-"));
+  cpSync(fixture, agentDir, { recursive: true });
+  writeFileSync(join(agentDir, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" } }));
+  const agentServer = spawn(process.execPath, [join(root, "bin/archdiff.js"), "web", agentDir, "--port", "0", "--no-watch"], { stdio: ["ignore", "ignore", "pipe"] });
+
+  try {
+    const agentBase = await new Promise<string>((resolve, reject) => {
+      let text = "";
+      agentServer.stderr!.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+        const match = text.match(/archdiff web: (http:\/\/[^/]+)\//);
+
+        if (match) resolve(match[1]!);
+      });
+      agentServer.on("exit", (code) => reject(new Error(`server exited with ${code}: ${text}`)));
+    });
+    await page!.goto(`${agentBase}/#view=layer%3Alib`);
+    await page!.waitForSelector(".excalidraw canvas");
+    await page!.click("#tabs button[data-tab='chat']");
+    await page!.waitForFunction(`(document.querySelector("#agent-name")?.textContent ?? "").includes("fake")`);
+    await page!.fill("#task", "Please ask the user which store to use.");
+    await page!.click("#run");
+    await page!.waitForFunction(`!document.querySelector("#question").hidden`, undefined, { timeout: 15_000 });
+    const options = (await page!.evaluate(`[...document.querySelectorAll("#question .options button")].map((b) => b.textContent)`)) as string[];
+    assert.deepEqual(options, ["in memory", "SQLite", "Postgres"]);
+    await page!.click("#question .options button:has-text('SQLite')");
+    await page!.waitForFunction(`document.querySelector("#question").hidden`);
+    await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev")].some((row) => (row.textContent ?? "").includes("Noted: SQLite"))`, undefined, { timeout: 15_000 });
+  } finally {
+    agentServer.kill();
+    rmSync(agentDir, { recursive: true, force: true });
+  }
 });

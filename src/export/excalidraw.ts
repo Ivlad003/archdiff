@@ -76,7 +76,7 @@ function seed(text: string): number {
   return (hash >>> 0) % 2147483647 || 1;
 }
 
-const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00" } as const;
+const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00", planned: "#1565c0" } as const;
 
 function base(id: string, type: string, x: number, y: number, width: number, height: number): ExcalidrawElement {
   return { id, type, x, y, width, height, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: seed(id), version: 1, versionNonce: seed(`${id}:v`), isDeleted: false, boundElements: null, updated: 1, link: null, locked: false };
@@ -94,7 +94,7 @@ function shapeOf(node: DiagramNode): { type: string; fill: string; stroke: strin
   // Heat darkens the fill; a diff mark is the stroke, so both show at once.
   const fill = node.heat !== undefined && node.heat > 0 ? heatColour(node.heat) : plain;
 
-  return { type: node.kind === "start" || node.kind === "external" || node.kind === "event" ? "ellipse" : node.kind === "hole" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.kind === "hole" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
+  return { type: node.kind === "start" || node.kind === "external" || node.kind === "event" ? "ellipse" : node.kind === "hole" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.diff === "planned" || node.kind === "hole" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
 }
 
 /** The view a shape opens on the page (`customData.view`, read by the page on a second tap); not an Excalidraw link, whose icon would clutter every shape. */
@@ -363,7 +363,7 @@ export function toExcalidraw(diagram: Diagram): string {
 
     if (!source || !target) continue;
     const id = `edge:${edge.from}->${edge.to}${edge.kind === "message" ? `:${diagram.edges.indexOf(edge)}` : ""}`;
-    const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.kind === "call" || edge.kind === "message" ? "#1565c0" : edge.kind === "lifeline" ? "#b0bec5" : "#616161";
+    const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.diff === "warning" || edge.diff === "changed" ? "#ef6c00" : edge.diff === "planned" || edge.kind === "call" || edge.kind === "message" ? "#1565c0" : edge.kind === "lifeline" ? "#b0bec5" : "#616161";
     const route = edge.route ?? routes.get(edge) ?? [centre.get(edge.from)!, centre.get(edge.to)!];
     const start = route[0]!;
     const finish = route[route.length - 1]!;
@@ -372,7 +372,7 @@ export function toExcalidraw(diagram: Diagram): string {
     elements.push({
       ...base(id, "arrow", start.x, start.y, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
       strokeColor: stroke,
-      strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" ? "dashed" : "solid",
+      strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" ? "dashed" : "solid",
       strokeWidth: edge.diff ? 2 : 1,
       points: route.map((point) => [point.x - start.x, point.y - start.y]),
       // No binding: Excalidraw would pull every end to the centre of a side and the ports would collapse into one point.

@@ -22,6 +22,8 @@ import type { Analysis } from "./analyze.ts";
 import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import type { Plan } from "./plan.ts";
+import { CONFIG_FILE } from "./config.ts";
+import { isJsonObject, parseJson, type JsonValue } from "./json.ts";
 
 export const INTENT_FILE = "ARCHITECTURE.md";
 
@@ -278,9 +280,75 @@ export function readIntent(root: string): Intent | null {
 
 export function writeIntent(root: string, intent: Intent): string {
   writeFileSync(join(root, INTENT_FILE), intentMarkdown(intent));
+  syncConfigLayers(root, intent);
 
   return INTENT_FILE;
 }
+
+/**
+ * archdiff.json's `layers` follow the intent: each intent layer gets the
+ * directories of its modules as globs, so a file the agent adds beside an
+ * intended one lands in the same lane. Other fields stay; a layer the
+ * intent has but whose modules have no directory yet keeps any globs it
+ * had.
+ */
+export function syncConfigLayers(root: string, intent: Intent): void {
+  const file = join(root, CONFIG_FILE);
+  let config: Record<string, JsonValue> = {};
+
+  if (existsSync(file)) {
+    try {
+      const parsed = parseJson(readFileSync(file, "utf8"));
+
+      if (isJsonObject(parsed)) config = { ...parsed };
+    } catch {
+      return;
+    }
+  }
+
+  const previous = isJsonObject(config["layers"]) ? config["layers"] : {};
+  const layers: Record<string, JsonValue> = {};
+  const names = [...intent.layers.map((layer) => layer.name), ...intent.modules.map((module) => module.layer).filter((layer): layer is string => layer !== undefined)];
+
+  for (const name of [...new Set(names)]) {
+    const directories = [...new Set(intent.modules.filter((module) => module.layer === name && module.id.includes("/")).map((module) => `${module.id.slice(0, module.id.lastIndexOf("/"))}/**`))].sort();
+    const kept = previous[name];
+    if (directories.length > 0) layers[name] = directories;
+    else if (Array.isArray(kept)) layers[name] = kept;
+    else layers[name] = [];
+  }
+
+  if (Object.keys(layers).length === 0) return;
+  // The intent's layers join the configured ones (which keep their globs); an intent layer with directories wins its name.
+  config["layers"] = { ...previous, ...layers };
+  writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+}
+
+/** What every agent run is told about archdiff: the file that is the contract, and how to ask the user. */
+export const AGENT_PROTOCOL = `## Working with archdiff
+
+- \`${INTENT_FILE}\` holds the intended architecture as a Mermaid flowchart: a subgraph is a layer, a node's label is a file path (then what it does), an arrow is an import. It is the contract: when you add a module or an import between layers, add it there too; when the task is about the diagram itself, edit only that file and keep the Mermaid valid.
+- When a decision is the user's to make — a name, a library, a split, a trade-off — do not guess. Write exactly one fenced block \`\`\`archdiff-question with JSON {"question": "…", "options": ["…", "…"]} (two to four short options) and stop; the answer comes as your next message.
+- Finish with the files you changed as a list of \`file:line\`.`;
+
+/** The prompt that turns a document (a design note, an ISD, a spec in prose) into the Mermaid block of the intent. */
+export function documentPrompt(text: string, lang: string | null): string {
+  return `Read the document below and write the intended architecture of the project it describes as ONE Mermaid flowchart, nothing else around it.
+
+Rules of the flowchart:
+- \`flowchart LR\`; one \`subgraph name["name — what the layer is for"]\` per layer, in the order a request flows (entry first, storage last).
+- One node per module: \`id["path/file.${lang ?? "ts"}<br>what it does"]\`; the path is relative to the repository root, under \`src/\` unless the document says otherwise; the id is letters and underscores only.
+- One arrow \`a --> b\` per import a module makes; a label \`-->|why|\` where the reason is not obvious.
+- Six to twenty modules; no libraries or frameworks as nodes (name them in a module's description instead).
+- If the document leaves a real choice open, still choose and say so in the layer description.
+
+Answer with the Mermaid block only.
+
+---
+
+${text}`;
+}
+
 
 /** A module's layer by the intent, else by the code (archdiff.json or the directory). */
 function layerOf(intent: Intent, graph: Graph, id: string): string | undefined {
@@ -474,8 +542,13 @@ export function checkMarkdown(report: IntentReport, root: string): string {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-/** The plan drawn on a view folded into the intent: new modules, functions and layers added, arrows as edges, removals taken out, notes kept under the block. */
-export function mergePlan(intent: Intent, plan: Plan): Intent {
+/**
+ * The plan drawn on a view folded into the intent: new modules, functions
+ * and layers added, arrows as edges (their ends named in the intent too,
+ * with the layer the code gives them), removals taken out, notes kept
+ * under the block.
+ */
+export function mergePlan(intent: Intent, plan: Plan, graph: Graph | null = null): Intent {
   const next: Intent = { ...intent, layers: [...intent.layers], modules: intent.modules.map((module) => ({ ...module, fns: [...module.fns] })), edges: [...intent.edges] };
 
   const module = (id: string, layer?: string): IntentModule => {
@@ -505,7 +578,30 @@ export function mergePlan(intent: Intent, plan: Plan): Intent {
   }
 
   for (const edge of plan.edges) {
+    for (const end of [edge.from.label, edge.to.label]) {
+      const owner = moduleOf(end);
+      const layer = graph?.modules.get(owner)?.layer;
+      const found = module(owner, next.modules.find((candidate) => candidate.id === owner)?.layer ?? layer);
+
+      if (end.includes("#")) {
+        const fnName = end.slice(end.indexOf("#") + 1);
+
+        if (!found.fns.some((fn) => fn.name === fnName)) found.fns.push({ name: fnName });
+      }
+    }
+
     if (!next.edges.some((candidate) => candidate.from === edge.from.label && candidate.to === edge.to.label)) next.edges.push({ from: edge.from.label, to: edge.to.label });
+  }
+
+  // A module drawn without a lane takes the layer the code gives it, when the code has it.
+  for (const candidate of next.modules) {
+    const layer = graph?.modules.get(candidate.id)?.layer;
+
+    if (!candidate.layer && layer) {
+      candidate.layer = layer;
+
+      if (!next.layers.some((known) => known.name === layer)) next.layers.push({ name: layer });
+    }
   }
 
   for (const removal of plan.removed) {

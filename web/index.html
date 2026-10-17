@@ -153,10 +153,18 @@
         <pre id="code" class="panel"></pre>
         <div id="coverage" class="panel prose"></div>
         <div id="chat" class="panel">
-          <p class="muted">Draw the change on this view (✎ edit: a shape with a name is a new module or function, an arrow is an import or a call, a deleted shape is a removal, text is a note), save, then <em>read the task</em>. Review the task, then <em>run</em> it with the agent, which edits this repository. Nothing runs by itself.</p>
+          <p class="muted">Draw the change on this view (✎ edit: a shape with a name is a new module or function, an arrow is an import or a call, a deleted shape is a removal, text is a note), save, then <em>code this</em>: the drawing goes into ARCHITECTURE.md (the contract) and the agent builds it. <em>improve the diagram</em> asks the agent to review the contract; <em>from document</em> turns a design note into it. The agent may ask you a question with options. Nothing runs by itself.</p>
           <div class="row">
-            <button id="plan">read the task from the drawing</button>
+            <button id="code-this" title="Fold the drawing of this view into ARCHITECTURE.md and have the agent build what is not built yet (/code)">code this</button>
+            <button id="improve-diagram" title="Ask the agent to review ARCHITECTURE.md: names, missing links, layers, what the document leaves open (/diagram)">improve the diagram</button>
+            <button id="from-document" title="Paste a design note, an ISD or a spec; the agent writes the architecture from it (/doc)">from document</button>
+            <button id="plan" class="small" title="Only read the task from the drawing, without touching the contract">read the task</button>
             <span id="agent-name" class="muted"></span>
+          </div>
+          <textarea id="document" hidden placeholder="Paste the document here (a design note, an ISD, a spec in prose, or Markdown with a Mermaid flowchart), then press Ctrl+Enter or the button below."></textarea>
+          <div id="document-row" class="row" hidden>
+            <button id="document-go">architecture from this document</button>
+            <span id="document-state" class="muted"></span>
           </div>
           <textarea id="task" placeholder="The task appears here; edit it before running. Type @ to name a module, function, layer, directory, flow or type: it is sent to the agent with its context."></textarea>
           <ul id="tag-suggest" hidden></ul>
@@ -166,6 +174,7 @@
             <span id="run-state" class="muted"></span>
           </div>
           <div id="transcript"></div>
+          <div id="question" hidden></div>
           <details id="tasks-box"><summary class="muted">previous tasks</summary><ul id="tasks"></ul></details>
           <div class="row">
             <input id="followup" type="text" placeholder="a follow-up message to the agent (Enter)" disabled />

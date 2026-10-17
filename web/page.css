@@ -1123,3 +1123,57 @@ body.embed #tool-split {
 body.embed main {
   grid-template-columns: 1fr;
 }
+
+#document {
+  width: 100%;
+  min-height: 140px;
+  box-sizing: border-box;
+  font: inherit;
+  margin-top: 6px;
+}
+
+#question {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+#question .q {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+#question .options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#question button {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+#question button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#question input {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: inherit;
+  min-width: 200px;
+}

@@ -11,7 +11,7 @@ function escape(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\n/g, "&#xa;");
 }
 
-const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00" } as const;
+const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00", planned: "#1565c0" } as const;
 
 function style(node: DiagramNode): string {
   const base: Record<DiagramNode["kind"], string> = {
@@ -31,7 +31,7 @@ function style(node: DiagramNode): string {
   };
   // The heat of a shape darkens its fill (a hotspot's calls in, a matrix cell's count).
   const heat = node.heat !== undefined && node.heat > 0 ? `fillColor=${heatColour(node.heat)};` : "";
-  const mark = node.diff ? `strokeColor=${DIFF_STROKE[node.diff]};strokeWidth=3;${node.diff === "removed" ? "dashed=1;" : ""}` : "";
+  const mark = node.diff ? `strokeColor=${DIFF_STROKE[node.diff]};strokeWidth=3;${node.diff === "removed" || node.diff === "planned" ? "dashed=1;" : ""}` : "";
 
   return base[node.kind] + heat + mark;
 }
@@ -83,8 +83,8 @@ export function toDrawio(diagram: Diagram): string {
 
     if (from === undefined || to === undefined) continue;
     const id = next++;
-    const dashed = edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" ? "dashed=1;" : "";
-    const colour = edge.diff === "added" ? "strokeColor=#2e7d32;strokeWidth=2;" : edge.diff === "removed" ? "strokeColor=#c62828;strokeWidth=2;" : edge.kind === "call" || edge.kind === "message" ? "strokeColor=#1565c0;" : edge.kind === "lifeline" ? "strokeColor=#b0bec5;endArrow=none;" : "strokeColor=#616161;";
+    const dashed = edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" ? "dashed=1;" : "";
+    const colour = edge.diff === "added" ? "strokeColor=#2e7d32;strokeWidth=2;" : edge.diff === "removed" ? "strokeColor=#c62828;strokeWidth=2;" : edge.diff === "warning" || edge.diff === "changed" ? "strokeColor=#ef6c00;strokeWidth=2;" : edge.diff === "planned" ? "strokeColor=#1565c0;strokeWidth=2;" : edge.kind === "call" || edge.kind === "message" ? "strokeColor=#1565c0;" : edge.kind === "lifeline" ? "strokeColor=#b0bec5;endArrow=none;" : "strokeColor=#616161;";
     // The bends of the route (without its two ends, which the cells give) as waypoints, so draw.io draws the same path.
     const bends = (edge.route ?? routes.get(edge) ?? []).slice(1, -1);
     const points = bends.length > 0 ? `<Array as="points">${bends.map((point) => `<mxPoint x="${Math.round(point.x)}" y="${Math.round(point.y)}"/>`).join("")}</Array>` : "";

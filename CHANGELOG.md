@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- A project from scratch: `archdiff new <dir> --lang ts|js --template blank|lib|cli|api|web` writes the skeleton, `archdiff.json`, `ARCHITECTURE.md` (the intent) and the first commit.
+- The intent as the contract: `ARCHITECTURE.md` with one Mermaid flowchart (subgraph = layer, node = module path and description, arrow = import) that archdiff reads and writes; the `intent` view draws it against the code (planned dashed, beyond the contract orange); `archdiff check` fails on an import between layers the contract does not allow; `archdiff import <file>` takes a document's flowchart; `archdiff intent --init` seeds one from the code; `--view` folds a drawing into it; archdiff.json's layers follow it.
+- The Chat tab: **code this** (the drawing into the contract, then the agent builds it), **improve the diagram**, **from document** (a pasted design note becomes the contract, through the agent when it has no flowchart), slash commands `/code`, `/diagram …`, `/doc`; every run carries the archdiff protocol; the agent's `archdiff-question` block shows as a question with option buttons, the answer resumes the session.
+
 ## 0.4.0 — 2026-10-17
 
 - Six more tools of the canvas: the shortest path between two shapes (Shift+tap), lanes ticked in and out (`--hide-lanes`), find with centring (`/`), a split pane with a second embedded picture (`s`), only the changed shapes and their neighbours in a review picture (`--only-changes`), and a minimap (by itself above 60 shapes).

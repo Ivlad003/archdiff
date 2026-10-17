@@ -13,6 +13,10 @@ The package is `@ivlad003/archdiff` on npm (npm refused the bare name as too clo
 
 | Command | What it does | Exit |
 | --- | --- | --- |
+| `archdiff new <dir> [--lang ts\|js] [--template blank\|lib\|cli\|api\|web] [--agent claude\|cursor]` | A project from scratch: the skeleton, `archdiff.json`, `ARCHITECTURE.md` with the template's intent, the first commit | 0 |
+| `archdiff import <file> [dir]` | A document's Mermaid flowchart becomes `ARCHITECTURE.md` (the contract) | 0 |
+| `archdiff intent [dir] [--init] [--view V] [--json]` | Print the contract; `--init` seeds it from the code; `--view` folds a saved drawing into it | 0 |
+| `archdiff check [dir] [--json]` | The code against the contract: imports between layers it does not allow, what is planned and not built, what is built beyond it | 0 / 1 |
 | `archdiff analyze [dir] [--json] [--no-cache]` | Parse the repository and print its size: files, functions, imports, calls followed and gaps | 0 |
 | `archdiff views [dir]` | List every view: `layers`, `layer:<name>`, `dir:<path>`, `module:<path>`, `calls:<path>#<fn>`, `coverage` | 0 |
 | `archdiff diagram <view> [dir] [--format F] [--depth N] [--out FILE]` | Draw one view as `md` (Markdown with Mermaid, default), `mermaid`, `json`, `drawio`, `excalidraw` or `archimate` | 0 |
@@ -67,6 +71,12 @@ In the Chat tab, `@` names what the diagrams know — `@module:src/lib/orders.ts
 ## Reviewing branches
 
 `review` on the page opens the branch bar: a base (develop, main or master by default, or any branch) and the heads — the working tree, the current branch, any other local or remote branch. One head is the review; tick two or more and `compare` draws every module any head touched, labelled with what each head did to it (`+ feature-a  ~ feature-b`, or "every head"), the imports each head added or removed labelled with the head, and a table per head with the layer couplings it introduced. A bar below lists the commits of the range; pick one, or step with ‹ ›, to see that commit's own change against the one before it. A tap on a shape in a review shows the commits that touched its file. In the terminal: `archdiff branches`, `archdiff compare --base develop --heads feature-a,feature-b,WORKTREE`, `archdiff history`; [docs/ci.md](docs/ci.md) shows the GitHub Action that posts the review on every pull request.
+
+## A project from scratch: the intent
+
+`archdiff new my-app --lang ts --template api` (templates: `blank`, `lib`, `cli`, `api`, `web`) writes the skeleton that ties nothing to a framework — package.json, tsconfig, archdiff.json with the template's layers, `ARCHITECTURE.md` with the template's intent, the first commit on `main` — and nothing else: the libraries are the agent's to add from the drawing. `ARCHITECTURE.md` is the contract: a Markdown file with one Mermaid flowchart where a subgraph is a layer, a node is a module (its label the file path, then what it does), an arrow is an import. Agents read and write that file as it is; `archdiff import note.md` takes any document that holds such a flowchart (a design note, an ISD, another tool's export) as the contract; `archdiff intent --init` seeds one from the code of a repository that has code and no contract yet.
+
+The **intent** view draws the contract against the code: planned and not built yet dashed blue, built plain, the code's modules and imports beyond the contract orange. Draw on it in `✎ edit` and press **code this** in the Chat tab: the drawing goes into `ARCHITECTURE.md` first (so it is the contract before it is code), then the agent builds what the contract names and the code lacks. **improve the diagram** has the agent review the contract — names, missing links, layers, what the prose leaves open — and edit the file; **from document** turns a pasted design note into it (a note that already holds a flowchart needs no agent). The agent may ask you a question with options (a fenced `archdiff-question` block in its answer): the Chat tab shows the options as buttons, and the answer resumes its session. `archdiff check` (exit 1 on an import between two of the contract's layers that no arrow of the contract allows) keeps the code to it in CI; it also lists what is planned and not built and what was built beyond the contract.
 
 ## From a drawing to code: the Chat tab
 

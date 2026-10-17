@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { contentHash, FactCache } from "./cache.ts";
 import { loadConfig, type Config } from "./config.ts";
 import type { FileFacts } from "./extract/facts.ts";
+import { readIntent, type Intent } from "./intent.ts";
 import { extractAll } from "./extract/pool.ts";
 import { listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
 import { frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
@@ -47,6 +48,8 @@ export interface Analysis {
   declaredEntries: DeclaredEntry[];
   /** The packages of the repository (package.json files), for the packages view. */
   packages: RepositoryPackage[];
+  /** The intended architecture (ARCHITECTURE.md), null without the file. */
+  intent: Intent | null;
   stats: AnalysisStats;
 }
 
@@ -126,5 +129,5 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
     ms: { list: Math.round(listed - started), extract: Math.round(extracted - listed), graph: Math.round(built - extracted), total: Math.round(built - started) },
   };
 
-  return { root, config, files, skipped: listed0.skipped, facts, graph, declaredEntries, packages, stats };
+  return { root, config, files, skipped: listed0.skipped, facts, graph, declaredEntries, packages, intent: readIntent(root), stats };
 }

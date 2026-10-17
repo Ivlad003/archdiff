@@ -34,6 +34,7 @@ import { planFromScene, planMarkdown } from "./plan.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { CACHE_DIRECTORY } from "./cache.ts";
 import { layoutSlug } from "./layouts.ts";
+import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, mergePlan, parseIntent, writeIntent } from "./intent.ts";
 import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type SceneElement } from "./layouts.ts";
 import { diagramMarkdown, edgeMarkdown, nodeMarkdown } from "./markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "./json.ts";
@@ -254,7 +255,8 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           if (!isJsonObject(parsed) || !isJsonString(parsed["prompt"]) || parsed["prompt"].trim() === "") return problem(response, 400, '"prompt" is required');
           const resume = isJsonString(parsed["resume"]) ? parsed["resume"] : null;
           runner ??= new AgentRunner(root, agentSpec);
-          const run = runner.start(parsed["prompt"], resume);
+          // Every run carries the protocol: the contract file, how to ask the user; a resumed session already has it.
+          const run = runner.start(resume ? parsed["prompt"] : `${parsed["prompt"].trimEnd()}\n\n${AGENT_PROTOCOL}\n`, resume);
           // The agent edits the repository: the next request analyses afresh, however soon it comes.
           run.subscribe(0, (event) => {
             if (event.kind === "exit") current = null;
@@ -267,6 +269,78 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           writeFileSync(join(root, file), `<!-- archdiff:generated — task for ${agentSpec.name}, run ${run.id} -->\n${parsed["prompt"]}\n`);
 
           return json(response, { id: run.id, agent: agentSpec.name, task: file });
+        }
+
+        case "/api/code": {
+          // "code this": the drawing of a view folded into ARCHITECTURE.md first (so it is the contract before it is code), then the task for the agent.
+          let parsed;
+
+          try {
+            parsed = parseJson(body);
+          } catch {
+            return problem(response, 400, "the body must be JSON");
+          }
+
+          const key = isJsonObject(parsed) && isJsonString(parsed["view"]) ? parsed["view"] : "";
+
+          if (!parseView(key)) return problem(response, 400, "unknown view");
+          const analysis = await fresh();
+          const saved = readLayout(root, key);
+          const plan = planFromScene(analysis, key, saved?.elements ?? []);
+          const intent = mergePlan(analysis.intent ?? parseIntent(""), plan, analysis.graph);
+          writeIntent(root, intent);
+          current = null;
+          const after = await fresh();
+          const report = checkIntent(after, intent);
+          const task = [planMarkdown(plan, after).trimEnd(), "", `## The contract`, "", `${INTENT_FILE} now holds what was drawn. Build what it names and the code does not have yet:`, "", ...report.planned.map((item) => `- \`${item}\``), ...report.plannedEdges.map((item) => `- ${item}`), "", "Keep every import within the arrows of the contract; add an arrow there when one is truly needed and say why."].join("\n");
+
+          return json(response, { markdown: `${task}\n`, intent: intentMarkdown(intent), planned: report.planned.length + report.plannedEdges.length });
+        }
+
+        case "/api/intent": {
+          let parsed;
+
+          try {
+            parsed = parseJson(body);
+          } catch {
+            return problem(response, 400, "the body must be JSON");
+          }
+
+          if (!isJsonObject(parsed) || !isJsonString(parsed["markdown"])) return problem(response, 400, '"markdown" is required');
+          const intent = parseIntent(parsed["markdown"]);
+
+          if (intent.layers.length === 0 && intent.modules.length === 0) return problem(response, 400, "no Mermaid flowchart with layers or modules in the text");
+          writeIntent(root, intent);
+          current = null;
+
+          return json(response, { file: INTENT_FILE, layers: intent.layers.length, modules: intent.modules.length, edges: intent.edges.length });
+        }
+
+        case "/api/intent/document": {
+          // A document in prose becomes the intent through the agent: it writes the Mermaid, archdiff keeps it.
+          if (!agentSpec) return problem(response, 400, "no agent: start with --agent claude|cursor or set \"agent\" in archdiff.json");
+          let parsed;
+
+          try {
+            parsed = parseJson(body);
+          } catch {
+            return problem(response, 400, "the body must be JSON");
+          }
+
+          if (!isJsonObject(parsed) || !isJsonString(parsed["text"]) || parsed["text"].trim() === "") return problem(response, 400, '"text" is required');
+          const analysis = await fresh();
+          const direct = parseIntent(parsed["text"]);
+
+          // A document that already holds a flowchart needs no agent.
+          const intent = direct.modules.length > 0 ? direct : parseIntent(await (runner ??= new AgentRunner(root, agentSpec)).runToResult(documentPrompt(parsed["text"], analysis.files.some((file) => file.endsWith(".ts")) ? "ts" : null), 300_000));
+
+          if (intent.modules.length === 0) return problem(response, 502, "the agent gave no Mermaid flowchart; try again or write the block by hand");
+          // The document's prose becomes the file's prose when the file had none of its own.
+          const final = direct.modules.length > 0 ? intent : { ...intent, before: analysis.intent?.before.trim() ? analysis.intent.before : `# Architecture\n\n${parsed["text"].trim().slice(0, 2000)}\n\n` };
+          writeIntent(root, final);
+          current = null;
+
+          return json(response, { file: INTENT_FILE, source: direct.modules.length > 0 ? "document" : agentSpec.name, layers: final.layers.length, modules: final.modules.length, edges: final.edges.length, markdown: intentMarkdown(final) });
         }
 
         case "/api/flow/mocks": {
@@ -398,6 +472,21 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           const analysis = await fresh();
 
           return json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis), agent: agentSpec?.name ?? null });
+        }
+
+        case "/api/intent": {
+          const analysis = await fresh();
+
+          return json(response, { exists: analysis.intent !== null, markdown: analysis.intent ? intentMarkdown(analysis.intent) : "", file: INTENT_FILE });
+        }
+
+        case "/api/check": {
+          const analysis = await fresh();
+
+          if (!analysis.intent) return json(response, { exists: false, markdown: `# Check\n\nNo ${INTENT_FILE}: draw on the intent view and run "code this", import a document, or \`archdiff intent --init\`.\n`, ok: true });
+          const report = checkIntent(analysis, analysis.intent);
+
+          return json(response, { exists: true, ok: report.ok, report, markdown: checkMarkdown(report, root) });
         }
 
         case "/api/plan": {

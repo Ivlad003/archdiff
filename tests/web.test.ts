@@ -267,3 +267,37 @@ test("web without --port takes the next free port when 7080 is taken, and a name
     first.kill();
   }
 });
+
+test("code this folds the drawing into the contract and writes the task; the intent and check routes follow", async () => {
+  // No contract yet: check says so, the intent view explains.
+  const before = await getJson<{ exists: boolean; ok: boolean }>("/api/check");
+  assert.equal(before.exists, false);
+  // A drawing on layer:lib with a new module and an arrow to it, saved, then "code this".
+  const scene = await getJson<{ elements: { id: string; x: number; y: number; width: number; height: number; customData?: Record<string, unknown> }[] }>(`/api/scene?view=${encodeURIComponent("layer:lib")}`);
+  const orders = scene.elements.find((element) => element.id === "src/lib/orders.ts")!;
+  const lane = scene.elements.find((element) => element.id === "lane:lib")!;
+  const drawn = [
+    ...scene.elements,
+    { id: "drawn-1", type: "rectangle", x: lane.x + 20, y: lane.y + lane.height - 70, width: 170, height: 50, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: [{ id: "drawn-1-text", type: "text" }], updated: 1, link: null, locked: false },
+    { id: "drawn-1-text", type: "text", x: lane.x + 30, y: lane.y + lane.height - 55, width: 150, height: 20, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 2, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false, text: "src/lib/vouchers.ts", originalText: "src/lib/vouchers.ts", fontSize: 14, fontFamily: 1, textAlign: "left", verticalAlign: "top", containerId: "drawn-1", lineHeight: 1.25, baseline: 14 },
+    { id: "drawn-arrow", type: "arrow", x: orders.x + orders.width, y: orders.y + orders.height / 2, width: 10, height: 10, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 3, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false, points: [[0, 0], [lane.x + 100 - (orders.x + orders.width), lane.y + lane.height - 45 - (orders.y + orders.height / 2)]], lastCommittedPoint: null, startBinding: { elementId: "src/lib/orders.ts", focus: 0, gap: 1 }, endBinding: { elementId: "drawn-1", focus: 0, gap: 1 }, startArrowhead: null, endArrowhead: "arrow" },
+  ];
+  const saved = await fetch(`${base}/api/layout?view=${encodeURIComponent("layer:lib")}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ format: 1, view: "layer:lib", elements: drawn, mocks: [] }) });
+  assert.equal(saved.status, 200, await saved.text());
+  const coded = await (await fetch(`${base}/api/code`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layer:lib" }) })).json() as { markdown: string; intent: string; planned: number };
+  assert.ok(coded.markdown.includes("A new module `src/lib/vouchers.ts` in layer **lib**"), coded.markdown);
+  assert.ok(coded.intent.includes("src/lib/vouchers.ts") && coded.intent.includes("n_src_lib_orders_ts --> n_src_lib_vouchers_ts"), coded.intent);
+  assert.ok(coded.planned >= 2, `${coded.planned}\n${coded.markdown}\n${coded.intent}`);
+  const intent = await getJson<{ exists: boolean; markdown: string }>("/api/intent");
+  assert.ok(intent.exists && intent.markdown.includes("subgraph n_lib"), intent.markdown);
+  const after = await getJson<{ exists: boolean; ok: boolean; markdown: string }>("/api/check");
+  assert.ok(after.exists && after.ok && after.markdown.includes("- `src/lib/vouchers.ts`"), after.markdown);
+  // The intent view draws the planned module dashed beside the built ones.
+  const view = await getJson<{ diagram: { nodes: { id: string; diff?: string }[] } }>("/api/scene?view=intent");
+  assert.equal(view.diagram.nodes.find((node) => node.id === "src/lib/vouchers.ts")?.diff, "planned");
+  assert.equal(view.diagram.nodes.find((node) => node.id === "src/lib/orders.ts")?.diff, undefined);
+  // A document with a flowchart replaces the intent without the agent; the rules say what was read.
+  const fromDocument = await (await fetch(`${base}/api/intent/document`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "# Note\n\n```mermaid\nflowchart LR\n  subgraph lib\n    A[src/lib/orders.ts]\n    B[src/lib/tax.ts]\n  end\n  A --> B\n```\n" }) })).json() as { source: string; modules: number };
+  assert.equal(fromDocument.source, "document");
+  assert.equal(fromDocument.modules, 2);
+});

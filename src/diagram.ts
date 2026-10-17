@@ -9,8 +9,12 @@
 // Entry points: `layout`, `SIZE`, and the types.
 
 /** The marking of a shape in the picture of a diff (`archdiff review`). */
-/** `added`, `removed`, `changed`: a review's marks; `warning`: an overlay's finding (a module without tests), orange like `changed` but no diff. */
-export type DiffMark = "added" | "removed" | "changed" | "warning";
+/**
+ * `added`, `removed`, `changed`: a review's marks; `warning`: a finding (a
+ * module without tests, code beyond the intent), orange; `planned`: in the
+ * intent but not in the code yet, dashed blue.
+ */
+export type DiffMark = "added" | "removed" | "changed" | "warning" | "planned";
 
 /** One shape: what it stands for, its lane, and its box once laid out. */
 export interface DiagramNode {
@@ -65,7 +69,7 @@ export interface DiagramEdge {
   route?: { x: number; y: number }[];
   /** How many underlying edges the line stands for (a layer edge: imports between its modules). */
   count?: number;
-  diff?: "added" | "removed";
+  diff?: DiffMark;
 }
 
 /** A lane: one layer, a band across the diagram. */

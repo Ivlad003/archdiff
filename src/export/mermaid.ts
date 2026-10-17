@@ -264,9 +264,9 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
   const marked = diagram.nodes.filter((node) => node.diff);
 
   if (marked.length > 0) {
-    lines.push("  classDef added stroke:#2e7d32,stroke-width:3px", "  classDef removed stroke:#c62828,stroke-width:3px,stroke-dasharray:5 5", "  classDef changed stroke:#ef6c00,stroke-width:3px", "  classDef warning stroke:#ef6c00,stroke-width:3px");
+    lines.push("  classDef added stroke:#2e7d32,stroke-width:3px", "  classDef removed stroke:#c62828,stroke-width:3px,stroke-dasharray:5 5", "  classDef changed stroke:#ef6c00,stroke-width:3px", "  classDef warning stroke:#ef6c00,stroke-width:3px", "  classDef planned stroke:#1565c0,stroke-width:3px,stroke-dasharray:5 5");
 
-    for (const mark of ["added", "removed", "changed", "warning"] as const) {
+    for (const mark of ["added", "removed", "changed", "warning", "planned"] as const) {
       const members = marked.filter((node) => node.diff === mark).map((node) => ids.get(node.id)!);
 
       if (members.length > 0) lines.push(`  class ${members.join(",")} ${mark}`);

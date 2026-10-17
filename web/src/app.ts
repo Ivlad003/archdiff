@@ -1098,6 +1098,8 @@ async function loadViews(): Promise<void> {
   views = response.views;
   agentName = response.agent;
   element("agent-name").textContent = agentName ? `agent: ${agentName}` : "no agent: start archdiff web --agent claude|cursor to run tasks";
+  // With an agent, anything typed in the box can run; without one the box only holds the task.
+  runButton.disabled = !agentName;
   element("root").textContent = response.root;
   const s = response.stats;
   element("stats").textContent = `${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms`;
@@ -1388,8 +1390,108 @@ async function readTask(): Promise<void> {
   runState.textContent = drawn ? "" : "no drawing saved for this view: edit, draw, save";
 }
 
+/** The question box: a fenced ```archdiff-question block in the agent's text, rendered as the question and its options; an answer resumes the session. */
+function showQuestion(text: string, run: { sessionId: string | null }): boolean {
+  const match = text.match(/```archdiff-question\s*\n([\s\S]*?)```/);
+
+  if (!match) return false;
+  let asked: { question?: unknown; options?: unknown };
+
+  try {
+    asked = JSON.parse(match[1]!) as { question?: unknown; options?: unknown };
+  } catch {
+    return false;
+  }
+
+  const question = typeof asked.question === "string" ? asked.question : "";
+  const options = Array.isArray(asked.options) ? asked.options.filter((option): option is string => typeof option === "string") : [];
+
+  if (question === "") return false;
+  const box = element<HTMLDivElement>("question");
+  box.replaceChildren();
+  const heading = document.createElement("div");
+  heading.className = "q";
+  heading.textContent = `❓ ${question}`;
+  box.append(heading);
+  const row = document.createElement("div");
+  row.className = "options";
+
+  const answer = (reply: string): void => {
+    box.hidden = true;
+    runTask(reply, run.sessionId);
+  };
+
+  for (const option of options) {
+    const button = document.createElement("button");
+    button.textContent = option;
+    button.addEventListener("click", () => answer(option));
+    row.append(button);
+  }
+
+  const other = document.createElement("input");
+  other.placeholder = "another answer (Enter)";
+  other.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && other.value.trim() !== "") answer(other.value.trim());
+    event.stopPropagation();
+  });
+  row.append(other);
+  box.append(row);
+  box.hidden = false;
+
+  return true;
+}
+
+/** The Chat tab's commands, by button or by a slash line in the task field. */
+async function runCommand(command: "code" | "diagram" | "doc", argument: string): Promise<void> {
+  const state = stateFromHash();
+
+  if (command === "doc") {
+    const textarea = element<HTMLTextAreaElement>("document");
+    const hidden = textarea.hidden;
+    textarea.hidden = !hidden ? true : false;
+    element<HTMLDivElement>("document-row").hidden = textarea.hidden;
+
+    if (!textarea.hidden) {
+      if (argument) textarea.value = argument;
+      textarea.focus();
+    }
+
+    return;
+  }
+
+  if (command === "code") {
+    // The drawing first, so an unsaved stroke counts; then the contract, then the task.
+    if (canvas && mode === "edit") await api.saveLayout(state.view, canvas.scene(), mocks);
+    runState.textContent = "folding the drawing into the contract…";
+    const result = await api.code(state.view);
+    taskField.value = result.markdown;
+    runState.textContent = result.planned === 0 ? "the contract is built already; the task has nothing to build" : `${result.planned} planned items in the contract`;
+
+    if (result.planned > 0 && agentName) runTask(result.markdown, null);
+    else if (!agentName) runState.textContent = "no agent: the task is in the box; start web with --agent claude to run it";
+
+    return;
+  }
+
+  const ask = argument.trim() === "" ? "Review ARCHITECTURE.md as an architect would: are the layer names and module paths clear and consistent, is anything missing between the layers (an import that will be needed), is any layer too thin or too fat, does anything in the prose contradict the diagram? Fix what is clearly wrong in the file (keep the Mermaid valid, keep the prose), and ask me about anything that is a real choice." : `About ARCHITECTURE.md: ${argument.trim()}. Edit the file (keep the Mermaid valid, keep the prose) and ask me when a choice is mine.`;
+  taskField.value = ask;
+
+  if (agentName) runTask(ask, null);
+  else runState.textContent = "no agent: start web with --agent claude to run it";
+}
+
 function runTask(written: string, resume: string | null): void {
   if (!agentName || written.trim() === "") return;
+  element<HTMLDivElement>("question").hidden = true;
+
+  // A slash line is a command, not a task.
+  const slash = written.trim().match(/^\/(code|diagram|doc)\b\s*([\s\S]*)$/);
+
+  if (slash) {
+    void runCommand(slash[1] as "code" | "diagram" | "doc", slash[2] ?? "").catch((error: unknown) => (runState.textContent = error instanceof Error ? error.message : String(error)));
+
+    return;
+  }
   const state = stateFromHash();
   runButton.disabled = true;
   runButton.classList.add("running");
@@ -1414,6 +1516,8 @@ function runTask(written: string, resume: string | null): void {
 
           if (event.kind !== "init") appendEvent(event.kind, event.text);
 
+          if (event.kind === "text" || event.kind === "result") showQuestion(event.text, run);
+
           // The shapes of the files the agent touches light up as it works, like a run passing through them.
           if (event.files && canvas) {
             const ids = shapesOfFiles(event.files);
@@ -1433,7 +1537,7 @@ function runTask(written: string, resume: string | null): void {
           runButton.classList.remove("running");
           stopButton.disabled = true;
           followup.disabled = run.sessionId === null;
-          runState.textContent = `${agentName} finished; the diagram is reloaded — compare with review`;
+          runState.textContent = element<HTMLDivElement>("question").hidden ? `${agentName} finished; the diagram is reloaded — compare with review, check against the contract` : `${agentName} asks a question`;
           canvas?.highlight([]);
           // The agent changed the code: the live diagram and the views follow.
           void loadViews().then(() => load());
@@ -1450,7 +1554,44 @@ function runTask(written: string, resume: string | null): void {
 }
 
 element<HTMLButtonElement>("plan").addEventListener("click", () => void readTask().catch((error: unknown) => (runState.textContent = error instanceof Error ? error.message : String(error))));
+element<HTMLButtonElement>("code-this").addEventListener("click", () => void runCommand("code", "").catch((error: unknown) => (runState.textContent = error instanceof Error ? error.message : String(error))));
+element<HTMLButtonElement>("improve-diagram").addEventListener("click", () => void runCommand("diagram", "").catch((error: unknown) => (runState.textContent = error instanceof Error ? error.message : String(error))));
+element<HTMLButtonElement>("from-document").addEventListener("click", () => void runCommand("doc", ""));
+
+const documentGo = async (): Promise<void> => {
+  const text = element<HTMLTextAreaElement>("document").value.trim();
+
+  if (text === "") return;
+  const state = element<HTMLSpanElement>("document-state");
+  state.textContent = "writing the architecture…";
+  element<HTMLButtonElement>("document-go").disabled = true;
+
+  try {
+    const result = await api.intentFromDocument(text);
+    state.textContent = `${result.file}: ${result.layers} layers, ${result.modules} modules, ${result.edges} imports (from ${result.source})`;
+    element<HTMLTextAreaElement>("document").hidden = true;
+    element<HTMLDivElement>("document-row").hidden = true;
+    setHash({ ...stateFromHash(), view: "intent", review: false });
+    void loadViews().then(() => load());
+  } catch (error) {
+    state.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    element<HTMLButtonElement>("document-go").disabled = false;
+  }
+};
+
+element<HTMLButtonElement>("document-go").addEventListener("click", () => void documentGo());
+element<HTMLTextAreaElement>("document").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void documentGo();
+  event.stopPropagation();
+});
 runButton.addEventListener("click", () => runTask(taskField.value, null));
+taskField.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey || /^\/(code|diagram|doc)\b/.test(taskField.value.trim()))) {
+    event.preventDefault();
+    runTask(taskField.value, null);
+  }
+});
 stopButton.addEventListener("click", () => {
   if (currentRun) void api.stopAgent(currentRun.id);
 });

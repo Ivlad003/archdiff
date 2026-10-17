@@ -20,4 +20,11 @@ if (file) {
   line({ type: "assistant", message: { content: [{ type: "tool_use", name: "Write", input: { file_path: file[1] } }] } });
 }
 
+// A prompt that mentions a choice: the question protocol, answered by the next (resumed) message.
+if (/ask the user/i.test(prompt) && at === -1) {
+  line({ type: "assistant", message: { content: [{ type: "text", text: 'Which store?\n```archdiff-question\n{"question": "Which store should orders use?", "options": ["in memory", "SQLite", "Postgres"]}\n```' }] } });
+} else if (at !== -1) {
+  line({ type: "assistant", message: { content: [{ type: "text", text: `Noted: ${prompt.slice(0, 40)}.` }] } });
+}
+
 line({ type: "result", result: "Done.", session_id: session });

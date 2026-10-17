@@ -50,7 +50,7 @@ function relationType(edge: DiagramEdge): string {
   return edge.kind === "dependency" ? "Serving" : edge.kind === "call" || edge.kind === "message" ? "Triggering" : "Association";
 }
 
-const DIFF_FILL = { added: { r: 200, g: 230, b: 201 }, removed: { r: 255, g: 205, b: 210 }, changed: { r: 255, g: 224, b: 178 }, warning: { r: 255, g: 224, b: 178 } } as const;
+const DIFF_FILL = { added: { r: 200, g: 230, b: 201 }, removed: { r: 255, g: 205, b: 210 }, changed: { r: 255, g: 224, b: 178 }, warning: { r: 255, g: 224, b: 178 }, planned: { r: 187, g: 222, b: 251 } } as const;
 
 export function toArchimate(diagram: Diagram): string {
   const elements: string[] = [];
@@ -76,7 +76,7 @@ export function toArchimate(diagram: Diagram): string {
     if (!known.has(edge.from) || !known.has(edge.to) || edge.kind === "lifeline") continue;
     const id = xmlId("rel", `${edge.from}->${edge.to}:${edge.kind}${edge.kind === "message" ? `:${index}` : ""}`);
     relationships.push(`    <relationship identifier="${id}" source="${xmlId("id", edge.from)}" target="${xmlId("id", edge.to)}" xsi:type="${relationType(edge)}">${edge.label ? `<name xml:lang="en">${escape(edge.label)}</name>` : ""}</relationship>`);
-    const colour = edge.diff === "added" ? '<style><lineColor r="46" g="125" b="50"/></style>' : edge.diff === "removed" ? '<style><lineColor r="198" g="40" b="40"/></style>' : "";
+    const colour = edge.diff === "added" ? '<style><lineColor r="46" g="125" b="50"/></style>' : edge.diff === "removed" ? '<style><lineColor r="198" g="40" b="40"/></style>' : edge.diff === "planned" ? '<style><lineColor r="21" g="101" b="192"/></style>' : edge.diff === "warning" || edge.diff === "changed" ? '<style><lineColor r="239" g="108" b="0"/></style>' : "";
     viewEdges.push(`      <connection identifier="${xmlId("conn", `${edge.from}->${edge.to}:${edge.kind}${edge.kind === "message" ? `:${index}` : ""}`)}" relationshipRef="${id}" xsi:type="Relationship" source="${xmlId("node", edge.from)}" target="${xmlId("node", edge.to)}">${colour}</connection>`);
   }
 

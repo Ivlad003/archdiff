@@ -35,6 +35,16 @@ export interface ReviewResponse {
   markdown: string;
 }
 
+/** A JSON POST to the server; an `error` in the answer or a failed status throws its text. */
+async function post<T>(path: string, payload: unknown): Promise<T> {
+  const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+  const body = (await response.json()) as T | { error: string };
+
+  if (!response.ok || (typeof body === "object" && body !== null && "error" in body)) throw new Error(typeof body === "object" && body !== null && "error" in body ? String(body.error) : response.statusText);
+
+  return body as T;
+}
+
 async function get<T>(url: string): Promise<T> {
   const response = await fetch(url);
   const body = (await response.json()) as T | { error: string };
@@ -139,6 +149,11 @@ export const api = {
 
     return () => source.close();
   },
+  code: (view: string) => post<{ markdown: string; intent: string; planned: number }>("/api/code", { view }),
+  intent: () => get<{ exists: boolean; markdown: string; file: string }>("/api/intent"),
+  saveIntent: (markdown: string) => post<{ file: string; layers: number; modules: number; edges: number }>("/api/intent", { markdown }),
+  intentFromDocument: (text: string) => post<{ file: string; source: string; layers: number; modules: number; edges: number; markdown: string }>("/api/intent/document", { text }),
+  check: () => get<{ exists: boolean; ok: boolean; markdown: string }>("/api/check"),
   plan: (view: string) => get<{ markdown: string; drawn: boolean; plan: { added: unknown[]; edges: unknown[]; removed: unknown[]; notes: string[] } }>(`/api/plan?view=${encodeURIComponent(view)}`),
   runAgent: async (view: string, prompt: string, resume: string | null): Promise<{ id: string; agent: string; task: string }> => {
     const response = await fetch("/api/agent/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, prompt, resume }) });
