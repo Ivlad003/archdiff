@@ -4,7 +4,7 @@
 // derive from the archdiff IDs, so the same diagram gives the same file.
 
 import type { Diagram, DiagramEdge, DiagramNode } from "../diagram.ts";
-import { heatColour } from "./drawio.ts";
+import { heatColour } from "./colour.ts";
 
 interface ExcalidrawElement {
   id: string;

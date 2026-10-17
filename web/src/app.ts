@@ -357,7 +357,7 @@ async function showNode(id: string | null): Promise<void> {
 
   if (!state.review) {
     try {
-      const { markdown } = await api.node(state.view, node.id);
+      const { markdown } = await api.node(state.view, node.id, pictureQuery(state));
       setMarkdown(markdownPanel, markdown);
     } catch (error) {
       setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
@@ -464,6 +464,11 @@ function walk(direction: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"): 
 }
 
 let walked: { direction: string; from: string; index: number } = { direction: "", from: "", index: 0 };
+
+/** The options that change which shapes a picture has, as query parameters, so a shape's page is asked for the picture the page shows. */
+function pictureQuery(state: State): string {
+  return `${state.depth === null ? "" : `&depth=${state.depth}`}${state.limit === null ? "" : `&limit=${state.limit}`}${state.weight === null ? "" : `&weight=${state.weight}`}${state.hubs ? "" : "&hubs=0"}${state.packages ? "&packages=1" : ""}${state.expand.length > 0 ? `&expand=${encodeURIComponent(state.expand.join(","))}` : ""}${state.hide.length > 0 ? `&hide=${encodeURIComponent(state.hide.join(","))}` : ""}`;
+}
 
 /** The tools of the canvas that change what a tap does. */
 const tools = { mix: false, focus: false };
@@ -656,7 +661,7 @@ async function showEdge(lines: PickedLine[], follow: boolean): Promise<void> {
   let markdown: string;
 
   try {
-    markdown = (await api.edge(state.view, line.from, line.to, line.kind)).markdown;
+    markdown = (await api.edge(state.view, line.from, line.to, line.kind, pictureQuery(state))).markdown;
   } catch (error) {
     markdown = error instanceof Error ? error.message : String(error);
   }
@@ -1766,7 +1771,10 @@ element<HTMLButtonElement>("exit").addEventListener("click", () => leaveEdit());
 element<HTMLButtonElement>("shot-png").addEventListener("click", () => void canvas?.screenshot("png").then((blob) => download(blob, fileName(".png"))));
 element<HTMLButtonElement>("shot-svg").addEventListener("click", () => void canvas?.screenshot("svg").then((blob) => download(blob, fileName(".svg"))));
 element<HTMLDivElement>("export").addEventListener("click", () => element<HTMLDetailsElement>("export-menu").removeAttribute("open"));
-depthInput.addEventListener("change", () => setHash({ ...stateFromHash(), depth: depthInput.value === "" ? null : Number(depthInput.value) }));
+depthInput.addEventListener("change", () => {
+  const typed = Number(depthInput.value);
+  setHash({ ...stateFromHash(), depth: depthInput.value === "" || !Number.isFinite(typed) ? null : Math.max(0, Math.min(12, Math.floor(typed))) });
+});
 packagesInput.addEventListener("change", () => setHash({ ...stateFromHash(), packages: packagesInput.checked }));
 changesInput.addEventListener("change", () => setHash({ ...stateFromHash(), changes: changesInput.checked }));
 element<HTMLInputElement>("limit").addEventListener("change", () => {

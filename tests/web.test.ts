@@ -108,6 +108,17 @@ test("a drawing saved by the editor places the shapes of the live diagram and me
   assert.equal(bad.status, 400);
 });
 
+test("a shape's page is asked for the picture the page shows: an opened module's function has a page, a package.json is a readable file", async () => {
+  const expanded = await getJson<{ markdown: string }>(`/api/node?view=${encodeURIComponent("layer:lib")}&id=${encodeURIComponent("src/lib/orders.ts#placeOrder")}&expand=${encodeURIComponent("src/lib/orders.ts")}`);
+  assert.ok(expanded.markdown.startsWith("# placeOrder"), expanded.markdown.slice(0, 80));
+  assert.equal((await fetch(`${base}/api/node?view=${encodeURIComponent("layer:lib")}&id=${encodeURIComponent("src/lib/orders.ts#placeOrder")}`)).status, 404);
+  const manifest = await fetch(`${base}/api/file?path=package.json`);
+  assert.equal(manifest.status, 200);
+  assert.ok((await manifest.text()).includes('"name"'));
+  assert.equal((await fetch(`${base}/api/file?path=${encodeURIComponent("../package.json")}`)).status, 404);
+  assert.equal((await fetch(`${base}/api/file?path=${encodeURIComponent(".git/config")}`)).status, 404);
+});
+
 test("the specs are listed and read from openspec/ and features/ only; the prompt names the subject", async () => {
   const before = await getJson<{ initialised: boolean; specs: unknown[] }>("/api/specs");
   assert.equal(before.initialised, false);

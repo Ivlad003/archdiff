@@ -26,6 +26,9 @@ export function ownView(node: DiagramNode): string | null {
 /** The other pictures of the same subject: a module's dependencies or its inside, a function's call tree or its sequence. */
 export function siblingViews(view: string): { label: string; key: string }[] {
   const at = view.indexOf(":");
+
+  // A plain view (layers, modules, matrix…) has no subject and so no siblings.
+  if (at === -1) return [];
   const kind = view.slice(0, at);
   const rest = view.slice(at + 1);
 

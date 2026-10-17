@@ -4,7 +4,7 @@
 // the live-reload stream. Each handler takes the server's context and the
 // request; the table at the end names them by method and path.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +29,20 @@ import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type Sce
 import { diagramMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView, viewList, viewOf, type ViewOptions } from "../views.ts";
-import { json, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
+import { json, problem, send, type PictureOptions, type RouteContext, type RouteRequest } from "./context.ts";
+
+/** The view options a picture's query implies, as `placed` builds them, for the routes that must see the same shapes. */
+function pictureOptions(picked: PictureOptions): ViewOptions {
+  const options: ViewOptions = { packages: picked.packages, hubs: picked.hubs, expand: picked.expand, hideLanes: picked.hide };
+
+  if (picked.depth !== undefined) options.depth = picked.depth;
+
+  if (picked.limit !== undefined) options.limit = picked.limit;
+
+  if (picked.weight !== undefined) options.weight = picked.weight;
+
+  return options;
+}
 
 export async function postLayout(ctx: RouteContext, { url, body, response }: RouteRequest): Promise<void> {
   const { root } = ctx;
@@ -159,7 +172,8 @@ export async function getNode(ctx: RouteContext, { url, response }: RouteRequest
 
   if (!view) return problem(response, 400, "unknown view");
   const analysis = await ctx.fresh();
-  const diagram = view.kind === "timeline" ? { nodes: [] as DiagramNode[] } : viewOf(analysis, view);
+  // The same picture the page shows: with its expansions, hidden lanes, fold limit and weight, a shape is where the page has it.
+  const diagram = view.kind === "timeline" ? { nodes: [] as DiagramNode[] } : viewOf(analysis, view, pictureOptions(ctx.optionsOf(url)));
   const node = diagram.nodes.find((candidate) => candidate.id === id);
 
   if (!node) return problem(response, 404, "no such shape in the view");
@@ -177,7 +191,7 @@ export async function getEdge(ctx: RouteContext, { url, response }: RouteRequest
 
   if (!view) return problem(response, 400, "unknown view");
   const analysis = await ctx.fresh();
-  const diagram = view.kind === "timeline" ? { view: "timeline", title: "", nodes: [], edges: [], groups: [] } : viewOf(analysis, view);
+  const diagram = view.kind === "timeline" ? { view: "timeline", title: "", nodes: [], edges: [], groups: [] } : viewOf(analysis, view, pictureOptions(ctx.optionsOf(url)));
   const edge = diagram.edges.find((candidate) => candidate.from === from && candidate.to === to && (kind === null || candidate.kind === kind));
 
   if (!edge) return problem(response, 404, "no such line in the view");
@@ -190,9 +204,14 @@ export async function getFile(ctx: RouteContext, { url, response }: RouteRequest
   const file = url.searchParams.get("path") ?? "";
   const analysis = await ctx.fresh();
 
-  if (!analysis.facts.has(file)) return problem(response, 404, "not an analysed file");
+  // An analysed file, or any other text file of the repository (a package.json a package shape points to); never a path out of it.
+  const full = join(root, ...file.split("/"));
 
-  return send(response, 200, "text/plain; charset=utf-8", readFileSync(join(root, file), "utf8"));
+  if (file === "" || file.split("/").some((segment) => segment === "" || segment === "." || segment === "..") || file.startsWith(".git/") || file.includes("node_modules/")) return problem(response, 404, "not a file of the repository");
+
+  if (!analysis.facts.has(file) && !(existsSync(full) && statSync(full).isFile() && statSync(full).size <= 1_500_000)) return problem(response, 404, "not a file of the repository");
+
+  return send(response, 200, "text/plain; charset=utf-8", readFileSync(full, "utf8"));
 }
 
 export async function getCoverage(ctx: RouteContext, { response }: RouteRequest): Promise<void> {

@@ -6,6 +6,7 @@
 
 import type { Diagram, DiagramNode } from "../diagram.ts";
 import { routeEdges } from "./excalidraw.ts";
+import { heatColour } from "./colour.ts";
 
 function escape(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\n/g, "&#xa;");
@@ -36,13 +37,6 @@ function style(node: DiagramNode): string {
   return base[node.kind] + heat + mark;
 }
 
-/** A fill from near white to a deep blue by `heat` 0–1. */
-export function heatColour(heat: number): string {
-  const t = Math.max(0, Math.min(1, heat));
-  const channel = (from: number, to: number): string => Math.round(from + (to - from) * t).toString(16).padStart(2, "0");
-
-  return `#${channel(0xf7, 0x1e)}${channel(0xf9, 0x5a)}${channel(0xfc, 0x9e)}`;
-}
 
 export function toDrawio(diagram: Diagram): string {
   const cells: string[] = ['<mxCell id="0"/>', '<mxCell id="1" parent="0"/>'];
