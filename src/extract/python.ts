@@ -15,6 +15,7 @@
 import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, Kwarg, LiteralValue, PassFact, StatementFact, UnsupportedFact, ValueRefFact } from "./facts.ts";
 import { isLicense, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, located, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
+import { collectPyMachines, collectPyStates, guardsOf, PY_CONTROL } from "./control.ts";
 
 /** Decorators that keep the function a plain function (or method) of that name. */
 const KEEPING_DECORATORS = new Set(
@@ -110,6 +111,13 @@ function extractTree(path: string, root: Node): FileFacts {
   collectMainEntries(root, names, facts);
   facts.valueRefs = [...facts.valueRefs, ...valueRefs(root, names, facts.imports.some((imp) => imp.glob))].sort((a, b) => a.line - b.line || a.col - b.col);
   collectDynamic(root, facts);
+  // The states the file writes and reads as literals, and the machines of the `transitions` package (control.ts).
+  const states = collectPyStates(root);
+
+  if (states.length > 0) facts.states = states;
+  const machines = collectPyMachines(root);
+
+  if (machines.length > 0) facts.machines = machines;
   const doc = docstring(root);
 
   if (doc !== undefined) facts.doc = doc;
@@ -560,6 +568,9 @@ function bodyCalls(body: Node, scope: CallScope): CallFact[] {
       if (closure) call.closure = true;
 
       if (closure && closure !== "stored") call.closureArg = closure;
+      const guards = guardsOf(node, body, PY_CONTROL);
+
+      if (guards.length > 0) call.guards = guards;
       out.push(call);
     }
 

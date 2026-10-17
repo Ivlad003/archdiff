@@ -29,9 +29,12 @@ export interface DiagramNode {
    * (the foot of a lifeline); `event`: an event name (emitted, listened
    * to); `cell`: a box of a table or a bar of a chart, sized by the view;
    * `package`: a package of a monorepo; `class`: a class or interface box
-   * of the class diagram, its label the fields and methods line by line.
+   * of the class diagram, its label the fields and methods line by line;
+   * `state`: a state of a state machine (or a machine in the list of them);
+   * `fragment`: a dashed frame of a sequence around the calls under one
+   * guard (`opt`, `loop`), its label top left.
    */
-  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package" | "class";
+  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package" | "class" | "state" | "fragment";
   /** How hot the shape is, 0–1 (a hotspot's calls in, a matrix cell's count): the fill darkens with it. */
   heat?: number;
   label: string;
@@ -108,11 +111,34 @@ export interface Diagram {
   /** How the lanes lie: bands down the picture (`rows`) or blocks across it (`columns`); absent: rows, or columns on a map of many lanes. */
   lanes?: "rows" | "columns";
   /** A sequence view: the Mermaid export is a sequenceDiagram and the Markdown lists the messages in order. */
-  sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number; times?: number }[] };
+  sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number; times?: number }[]; fragments?: SequenceFragment[] };
+  /** A machine view: the states and transitions behind the picture (Mermaid: a stateDiagram-v2; Markdown: a table). */
+  machine?: MachineData;
   /** A metrics view: the numbers behind the table, for the Markdown and the quadrant chart. */
   metrics?: Metrics;
   /** A class view: the Mermaid export is a classDiagram. */
   classes?: { boxes: { id: string; name: string; kind: "class" | "interface" | "type"; fields: string[]; methods: string[] }[]; relations: { from: string; to: string; kind: "extends" | "implements" }[] };
+}
+
+/** A frame of a sequence around the messages `first`..`last` (indices): the calls under one guard. */
+export interface SequenceFragment {
+  kind: "opt" | "loop";
+  label: string;
+  first: number;
+  last: number;
+  /** How deep the frame nests: 0 outermost. */
+  level: number;
+}
+
+/** A state machine as a picture carries it (machines.ts). */
+export interface MachineData {
+  name: string;
+  module: string;
+  initial: string | null;
+  /** `declared`: named by a type; `assigned`: set somewhere in the code. */
+  states: { name: string; declared: boolean; assigned: boolean }[];
+  /** `from` is `*` for a transition from any state; `event` names a library's event, `fn` the function that makes it. */
+  transitions: { from: string; to: string; event?: string; fn?: string; line: number }[];
 }
 
 /** The coupling and cohesion of one module (metrics.ts): Martin's Ca, Ce, I, A and D, and the cohesion of its functions. */
@@ -175,6 +201,8 @@ export const SIZE: Record<DiagramNode["kind"], { w: number; h: number }> = {
   cell: { w: 70, h: 34 },
   package: { w: 180, h: 60 },
   class: { w: 230, h: 80 },
+  state: { w: 150, h: 50 },
+  fragment: { w: 2, h: 2 },
 };
 
 /** One cell of the grid: the largest shape and the gaps around it. */

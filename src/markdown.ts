@@ -68,11 +68,27 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
     return `${lines.join("\n").trimEnd()}\n`;
   }
 
-  // A sequence reads as a numbered list: who calls what, in order, with the line of each call.
+  // A machine reads as its states and a table of transitions.
+  if (diagram.machine) {
+    const machine = diagram.machine;
+    lines.push("## States", "", ...machine.states.map((state) => `- **${state.name}**${state.name === machine.initial ? " (initial)" : ""}${state.assigned ? "" : state.declared ? " — declared by the type, never set" : " — read, never set"}`), "", "## Transitions", "", "| from | by | to | where |", "| --- | --- | --- | --- |");
+
+    for (const transition of machine.transitions) lines.push(`| ${transition.from === "*" ? "any state" : transition.from} | ${transition.event ?? transition.fn ?? ""} | ${transition.to} | ${machine.module}:${transition.line} |`);
+    lines.push("");
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
+  // A sequence reads as a numbered list: who calls what, in order, with the line of each call; a fragment is named before its calls.
   if (diagram.sequence) {
     lines.push("## Messages", "");
+    const fragments = diagram.sequence.fragments ?? [];
 
-    for (const [i, message] of diagram.sequence.messages.entries()) lines.push(`${i + 1}. \`${message.from}\` → \`${message.to}\`: **${message.label}()**${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""} — ${message.from}:${message.line}`);
+    for (const [i, message] of diagram.sequence.messages.entries()) {
+      for (const fragment of fragments) if (fragment.first === i) lines.push(`- _${fragment.kind} [${fragment.label}]_ — messages ${fragment.first + 1}–${fragment.last + 1}`);
+      lines.push(`${i + 1}. \`${message.from}\` → \`${message.to}\`: **${message.label}()**${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""} — ${message.from}:${message.line}`);
+    }
+
     lines.push("", "## Participants", "", ...diagram.sequence.participants.map((module) => `- ${module}`), "");
 
     return `${lines.join("\n").trimEnd()}\n`;

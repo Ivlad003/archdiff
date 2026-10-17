@@ -18,6 +18,8 @@ export function ownView(node: DiagramNode): string | null {
       return `calls:${id}`;
     case "more":
       return node.ref?.id ?? null;
+    case "state":
+      return node.ref?.id?.startsWith("machine:") ? node.ref.id : null;
     default:
       return null;
   }

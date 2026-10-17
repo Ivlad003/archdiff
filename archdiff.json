@@ -32,7 +32,8 @@
       "src/pipeline.ts",
       "src/view-keys.ts",
       "src/cycles.ts",
-      "src/metrics.ts"
+      "src/metrics.ts",
+      "src/machines.ts"
     ],
     "exports": [
       "src/export/**",

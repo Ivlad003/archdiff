@@ -29,6 +29,8 @@ function style(node: DiagramNode): string {
     cell: "rounded=0;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#9e9e9e;fontSize=10;",
     package: "rounded=0;whiteSpace=wrap;html=1;fillColor=#e8eaf6;strokeColor=#3949ab;fontStyle=1;",
     class: "rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacingLeft=6;fontFamily=Courier New;fontSize=10;fillColor=#fff8e1;strokeColor=#4e342e;",
+    state: "rounded=1;whiteSpace=wrap;html=1;arcSize=30;fillColor=#e8f5e9;strokeColor=#2e7d32;",
+    fragment: "rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#9e9e9e;align=left;verticalAlign=top;spacingLeft=6;fontSize=11;",
   };
   // The heat of a shape darkens its fill (a hotspot's calls in, a matrix cell's count).
   const heat = node.heat !== undefined && node.heat > 0 ? `fillColor=${heatColour(node.heat)};` : "";

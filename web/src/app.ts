@@ -712,7 +712,8 @@ function renderViews(filter: string): void {
   viewsList.replaceChildren();
   const needle = filter.trim().toLowerCase();
   const groups: [string, string[]][] = [
-    ["Overview", ["layers", "coverage", "classes", "matrix", "metrics", "cycles", "cycles:fns", "events", "tests", "hotspots", "packages", "timeline"]],
+    ["Overview", ["layers", "coverage", "classes", "matrix", "metrics", "cycles", "cycles:fns", "machines", "events", "tests", "hotspots", "packages", "timeline"]],
+    ["State machines", ["machine"]],
     ["Layers", ["layer"]],
     ["Directories", ["dir"]],
     ["Entry points (call flows)", ["calls"]],

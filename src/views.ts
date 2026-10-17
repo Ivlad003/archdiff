@@ -22,6 +22,7 @@ import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
 import { classesView, contractView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
+import { machinesOf, machinesView, machineView } from "./machines.ts";
 import { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 import { MAX_SHAPES } from "./shape.ts";
 import { DEFAULT_DEPTH, type View } from "./view-keys.ts";
@@ -163,6 +164,9 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   list.push({ key: "cycles", title: "Cycles: modules importing each other, and where to cut", kind: "cycles" });
   list.push({ key: "cycles:fns", title: "Call cycles: functions calling each other across modules", kind: "cycles" });
   list.push({ key: "metrics", title: "Metrics: coupling and cohesion of every module", kind: "metrics" });
+  list.push({ key: "machines", title: "State machines: declared by a library or written with literal states", kind: "machines" });
+
+  for (const machine of machinesOf(analysis)) list.push({ key: machine.id, title: `${machine.name} (${machine.module}) — ${machine.states.length} states`, kind: "machine", layer: graph.modules.get(machine.module)!.layer });
   list.push({ key: "events", title: "Events: emitters and listeners", kind: "events" });
   list.push({ key: "tests", title: "Tests: which modules the tests cover", kind: "tests" });
   list.push({ key: "hotspots", title: "Hotspots: size and calls in", kind: "hotspots" });
@@ -382,10 +386,13 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
   const callsFrom = new Map<string, typeof graph.calls>();
 
   for (const call of graph.calls) if (call.kind === "call") callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call]);
-  const messages: { from: string; to: string; label: string; line: number; depth: number; times?: number }[] = [];
+  type Guard = { id: string; kind: "opt" | "loop"; label: string };
+  const messages: { from: string; to: string; label: string; line: number; depth: number; times?: number; chain: Guard[] }[] = [];
   const active = new Set<string>();
 
-  const walk = (from: string, level: number): void => {
+  // The guards of a message, outermost first: those its caller sat under (the calls a guarded call makes happen under
+  // the same guards), then its own call's branches and loops. A guard's id is made unique per function it sits in.
+  const walk = (from: string, level: number, inherited: Guard[]): void => {
     if (level >= depth || messages.length >= limit) return;
     active.add(from);
 
@@ -394,25 +401,55 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
       const target = graph.nodes.get(call.to);
 
       if (!target) continue;
-      messages.push({ from: moduleOf(from), to: moduleOf(call.to), label: target.parent ? `${target.parent}.${target.name}` : target.name, line: call.line, depth: level });
+      const own = (call.guards ?? []).map((guard): Guard => ({ id: `${from}:${guard.id}`, kind: guard.kind === "loop" ? "loop" : "opt", label: guard.kind === "loop" || guard.kind === "if" || guard.kind === "else" ? guard.text : guard.text === "" || guard.text === guard.kind ? guard.kind : `${guard.kind} ${guard.text}` }));
+      const chain = [...inherited, ...own];
+      messages.push({ from: moduleOf(from), to: moduleOf(call.to), label: target.parent ? `${target.parent}.${target.name}` : target.name, line: call.line, depth: level, chain });
 
       // A call back into a function already on the stack is drawn, not followed: no loop.
-      if (!active.has(call.to)) walk(call.to, level + 1);
+      if (!active.has(call.to)) walk(call.to, level + 1, chain);
     }
 
     active.delete(from);
   };
 
-  walk(id, 0);
+  walk(id, 0, []);
   // Consecutive repeats of one call (a loop body, a helper called twice in a row) collapse into one message "×N".
   const collapsed: (typeof messages[number] & { times: number })[] = [];
 
   for (const message of messages) {
     const last = collapsed[collapsed.length - 1];
 
-    if (last && last.from === message.from && last.to === message.to && last.label === message.label) last.times++;
+    if (last && last.from === message.from && last.to === message.to && last.label === message.label && last.chain.map((guard) => guard.id).join() === message.chain.map((guard) => guard.id).join()) last.times++;
     else collapsed.push({ ...message, times: 1 });
   }
+
+  // Consecutive messages under one guard form a fragment: an opt (a branch) or a loop, labelled with the condition;
+  // the guards inside a guard nest, up to three deep.
+  const fragments: NonNullable<Diagram["sequence"]>["fragments"] = [];
+
+  const frame = (first: number, last: number, level: number): void => {
+    if (level >= 3) return;
+    let i = first;
+
+    while (i <= last) {
+      const guard = collapsed[i]!.chain[level];
+
+      if (!guard) {
+        i++;
+        continue;
+      }
+
+      let end = i;
+
+      while (end + 1 <= last && collapsed[end + 1]!.chain[level]?.id === guard.id) end++;
+      fragments.push({ kind: guard.kind, label: guard.label, first: i, last: end, level });
+      frame(i, end, level + 1);
+      i = end + 1;
+    }
+  };
+
+  frame(0, collapsed.length - 1, 0);
+  fragments.sort((a, b) => a.first - b.first || a.level - b.level);
 
   messages.length = 0;
   messages.push(...collapsed);
@@ -448,6 +485,15 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
     edges.push({ from: module, to: `foot:${module}`, kind: "lifeline", route: [{ x: x + SIZE.participant.w / 2, y: 20 + SIZE.participant.h }, { x: x + SIZE.participant.w / 2, y: bottom }] });
   }
 
+  // A fragment is a dashed frame across every lifeline, from a little above its first message to a little below its
+  // last; a nested one sits a few pixels inside its parent.
+  for (const [i, fragment] of fragments.entries()) {
+    const inset = fragment.level * 8;
+    const top = 80 + (fragment.first + 1) * SEQ_ROW - 26 + inset;
+    const bottom = 80 + (fragment.last + 1) * SEQ_ROW + 14 - inset;
+    nodes.push({ id: `fragment:${i}`, kind: "fragment", label: `${fragment.kind} [${fragment.label}]`, x: 6 + inset, y: top, w: participants.length * SEQ_COLUMN - 2 * inset, h: bottom - top });
+  }
+
   messages.forEach((message, i) => {
     const y = 80 + (i + 1) * SEQ_ROW;
     const fromX = column.get(message.from)! + SIZE.participant.w / 2;
@@ -457,7 +503,9 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
     edges.push({ from: message.from, to: message.to, kind: "message", label: `${i + 1}. ${message.label}()${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`, route });
   });
 
-  const diagram = unplaced(`sequence:${id}`, `Sequence from ${start.parent ? `${start.parent}.` : ""}${start.name}`, nodes, edges, [], { placed: true, sequence: { participants, messages: messages.map(({ from, to, label, line, times }) => ((times ?? 1) > 1 ? { from, to, label, line, times: times as number } : { from, to, label, line })) } });
+  const diagram = unplaced(`sequence:${id}`, `Sequence from ${start.parent ? `${start.parent}.` : ""}${start.name}`, nodes, edges, [], { placed: true, sequence: { participants, messages: messages.map(({ from, to, label, line, times }) => ((times ?? 1) > 1 ? { from, to, label, line, times: times as number } : { from, to, label, line })), ...(fragments.length > 0 ? { fragments } : {}) } });
+
+  if (fragments.length > 0) diagram.reason = `${fragments.length} fragments: the calls under a branch or a loop, framed`;
 
   if (messages.length === 0) diagram.reason = "the function calls nothing archdiff can follow";
   else if (messages.length >= limit) diagram.reason = `cut at ${limit} messages; --limit raises it`;
@@ -520,6 +568,10 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
         return matrixView(graph, view.scope, options.types === true);
       case "metrics":
         return metricsView(analysis, view.scope, options.limit ?? MAX_SHAPES, options.types === true);
+      case "machines":
+        return machinesView(analysis);
+      case "machine":
+        return machineView(analysis, view.id);
       case "events":
         return eventsView(analysis);
       case "tests":

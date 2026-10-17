@@ -17,7 +17,7 @@
 
 import type { Config } from "./config.ts";
 import { layerOf } from "./config.ts";
-import type { CallFact, DeclFact, FileFacts } from "./extract/facts.ts";
+import type { CallFact, DeclFact, FileFacts, GuardFact } from "./extract/facts.ts";
 import type { Resolution } from "./resolve.ts";
 
 /** A file of the repository. */
@@ -69,6 +69,8 @@ export interface CallEdge {
   to: string;
   kind: "call" | "ref";
   line: number;
+  /** The branches, loops and handlers the call sits under, outermost first (a sequence draws them as fragments). */
+  guards?: GuardFact[];
 }
 
 /** A call archdiff could not follow. */
@@ -480,9 +482,10 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
 
       for (const call of decl.calls) {
         const target = resolveCall(file.path, ownClass, call);
+        const edge = (to: string): CallEdge => (call.guards ? { from: id, to, kind: "call", line: call.line, guards: call.guards } : { from: id, to, kind: "call", line: call.line });
 
-        if ("id" in target) calls.push({ from: id, to: target.id, kind: "call", line: call.line });
-        else if ("ids" in target) for (const to of target.ids) calls.push({ from: id, to, kind: "call", line: call.line });
+        if ("id" in target) calls.push(edge(target.id));
+        else if ("ids" in target) for (const to of target.ids) calls.push(edge(to));
         else gaps.push({ from: id, callee: call.callee, reason: target.gap, line: call.line });
       }
 

@@ -24,6 +24,8 @@ export type View =
   | { kind: "classes"; scope: string | null }
   | { kind: "matrix"; scope: string | null }
   | { kind: "metrics"; scope: string | null }
+  | { kind: "machines" }
+  | { kind: "machine"; id: string }
   | { kind: "events" }
   | { kind: "tests" }
   | { kind: "hotspots" }
@@ -34,10 +36,10 @@ export type View =
   | { kind: "modules" };
 
 /** The views without a subject. */
-const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "metrics", "events", "tests", "hotspots", "packages", "timeline", "intent", "modules"]);
+const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "metrics", "events", "tests", "hotspots", "packages", "timeline", "intent", "modules", "machines"]);
 
 /** The views with a subject (`kind:<subject>`). */
-const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "cycles", "classes", "matrix", "metrics"]);
+const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "cycles", "classes", "matrix", "metrics", "machine"]);
 
 /** The one question each kind of view answers. */
 export const QUESTION: Record<View["kind"], string> = {
@@ -56,6 +58,8 @@ export const QUESTION: Record<View["kind"], string> = {
   classes: "which classes and interfaces exist, with what fields and methods, extending what",
   matrix: "who imports whom, and which imports go against the order",
   metrics: "how coupled and how cohesive each module is: Ca, Ce, instability, abstractness, the distance from the main sequence",
+  machines: "which state machines the code has, declared by a library or written with literal states",
+  machine: "which states a machine has, which transitions, and which function or event makes each",
   events: "which modules emit which events, and which listen",
   tests: "which modules the tests import, and which none does",
   hotspots: "which modules are big, and which are called from everywhere",

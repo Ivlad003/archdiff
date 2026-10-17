@@ -55,6 +55,10 @@ function shape(node: DiagramNode, id: string): string {
       return `${id}((${text}))`;
     case "class":
       return `${id}[${label(node.label.split("\n")[0] ?? node.label)}]`;
+    case "state":
+      return `${id}([${text}])`;
+    case "fragment":
+      return `${id}[${text}]`;
   }
 }
 
@@ -74,7 +78,46 @@ function sequenceMermaid(diagram: Diagram): string {
 
   for (const module of sequence.participants) lines.push(`  participant ${ids.get(module)} as ${module.replace(/[:;]/g, " ")}`);
 
-  for (const [i, message] of sequence.messages.entries()) lines.push(`  ${ids.get(message.from)}->>${ids.get(message.to)}: ${i + 1}. ${message.label}()${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`);
+  const fragments = sequence.fragments ?? [];
+
+  for (const [i, message] of sequence.messages.entries()) {
+    // A fragment opens before its first message (opt or loop, labelled) and closes after its last; outer ones first.
+    for (const fragment of fragments) if (fragment.first === i) lines.push(`  ${"  ".repeat(fragment.level)}${fragment.kind} ${fragment.label.replace(/[:;]/g, " ")}`);
+    lines.push(`  ${ids.get(message.from)}->>${ids.get(message.to)}: ${i + 1}. ${message.label}()${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`);
+
+    for (const fragment of [...fragments].reverse()) if (fragment.last === i) lines.push(`  ${"  ".repeat(fragment.level)}end`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+/** A machine view as Mermaid's stateDiagram-v2: the start mark to the initial state, every transition labelled with its event or function. */
+function stateMermaid(diagram: Diagram): string {
+  const machine = diagram.machine!;
+  const ids = new Map<string, string>();
+  const taken = new Set<string>();
+
+  for (const name of [...machine.states.map((state) => state.name), "*"]) {
+    const base = `s_${name.replace(/[^A-Za-z0-9_]/g, "_")}` || "s_any";
+    let candidate = name === "*" ? "s_any" : base;
+
+    for (let n = 2; taken.has(candidate); n++) candidate = `${base}_${n}`;
+    taken.add(candidate);
+    ids.set(name, candidate);
+  }
+
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram)];
+
+  if (diagram.reason) lines.push(`%% ${diagram.reason}`);
+  lines.push("stateDiagram-v2");
+
+  for (const state of machine.states) lines.push(`  state "${state.name.replace(/"/g, "'")}${state.assigned ? "" : " (never set)"}" as ${ids.get(state.name)}`);
+
+  if (machine.transitions.some((transition) => transition.from === "*")) lines.push('  state "any state" as s_any');
+
+  if (machine.initial !== null) lines.push(`  [*] --> ${ids.get(machine.initial)}`);
+
+  for (const transition of machine.transitions) lines.push(`  ${ids.get(transition.from)} --> ${ids.get(transition.to)}${transition.event ?? transition.fn ? `: ${(transition.event ?? transition.fn ?? "").replace(/[:;]/g, " ")}` : ""}`);
 
   return `${lines.join("\n")}\n`;
 }
@@ -223,6 +266,8 @@ export function mermaidStyleFor(diagram: Diagram, style: MermaidStyle): Exclude<
 
   if (diagram.metrics) return "quadrant";
 
+  if (diagram.machine) return "state";
+
   return "flowchart";
 }
 
@@ -230,6 +275,8 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
   if (diagram.sequence) return sequenceMermaid(diagram);
 
   if (diagram.classes) return classMermaid(diagram);
+
+  if (diagram.machine) return stateMermaid(diagram);
   const chosen = mermaidStyleFor(diagram, style);
 
   if (chosen === "c4") return c4Mermaid(diagram);

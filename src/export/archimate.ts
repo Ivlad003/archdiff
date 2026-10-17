@@ -43,6 +43,10 @@ function elementType(node: DiagramNode): string {
       return "Grouping";
     case "class":
       return "DataObject";
+    case "state":
+      return "ApplicationEvent";
+    case "fragment":
+      return "Grouping";
   }
 }
 

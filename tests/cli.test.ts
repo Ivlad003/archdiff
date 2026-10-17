@@ -912,3 +912,33 @@ test("review against the contract: a new layer dependency ARCHITECTURE.md forbid
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("state machines: the implicit ones written with literals, the explicit ones a library declares, in TypeScript and Python", () => {
+  const machines = join(root, "tests/fixtures/machines");
+  const views = archdiff(["views", machines]).stdout;
+  assert.ok(views.includes("machine:src/order.ts#status\tstatus (src/order.ts) — 5 states"), views);
+  assert.ok(views.includes("machine:src/light.ts#light\tlight (src/light.ts) — 3 states"), views);
+  assert.ok(views.includes("machine:src/door.py#state\tstate (src/door.py) — 3 states"), views);
+  // An implicit machine: states from the assignments, the comparisons and the union type; transitions from the case or if the assignment sits under.
+  const order = archdiff(["diagram", "machine:src/order.ts#status", machines]).stdout;
+  assert.ok(order.includes("stateDiagram-v2"), order);
+  assert.ok(order.includes("s_new --> s_paid: pay") && order.includes("s_paid --> s_shipped: ship") && order.includes("s_new --> s_cancelled: cancel") && order.includes("s_any --> s_new: reset"), order);
+  assert.ok(order.includes("- **refunded** — declared by the type, never set"), order);
+  assert.ok(order.includes("| new | pay | paid | src/order.ts:12 |"), order);
+  // An explicit XState machine: its initial state, its events, `after` and object targets.
+  const light = archdiff(["diagram", "machine:src/light.ts#light", machines, "--format", "mermaid"]).stdout;
+  assert.ok(light.includes("[*] --> s_green") && light.includes("s_yellow --> s_red: TIMER") && light.includes("s_red --> s_green: after 5000") && light.includes("s_red --> s_red: PANIC"), light);
+  // Python: `self.state` set in __init__ (initial), under an `if` and a `match`.
+  const door = archdiff(["diagram", "machine:src/door.py#state", machines, "--format", "mermaid"]).stdout;
+  assert.ok(door.includes("[*] --> s_closed") && door.includes("s_closed --> s_open: Door.open") && door.includes("s_closed --> s_locked: Door.lock"), door);
+  // The list of machines, and a machine that does not exist.
+  const list = archdiff(["diagram", "machines", machines]).stdout;
+  assert.ok(list.includes("# State machines (3)") && list.includes("1 declared by a library, 2 written with literals"), list);
+  assert.equal(archdiff(["diagram", "machine:src/order.ts#nope", machines]).status, 2);
+  // A sequence frames the calls under a loop, a branch, a try and a catch, nesting the branch inside the loop.
+  const sequence = archdiff(["diagram", "sequence:src/checkout.ts#checkout", machines]).stdout;
+  assert.ok(sequence.includes("  loop const order of orders\n  P0->>P1: 1. pay()\n    opt rush\n  P0->>P1: 2. ship()\n    end\n    opt not rush\n  P0->>P1: 3. cancel()\n    end\n  end\n  opt try\n  P0->>P0: 4. audit()\n  end\n  opt catch\n  P0->>P1: 5. cancel()\n  end"), sequence);
+  assert.ok(sequence.includes("- _loop [const order of orders]_ — messages 1–3"), sequence);
+  const json = JSON.parse(archdiff(["diagram", "sequence:src/checkout.ts#checkout", machines, "--format", "json"]).stdout) as { nodes: { kind: string; label: string }[] };
+  assert.deepEqual(json.nodes.filter((node) => node.kind === "fragment").map((node) => node.label), ["loop [const order of orders]", "opt [rush]", "opt [not rush]", "opt [try]", "opt [catch]"]);
+});

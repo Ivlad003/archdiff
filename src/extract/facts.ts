@@ -129,6 +129,10 @@ export interface FileFacts {
    * `config`. Absent when the file has none of them.
    */
   web?: WebFacts;
+  /** States written and read as literals, for the implicit state machines (control.ts). Absent when the file has none. */
+  states?: StateFact[];
+  /** State machines a library declares (control.ts). Absent when the file has none. */
+  machines?: MachineFact[];
 }
 
 /** See `FileFacts.web`. */
@@ -612,10 +616,55 @@ export interface CallFact {
   on?: ValueOfFact;
   /** With `on`: the member called (an opaque `callee` does not end in it). */
   member?: string;
+  /** The branches, loops and handlers the call sits in, outermost first (control.ts): a sequence draws calls under one guard as a fragment. */
+  guards?: GuardFact[];
   line: number;
   col: number;
   endLine: number;
   endCol: number;
+}
+
+/**
+ * A guard around a call: an `if` (or its `else`), a loop, a `case`, a
+ * `try` or `catch` it sits in, or a ternary. `id` names the guarding
+ * statement (its offset in the file), so calls under one guard share it;
+ * `text` is the condition or the header, cut short.
+ */
+export interface GuardFact {
+  kind: "if" | "else" | "loop" | "case" | "try" | "catch" | "ternary";
+  text: string;
+  id: number;
+}
+
+/**
+ * A state written or read as a literal (control.ts): `order.status =
+ * "paid"` (`assign`), `case "paid":` of a switch on the subject (`case`),
+ * `order.status === "paid"` (`compare`). `subject` is the field or
+ * variable (`status`, `this.state`), `within` the function the statement
+ * sits in, `under` the values the enclosing `case` or `if` on the same
+ * subject names (the states the assignment moves from). An `initial`
+ * assignment is a declaration or a field initializer.
+ */
+export interface StateFact {
+  subject: string;
+  kind: "assign" | "case" | "compare";
+  value: string;
+  within: string | null;
+  under?: string[];
+  initial?: true;
+  line: number;
+  col: number;
+}
+
+/** A state machine a library declares (control.ts): XState's `createMachine`, javascript-state-machine, Python's `transitions`. */
+export interface MachineFact {
+  name: string;
+  library: string;
+  initial?: string;
+  states: string[];
+  transitions: { from: string; to: string; event: string }[];
+  line: number;
+  col: number;
 }
 
 /**

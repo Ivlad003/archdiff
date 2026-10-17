@@ -30,6 +30,7 @@ flowchart LR
     n_src_pipeline_ts["src/pipeline.ts<br>the steps after a view as data: hide, mix, hubs, fold, weight, marks, overlays"]
     n_src_metrics_ts["src/metrics.ts<br>coupling and cohesion: Ca, Ce, I, A, D, the cohesion of a module's functions"]
     n_src_cycles_ts["src/cycles.ts<br>import, call and layer cycles, and where to cut them"]
+    n_src_machines_ts["src/machines.ts<br>state machines: declared by a library, or written with literal states"]
   end
   subgraph n_exports["exports — the picture as text and files"]
     n_src_export_index_ts["src/export/index.ts<br>Mermaid, draw.io, Excalidraw, ArchiMate, JSON"]
@@ -51,6 +52,7 @@ flowchart LR
   subgraph n_extract["extract — the language frontends on tree-sitter"]
     n_src_extract_ts_ts["src/extract/ts.ts<br>TypeScript and JavaScript facts"]
     n_src_extract_facts_ts["src/extract/facts.ts<br>the FileFacts contract every frontend fills"]
+    n_src_extract_control_ts["src/extract/control.ts<br>control flow as facts: guards, literal states, declared machines"]
     n_src_extract_pool_ts["src/extract/pool.ts<br>extraction on worker threads"]
     n_src_extract_grammars_ts["src/extract/grammars.ts<br>the grammars and their WASM files"]
     n_src_languages_ts["src/languages.ts<br>the languages archdiff reads and their extensions"]
@@ -82,6 +84,8 @@ flowchart LR
   n_src_views_ts --> n_src_pipeline_ts
   n_src_views_ts --> n_src_metrics_ts
   n_src_views_ts --> n_src_cycles_ts
+  n_src_views_ts --> n_src_machines_ts
+  n_src_extract_ts_ts --> n_src_extract_control_ts
   n_src_pipeline_ts --> n_src_shape_ts
   n_src_views_ts --> n_src_shape_ts
   n_src_views_ts --> n_src_intent_view_ts

@@ -12,6 +12,7 @@ import { builtinModules } from "node:module";
 import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, TypeFieldFact, TypeRefFact, UnsupportedFact, ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, grammarFor, located, query, startCol, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Tree } from "./treesitter.ts";
+import { collectTsMachines, collectTsStates, guardsOf, TS_CONTROL } from "./control.ts";
 
 // Every call and `new`, whatever its callee: each becomes an edge or a hole, never nothing.
 const CALLS_QUERY = `
@@ -330,6 +331,10 @@ function extractIndexed(path: string, root: Node, language: Language, g: Grammar
 
       if (passes.length > 0) fact.passes = passes;
       markClosure(fact, c.node, body);
+      // The branches, loops and handlers the call sits under, for the sequence's fragments.
+      const guards = guardsOf(c.node, body, TS_CONTROL);
+
+      if (guards.length > 0) fact.guards = guards;
       out.push(fact);
 
       // `jsx(Cart)` is the same call as `<Cart />` when `jsx` is React's. The factory call and its `passes` stay.
@@ -647,6 +652,13 @@ function extractIndexed(path: string, root: Node, language: Language, g: Grammar
   collectValueRefs(root, facts);
   collectRouteEntries(root, facts);
   collectWebFacts(root, facts);
+  // The states the file writes and reads as literals, and the machines a library declares (control.ts).
+  const states = collectTsStates(root, language, g);
+
+  if (states.length > 0) facts.states = states;
+  const machines = collectTsMachines(root, language, g);
+
+  if (machines.length > 0) facts.machines = machines;
   // A hash of the module's value code (constants, top-level calls), so a change outside declarations is seen.
   const values = valuesFingerprint(root.namedChildren, facts.decls);
 
