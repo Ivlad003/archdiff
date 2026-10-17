@@ -125,14 +125,38 @@ export interface Point {
   y: number;
 }
 
+/** The columns of a placed diagram: shapes whose x-ranges overlap share a column; a column starts where a shape begins past every shape before it. */
+function columnsOf(nodes: readonly DiagramNode[]): { column: Map<string, number>; left: number[]; right: number[] } {
+  const column = new Map<string, number>();
+  const left: number[] = [];
+  const right: number[] = [];
+  let index = -1;
+
+  for (const node of [...nodes].sort((a, b) => a.x - b.x)) {
+    if (index < 0 || node.x >= right[index]! - 1) {
+      index++;
+      left.push(node.x);
+      right.push(node.x + node.w);
+    }
+
+    right[index] = Math.max(right[index]!, node.x + node.w);
+    column.set(node.id, index);
+  }
+
+  return { column, left, right };
+}
+
 /**
  * Orthogonal routes for the edges of a placed diagram: an edge leaves its
- * source on the right, runs along a vertical channel in the gap before the
- * target's column, and enters the target on the left; an edge going
- * backwards (to the left, or within one column) leaves at the bottom and
- * comes around below the shapes. Edges sharing a gap take channels a few
- * pixels apart, by their order, so parallel runs stay apart. Exports and
- * the canvas share these routes; the sizes come from `layout`.
+ * source on the right, runs along a vertical channel in the gap just before
+ * the target's column, and enters the target on the left. When it spans
+ * more than one column and a shape stands in its way, its horizontal run
+ * goes along a corridor between the rows of the columns in between. An
+ * edge going backwards (to the left, or within one column) leaves at the
+ * bottom and comes around below the shapes. Edges sharing a gap take
+ * channels a few pixels apart, by their order, so parallel runs stay
+ * apart. Exports and the canvas share these routes; the sizes come from
+ * `layout`.
  */
 export function routeEdges(diagram: Diagram): Map<DiagramEdge, Point[]> {
   const boxes = new Map(diagram.nodes.map((node) => [node.id, node]));
@@ -140,6 +164,7 @@ export function routeEdges(diagram: Diagram): Map<DiagramEdge, Point[]> {
   const lowest = Math.max(0, ...diagram.nodes.map((node) => node.y + node.h));
   const centreY = (node: DiagramNode): number => node.y + node.h / 2;
   const usable = diagram.edges.filter((edge) => boxes.has(edge.from) && boxes.has(edge.to) && edge.from !== edge.to && !edge.route);
+  const columns = columnsOf(diagram.nodes);
 
   // Ports: the edges leaving a shape spread down its right side in the order of their targets, the edges entering a
   // shape spread down its left side in the order of their sources, so no two lines share an end point.
@@ -171,52 +196,120 @@ export function routeEdges(diagram: Diagram): Map<DiagramEdge, Point[]> {
     sorted.forEach((edge, i) => inPort.set(edge, portY(boxes.get(id)!, i, sorted.length)));
   }
 
-  // Channels: the vertical run of a forward edge sits in the gap before the target's column; the edges of one gap take
-  // distinct x positions spread over the middle of the gap, ordered by where they start, so their runs do not overlap.
+  // A shape (other than the edge's own two) standing on the horizontal run at `y` between `x1` and `x2`.
+  const blocked = (edge: DiagramEdge, y: number, x1: number, x2: number): boolean =>
+    diagram.nodes.some((node) => node.id !== edge.from && node.id !== edge.to && node.x < x2 && node.x + node.w > x1 && node.y - 6 < y && node.y + node.h + 6 > y);
+
+  // The free horizontal corridors between the rows of the columns `first`..`last`: the midpoints of the gaps between
+  // the shapes' y-ranges, plus one below the last (not above the first: the lane's label sits there).
+  const corridors = (first: number, last: number): { y: number; room: number }[] => {
+    const spans = diagram.nodes
+      .filter((node) => (columns.column.get(node.id) ?? -1) >= first && (columns.column.get(node.id) ?? -1) <= last)
+      .map((node) => [node.y - 10, node.y + node.h + 10] as [number, number])
+      .sort((a, b) => a[0] - b[0]);
+    const merged: [number, number][] = [];
+
+    for (const span of spans) {
+      const last = merged[merged.length - 1];
+
+      if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+      else merged.push([span[0], span[1]]);
+    }
+
+    const free: { y: number; room: number }[] = [];
+
+    for (let i = 0; i < merged.length; i++) {
+      // `room`: how far from the corridor's centre a line may sit without touching a shape.
+      if (i > 0) free.push({ y: (merged[i - 1]![1] + merged[i]![0]) / 2, room: Math.max(0, (merged[i]![0] - merged[i - 1]![1]) / 2 - 2) });
+
+      if (i === merged.length - 1) free.push({ y: merged[i]![1] + 12, room: 40 });
+    }
+
+    return free;
+  };
+
+  // Channels: the vertical run of a forward edge sits in the gap just before the target's column; the edges of one
+  // gap take distinct x positions spread over the middle of the gap, ordered by where they start, so their runs do
+  // not overlap. A detour (the exit of an edge that must take a corridor) runs down the left tenth of the gap after
+  // the source's column, and the edges of one corridor sit a few pixels apart.
   const byGap = new Map<number, DiagramEdge[]>();
   const backward: DiagramEdge[] = [];
 
   for (const edge of usable) {
-    const from = boxes.get(edge.from)!;
-    const to = boxes.get(edge.to)!;
+    const from = columns.column.get(edge.from)!;
+    const to = columns.column.get(edge.to)!;
 
-    if (to.x >= from.x + from.w + 16) byGap.set(Math.round(to.x), [...(byGap.get(Math.round(to.x)) ?? []), edge]);
+    if (to > from) byGap.set(to, [...(byGap.get(to) ?? []), edge]);
     else backward.push(edge);
   }
 
-  for (const [gapRight, edges] of byGap) {
-    const gapLeft = Math.max(...edges.map((edge) => boxes.get(edge.from)!.x + boxes.get(edge.from)!.w));
-    const width = gapRight - gapLeft;
+  const detours = new Map<number, number>();
+  const taken = new Map<number, number>();
+
+  for (const [targetColumn, edges] of byGap) {
+    const gapLeft = columns.right[targetColumn - 1]!;
+    const width = columns.left[targetColumn]! - gapLeft;
     const sorted = [...edges].sort((a, b) => outPort.get(a)! - outPort.get(b)!);
     const n = sorted.length;
 
     sorted.forEach((edge, i) => {
       const from = boxes.get(edge.from)!;
       const to = boxes.get(edge.to)!;
+      const sourceColumn = columns.column.get(edge.from)!;
       const startY = outPort.get(edge)!;
       const endY = inPort.get(edge)!;
       // The middle 60% of the gap holds the channels; one edge runs down the centre.
       const channel = n === 1 ? gapLeft + width / 2 : gapLeft + width * 0.2 + (width * 0.6 * i) / (n - 1);
       const route: Point[] = [{ x: from.x + from.w, y: startY }];
 
-      if (Math.abs(startY - endY) > 1) route.push({ x: channel, y: startY }, { x: channel, y: endY });
+      if (targetColumn > sourceColumn + 1 && blocked(edge, startY, from.x + from.w, channel)) {
+        // Around the shapes in between: out into the gap after the source, along the nearest free corridor, into the channel.
+        const exitLeft = columns.right[sourceColumn]!;
+        const exitWidth = columns.left[sourceColumn + 1]! - exitLeft;
+        const used = detours.get(sourceColumn) ?? 0;
+        detours.set(sourceColumn, used + 1);
+        const exitX = exitLeft + exitWidth * 0.08 + Math.min(exitWidth * 0.1, used * 5);
+        const wanted = (startY + endY) / 2;
+        // The nearest corridor with room left: a full one costs as much as a corridor a row away.
+        const cost = (corridor: { y: number; room: number }): number => Math.abs(corridor.y - wanted) + ((taken.get(Math.round(corridor.y)) ?? 0) * 4 > corridor.room * 2 ? 1000 : 0);
+        const corridor = corridors(sourceColumn + 1, targetColumn - 1).sort((a, b) => cost(a) - cost(b))[0] ?? { y: startY, room: 0 };
+        const key = Math.round(corridor.y);
+        const seen = taken.get(key) ?? 0;
+        taken.set(key, seen + 1);
+        // Lines of one corridor sit 4 px apart, alternating sides of its centre, never past its room.
+        const y = corridor.y + (seen % 2 === 0 ? 1 : -1) * Math.min(corridor.room, Math.ceil(seen / 2) * 4);
+        route.push({ x: exitX, y: startY }, { x: exitX, y }, { x: channel, y }, { x: channel, y: endY });
+      } else if (Math.abs(startY - endY) > 1) {
+        route.push({ x: channel, y: startY }, { x: channel, y: endY });
+      }
+
       route.push({ x: to.x, y: endY });
       routes.set(edge, route);
     });
   }
 
-  // Backward or same column: down from the source, along a lane below everything, up into the target's bottom.
+  // Backward or same column: out of the source's right into the gap after its column, down along a lane below
+  // everything, back along it, up the gap before the target's column and into the target's left. Every vertical
+  // run sits in a gap, so no shape is crossed; the lane below spreads the edges a few pixels apart.
   backward.forEach((edge, i) => {
     const from = boxes.get(edge.from)!;
     const to = boxes.get(edge.to)!;
+    const sourceColumn = columns.column.get(edge.from)!;
+    const targetColumn = columns.column.get(edge.to)!;
     const below = lowest + 24 + (i % 8) * 8;
-    const fromX = from.x + from.w * 0.6;
-    const toX = to.x + to.w * 0.4;
+    const exitGap = sourceColumn + 1 < columns.left.length ? columns.left[sourceColumn + 1]! - columns.right[sourceColumn]! : 40;
+    const exitX = columns.right[sourceColumn]! + exitGap * 0.85 - (i % 4) * 4;
+    const entryGap = targetColumn > 0 ? columns.left[targetColumn]! - columns.right[targetColumn - 1]! : 40;
+    const entryX = columns.left[targetColumn]! - entryGap * 0.85 + (i % 4) * 4;
+    const startY = outPort.get(edge)!;
+    const endY = inPort.get(edge)!;
     routes.set(edge, [
-      { x: fromX, y: from.y + from.h },
-      { x: fromX, y: below },
-      { x: toX, y: below },
-      { x: toX, y: to.y + to.h },
+      { x: from.x + from.w, y: startY },
+      { x: exitX, y: startY },
+      { x: exitX, y: below },
+      { x: entryX, y: below },
+      { x: entryX, y: endY },
+      { x: to.x, y: endY },
     ]);
   });
 
