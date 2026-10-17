@@ -17,6 +17,7 @@ import type { Diagram, DiagramEdge, DiagramNode, DiffMark } from "./diagram.ts";
 import { layout } from "./diagram.ts";
 import { toMermaid } from "./export/mermaid.ts";
 import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
+import { allowedLayerPairs, type Intent } from "./intent.ts";
 
 export interface NodeChange {
   id: string;
@@ -28,6 +29,8 @@ export interface NodeChange {
 }
 
 export interface EdgeChange {
+  /** A layer dependency the contract (ARCHITECTURE.md) does not allow; absent without a contract, or when it allows it. */
+  against?: true;
   from: string;
   to: string;
 }
@@ -52,6 +55,8 @@ export interface GraphDiff {
 }
 
 export interface ReviewResult {
+  /** The head has a contract (ARCHITECTURE.md): a new layer dependency is a finding only when it goes against it. */
+  contract: boolean;
   head: Analysis;
   base: Analysis;
   diff: GraphDiff;
@@ -219,10 +224,23 @@ export async function review(root: string, base: string | null, headRef: string 
   const head = headRef === null ? await analyze(root, { config }) : await analyze(root, { overrides: treeAt(root, headRef), config });
   const baseAnalysis = await analyze(root, { overrides: treeAt(root, ref), config });
   const changed = changedFiles(root, ref, headRef);
-  const diff = graphDiff(baseAnalysis.graph, head.graph, headRef === null ? ref : `${ref}..${headRef}`, [...changed.base.keys()]);
+  const diff = markContract(graphDiff(baseAnalysis.graph, head.graph, headRef === null ? ref : `${ref}..${headRef}`, [...changed.base.keys()]), head.intent, head.graph);
   const diagram = layout(diffDiagram(diff, baseAnalysis.graph, head.graph));
 
-  return { head, base: baseAnalysis, diff, diagram };
+  return { head, base: baseAnalysis, diff, diagram, contract: head.intent !== null };
+}
+
+/** The new layer dependencies the contract forbids, marked; a diff without a contract is left as it is. */
+export function markContract(diff: GraphDiff, intent: Intent | null, graph: Graph): GraphDiff {
+  if (!intent) return diff;
+  const { layers, allowed } = allowedLayerPairs(intent, graph);
+
+  return { ...diff, layerEdgesAdded: diff.layerEdgesAdded.map((edge) => (layers.has(edge.from) && layers.has(edge.to) && !allowed.has(`${edge.from}\u0000${edge.to}`) ? { ...edge, against: true } : edge)) };
+}
+
+/** The findings of a review: with a contract, the new layer dependencies it forbids; without one, every new layer dependency. */
+export function reviewFindings(diff: GraphDiff, contract: boolean): EdgeChange[] {
+  return contract ? diff.layerEdgesAdded.filter((edge) => edge.against) : diff.layerEdgesAdded;
 }
 
 /** How the architecture moved at one commit of a range. */
@@ -299,9 +317,10 @@ export function reviewMarkdown(result: ReviewResult): string {
   lines.push(counts.join("; ") + ".", "");
 
   if (diff.layerEdgesAdded.length > 0) {
-    lines.push("## ⚠ New dependencies between layers", "");
+    const findings = reviewFindings(diff, result.contract);
+    lines.push(findings.length > 0 ? "## ⚠ New dependencies between layers" : "## New dependencies between layers", "");
 
-    for (const edge of diff.layerEdgesAdded) lines.push(`- **${edge.from} → ${edge.to}**`);
+    for (const edge of diff.layerEdgesAdded) lines.push(`- **${edge.from} → ${edge.to}**${result.contract ? (edge.against ? " — against ARCHITECTURE.md" : " — allowed by ARCHITECTURE.md") : ""}`);
     lines.push("");
   }
 
@@ -342,6 +361,8 @@ export { moduleOf };
 
 /** One head of a comparison against the base: its diff and the graph it was computed on. */
 export interface Compared {
+  /** The head has a contract: only the layer dependencies against it are findings. */
+  contract: boolean;
   head: string;
   diff: GraphDiff;
 }
@@ -367,10 +388,11 @@ export async function compareBranches(root: string, base: string | null, heads: 
   const graphs = new Map<string, Graph>();
 
   for (const head of heads) {
-    const graph = (head === "WORKTREE" ? await analyze(root, { config }) : await analyze(root, { overrides: treeAt(root, head), config })).graph;
+    const analysis = head === "WORKTREE" ? await analyze(root, { config }) : await analyze(root, { overrides: treeAt(root, head), config });
+    const { graph } = analysis;
     graphs.set(head, graph);
     const changed = head === "WORKTREE" ? [...changedFiles(root, baseRef).base.keys()] : [...changedFiles(root, baseRef, head).base.keys()];
-    compared.push({ head, diff: graphDiff(baseGraph, graph, `${baseRef}..${head}`, changed) });
+    compared.push({ head, diff: markContract(graphDiff(baseGraph, graph, `${baseRef}..${head}`, changed), analysis.intent, graph), contract: analysis.intent !== null });
   }
 
   return { base: baseRef, heads: compared, diagram: layout(compareDiagram(baseRef, compared, baseGraph, graphs)) };
@@ -465,8 +487,8 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
 export function comparisonMarkdown(result: ComparisonResult): string {
   const lines = [`<!-- archdiff:generated — compare ${result.base} .. ${result.heads.map((head) => head.head).join(", ")} -->`, `# ${result.heads.length} heads against ${result.base}`, "", "| head | files | modules | functions | imports | calls | layer couplings |", "| --- | --- | --- | --- | --- | --- | --- |"];
 
-  for (const { head, diff } of result.heads) {
-    const couplings = diff.layerEdgesAdded.map((edge) => `⚠ +${edge.from}→${edge.to}`).concat(diff.layerEdgesRemoved.map((edge) => `−${edge.from}→${edge.to}`)).join(" ");
+  for (const { head, diff, contract } of result.heads) {
+    const couplings = diff.layerEdgesAdded.map((edge) => `${edge.against || !contract ? "⚠ " : ""}+${edge.from}→${edge.to}`).concat(diff.layerEdgesRemoved.map((edge) => `−${edge.from}→${edge.to}`)).join(" ");
     lines.push(`| ${head === "WORKTREE" ? "working tree" : head} | ${diff.changedFiles.length} | +${diff.modulesAdded.length} −${diff.modulesRemoved.length} | +${diff.nodesAdded.length} −${diff.nodesRemoved.length} ~${diff.nodesChanged.length} | +${diff.depsAdded.length} −${diff.depsRemoved.length} | +${diff.callsAdded.length} −${diff.callsRemoved.length} | ${couplings} |`);
   }
 
@@ -491,12 +513,12 @@ export function comparisonMarkdown(result: ComparisonResult): string {
     lines.push("");
   }
 
-  for (const { head, diff } of result.heads) {
+  for (const { head, diff, contract } of result.heads) {
     lines.push(`## ${head === "WORKTREE" ? "working tree" : head}`, "");
     const section = (title: string, items: string[]): void => {
       if (items.length > 0) lines.push(`### ${title}`, "", ...items.map((item) => `- ${item}`), "");
     };
-    section("New dependencies between layers", diff.layerEdgesAdded.map((edge) => `**${edge.from} → ${edge.to}**`));
+    section("New dependencies between layers", diff.layerEdgesAdded.map((edge) => `**${edge.from} → ${edge.to}**${contract ? (edge.against ? " — against ARCHITECTURE.md" : " — allowed by ARCHITECTURE.md") : ""}`));
     section("Modules added", diff.modulesAdded);
     section("Modules removed", diff.modulesRemoved);
     section("Functions changed", diff.nodesChanged.map(fnLabel));

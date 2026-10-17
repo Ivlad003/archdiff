@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { contentHash, FactCache } from "./cache.ts";
 import { loadConfig, type Config } from "./config.ts";
 import type { FileFacts } from "./extract/facts.ts";
-import { readIntent, type Intent } from "./intent.ts";
+import { readIntent, withIntentLayers, type Intent } from "./intent.ts";
 import type { HistoryRow } from "./diff.ts";
 import { extractAll } from "./extract/pool.ts";
 import { listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
@@ -68,7 +68,9 @@ export interface AnalyzeOptions {
 /** Analyses the repository at `root`. */
 export async function analyze(root: string, options: AnalyzeOptions = {}): Promise<Analysis> {
   const started = performance.now();
-  const config = options.config ?? loadConfig(root);
+  // ARCHITECTURE.md is read first: without layers of its own, archdiff.json takes the contract's.
+  const intent = readIntent(root);
+  const config = withIntentLayers(options.config ?? loadConfig(root), intent);
   const listed0 = listSourceFiles(root, config.exclude);
   const overrides = options.overrides ?? new Map<string, string | null>();
   const files = [...new Set([...listed0.files, ...[...overrides.keys()].filter((path) => overrides.get(path) !== null)])].filter((path) => overrides.get(path) !== null).sort();
@@ -132,5 +134,5 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
     ms: { list: Math.round(listed - started), extract: Math.round(extracted - listed), graph: Math.round(built - extracted), total: Math.round(built - started) },
   };
 
-  return { root, config, files, skipped: listed0.skipped, facts, graph, declaredEntries, packages, intent: readIntent(root), stats };
+  return { root, config, files, skipped: listed0.skipped, facts, graph, declaredEntries, packages, intent, stats };
 }

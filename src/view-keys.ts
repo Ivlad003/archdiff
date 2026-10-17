@@ -19,10 +19,11 @@ export type View =
   | { kind: "sequence"; id: string }
   | { kind: "path"; id: string }
   | { kind: "type"; id: string }
-  | { kind: "cycles" }
+  | { kind: "cycles"; scope: "fns" | null }
   | { kind: "cycle"; id: string }
   | { kind: "classes"; scope: string | null }
   | { kind: "matrix"; scope: string | null }
+  | { kind: "metrics"; scope: string | null }
   | { kind: "events" }
   | { kind: "tests" }
   | { kind: "hotspots" }
@@ -33,10 +34,10 @@ export type View =
   | { kind: "modules" };
 
 /** The views without a subject. */
-const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "events", "tests", "hotspots", "packages", "timeline", "intent", "modules"]);
+const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "metrics", "events", "tests", "hotspots", "packages", "timeline", "intent", "modules"]);
 
 /** The views with a subject (`kind:<subject>`). */
-const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "classes", "matrix"]);
+const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "cycles", "classes", "matrix", "metrics"]);
 
 /** The one question each kind of view answers. */
 export const QUESTION: Record<View["kind"], string> = {
@@ -50,10 +51,11 @@ export const QUESTION: Record<View["kind"], string> = {
   sequence: "in what order a function's calls cross the modules",
   path: "which calls lead from a function to a store",
   type: "where a type is produced, consumed and transformed",
-  cycles: "which modules import each other in a circle",
-  cycle: "which modules form this circle, and through which imports",
+  cycles: "which modules (or functions) import or call each other in a circle, and where to cut",
+  cycle: "which modules form this circle, through which imports, and where to cut",
   classes: "which classes and interfaces exist, with what fields and methods, extending what",
   matrix: "who imports whom, and which imports go against the order",
+  metrics: "how coupled and how cohesive each module is: Ca, Ce, instability, abstractness, the distance from the main sequence",
   events: "which modules emit which events, and which listen",
   tests: "which modules the tests import, and which none does",
   hotspots: "which modules are big, and which are called from everywhere",
@@ -70,6 +72,12 @@ export function parseView(key: string): View | null {
 
   if (key === "matrix") return { kind: "matrix", scope: null };
 
+  if (key === "metrics") return { kind: "metrics", scope: null };
+
+  if (key === "cycles") return { kind: "cycles", scope: null };
+
+  if (key === "cycles:fns") return { kind: "cycles", scope: "fns" };
+
   if (PLAIN_VIEWS.has(key)) return { kind: key } as View;
   const at = key.indexOf(":");
 
@@ -83,13 +91,15 @@ export function parseView(key: string): View | null {
 
   if (kind === "dir") return { kind, path: rest.replace(/\/+$/, "") };
 
-  if (kind === "classes" || kind === "matrix") return { kind, scope: rest.replace(/\/+$/, "") };
+  if (kind === "cycles") return null;
+
+  if (kind === "classes" || kind === "matrix" || kind === "metrics") return { kind, scope: rest.replace(/\/+$/, "") };
 
   return { kind, id: rest } as View;
 }
 
 export function viewKey(view: View): string {
-  if (view.kind === "classes" || view.kind === "matrix") return view.scope === null ? view.kind : `${view.kind}:${view.scope}`;
+  if (view.kind === "classes" || view.kind === "matrix" || view.kind === "metrics" || view.kind === "cycles") return view.scope === null ? view.kind : `${view.kind}:${view.scope}`;
 
   if ("name" in view) return `${view.kind}:${view.name}`;
 
@@ -102,4 +112,5 @@ export function viewKey(view: View): string {
 
 export const DEFAULT_DEPTH: Partial<Record<View["kind"], number>> = { layer: 1, dir: 1, module: 1, inside: 1, calls: 3, sequence: 4, path: 8, type: 1 };
 
-/** The views whose shapes are modules, where a hub (a module most of them import) is noise rather than news. */export const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests", "intent", "modules"]);
+/** The views whose shapes are modules, where a hub (a module most of them import) is noise rather than news. */
+export const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests", "intent", "modules"]);

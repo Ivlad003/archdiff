@@ -2,7 +2,8 @@
 // two questions are answered by one picture. `tests`: modules no test
 // file imports are marked; `storages`: modules that hold data (stores,
 // databases, caches) are labelled; `heat`: every module or function is
-// shaded by the calls into it from other modules. Pure functions of a
+// shaded by the calls into it from other modules; `instability`: every
+// module shaded by Martin's I (metrics.ts). Pure functions of a
 // diagram and the analysis; `--overlay a,b` and the options panel of the
 // page apply them in order after the review's own overlay (diff.ts).
 
@@ -10,6 +11,7 @@ import type { Analysis } from "./analyze.ts";
 import type { Diagram, DiagramNode } from "./diagram.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
+import { overlayInstability } from "./metrics.ts";
 
 import { OVERLAYS, type Overlay } from "./options.ts";
 
@@ -103,6 +105,7 @@ export function applyOverlays(diagram: Diagram, analysis: Analysis, overlays: re
     if (overlay === "tests") out = overlayTests(out, analysis.graph);
     else if (overlay === "storages") out = overlayStorages(out, analysis);
     else if (overlay === "heat") out = overlayHeat(out, analysis.graph);
+    else if (overlay === "instability") out = overlayInstability(out, analysis);
   }
 
   return out;

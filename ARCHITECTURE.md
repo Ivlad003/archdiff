@@ -27,6 +27,9 @@ flowchart LR
     n_src_diff_ts["src/diff.ts<br>the architectural diff of a change: review, compare, history"]
     n_src_intent_view_ts["src/intent-view.ts<br>ARCHITECTURE.md drawn against the code"]
     n_src_flow_ts["src/flow.ts<br>the data flow of a call tree with mocks, and which modules are storages"]
+    n_src_pipeline_ts["src/pipeline.ts<br>the steps after a view as data: hide, mix, hubs, fold, weight, marks, overlays"]
+    n_src_metrics_ts["src/metrics.ts<br>coupling and cohesion: Ca, Ce, I, A, D, the cohesion of a module's functions"]
+    n_src_cycles_ts["src/cycles.ts<br>import, call and layer cycles, and where to cut them"]
   end
   subgraph n_exports["exports — the picture as text and files"]
     n_src_export_index_ts["src/export/index.ts<br>Mermaid, draw.io, Excalidraw, ArchiMate, JSON"]
@@ -43,6 +46,7 @@ flowchart LR
     n_src_graph_ts["src/graph.ts<br>facts to graph: modules, nodes, imports, resolved calls, gaps"]
     n_src_intent_ts["src/intent.ts<br>the contract: parse and write ARCHITECTURE.md, check the code against it"]
     n_src_cache_ts["src/cache.ts<br>the fact cache, keyed by content hash and extractor version"]
+    n_src_options_ts["src/options.ts<br>the options of a picture, described once for the CLI, the API and the page"]
   end
   subgraph n_extract["extract — the language frontends on tree-sitter"]
     n_src_extract_ts_ts["src/extract/ts.ts<br>TypeScript and JavaScript facts"]
@@ -72,7 +76,13 @@ flowchart LR
   n_src_server_ts --> n_src_diagram_ts
   n_src_server_ts --> n_src_analyze_ts
   n_src_routes_pictures_ts --> n_src_markdown_ts
+  n_web_src_app_ts --> n_src_options_ts
+  n_src_cli_ts --> n_src_options_ts
   n_src_views_ts --> n_src_views_more_ts
+  n_src_views_ts --> n_src_pipeline_ts
+  n_src_views_ts --> n_src_metrics_ts
+  n_src_views_ts --> n_src_cycles_ts
+  n_src_pipeline_ts --> n_src_shape_ts
   n_src_views_ts --> n_src_shape_ts
   n_src_views_ts --> n_src_intent_view_ts
   n_src_views_ts --> n_src_diagram_ts
@@ -95,4 +105,4 @@ flowchart LR
   n_scripts_copy_wasm_mjs --> n_src_extract_grammars_ts
 ```
 
-The page (`web/src`) imports only types from `src/diagram.ts` and `src/scene.ts`, which erase at build time, so it has no runtime arrow. Tests import whatever they test. `src/routes/context.ts` imports the `ServeOptions` type back from `server.ts`: a type, inside one layer.
+The page (`web/src`) imports the table of picture options from `src/options.ts` (free of Node, bundled into the page) and only types from `src/diagram.ts` and `src/scene.ts`, which erase at build time. Tests import whatever they test. `src/routes/context.ts` imports the `ServeOptions` type back from `server.ts`: a type, inside one layer.

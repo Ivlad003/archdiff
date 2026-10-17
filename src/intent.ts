@@ -21,7 +21,7 @@ import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import type { Plan } from "./plan.ts";
-import { CONFIG_FILE } from "./config.ts";
+import { CONFIG_FILE, type Config } from "./config.ts";
 import { isJsonObject, parseJson, type JsonValue } from "./json.ts";
 
 export const INTENT_FILE = "ARCHITECTURE.md";
@@ -315,6 +315,42 @@ export function writeIntent(root: string, intent: Intent): string {
  * intent has but whose modules have no directory yet keeps any globs it
  * had.
  */
+/**
+ * The globs of each intent layer: the directories of its modules, or the
+ * files themselves where another layer lives in or below that directory
+ * (so `src/main.ts` in "entry" does not make `src/**` swallow
+ * `src/http/**`). A layer without a module with a path has no globs.
+ */
+export function intentLayerGlobs(intent: Intent): Record<string, string[]> {
+  const names = [...intent.layers.map((layer) => layer.name), ...intent.modules.map((module) => module.layer).filter((layer): layer is string => layer !== undefined)];
+  const directoryOf = (id: string): string => id.slice(0, id.lastIndexOf("/"));
+  const layers: Record<string, string[]> = {};
+
+  for (const name of [...new Set(names)]) {
+    const own = intent.modules.filter((module) => module.layer === name && module.id.includes("/"));
+    const foreign = intent.modules.filter((module) => module.layer !== name && module.id.includes("/")).map((module) => directoryOf(module.id));
+    const directories = [...new Set(own.map((module) => {
+      const directory = directoryOf(module.id);
+
+      return foreign.some((other) => other === directory || other.startsWith(`${directory}/`)) ? module.id : `${directory}/**`;
+    }))].sort();
+    layers[name] = directories;
+  }
+
+  return layers;
+}
+
+/** The config with the contract's layers when it names none of its own: the contract places the files, as the rules say, and the globs are not written twice. */
+export function withIntentLayers(config: Config, intent: Intent | null): Config {
+  if (config.layers !== null || !intent) return config;
+  const globs = intentLayerGlobs(intent);
+  const layers: Record<string, string[]> = {};
+
+  for (const [name, list] of Object.entries(globs)) if (list.length > 0) layers[name] = list;
+
+  return Object.keys(layers).length > 0 ? { ...config, layers } : config;
+}
+
 export function syncConfigLayers(root: string, intent: Intent): void {
   const file = join(root, CONFIG_FILE);
   let config: Record<string, JsonValue> = {};
@@ -331,21 +367,10 @@ export function syncConfigLayers(root: string, intent: Intent): void {
 
   const previous = isJsonObject(config["layers"]) ? config["layers"] : {};
   const layers: Record<string, JsonValue> = {};
-  const names = [...intent.layers.map((layer) => layer.name), ...intent.modules.map((module) => module.layer).filter((layer): layer is string => layer !== undefined)];
 
-  const directoryOf = (id: string): string => id.slice(0, id.lastIndexOf("/"));
-
-  for (const name of [...new Set(names)]) {
-    const own = intent.modules.filter((module) => module.layer === name && module.id.includes("/"));
-    const foreign = intent.modules.filter((module) => module.layer !== name && module.id.includes("/")).map((module) => directoryOf(module.id));
-    // A directory is the layer's glob only when no other layer lives in it or below it; else the files themselves,
-    // so `src/main.ts` in "entry" does not make `src/**` swallow `src/http/**`.
-    const directories = [...new Set(own.map((module) => {
-      const directory = directoryOf(module.id);
-
-      return foreign.some((other) => other === directory || other.startsWith(`${directory}/`)) ? module.id : `${directory}/**`;
-    }))].sort();
+  for (const [name, directories] of Object.entries(intentLayerGlobs(intent))) {
     const kept = previous[name];
+
     if (directories.length > 0) layers[name] = directories;
     else if (Array.isArray(kept)) layers[name] = kept;
     else layers[name] = [];
@@ -413,8 +438,8 @@ export interface IntentReport {
  * planned and not built, what is built beyond the intent, and imports
  * the intent does not name are listed too, as news, not failures.
  */
-export function checkIntent(analysis: Analysis, intent: Intent): IntentReport {
-  const { graph } = analysis;
+/** The layers the intent names, and the pairs of layers (`from\u0000to`) its arrows allow an import between. */
+export function allowedLayerPairs(intent: Intent, graph: Graph): { layers: Set<string>; allowed: Set<string> } {
   const layers = new Set([...intent.layers.map((layer) => layer.name), ...intent.modules.map((module) => module.layer).filter((layer): layer is string => layer !== undefined)]);
   const allowed = new Set<string>();
 
@@ -424,6 +449,13 @@ export function checkIntent(analysis: Analysis, intent: Intent): IntentReport {
 
     if (from && to) allowed.add(`${from}\u0000${to}`);
   }
+
+  return { layers, allowed };
+}
+
+export function checkIntent(analysis: Analysis, intent: Intent): IntentReport {
+  const { graph } = analysis;
+  const { layers, allowed } = allowedLayerPairs(intent, graph);
 
   const planned: string[] = [];
 

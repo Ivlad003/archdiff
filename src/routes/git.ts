@@ -67,7 +67,7 @@ export async function getReview(ctx: RouteContext, { url, response }: RouteReque
 
     const elements = (JSON.parse(toExcalidraw(result.diagram)) as { elements: SceneElement[] }).elements;
 
-    return json(response, { diff: result.diff, diagram: result.diagram, elements, markdown: reviewMarkdown(result) });
+    return json(response, { diff: result.diff, diagram: result.diagram, elements, markdown: reviewMarkdown(result), contract: result.contract });
   } catch (error) {
     return problem(response, 400, error instanceof Error ? error.message : String(error));
   }

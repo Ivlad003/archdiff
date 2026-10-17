@@ -5,11 +5,12 @@
 export type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "../../src/diagram.ts";
 import type { Diagram } from "../../src/diagram.ts";
 import { pictureQueryText, type PictureOptions } from "../../src/options.ts";
+import type { View } from "../../src/view-keys.ts";
 
 export interface ViewEntry {
   key: string;
   title: string;
-  kind: "layers" | "layer" | "dir" | "module" | "inside" | "contract" | "calls" | "sequence" | "path" | "type" | "cycles" | "cycle" | "classes" | "matrix" | "events" | "tests" | "hotspots" | "packages" | "timeline" | "coverage";
+  kind: View["kind"];
   layer?: string;
 }
 
@@ -30,10 +31,12 @@ export interface DiagramResponse {
 }
 
 export interface ReviewResponse {
-  diff: { base: string; changedFiles: string[]; layerEdgesAdded: { from: string; to: string }[] };
+  diff: { base: string; changedFiles: string[]; layerEdgesAdded: { from: string; to: string; against?: true }[] };
   diagram: Diagram;
   elements: import("../../src/scene.ts").SceneElement[];
   markdown: string;
+  /** The head has ARCHITECTURE.md: only the layer dependencies against it are findings. */
+  contract: boolean;
 }
 
 /** A JSON POST to the server; an `error` in the answer or a failed status throws its text. */

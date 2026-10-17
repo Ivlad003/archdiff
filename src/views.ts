@@ -19,7 +19,9 @@ import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
 import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
-import { classesView, contractView, cyclesView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
+import { classesView, contractView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
+import { cyclesView } from "./cycles.ts";
+import { metricsView } from "./metrics.ts";
 import { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 import { MAX_SHAPES } from "./shape.ts";
 import { DEFAULT_DEPTH, type View } from "./view-keys.ts";
@@ -158,7 +160,9 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   list.push({ key: "modules", title: "Modules: the whole map, every module and import", kind: "modules" });
   list.push({ key: "classes", title: "Classes: every class and interface, fields and methods", kind: "classes" });
   list.push({ key: "matrix", title: "Matrix: who imports whom, layer by layer", kind: "matrix" });
-  list.push({ key: "cycles", title: "Cycles: modules importing each other", kind: "cycles" });
+  list.push({ key: "cycles", title: "Cycles: modules importing each other, and where to cut", kind: "cycles" });
+  list.push({ key: "cycles:fns", title: "Call cycles: functions calling each other across modules", kind: "cycles" });
+  list.push({ key: "metrics", title: "Metrics: coupling and cohesion of every module", kind: "metrics" });
   list.push({ key: "events", title: "Events: emitters and listeners", kind: "events" });
   list.push({ key: "tests", title: "Tests: which modules the tests cover", kind: "tests" });
   list.push({ key: "hotspots", title: "Hotspots: size and calls in", kind: "hotspots" });
@@ -507,13 +511,15 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
       case "type":
         return typeView(analysis, view.id);
       case "cycles":
-        return cyclesView(graph, null);
+        return cyclesView(graph, null, { types: options.types === true, fns: view.scope === "fns" });
       case "cycle":
-        return cyclesView(graph, view.id);
+        return cyclesView(graph, view.id, { types: options.types === true, fns: view.id.includes("#") });
       case "classes":
         return classesView(analysis, view.scope, options.limit ?? MAX_SHAPES);
       case "matrix":
-        return matrixView(graph, view.scope);
+        return matrixView(graph, view.scope, options.types === true);
+      case "metrics":
+        return metricsView(analysis, view.scope, options.limit ?? MAX_SHAPES, options.types === true);
       case "events":
         return eventsView(analysis);
       case "tests":

@@ -11,6 +11,7 @@
 // `parseSignature`, `storageOf`, `DataFlow`.
 
 import type { Analysis } from "./analyze.ts";
+import { matchesGlob } from "./glob.ts";
 import { moduleOf, type GraphNode } from "./graph.ts";
 import type { Mock } from "./scene.ts";
 
@@ -76,9 +77,32 @@ const STORAGE_PACKAGES: Record<string, string> = {
 /** A module path that names a store: `store`, `db`, `repository`, `cache`… as a path segment or file name. */
 const STORAGE_NAME = /(^|\/)(db|database|store|stores|storage|repo|repos|repository|repositories|cache|persistence|dao|models?)(\/|\.|$)/i;
 
-/** Why a module is a storage, or null. */
+/**
+ * Calls that read or write a store, by the callee as the code writes it
+ * (the last member, or the bare name): the file system, HTTP, the browser's
+ * stores, a database client's query. What the code does, not what it is named.
+ */
+const STORAGE_CALLS: [RegExp, string][] = [
+  [/^(fs\.|fsp\.|promises\.)?(readFileSync|writeFileSync|readFile|writeFile|appendFile|appendFileSync|mkdirSync|mkdir|readdirSync|readdir|unlinkSync|unlink|rmSync|rm|createReadStream|createWriteStream|open|openSync)$/, "the file system (fs calls)"],
+  [/^(fetch|axios|axios\.(get|post|put|patch|delete|request)|http\.request|https\.request|got|ky)$/, "HTTP (fetch)"],
+  [/^(localStorage|sessionStorage)\.(getItem|setItem|removeItem)$/, "browser storage"],
+  [/^(indexedDB\.open)$/, "IndexedDB"],
+  [/^[A-Za-z_$][\w$]*\.(query|execute|exec|prepare|transaction|insert|insertOne|insertMany|findOne|findMany|updateOne|updateMany|deleteOne|deleteMany|upsert|aggregate)$/, "a database client (query calls)"],
+  [/^(sqlite3\.connect|psycopg2\.connect|psycopg\.connect|pymysql\.connect|redis\.Redis|boto3\.(client|resource)|requests\.(get|post|put|patch|delete)|urlopen|open)$/, "a store (Python calls)"],
+  [/^(std::fs::(read|write|read_to_string|File::open|File::create)|File::open|File::create|reqwest::get|reqwest::Client::new)$/, "a store (Rust calls)"],
+  [/^(file_get_contents|file_put_contents|fopen|fwrite|mysqli_connect|mysqli_query|curl_exec|PDO|new PDO)$/, "a store (PHP calls)"],
+];
+
+/** The callee a call fact writes, with `new ` and the argument lists stripped, so a table of names can match it. */
+function calleeName(callee: string): string {
+  return callee.replace(/^new\s+/, "").replace(/\(\)/g, "");
+}
+
+/** Why a module is a storage, or null: archdiff.json's globs and packages first, then the packages it imports, the calls it makes, its name. */
 export function storageOf(analysis: Analysis, module: string): string | null {
-  const { graph } = analysis;
+  const { graph, config, facts } = analysis;
+
+  for (const [glob, label] of Object.entries(config.storages)) if (matchesGlob(module, glob)) return label;
 
   for (const dep of graph.deps) {
     if (dep.from !== module || dep.typeOnly) continue;
@@ -86,8 +110,23 @@ export function storageOf(analysis: Analysis, module: string): string | null {
 
     if (!external) continue;
     const key = external.kind === "builtin" ? `node:${external.name}` : external.name;
+    const label = config.storagePackages[key] ?? STORAGE_PACKAGES[key];
 
-    if (STORAGE_PACKAGES[key]) return STORAGE_PACKAGES[key]!;
+    if (label) return label;
+  }
+
+  // What the code does: a call that reads or writes a store, in any declaration or at the top level.
+  const file = facts.get(module);
+
+  if (file) {
+    const calls = [...file.moduleCalls, ...file.decls.flatMap((decl) => [...decl.calls, ...decl.members.flatMap((member) => member.calls)])];
+
+    for (const call of calls) {
+      if (call.opaque) continue;
+      const name = calleeName(call.callee);
+
+      for (const [pattern, label] of STORAGE_CALLS) if (pattern.test(name)) return label;
+    }
   }
 
   const match = module.match(STORAGE_NAME);

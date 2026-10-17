@@ -29,6 +29,10 @@ export interface Config {
   agent: AgentSpec | null;
   /** When a module of a picture is a hub (a badge, not lines): imported by at least `min` of its modules and `share` of them, or by `max` whatever the picture's size. */
   hubs: HubThresholds;
+  /** Glob → what the matching modules hold (`"src/cache/**": "the cache"`): storages the code's names and packages do not reveal. */
+  storages: Record<string, string>;
+  /** Package name → what a module importing it holds (`"my-orm": "MyORM"`), beside the built-in table. */
+  storagePackages: Record<string, string>;
 }
 
 export interface HubThresholds {
@@ -40,7 +44,16 @@ export interface HubThresholds {
 /** A quarter of a picture marks the logger and the shared types, not a busy neighbour; at least 6 importers, and 40 on a big map whatever its size. */
 export const DEFAULT_HUBS: HubThresholds = { min: 6, share: 0.25, max: 40 };
 
-export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null, hubs: DEFAULT_HUBS };
+export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null, hubs: DEFAULT_HUBS, storages: {}, storagePackages: {} };
+
+/** `"storages": { "<glob>": "<what it holds>" }`: an object of strings. */
+function stringMap(value: JsonValue | undefined, file: string, field: string): Record<string, string> {
+  if (value === undefined) return {};
+
+  if (!isJsonObject(value) || !Object.values(value).every(isJsonString)) throw new Error(`${file}: "${field}" must be an object of string → string`);
+
+  return { ...(value as Record<string, string>) };
+}
 
 function stringList(value: JsonValue | undefined, file: string, field: string): string[] {
   if (value === undefined) return [];
@@ -76,7 +89,7 @@ export function loadConfig(root: string): Config {
 
   if (other !== undefined && !isJsonString(other)) throw new Error(`${CONFIG_FILE}: "other" must be a string`);
 
-  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: agentFromConfig(parsed["agent"]), hubs: hubThresholds(parsed["hubs"]) };
+  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: agentFromConfig(parsed["agent"]), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages") };
 }
 
 /** `"hubs": { "min": 6, "share": 0.25, "max": 40 }`, each field optional; a wrong field names itself. */

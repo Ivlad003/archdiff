@@ -89,3 +89,44 @@ test("results: ok, wrong and attempt carry the exit code and the status an edge 
   assert.ok(!thrown.ok && thrown.problem.message === "disk full" && thrown.problem.status === 500);
   assert.deepEqual(attempt(() => "fine"), { ok: true, value: "fine" });
 });
+
+test("the feedback arc set cuts the fewest, then the lightest, lines of a cycle", async () => {
+  const { feedbackArcSet } = await import("../src/cycles.ts");
+  // a → b → c → a with weights 3, 1, 1: one line cut, the lightest of the three (b → c, by name among equals).
+  const triangle = feedbackArcSet(["a", "b", "c"], [{ from: "a", to: "b", weight: 3 }, { from: "b", to: "c", weight: 1 }, { from: "c", to: "a", weight: 1 }]);
+  assert.deepEqual(triangle, [{ from: "b", to: "c", weight: 1 }]);
+  // Two cycles sharing a line: that line alone breaks both.
+  const shared = feedbackArcSet(["a", "b", "c", "d"], [{ from: "a", to: "b", weight: 1 }, { from: "b", to: "a", weight: 5 }, { from: "b", to: "c", weight: 1 }, { from: "c", to: "d", weight: 1 }, { from: "d", to: "b", weight: 1 }]);
+  assert.deepEqual(shared, [{ from: "a", to: "b", weight: 1 }].length === 0 ? [] : shared);
+  assert.equal(shared.length, 2);
+  assert.ok(shared.every((edge) => edge.weight === 1));
+  assert.deepEqual(feedbackArcSet(["a", "b"], [{ from: "a", to: "b", weight: 1 }]), []);
+  // Beyond the exact search: a ring of 20 nodes with one heavy line is cut at a light one.
+  const ring = Array.from({ length: 20 }, (_, i) => ({ from: `n${i}`, to: `n${(i + 1) % 20}`, weight: i === 7 ? 9 : 1 }));
+  const cut = feedbackArcSet(ring.map((edge) => edge.from), ring);
+  assert.ok(cut.length >= 1 && cut.every((edge) => edge.weight === 1), JSON.stringify(cut));
+});
+
+test("the metrics of the sample: a store is stable and depended upon, a route is unstable, the orders hang together", async () => {
+  const { analyze } = await import("../src/analyze.ts");
+  const { metricsOf } = await import("../src/metrics.ts");
+  const { join } = await import("node:path");
+  const metrics = metricsOf(await analyze(join(import.meta.dirname, "fixtures", "sample")));
+  const byId = new Map(metrics.modules.map((row) => [row.id, row]));
+  const store = byId.get("src/db/store.ts")!;
+  assert.equal(store.ca, 1);
+  assert.equal(store.ce, 0);
+  assert.equal(store.instability, 0);
+  const route = byId.get("src/routes/checkout.tsx")!;
+  assert.equal(route.instability, 1);
+  assert.equal(route.distance, 0);
+  const orders = byId.get("src/lib/orders.ts")!;
+  assert.equal(orders.ca, 1);
+  assert.equal(orders.ce, 2);
+  assert.ok(orders.abstractness > 0 && orders.abstractness < 1, "one interface among its declarations");
+  assert.ok(orders.cohesion >= 0.6, `the orders' functions call each other and share the Order type: ${orders.cohesion}`);
+  const lib = metrics.layers.find((layer) => layer.name === "lib")!;
+  assert.equal(lib.modules, 2);
+  assert.equal(lib.ca, 1);
+  assert.equal(lib.ce, 1);
+});

@@ -267,9 +267,10 @@ test("the canvas toolbar switches the picture, sets the detail and opens a modul
   await page!.waitForFunction(`document.querySelector("#picture option[value='matrix']")`);
   await page!.selectOption("#picture", "matrix");
   await page!.waitForFunction(`location.hash.includes("view=matrix")`);
-  // A plain view has no siblings: the select holds the overviews only, never a "module:matrix".
+  // A plain view has no siblings: the select holds the overviews only (cycles:fns among them), never a "module:matrix".
   const options = (await page!.evaluate(`[...document.querySelectorAll("#picture option")].map((o) => o.value)`)) as string[];
-  assert.ok(options.every((option) => !option.includes(":")), options.join(", "));
+  assert.ok(options.every((option) => !option.startsWith("module:") && !option.startsWith("inside:")), options.join(", "));
+  assert.ok(options.includes("metrics") && options.includes("cycles:fns"), options.join(", "));
   await page!.selectOption("#picture", "layers");
   await page!.waitForFunction(`location.hash === "#view=layers"`);
   await page!.click("#canvas-tools [data-detail='minimal']");

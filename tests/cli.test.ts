@@ -555,7 +555,7 @@ test("cycles, events, tests, packages and timeline on a repository that has them
     writeFileSync(join(dir, "packages/app/test/a.test.ts"), 'import { a } from "../src/a.ts";\nimport { util } from "../../lib/src/index.ts";\na();\nutil();\n');
     const cycles = archdiff(["diagram", "cycles", dir, "--format", "json"]).stdout;
     const parsed = JSON.parse(cycles) as { groups: { id: string }[]; nodes: { id: string }[] };
-    assert.deepEqual(parsed.groups.map((group) => group.id), ["cycle 1 (2)"]);
+    assert.deepEqual(parsed.groups.map((group) => group.id), ["cycle 1 (2 modules)"]);
     assert.deepEqual(parsed.nodes.map((node) => node.id).sort(), ["packages/app/src/a.ts", "packages/app/src/b.ts"]);
     const one = archdiff(["diagram", "cycle:packages/app/src/bus.ts", dir]).stdout;
     assert.ok(one.includes("is in no import cycle"), one);
@@ -850,6 +850,64 @@ test("an import type expression does not make a file a syntax error; a dynamic i
     const inside = JSON.parse(archdiff(["diagram", "inside:src/page.ts", dir, "--format", "json"]).stdout) as { nodes: { id: string; ref?: { line?: number } }[] };
     assert.deepEqual(inside.nodes.map((node) => node.id).filter((id) => id.startsWith("src/page.ts#")).sort(), ["src/page.ts#elements", "src/page.ts#load"]);
     assert.equal(inside.nodes.find((node) => node.id === "src/page.ts#load")?.ref?.line, 5);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("metrics: coupling and cohesion by module and layer, as Markdown and JSON; the pictures of cycles say where to cut", () => {
+  const { status, stdout } = archdiff(["metrics", fixture]);
+  assert.equal(status, 0, stdout);
+  assert.ok(stdout.includes("| **lib** | 2 | 1 | 1 | 0.50 |"), stdout);
+  assert.ok(stdout.includes("| src/routes/checkout.tsx | routes | 0 | 1 | 1.00 | 0.00 | 0.00 |"), stdout);
+  const json = JSON.parse(archdiff(["metrics", fixture, "--json", "--layer", "db"]).stdout) as { modules: { id: string; ca: number; instability: number }[]; layers: { name: string }[] };
+  assert.deepEqual(json.modules.map((row) => [row.id, row.ca, row.instability]), [["src/db/store.ts", 1, 0]]);
+  assert.deepEqual(json.layers.map((layer) => layer.name), ["db"]);
+  assert.equal(archdiff(["metrics", fixture, "--layer", "nope"]).status, 2);
+  // The metrics picture is a table; its Mermaid is a quadrant chart of instability against abstractness.
+  const picture = archdiff(["diagram", "metrics", fixture]).stdout;
+  assert.ok(picture.includes("quadrantChart") && picture.includes("zone of pain") && picture.includes("## Modules"), picture);
+  // Type-only imports count only when asked: the store imports the Order type, which closes a circle with orders.
+  assert.ok(archdiff(["diagram", "cycles", fixture]).stdout.includes("no import cycles"));
+  const typed = archdiff(["diagram", "cycles", fixture, "--types", "--format", "mermaid"]).stdout;
+  assert.ok(typed.includes('src_db_store_ts -.->|"cut: 1 import"| src_lib_orders_ts'), typed);
+  assert.ok(typed.includes("layers in a circle: db ⇄ lib"), typed);
+  assert.ok(archdiff(["diagram", "cycles:fns", fixture]).stdout.includes("no call cycles"));
+  // The instability overlay shades modules and names the unstable ones others depend on.
+  const overlay = archdiff(["diagram", "layer:lib", fixture, "--overlay", "instability"]).stdout;
+  assert.ok(overlay.includes("shade: instability") && overlay.includes("I 0.67 · Ca 1"), overlay);
+});
+
+test("review against the contract: a new layer dependency ARCHITECTURE.md forbids fails, one it allows is news; a storage is known by its calls", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-contract-"));
+
+  try {
+    cpSync(fixture, dir, { recursive: true });
+    writeFileSync(join(dir, "ARCHITECTURE.md"), "# Architecture\n\n```mermaid\nflowchart LR\n  subgraph routes\n    r[src/routes/checkout.tsx]\n  end\n  subgraph lib\n    o[src/lib/orders.ts]\n    l[src/lib/log.ts]\n  end\n  subgraph db\n    s[src/db/store.ts]\n  end\n  r --> o\n  o --> s\n  o --> l\n  s --> l\n```\n");
+    const git = (...args: string[]): void => {
+      const result = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git("init", "-q", "-b", "main");
+    git("-c", "user.email=t@example.com", "-c", "user.name=t", "add", ".");
+    git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "base");
+    // Allowed by the contract (db → lib): news, exit 0.
+    writeFileSync(join(dir, "src/db/store.ts"), `${readFileSync(join(dir, "src/db/store.ts"), "utf8")}import { log } from "../lib/log.ts";\nexport function note(): void { log("x"); }\n`);
+    const allowed = archdiff(["review", dir, "--base", "HEAD"]);
+    assert.equal(allowed.status, 0, allowed.stdout);
+    assert.ok(allowed.stdout.includes("- **db → lib** — allowed by ARCHITECTURE.md"), allowed.stdout);
+    // Against the contract (routes → db): a finding, exit 1.
+    writeFileSync(join(dir, "src/routes/checkout.tsx"), `import { readOrder } from "@/db/store";\nexport function loader() {\n  return readOrder("y");\n}\n`);
+    const against = archdiff(["review", dir, "--base", "HEAD"]);
+    assert.equal(against.status, 1, against.stdout);
+    assert.ok(against.stdout.includes("## ⚠ New dependencies between layers") && against.stdout.includes("- **routes → db** — against ARCHITECTURE.md"), against.stdout);
+    // A module that calls fetch is a storage by what it does, without a name or a package that says so.
+    writeFileSync(join(dir, "src/lib/remote.ts"), `export async function load(id: string): Promise<unknown> {\n  const response = await fetch(\`/api/\${id}\`);\n  return response.json();\n}\n`);
+    const storages = archdiff(["diagram", "layer:lib", dir, "--overlay", "storages"]).stdout;
+    assert.ok(storages.includes("⛁ HTTP (fetch)"), storages);
+    // archdiff.json names a storage by glob, and a package by name.
+    writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ storages: { "src/lib/log.ts": "the log file" }, storagePackages: {} }));
+    assert.ok(archdiff(["diagram", "layer:lib", dir, "--overlay", "storages"]).stdout.includes("⛁ the log file"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -149,8 +149,18 @@ function c4Mermaid(diagram: Diagram): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** The metrics as a quadrant chart: instability across, abstractness up; the main sequence runs from top left to bottom right. */
+function metricsQuadrant(diagram: Diagram): string {
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "quadrantChart", `  title ${diagram.title.replace(/\n/g, " ")}`, "  x-axis stable (depended upon) --> unstable (depends on others)", "  y-axis concrete --> abstract", "  quadrant-1 zone of uselessness", "  quadrant-2 main sequence", "  quadrant-3 zone of pain", "  quadrant-4 main sequence"];
+
+  for (const row of diagram.metrics!.modules.slice(0, 60)) lines.push(`  "${row.id.replace(/"/g, "'")}": [${(0.03 + 0.94 * row.instability).toFixed(2)}, ${(0.03 + 0.94 * row.abstractness).toFixed(2)}]`);
+
+  return `${lines.join("\n")}\n`;
+}
+
 /** Hotspots as a quadrant chart: lines across, calls in up; the big and called sit top right. */
 function quadrantMermaid(diagram: Diagram): string {
+  if (diagram.metrics) return metricsQuadrant(diagram);
   const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "quadrantChart", `  title ${diagram.title.replace(/\n/g, " ")}`, "  x-axis small --> large", "  y-axis few calls in --> many calls in", "  quadrant-1 big and central", "  quadrant-2 small but central", "  quadrant-3 small and quiet", "  quadrant-4 big but quiet"];
   const sizes = diagram.nodes.map((node) => node.w);
   const maxSize = Math.max(1, ...sizes);
@@ -211,6 +221,8 @@ export function mermaidStyleFor(diagram: Diagram, style: MermaidStyle): Exclude<
 
   if (diagram.view === "timeline") return "gitgraph";
 
+  if (diagram.metrics) return "quadrant";
+
   return "flowchart";
 }
 
@@ -255,7 +267,7 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
     const to = ids.get(edge.to);
 
     if (!from || !to || edge.kind === "lifeline") continue;
-    const arrow = edge.kind === "ref" ? "-.->" : edge.kind === "call" || edge.kind === "message" ? "==>" : "-->";
+    const arrow = edge.kind === "ref" || edge.typeOnly ? "-.->" : edge.kind === "call" || edge.kind === "message" ? "==>" : "-->";
     const text = edge.label ? `|${label(edge.label)}|` : "";
     lines.push(`  ${from} ${arrow}${text} ${to}`);
   }

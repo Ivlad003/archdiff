@@ -9,6 +9,7 @@
 
 import type { Analysis } from "./analyze.ts";
 import type { Diagram, DiagramEdge, DiagramNode } from "./diagram.ts";
+import { farFromMainSequence, type Metrics } from "./diagram.ts";
 import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
 import { moduleOf } from "./graph.ts";
 
@@ -37,6 +38,13 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
 
     for (const from of ids) lines.push(`| **${name.get(from)}** | ${ids.map((to) => (from === to ? "·" : cell.get(`${from}>${to}`)?.diff === "removed" ? `**${cell.get(`${from}>${to}`)!.label}** ⚠` : cell.get(`${from}>${to}`)?.label || "")).join(" | ")} |`);
     lines.push("", diagram.view === "matrix" ? "A cell in bold with ⚠ is an import against the layer order (a lower layer importing a higher one)." : "A cell in bold with ⚠ is an import against the order of the rows (a module importing one placed above it).");
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
+  // The metrics read as tables: the layers, then the modules, the farthest from the main sequence first.
+  if (diagram.metrics) {
+    lines.push(...metricsMarkdown(diagram.metrics));
 
     return `${lines.join("\n").trimEnd()}\n`;
   }
@@ -90,6 +98,25 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/** The metrics as Markdown tables: the modules (the farthest from the main sequence first) and the layers. */
+export function metricsMarkdown(metrics: Metrics): string[] {
+  const lines: string[] = [];
+
+  if (metrics.layers.length > 0) {
+    lines.push("## Layers", "", "| layer | modules | Ca | Ce | I | A | D |", "| --- | --- | --- | --- | --- | --- | --- |");
+
+    for (const layer of metrics.layers) lines.push(`| **${layer.name}** | ${layer.modules} | ${layer.ca} | ${layer.ce} | ${layer.instability.toFixed(2)} | ${layer.abstractness.toFixed(2)} | ${layer.distance.toFixed(2)} |`);
+    lines.push("");
+  }
+
+  lines.push("## Modules", "", "| module | layer | Ca | Ce | I | A | D | cohesion | fns | lines |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+
+  for (const row of metrics.modules) lines.push(`| ${row.id} | ${row.layer} | ${row.ca} | ${row.ce} | ${row.instability.toFixed(2)} | ${row.abstractness.toFixed(2)} | ${farFromMainSequence(row) ? `**${row.distance.toFixed(2)}** ⚠` : row.distance.toFixed(2)} | ${row.cohesion < 0.3 && row.fns > 2 ? `**${row.cohesion.toFixed(2)}** ⚠` : row.cohesion.toFixed(2)} | ${row.fns} | ${row.lines} |`);
+  lines.push("", "Ca: modules that import it; Ce: modules it imports; I = Ce / (Ca + Ce), 0 stable, 1 unstable; A: types and interfaces among its declarations; D = |A + I − 1|, the distance from the main sequence (⚠ at 0.7 when the module is coupled at all: concrete and depended upon, or abstract and depending on everything); cohesion: 1 when its functions form one group by calls, shared callees and shared types, 0 when each stands alone.");
+
+  return lines;
 }
 
 /** How many lines of a declaration's code the panel shows before cutting; the Code tab has the whole file. */

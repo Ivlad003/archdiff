@@ -70,6 +70,8 @@ export interface DiagramEdge {
   /** How many underlying edges the line stands for (a layer edge: imports between its modules). */
   count?: number;
   diff?: DiffMark;
+  /** Only types cross the line (`import type`): drawn dashed, counted only when asked (`--types`). */
+  typeOnly?: true;
 }
 
 /** A lane: one layer, a band across the diagram. */
@@ -107,8 +109,52 @@ export interface Diagram {
   lanes?: "rows" | "columns";
   /** A sequence view: the Mermaid export is a sequenceDiagram and the Markdown lists the messages in order. */
   sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number; times?: number }[] };
+  /** A metrics view: the numbers behind the table, for the Markdown and the quadrant chart. */
+  metrics?: Metrics;
   /** A class view: the Mermaid export is a classDiagram. */
   classes?: { boxes: { id: string; name: string; kind: "class" | "interface" | "type"; fields: string[]; methods: string[] }[]; relations: { from: string; to: string; kind: "extends" | "implements" }[] };
+}
+
+/** The coupling and cohesion of one module (metrics.ts): Martin's Ca, Ce, I, A and D, and the cohesion of its functions. */
+export interface ModuleMetrics {
+  id: string;
+  layer: string;
+  /** Afferent coupling: modules of the repository that import it. */
+  ca: number;
+  /** Efferent coupling: modules of the repository it imports. */
+  ce: number;
+  /** Ce / (Ca + Ce): 0 stable (depended upon), 1 unstable (depends on others). */
+  instability: number;
+  /** Types and interfaces among its top-level declarations, 0–1. */
+  abstractness: number;
+  /** |A + I − 1|: the distance from the main sequence. */
+  distance: number;
+  /** 1 when its functions form one group (by calls, shared callees and shared types), 0 when each stands alone. */
+  cohesion: number;
+  lines: number;
+  fns: number;
+  callsIn: number;
+  callsOut: number;
+}
+
+export interface LayerMetrics {
+  name: string;
+  modules: number;
+  ca: number;
+  ce: number;
+  instability: number;
+  abstractness: number;
+  distance: number;
+}
+
+export interface Metrics {
+  modules: ModuleMetrics[];
+  layers: LayerMetrics[];
+}
+
+/** Far from the main sequence, and coupled enough for it to matter: an isolated module (Ca = Ce = 0) has D = 1 and no pain. */
+export function farFromMainSequence(row: ModuleMetrics): boolean {
+  return row.distance >= 0.7 && row.ca + row.ce >= 2;
 }
 
 /** Manual places that win over the computed ones, by node ID. */

@@ -1,6 +1,6 @@
 // The views that answer one architectural question each, beside the
-// structural ones of views.ts: `cycles` (modules importing each other,
-// by strongly connected component), `matrix` (who imports whom, layer by
+// structural ones of views.ts (the cycles live in cycles.ts, the metrics
+// in metrics.ts): `matrix` (who imports whom, layer by
 // layer, as a dependency structure matrix with the back edges marked),
 // `type:<id>` (where a type is produced, consumed and stored),
 // `path:<fn>` (from an entry to the storages, the branches that lead
@@ -17,70 +17,21 @@ import { SIZE, type Diagram, type DiagramEdge, type DiagramNode } from "./diagra
 import type { HistoryRow } from "./diff.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
-import { stronglyConnected } from "./scc.ts";
 import { fnNode, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
-
-/** The runtime imports between modules as adjacency (type-only imports do not run). */
-function moduleAdjacency(graph: Graph): Map<string, Set<string>> {
-  const adjacency = new Map<string, Set<string>>();
-
-  for (const id of graph.modules.keys()) adjacency.set(id, new Set());
-
-  for (const dep of graph.deps) if (!dep.typeOnly && graph.modules.has(dep.to) && dep.from !== dep.to) adjacency.get(dep.from)!.add(dep.to);
-
-  return adjacency;
-}
-
-/** The import cycles: every strongly connected component of two or more modules, each a lane; `only` keeps the component holding that module. */
-export function cyclesView(graph: Graph, only: string | null): Diagram {
-  const key = only === null ? "cycles" : `cycle:${only}`;
-  const components = stronglyConnected(moduleAdjacency(graph))
-    .filter((component) => component.length >= 2)
-    .sort((a, b) => b.length - a.length || (a[0]! < b[0]! ? -1 : 1));
-  const chosen = only === null ? components : components.filter((component) => component.includes(only));
-
-  if (only !== null && !graph.modules.has(only)) return unplaced(key, only, [], [], [], { reason: `no module "${only}"`, missing: true });
-
-  if (chosen.length === 0) return unplaced(key, only === null ? "Import cycles" : `Cycle of ${only}`, [], [], [], { reason: only === null ? "no import cycles: no two modules import each other" : `${only} is in no import cycle` });
-  const laneOf = new Map<string, string>();
-  const nodes: DiagramNode[] = [];
-
-  chosen.forEach((component, i) => {
-    const laneId = `cycle ${i + 1} (${component.length})`;
-
-    for (const id of component) {
-      laneOf.set(id, laneId);
-      nodes.push({ ...moduleNode(graph, id), group: laneId });
-    }
-  });
-  const edges: DiagramEdge[] = [];
-  const seen = new Set<string>();
-
-  for (const dep of graph.deps) {
-    if (dep.typeOnly || !laneOf.has(dep.from) || laneOf.get(dep.from) !== laneOf.get(dep.to)) continue;
-    const pair = `${dep.from}\u0000${dep.to}`;
-
-    if (seen.has(pair)) continue;
-    seen.add(pair);
-    edges.push({ from: dep.from, to: dep.to, kind: "dependency" });
-  }
-
-  return unplaced(key, only === null ? `Import cycles (${chosen.length})` : `Cycle of ${only}`, nodes, edges, [...new Set(laneOf.values())].map(lane));
-}
 
 /**
  * The layers ordered so that most imports point down the list: repeatedly
  * the layer that imports the most of what remains and is imported least by
  * it goes next. A deterministic greedy order, good enough for a matrix.
  */
-function layerOrder(graph: Graph): string[] {
+function layerOrder(graph: Graph, types = false): string[] {
   const counts = new Map<string, number>();
 
   for (const dep of graph.deps) {
     const from = graph.modules.get(dep.from)?.layer;
     const to = graph.modules.get(dep.to)?.layer;
 
-    if (from && to && from !== to && !dep.typeOnly) counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
+    if (from && to && from !== to && (types || !dep.typeOnly)) counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
   }
 
   return greedyOrder(graph.layers, counts);
@@ -134,7 +85,7 @@ function greedyOrder(items: readonly string[], counts: ReadonlyMap<string, numbe
  * go against the order (a lower layer importing a higher one) and are marked
  * red. Placed, with the layer names as the first row and column.
  */
-export function matrixView(graph: Graph, scope: string | null = null): Diagram {
+export function matrixView(graph: Graph, scope: string | null = null, types = false): Diagram {
   // The matrix of a directory: its modules in the rows and columns, ordered by their layers' order and then greedily
   // by their imports, so that an import against the order (upward) stands out as it does between layers.
   const counts = new Map<string, number>();
@@ -144,7 +95,7 @@ export function matrixView(graph: Graph, scope: string | null = null): Diagram {
   let title = "Matrix: rows import columns";
 
   if (scope === null) {
-    order = layerOrder(graph);
+    order = layerOrder(graph, types);
 
     if (order.length === 0) return unplaced("matrix", "Matrix", [], [], [], { reason: "no layers" });
 
@@ -152,7 +103,7 @@ export function matrixView(graph: Graph, scope: string | null = null): Diagram {
       const from = graph.modules.get(dep.from)?.layer;
       const to = graph.modules.get(dep.to)?.layer;
 
-      if (from && to && from !== to && !dep.typeOnly) counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
+      if (from && to && from !== to && (types || !dep.typeOnly)) counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
     }
 
     label = (id) => id;
@@ -165,8 +116,8 @@ export function matrixView(graph: Graph, scope: string | null = null): Diagram {
     if (modules.length === 0) return unplaced(view, title, [], [], [], { reason: `no modules under "${scope}"`, missing: true });
     const inside = new Set(modules);
 
-    for (const dep of graph.deps) if (inside.has(dep.from) && inside.has(dep.to) && dep.from !== dep.to && !dep.typeOnly) counts.set(`${dep.from}\u0000${dep.to}`, (counts.get(`${dep.from}\u0000${dep.to}`) ?? 0) + 1);
-    const layers = layerOrder(graph);
+    for (const dep of graph.deps) if (inside.has(dep.from) && inside.has(dep.to) && dep.from !== dep.to && (types || !dep.typeOnly)) counts.set(`${dep.from}\u0000${dep.to}`, (counts.get(`${dep.from}\u0000${dep.to}`) ?? 0) + 1);
+    const layers = layerOrder(graph, types);
     const byLayer = new Map<string, string[]>();
 
     for (const id of modules) byLayer.set(graph.modules.get(id)!.layer, [...(byLayer.get(graph.modules.get(id)!.layer) ?? []), id]);

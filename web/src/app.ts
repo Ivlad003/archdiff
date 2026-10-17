@@ -711,8 +711,8 @@ function renderViews(filter: string): void {
   const state = stateFromHash();
   viewsList.replaceChildren();
   const needle = filter.trim().toLowerCase();
-  const groups: [string, ViewEntry["kind"][]][] = [
-    ["Overview", ["layers", "coverage", "classes", "matrix", "cycles", "events", "tests", "hotspots", "packages", "timeline"]],
+  const groups: [string, string[]][] = [
+    ["Overview", ["layers", "coverage", "classes", "matrix", "metrics", "cycles", "cycles:fns", "events", "tests", "hotspots", "packages", "timeline"]],
     ["Layers", ["layer"]],
     ["Directories", ["dir"]],
     ["Entry points (call flows)", ["calls"]],
@@ -721,7 +721,8 @@ function renderViews(filter: string): void {
   ];
 
   for (const [label, kinds] of groups) {
-    const members = views.filter((view) => kinds.includes(view.kind) && (needle === "" || view.title.toLowerCase().includes(needle) || view.key.toLowerCase().includes(needle)));
+    // The overviews are named by key (a plain view's key is its kind, `cycles:fns` is a key of the cycles kind); the rest by kind.
+    const members = views.filter((view) => (label === "Overview" ? kinds.includes(view.key) : kinds.includes(view.kind)) && (needle === "" || view.title.toLowerCase().includes(needle) || view.key.toLowerCase().includes(needle)));
 
     if (members.length === 0) continue;
     const head = document.createElement("li");
@@ -936,7 +937,8 @@ async function load(): Promise<void> {
       void loadBranches(state);
     } else if (state.review) {
       const result = await api.review(baseInput.value.trim() || null, state.head);
-      title.textContent = `${result.diagram.title} — ${result.diff.changedFiles.length} source files changed${result.diff.layerEdgesAdded.length > 0 ? ` — ⚠ ${result.diff.layerEdgesAdded.length} new layer dependencies` : ""}`;
+      const findings = result.contract ? result.diff.layerEdgesAdded.filter((edge) => edge.against) : result.diff.layerEdgesAdded;
+      title.textContent = `${result.diagram.title} — ${result.diff.changedFiles.length} source files changed${findings.length > 0 ? ` — ⚠ ${findings.length} new layer dependencies${result.contract ? " against ARCHITECTURE.md" : ""}` : result.diff.layerEdgesAdded.length > 0 ? ` — ${result.diff.layerEdgesAdded.length} new layer dependencies, allowed by ARCHITECTURE.md` : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
       edges = result.diagram.edges;

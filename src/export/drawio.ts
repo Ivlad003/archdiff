@@ -77,7 +77,7 @@ export function toDrawio(diagram: Diagram): string {
 
     if (from === undefined || to === undefined) continue;
     const id = next++;
-    const dashed = edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" ? "dashed=1;" : "";
+    const dashed = edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" || edge.typeOnly ? "dashed=1;" : "";
     const colour = edge.diff === "added" ? "strokeColor=#2e7d32;strokeWidth=2;" : edge.diff === "removed" ? "strokeColor=#c62828;strokeWidth=2;" : edge.diff === "warning" || edge.diff === "changed" ? "strokeColor=#ef6c00;strokeWidth=2;" : edge.diff === "planned" ? "strokeColor=#1565c0;strokeWidth=2;" : edge.kind === "call" || edge.kind === "message" ? "strokeColor=#1565c0;" : edge.kind === "lifeline" ? "strokeColor=#b0bec5;endArrow=none;" : "strokeColor=#616161;";
     // The bends of the route (without its two ends, which the cells give) as waypoints, so draw.io draws the same path.
     const bends = (edge.route ?? routes.get(edge) ?? []).slice(1, -1);

@@ -15,9 +15,9 @@ import { dataFlow, flowMarkdown } from "./flow.ts";
 import { LAYOUTS_DIRECTORY, readLayout, readLayoutFile } from "./layouts.ts";
 import { planFromScene, planMarkdown } from "./plan.ts";
 import { agentFromConfig } from "./agent.ts";
-import { diagramMarkdown } from "./markdown.ts";
+import { diagramMarkdown, metricsMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
-import { compareBranches, comparisonMarkdown, history, historyMarkdown, reviewMarkdown, review, withTimeline } from "./diff.ts";
+import { compareBranches, comparisonMarkdown, history, historyMarkdown, reviewFindings, reviewMarkdown, review, withTimeline } from "./diff.ts";
 import { defaultBase, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { serve } from "./server.ts";
 import { layout } from "./diagram.ts";
@@ -26,6 +26,7 @@ import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
 import { listSpecs, specPrompt, validateSpecs } from "./spec.ts";
 import { pictureFlags, pictureOptionsHelp, readPictureOptions } from "./options.ts";
+import { metricsOf } from "./metrics.ts";
 
 /** A flag a command knows: its name after `--`, and whether a value follows it. */
 interface FlagSpec {
@@ -188,6 +189,27 @@ const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: "metrics",
+    usage: "[dir] [--layer NAME] [--types] [--json] [--out FILE]",
+    help: ["Coupling and cohesion by module and by layer: Ca (modules importing it),", "Ce (modules it imports), instability I = Ce/(Ca+Ce), abstractness A,", "the distance from the main sequence D = |A+I-1| (the zone of pain: concrete", "and depended upon; the zone of uselessness: abstract and depending on all),", "and the cohesion of its functions (one group by calls and shared types: 1).", "--types counts type-only imports too; --layer keeps one layer's modules"],
+    arity: 1,
+    flags: [flag("layer", true), flag("types"), flag("json"), flag("out", true)],
+    async run(call) {
+      const analysis = await analyze(call.dir(0));
+      const metrics = metricsOf(analysis, call.has("types"));
+      const layer = call.text("layer");
+
+      if (layer !== null && !analysis.graph.layers.includes(layer)) return fail(`metrics: no layer "${layer}"`);
+      const modules = metrics.modules.filter((row) => layer === null || row.layer === layer).sort((a, b) => b.distance - a.distance || b.ca - a.ca || (a.id < b.id ? -1 : 1));
+      const chosen = { modules, layers: layer === null ? metrics.layers : metrics.layers.filter((row) => row.name === layer) };
+
+      if (call.has("json")) return writeOut(`${JSON.stringify(chosen, null, 2)}\n`, call.text("out"));
+      const stamp = revisionStamp(analysis.root);
+
+      return writeOut(`${[`<!-- archdiff:generated — metrics${stamp ? ` — commit ${stamp.commit} (${stamp.date})` : ""} -->`, `# Metrics: coupling and cohesion${layer ? ` of ${layer}` : ""}`, "", ...metricsMarkdown(chosen)].join("\n")}\n`, call.text("out"));
+    },
+  },
+  {
     name: "layouts",
     usage: "[dir] [--prune]",
     help: ["List the saved drawings (.archdiff/layouts/); --prune deletes those", "whose view the code no longer has (a renamed module, a removed function)"],
@@ -252,7 +274,7 @@ const COMMANDS: readonly Command[] = [
   {
     name: "review",
     usage: "[dir] [--base REF] [--head REF] [--format F] [--out FILE]",
-    help: ["The architectural diff of the working tree (or --head REF) against", "--base REF (default: the merge-base with the main branch): modules,", "imports and calls added, removed or changed, as Markdown with a Mermaid", "diagram (md, default), json, or any diagram format. Exit 1 when a layer", "dependency appeared"],
+    help: ["The architectural diff of the working tree (or --head REF) against", "--base REF (default: the merge-base with the main branch): modules,", "imports and calls added, removed or changed, as Markdown with a Mermaid", "diagram (md, default), json, or any diagram format. Exit 1 when a layer", "dependency appeared that ARCHITECTURE.md does not allow (any, without one)"],
     arity: 1,
     flags: [...REF_FLAGS, ...OUTPUT_FLAGS],
     async run(call) {
@@ -265,7 +287,7 @@ const COMMANDS: readonly Command[] = [
 
       if (written !== 0) return written;
 
-      return result.diff.layerEdgesAdded.length > 0 ? 1 : 0;
+      return reviewFindings(result.diff, result.contract).length > 0 ? 1 : 0;
     },
   },
   {
@@ -302,7 +324,7 @@ const COMMANDS: readonly Command[] = [
 
       if (written !== 0) return written;
 
-      return result.heads.some((head) => head.diff.layerEdgesAdded.length > 0) ? 1 : 0;
+      return result.heads.some((head) => reviewFindings(head.diff, head.contract).length > 0) ? 1 : 0;
     },
   },
   {

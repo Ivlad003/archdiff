@@ -363,7 +363,7 @@ export function toExcalidraw(diagram: Diagram): string {
 
     if (!source || !target) continue;
     const id = `edge:${edge.from}->${edge.to}${edge.kind === "message" ? `:${diagram.edges.indexOf(edge)}` : ""}`;
-    const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.diff === "warning" || edge.diff === "changed" ? "#ef6c00" : edge.diff === "planned" || edge.kind === "call" || edge.kind === "message" ? "#1565c0" : edge.kind === "lifeline" ? "#b0bec5" : "#616161";
+    const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.diff === "warning" || edge.diff === "changed" ? "#ef6c00" : edge.diff === "planned" || edge.kind === "call" || edge.kind === "message" ? "#1565c0" : edge.kind === "lifeline" ? "#b0bec5" : edge.typeOnly ? "#9e9e9e" : "#616161";
     const route = edge.route ?? routes.get(edge) ?? [centre.get(edge.from)!, centre.get(edge.to)!];
     const start = route[0]!;
     const finish = route[route.length - 1]!;
@@ -372,7 +372,7 @@ export function toExcalidraw(diagram: Diagram): string {
     elements.push({
       ...base(id, "arrow", start.x, start.y, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
       strokeColor: stroke,
-      strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" ? "dashed" : "solid",
+      strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" || edge.typeOnly ? "dashed" : "solid",
       strokeWidth: edge.diff ? 2 : 1,
       points: route.map((point) => [point.x - start.x, point.y - start.y]),
       // No binding: Excalidraw would pull every end to the centre of a side and the ports would collapse into one point.

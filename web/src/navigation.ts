@@ -36,7 +36,7 @@ export function siblingViews(view: string): { label: string; key: string }[] {
 
   if (kind === "dir" || kind === "classes") return [{ label: "modules of the directory", key: `dir:${rest}` }, { label: "classes of the directory", key: `classes:${rest}` }];
 
-  if (kind === "calls" || kind === "sequence" || kind === "path") return [{ label: "call tree", key: `calls:${rest}` }, { label: "sequence of calls", key: `sequence:${rest}` }, { label: "path to the storages", key: `path:${rest}` }];
+  if (kind === "calls" || kind === "sequence" || kind === "path" || (kind === "cycle" && rest.includes("#"))) return [{ label: "call tree", key: `calls:${rest}` }, { label: "sequence of calls", key: `sequence:${rest}` }, { label: "path to the storages", key: `path:${rest}` }, { label: "its call cycle", key: `cycle:${rest}` }];
 
   return [];
 }

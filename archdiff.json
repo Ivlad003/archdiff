@@ -28,7 +28,11 @@
       "src/plan.ts",
       "src/coverage.ts",
       "src/spec.ts",
-      "src/scaffold.ts"
+      "src/scaffold.ts",
+      "src/pipeline.ts",
+      "src/view-keys.ts",
+      "src/cycles.ts",
+      "src/metrics.ts"
     ],
     "exports": [
       "src/export/**",
