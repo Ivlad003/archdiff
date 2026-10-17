@@ -1,21 +1,15 @@
 {
   "name": "archdiff",
   "version": "0.1.0",
-  "description": "Live diagrams of a TypeScript/JavaScript repository: structure, dependencies, call flows, and the architectural diff of a pull request — algorithmic, fast, no model",
+  "description": "Live diagrams of a TypeScript/JavaScript repository: structure, dependencies, call flows, and the architectural diff of a pull request \u2014 algorithmic, fast, no model",
   "license": "Apache-2.0",
-  "type": "module",
-  "bin": {
-    "archdiff": "bin/archdiff.js"
+  "author": "Ivlad003",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ivlad003/archdiff.git"
   },
-  "files": [
-    "bin",
-    "dist",
-    "dist/wasm",
-    "dist/web"
-  ],
-  "engines": {
-    "node": ">=22.18"
-  },
+  "homepage": "https://github.com/Ivlad003/archdiff#readme",
+  "bugs": "https://github.com/Ivlad003/archdiff/issues",
   "keywords": [
     "architecture",
     "diagram",
@@ -30,7 +24,22 @@
     "mermaid"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
+  },
+  "type": "module",
+  "bin": {
+    "archdiff": "bin/archdiff.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "dist/wasm",
+    "dist/web"
+  ],
+  "engines": {
+    "node": ">=22.18"
   },
   "scripts": {
     "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/copy-wasm.mjs && node scripts/build-web.mjs && node scripts/pack-entry.mjs publish",

@@ -2,3 +2,5 @@ node_modules/
 dist/
 .archdiff/
 tests/fixtures/sample/.archdiff/
+tests/fixtures/polyglot/.archdiff/
+*.tgz
