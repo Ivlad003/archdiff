@@ -800,7 +800,9 @@ test("new scaffolds a project with its intent and first commit; import, intent a
     const imported = archdiff(["import", join(dir, "note.md"), target]);
     assert.equal(imported.status, 0, imported.stderr);
     const config = JSON.parse(readFileSync(join(target, "archdiff.json"), "utf8")) as { layers: Record<string, string[]> };
-    assert.deepEqual(config.layers, { routes: ["src/routes/**"], services: ["src/services/**"], domain: ["src/domain/**"], db: ["src/db/**"], http: ["src/http/**"], app: ["src/app/**"] });
+    // The intent's layers first (a specific layer beats a catch-all), the template's after.
+    assert.deepEqual(Object.keys(config.layers), ["http", "app", "routes", "services", "domain", "db"]);
+    assert.deepEqual(config.layers["http"], ["src/http/**"]);
     const printed = JSON.parse(archdiff(["intent", target, "--json"]).stdout) as { layers: { name: string; description?: string }[]; modules: { id: string; description?: string }[]; edges: { from: string; to: string; label?: string }[] };
     assert.deepEqual(printed.layers, [{ name: "http", description: "the edge" }, { name: "app" }]);
     assert.equal(printed.modules.find((module) => module.id === "src/app/orders.ts")?.description, "places orders");

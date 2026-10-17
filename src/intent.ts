@@ -74,7 +74,31 @@ function labelOf(rest: string): string | null {
 
   if (!match) return null;
 
-  return match[2]!.replace(/<br\s*\/?>/gi, "\n").replace(/\\n/g, "\n").replace(/#quot;/g, '"').trim();
+  return match[2]!.replace(/<br\s*\/?>/gi, "\n").replace(/\\n/g, "\n").replace(/#quot;|&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").trim();
+}
+
+/** Splits `a & b & c` into its nodes: on `&` outside brackets and quotes only, so a label with an ampersand or an HTML entity stays whole. */
+function splitNodes(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quoted = false;
+  let start = 0;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]!;
+
+    if (char === '"') quoted = !quoted;
+    else if (!quoted && "[({".includes(char)) depth++;
+    else if (!quoted && "])}".includes(char)) depth = Math.max(0, depth - 1);
+    else if (char === "&" && depth === 0 && !quoted) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+
+  parts.push(text.slice(start));
+
+  return parts.filter((part) => part.trim() !== "");
 }
 
 /** The text of a line's first line and the rest as a description. */
@@ -180,8 +204,8 @@ export function parseIntent(markdown: string): Intent {
       let labelIndex = 0;
 
       for (let i = 0; i < parts.length - 1; i++) {
-        const froms = parts[i]!.replace(/^\|[^|]*\|\s*/, "").split("&").map((text) => declare(text)).filter((id): id is string => id !== null);
-        const tos = parts[i + 1]!.replace(/^\|[^|]*\|\s*/, "").split("&").map((text) => declare(text)).filter((id): id is string => id !== null);
+        const froms = splitNodes(parts[i]!.replace(/^\|[^|]*\|\s*/, "")).map((text) => declare(text)).filter((id): id is string => id !== null);
+        const tos = splitNodes(parts[i + 1]!.replace(/^\|[^|]*\|\s*/, "")).map((text) => declare(text)).filter((id): id is string => id !== null);
         const label = labels[labelIndex] ?? inline[labelIndex];
         labelIndex++;
 
@@ -191,7 +215,7 @@ export function parseIntent(markdown: string): Intent {
       continue;
     }
 
-    for (const text of line.split("&")) declare(text);
+    for (const text of splitNodes(line)) declare(text);
   }
 
   // Modules and functions from every ID seen, named by their labels; a function sits in the module its name points to.
@@ -310,8 +334,18 @@ export function syncConfigLayers(root: string, intent: Intent): void {
   const layers: Record<string, JsonValue> = {};
   const names = [...intent.layers.map((layer) => layer.name), ...intent.modules.map((module) => module.layer).filter((layer): layer is string => layer !== undefined)];
 
+  const directoryOf = (id: string): string => id.slice(0, id.lastIndexOf("/"));
+
   for (const name of [...new Set(names)]) {
-    const directories = [...new Set(intent.modules.filter((module) => module.layer === name && module.id.includes("/")).map((module) => `${module.id.slice(0, module.id.lastIndexOf("/"))}/**`))].sort();
+    const own = intent.modules.filter((module) => module.layer === name && module.id.includes("/"));
+    const foreign = intent.modules.filter((module) => module.layer !== name && module.id.includes("/")).map((module) => directoryOf(module.id));
+    // A directory is the layer's glob only when no other layer lives in it or below it; else the files themselves,
+    // so `src/main.ts` in "entry" does not make `src/**` swallow `src/http/**`.
+    const directories = [...new Set(own.map((module) => {
+      const directory = directoryOf(module.id);
+
+      return foreign.some((other) => other === directory || other.startsWith(`${directory}/`)) ? module.id : `${directory}/**`;
+    }))].sort();
     const kept = previous[name];
     if (directories.length > 0) layers[name] = directories;
     else if (Array.isArray(kept)) layers[name] = kept;
@@ -319,8 +353,12 @@ export function syncConfigLayers(root: string, intent: Intent): void {
   }
 
   if (Object.keys(layers).length === 0) return;
-  // The intent's layers join the configured ones (which keep their globs); an intent layer with directories wins its name.
-  config["layers"] = { ...previous, ...layers };
+  // The intent's layers come first (the first matching glob wins, so a specific intent layer beats a template's catch-all
+  // like `app: src/**`); the configured layers the intent does not name follow with their globs.
+  const rest: Record<string, JsonValue> = {};
+
+  for (const [name, globs] of Object.entries(previous)) if (!(name in layers)) rest[name] = globs;
+  config["layers"] = { ...layers, ...rest };
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
 }
 
@@ -377,7 +415,8 @@ export function intentView(analysis: Analysis, intent: Intent | null): Diagram {
 
   for (const module of intent.modules) {
     const built = graph.modules.has(module.id);
-    const node: DiagramNode = { id: module.id, kind: "module", label: module.description ? `${module.id}\n${module.description}` : module.id, ref: { id: module.id, file: module.id, line: 1 }, x: 0, y: 0, w: 0, h: 0 };
+    // The path is the label; the description goes to the panel (`doc`), where it has room.
+    const node: DiagramNode = { id: module.id, kind: "module", label: module.id, ref: { id: module.id, file: module.id, line: 1 }, x: 0, y: 0, w: 0, h: 0 };
 
     if (module.layer) node.group = module.layer;
 

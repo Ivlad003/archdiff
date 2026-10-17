@@ -13,6 +13,9 @@ import { layout } from "../src/diagram.ts";
 import { routeEdges } from "../src/export/excalidraw.ts";
 import { hideLanes, hubsAsBadges, parseView, viewList, viewOf } from "../src/views.ts";
 import { onlyChanged } from "../src/diff.ts";
+import { intentMarkdown, parseIntent, syncConfigLayers } from "../src/intent.ts";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const fixture = join(import.meta.dirname, "fixtures", "sample");
 
@@ -158,4 +161,38 @@ test("only the changed shapes and their neighbours stay; hidden lanes take their
   assert.equal(hidden.edges.length, 1);
   assert.ok(hidden.reason?.includes("lanes hidden: other (1 shapes)"));
   assert.equal(hideLanes(diagram, ["nowhere"]), diagram);
+});
+
+test("the intent parser keeps labels with entities and ampersands whole, reads every bracket and arrow, and round-trips", () => {
+  const text = `# Note\n\n\`\`\`mermaid\nflowchart TD\n  subgraph out["outbound — adapters"]\n    F["src/out/fetch.ts<br>fetchTitle(url) &lt;string | null&gt; &amp; retries"]\n    G(src/out/log.ts) & H{src/out/clock.ts}\n  end\n  subgraph app\n    A["src/app/add.ts: adds a bookmark"]\n  end\n  A -->|fill title| F\n  A --> G & H\n  A -.-> src/app/add.ts#validate\n\`\`\`\n\nAfter.\n`;
+  const intent = parseIntent(text);
+  assert.deepEqual(intent.layers, [{ name: "outbound", description: "adapters" }, { name: "app" }]);
+  assert.deepEqual(intent.modules.map((module) => module.id).sort(), ["src/app/add.ts", "src/out/clock.ts", "src/out/fetch.ts", "src/out/log.ts"]);
+  assert.equal(intent.modules.find((module) => module.id === "src/out/fetch.ts")?.description, "fetchTitle(url) <string | null> & retries");
+  assert.equal(intent.modules.find((module) => module.id === "src/app/add.ts")?.description, "adds a bookmark");
+  assert.deepEqual(intent.modules.find((module) => module.id === "src/app/add.ts")?.fns, [{ name: "validate" }]);
+  assert.deepEqual(intent.edges.map((edge) => `${edge.from}>${edge.to}${edge.label ? `|${edge.label}` : ""}`), ["src/app/add.ts>src/out/fetch.ts|fill title", "src/app/add.ts>src/out/log.ts", "src/app/add.ts>src/out/clock.ts", "src/app/add.ts>src/app/add.ts#validate"]);
+  // Written back and read again: the same intent, the prose kept.
+  const again = parseIntent(intentMarkdown(intent));
+  assert.deepEqual(again.modules, intent.modules);
+  assert.deepEqual(again.edges, intent.edges);
+  assert.ok(intentMarkdown(intent).startsWith("# Note\n") && intentMarkdown(intent).trimEnd().endsWith("After."));
+});
+
+test("archdiff.json's layers follow the intent: a directory as the glob, the files themselves where another layer lives below", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-layers-"));
+
+  try {
+    writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ layers: { app: ["src/**"] }, exclude: ["vendor/**"] }));
+    const intent = parseIntent("```mermaid\nflowchart LR\n  subgraph entry\n    M[src/main.ts]\n    C[src/config.ts]\n  end\n  subgraph http\n    S[src/http/server.ts]\n  end\n  subgraph tests\n  end\n  M --> S\n```\n");
+    syncConfigLayers(dir, intent);
+    const config = JSON.parse(readFileSync(join(dir, "archdiff.json"), "utf8")) as { layers: Record<string, string[]>; exclude: string[] };
+    assert.deepEqual(Object.keys(config.layers), ["entry", "http", "tests", "app"]);
+    assert.deepEqual(config.layers["entry"], ["src/config.ts", "src/main.ts"]);
+    assert.deepEqual(config.layers["http"], ["src/http/**"]);
+    assert.deepEqual(config.layers["tests"], []);
+    assert.deepEqual(config.exclude, ["vendor/**"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
