@@ -50,7 +50,7 @@ function relationType(edge: DiagramEdge): string {
   return edge.kind === "dependency" ? "Serving" : edge.kind === "call" || edge.kind === "message" ? "Triggering" : "Association";
 }
 
-const DIFF_FILL = { added: { r: 200, g: 230, b: 201 }, removed: { r: 255, g: 205, b: 210 }, changed: { r: 255, g: 224, b: 178 } } as const;
+const DIFF_FILL = { added: { r: 200, g: 230, b: 201 }, removed: { r: 255, g: 205, b: 210 }, changed: { r: 255, g: 224, b: 178 }, warning: { r: 255, g: 224, b: 178 } } as const;
 
 export function toArchimate(diagram: Diagram): string {
   const elements: string[] = [];

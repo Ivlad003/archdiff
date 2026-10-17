@@ -29,6 +29,7 @@ import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, MER
 import { toExcalidraw } from "./export/excalidraw.ts";
 import { AgentRunner, agentFromConfig, type AgentSpec } from "./agent.ts";
 import { dataFlow, flowMarkdown, jsonInAnswer, mockPrompt, mocksFromTypes } from "./flow.ts";
+import { applyOverlays, parseOverlays, type Overlay } from "./overlays.ts";
 import { planFromScene, planMarkdown } from "./plan.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { CACHE_DIRECTORY } from "./cache.ts";
@@ -154,17 +155,34 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   };
 
   // The placed diagram of a view, at the saved places when the view was drawn by hand.
-  const placed = async (analysis: Analysis, key: string, depth?: number, packages = false, base: string | null = null, head: string | null = null, changes = false): Promise<ReturnType<typeof layout> | null> => {
+  /** The options of a picture as the query names them: depth, limit, packages, changes, overlays. */
+  const optionsOf = (url: URL): { depth?: number; limit?: number; packages: boolean; changes: boolean; overlays: Overlay[] } => {
+    const depthText = url.searchParams.get("depth");
+    const limitText = url.searchParams.get("limit");
+    const out: { depth?: number; limit?: number; packages: boolean; changes: boolean; overlays: Overlay[] } = { packages: url.searchParams.get("packages") === "1", changes: url.searchParams.get("changes") === "1", overlays: parseOverlays(url.searchParams.get("overlay")) };
+
+    if (depthText !== null && depthText !== "" && Number.isInteger(Number(depthText)) && Number(depthText) >= 0) out.depth = Number(depthText);
+
+    if (limitText !== null && limitText !== "" && Number.isInteger(Number(limitText)) && Number(limitText) >= 1) out.limit = Number(limitText);
+
+    return out;
+  };
+
+  const placed = async (analysis: Analysis, key: string, depth?: number, packages = false, base: string | null = null, head: string | null = null, changes = false, limit?: number, overlays: readonly Overlay[] = []): Promise<ReturnType<typeof layout> | null> => {
     const view = parseView(key);
 
     if (!view) return null;
+    const viewOptions: { depth?: number; limit?: number; packages: boolean } = { packages };
+
+    if (depth !== undefined) viewOptions.depth = depth;
+
+    if (limit !== undefined) viewOptions.limit = limit;
 
     // `changes`: the review's marks laid over the view, so the structure and what the change did to it are one picture.
     if (changes && view.kind !== "timeline") {
       const result = await review(root, base || options.base, head);
-      const viewOptions = depth === undefined ? { packages } : { depth, packages };
 
-      return layout(overlayDiff(viewOf(analysis, view, viewOptions), result.diff), positionsOf(readLayout(root, key)?.elements ?? null));
+      return layout(applyOverlays(overlayDiff(viewOf(analysis, view, viewOptions), result.diff), analysis, overlays), positionsOf(readLayout(root, key)?.elements ?? null));
     }
 
     // The timeline is built from the commits of a range, not from one analysis.
@@ -175,9 +193,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
       return layout(timelineDiagram(await history(root, from, to), from, to), positionsOf(readLayout(root, key)?.elements ?? null));
     }
 
-    const viewOptions = depth === undefined ? { packages } : { depth, packages };
-
-    return layout(viewOf(analysis, view, viewOptions), positionsOf(readLayout(root, key)?.elements ?? null));
+    return layout(applyOverlays(viewOf(analysis, view, viewOptions), analysis, overlays), positionsOf(readLayout(root, key)?.elements ?? null));
   };
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -344,15 +360,23 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
         case "/api/scene": {
           const key = url.searchParams.get("view") ?? "";
           const analysis = await fresh();
-          const depthText = url.searchParams.get("depth");
-          const diagram = await placed(analysis, key, depthText === null || depthText === "" ? undefined : Number(depthText), url.searchParams.get("packages") === "1", url.searchParams.get("base"), url.searchParams.get("head"), url.searchParams.get("changes") === "1");
+          let picked;
+
+          try {
+            picked = optionsOf(url);
+          } catch (error) {
+            return problem(response, 400, error instanceof Error ? error.message : String(error));
+          }
+
+          const diagram = await placed(analysis, key, picked.depth, picked.packages, url.searchParams.get("base"), url.searchParams.get("head"), picked.changes, picked.limit, picked.overlays);
 
           if (!diagram) return problem(response, 400, "unknown view");
           // The code's picture at the saved places, then the saved drawing's own elements (pencil, notes) on top.
           const generated = (JSON.parse(toExcalidraw(diagram)) as { elements: SceneElement[] }).elements;
           const saved = readLayout(root, key);
+          const mermaid = (url.searchParams.get("mermaid") ?? "auto") as MermaidStyle;
 
-          return json(response, { elements: saved ? mergeScene(saved.elements, generated) : generated, mocks: saved?.mocks ?? [], diagram, markdown: diagramMarkdown(diagram, analysis), drawn: saved !== null });
+          return json(response, { elements: saved ? mergeScene(saved.elements, generated) : generated, mocks: saved?.mocks ?? [], diagram, markdown: diagramMarkdown(diagram, analysis, MERMAID_STYLES.includes(mermaid) ? mermaid : "auto"), drawn: saved !== null });
         }
 
         case "/api/views": {
@@ -402,9 +426,11 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
           if (depth !== undefined && !(Number.isInteger(depth) && depth >= 0)) return problem(response, 400, "depth must be a whole number");
           const analysis = await fresh();
-          const diagram = (await placed(analysis, url.searchParams.get("view") ?? "", depth, url.searchParams.get("packages") === "1", url.searchParams.get("base"), url.searchParams.get("head"), url.searchParams.get("changes") === "1"))!;
+          const picked = optionsOf(url);
+          const diagram = (await placed(analysis, url.searchParams.get("view") ?? "", depth, picked.packages, url.searchParams.get("base"), url.searchParams.get("head"), picked.changes, picked.limit, picked.overlays))!;
+          const mermaid = (url.searchParams.get("mermaid") ?? "auto") as MermaidStyle;
 
-          return json(response, { diagram, markdown: diagramMarkdown(diagram, analysis), drawn: readLayout(root, url.searchParams.get("view") ?? "") !== null });
+          return json(response, { diagram, markdown: diagramMarkdown(diagram, analysis, MERMAID_STYLES.includes(mermaid) ? mermaid : "auto"), drawn: readLayout(root, url.searchParams.get("view") ?? "") !== null });
         }
 
         case "/api/node": {
@@ -553,7 +579,8 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
             const result = await compareBranches(root, url.searchParams.get("base") || null, (url.searchParams.get("heads") ?? "WORKTREE").split(",").filter((head) => head !== ""));
             diagram = result.diagram;
           } else {
-            diagram = await placed(analysis, key, undefined, false, url.searchParams.get("base"), url.searchParams.get("head"), url.searchParams.get("changes") === "1");
+            const picked = optionsOf(url);
+            diagram = await placed(analysis, key, picked.depth, picked.packages, url.searchParams.get("base"), url.searchParams.get("head"), picked.changes, picked.limit, picked.overlays);
 
             if (!diagram) return problem(response, 400, "unknown view");
           }

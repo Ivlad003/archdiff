@@ -76,7 +76,7 @@ function seed(text: string): number {
   return (hash >>> 0) % 2147483647 || 1;
 }
 
-const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00" } as const;
+const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00" } as const;
 
 function base(id: string, type: string, x: number, y: number, width: number, height: number): ExcalidrawElement {
   return { id, type, x, y, width, height, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: seed(id), version: 1, versionNonce: seed(`${id}:v`), isDeleted: false, boundElements: null, updated: 1, link: null, locked: false };
@@ -91,8 +91,8 @@ function text(id: string, container: string | null, x: number, y: number, width:
 function shapeOf(node: DiagramNode): { type: string; fill: string; stroke: string; style: ExcalidrawElement["strokeStyle"]; width: number } {
   const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "class" ? "#4e342e" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
   const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : node.kind === "class" ? "#fff8e1" : "#ffffff";
-  // Heat darkens the fill; a diff mark keeps its own colour.
-  const fill = node.heat !== undefined && node.heat > 0 && !node.diff ? heatColour(node.heat) : plain;
+  // Heat darkens the fill; a diff mark is the stroke, so both show at once.
+  const fill = node.heat !== undefined && node.heat > 0 ? heatColour(node.heat) : plain;
 
   return { type: node.kind === "start" || node.kind === "external" || node.kind === "event" ? "ellipse" : node.kind === "hole" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.kind === "hole" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
 }
@@ -255,7 +255,7 @@ export function toExcalidraw(diagram: Diagram): string {
     const label = node.kind === "class" ? node.label : wrapLabel(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
     const fontSize = node.kind === "layer" ? 15 : node.kind === "cell" ? 10 : node.kind === "class" ? 11 : 12;
     const lines = label.split("\n").length;
-    const dark = node.heat !== undefined && node.heat > 0.55 && !node.diff;
+    const dark = node.heat !== undefined && node.heat > 0.55;
     const classText = node.kind === "class" ? { textAlign: "left", verticalAlign: "top", fontFamily: 3 } : {};
     elements.push({ ...text(`${node.id}:text`, node.id, node.x + 8, node.kind === "class" ? node.y + 8 : node.y + node.h / 2 - (lines * fontSize * 1.25) / 2, node.w - 16, lines * fontSize * 1.25, label, fontSize), ...classText, ...(dark ? { strokeColor: "#ffffff" } : {}), customData: { archdiff: "label" } });
     centre.set(node.id, { x: node.x + node.w / 2, y: node.y + node.h / 2 });

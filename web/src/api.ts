@@ -169,7 +169,8 @@ export const api = {
     return () => source.close();
   },
   flow: (view: string, depth: number | null) => get<FlowResponse>(`/api/flow?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
-  scene: (view: string, depth: number | null, packages: boolean, base: string | null = null, head: string | null = null, changes = false) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}${packages ? "&packages=1" : ""}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}${changes ? "&changes=1" : ""}`),
+  scene: (view: string, options: { depth: number | null; limit: number | null; packages: boolean; changes: boolean; overlays: string[]; mermaid: string; base: string | null; head: string | null }) =>
+    get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${options.depth === null ? "" : `&depth=${options.depth}`}${options.limit === null ? "" : `&limit=${options.limit}`}${options.packages ? "&packages=1" : ""}${options.base ? `&base=${encodeURIComponent(options.base)}` : ""}${options.head ? `&head=${encodeURIComponent(options.head)}` : ""}${options.changes ? "&changes=1" : ""}${options.overlays.length > 0 ? `&overlay=${encodeURIComponent(options.overlays.join(","))}` : ""}${options.mermaid !== "auto" ? `&mermaid=${options.mermaid}` : ""}`),
   saveLayout: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
     const response = await fetch(`/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
     const body = (await response.json()) as { saved: string } | { error: string };
@@ -190,5 +191,5 @@ export const api = {
   },
   coverage: () => get<{ markdown: string; ratio: number; gaps: number; calls: number }>("/api/coverage"),
   review: (base: string | null, head: string | null) => get<ReviewResponse>(`/api/review?${base ? `base=${encodeURIComponent(base)}&` : ""}${head ? `head=${encodeURIComponent(head)}` : ""}`),
-  exportUrl: (view: string, format: string, base: string | null, head: string | null = null, heads: string[] = []) => `/api/export?view=${encodeURIComponent(view)}&format=${format}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}${heads.length > 0 ? `&heads=${encodeURIComponent(heads.join(","))}` : ""}`,
+  exportUrl: (view: string, format: string, base: string | null, head: string | null = null, heads: string[] = [], extra = "") => `/api/export?view=${encodeURIComponent(view)}&format=${format}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}${heads.length > 0 ? `&heads=${encodeURIComponent(heads.join(","))}` : ""}${extra}`,
 };

@@ -107,3 +107,30 @@ test("the editor opens and closes, and the Chat tab reads the task from the draw
   assert.ok((await page!.inputValue("#task")).includes("adds nothing to the code"));
   assert.ok((await page!.textContent("#agent-name"))?.includes("no agent"));
 });
+
+test("the options panel sets the overlays and the fold limit, writes them to the link and remembers them as defaults", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.evaluate("localStorage.clear()");
+  await page!.goto(`${base}/?fresh=2#view=layer%3Alib`);
+  await page!.waitForSelector(".excalidraw canvas");
+  await page!.click("#options-menu summary");
+  await page!.check("#options .overlay[value='storages']");
+  await page!.waitForFunction(`location.hash.includes("overlay=storages")`);
+  // The Markdown of the view names the overlay's finding.
+  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("storages")`);
+  await page!.fill("#limit", "1");
+  await page!.press("#limit", "Enter");
+  await page!.dispatchEvent("#limit", "change");
+  await page!.waitForFunction(`location.hash.includes("limit=1")`);
+  await page!.waitForFunction(`(document.querySelector("#markdown")?.textContent ?? "").includes("…")`);
+  // Remembered: a link without options opens with them, and the hash drops what equals the defaults.
+  await page!.click("#options-default");
+  await page!.goto(`${base}/?fresh=3#view=layer%3Alib`);
+  await page!.waitForSelector(".excalidraw canvas");
+  await page!.waitForFunction(`document.querySelector("#options .overlay[value='storages']").checked && document.querySelector("#limit").value === "1"`);
+  assert.ok(!String(await page!.evaluate("location.hash")).includes("overlay="));
+  // Reset: back to the built-in options, nothing remembered.
+  await page!.click("#options-menu summary");
+  await page!.click("#options-reset");
+  await page!.waitForFunction(`document.querySelector("#limit").value === "" && !document.querySelector("#options .overlay[value='storages']").checked`);
+  assert.equal(await page!.evaluate("localStorage.getItem('archdiff.defaults')"), null);
+});

@@ -709,3 +709,13 @@ test("--mermaid picks a Mermaid type that fits the view", () => {
   assert.ok(archdiff(["diagram", "layer:lib", fixture, "--mermaid", "mindmap"]).stdout.includes("mindmap"));
   assert.equal(archdiff(["diagram", "layers", fixture, "--mermaid", "venn"]).status, 2);
 });
+
+test("--overlay marks untested modules, labels storages and shades by calls in, on any view", () => {
+  const json = JSON.parse(archdiff(["diagram", "layer:lib", fixture, "--overlay", "tests,storages,heat", "--format", "json"]).stdout) as { nodes: { id: string; label: string; diff?: string; heat?: number }[]; reason?: string };
+  const store = json.nodes.find((node) => node.id === "src/db/store.ts")!;
+  assert.ok(store.label.includes("⛁ the file system"), store.label);
+  assert.ok(store.label.includes("no tests") && store.diff === "warning", store.label);
+  assert.ok((store.heat ?? 0) > 0 && store.label.includes("calls in"), store.label);
+  assert.ok(json.reason?.includes("storages") && json.reason.includes("no test"), json.reason);
+  assert.equal(archdiff(["diagram", "layers", fixture, "--overlay", "nope"]).status, 2);
+});

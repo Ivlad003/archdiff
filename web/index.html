@@ -16,9 +16,36 @@
       <span class="spacer"></span>
       <span id="stats" class="muted"></span>
       <span class="spacer"></span>
-      <label title="How far from the subject the picture goes">depth <input id="depth" type="number" min="0" max="12" value="" placeholder="auto" /></label>
-      <label title="Draw the packages and Node built-ins a module imports"><input id="packages" type="checkbox" /> packages</label>
-      <label title="Lay the review's marks (base → head) over this view: what the change touched, in colour"><input id="changes" type="checkbox" /> changes</label>
+      <details id="options-menu">
+        <summary title="Depth, folding, packages, overlays, the Mermaid type: the options of every picture (o)">⚙ options</summary>
+        <div id="options">
+          <label title="How far from the subject the picture goes">depth <input id="depth" type="number" min="0" max="12" value="" placeholder="auto" /></label>
+          <label title="More shapes than this fold by directory into one shape each">fold above <input id="limit" type="number" min="1" max="2000" value="" placeholder="80" /></label>
+          <label title="Draw the packages and Node built-ins a module imports"><input id="packages" type="checkbox" /> packages</label>
+          <fieldset>
+            <legend>overlays</legend>
+            <label title="Lay the review's marks (base → head) over this view: what the change touched, in colour"><input id="changes" type="checkbox" /> changes since base</label>
+            <label title="Mark the modules no test file imports"><input type="checkbox" class="overlay" value="tests" /> untested modules</label>
+            <label title="Label the modules that hold data: stores, databases, caches"><input type="checkbox" class="overlay" value="storages" /> storages</label>
+            <label title="Shade every shape by the calls into it from other modules"><input type="checkbox" class="overlay" value="heat" /> heat: calls in</label>
+          </fieldset>
+          <label title="The Mermaid type of the Markdown and the export">Mermaid
+            <select id="mermaid">
+              <option value="auto">auto (flowchart; sequence, class, gitGraph where they fit)</option>
+              <option value="flowchart">flowchart</option>
+              <option value="c4">C4 context (layers, packages)</option>
+              <option value="quadrant">quadrant chart (hotspots)</option>
+              <option value="pie">pie (modules per lane)</option>
+              <option value="mindmap">mindmap (a directory or layer)</option>
+              <option value="gitgraph">gitGraph (timeline)</option>
+            </select>
+          </label>
+          <div class="row">
+            <button id="options-default" title="Use these options for every view opened without options in its link">remember as defaults</button>
+            <button id="options-reset" title="Back to the built-in options">reset</button>
+          </div>
+        </div>
+      </details>
       <button id="fit" title="Fit the diagram to the window (0)">fit</button>
       <label>base <input id="base" type="text" placeholder="merge-base" size="10" /></label>
       <label>head <input id="head" type="text" placeholder="working tree" size="10" /></label>

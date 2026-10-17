@@ -74,9 +74,12 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
 
     for (const node of nodes) {
       const where = position(node);
-      const mark = node.diff ? ` (${node.diff})` : "";
+      const mark = node.diff && node.diff !== "warning" ? ` (${node.diff})` : "";
       const detail = node.kind === "hole" ? ` — not followed: ${node.reason ?? ""}` : node.signature ? ` \`${node.signature}\`` : node.count !== undefined && node.kind === "layer" ? ` — ${node.count} modules` : "";
-      lines.push(`- **${node.label.replace(/\n.*/s, "")}**${mark}${detail}${where ? ` — ${where}` : ""}`);
+      // The further lines of a label are what the overlays found (no tests, ⛁ a store, N calls in); a class lists its members elsewhere.
+      const [first, ...rest] = node.label.split("\n");
+      const found = node.kind === "class" || rest.length === 0 ? "" : ` — ${rest.join(" · ")}`;
+      lines.push(`- **${first}**${mark}${found}${detail}${where ? ` — ${where}` : ""}`);
     }
 
     lines.push("");

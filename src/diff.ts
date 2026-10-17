@@ -611,7 +611,7 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
     for (const change of [...diff.nodesChanged, ...diff.nodesAdded, ...diff.nodesRemoved]) mark(change.module, head, "changed");
   }
 
-  const glyph: Record<DiffMark, string> = { added: "+", removed: "−", changed: "~" };
+  const glyph: Record<DiffMark, string> = { added: "+", removed: "−", changed: "~", warning: "!" };
   const nodes: DiagramNode[] = [];
   const everyHead = heads.length;
 

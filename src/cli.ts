@@ -14,6 +14,7 @@ import { diagramMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "./export/index.ts";
 import { compareBranches, comparisonMarkdown, defaultBase, history, historyMarkdown, listBranches, mergeBase, overlayDiff, reviewMarkdown, review } from "./diff.ts";
 import { timelineDiagram } from "./views-more.ts";
+import { applyOverlays, parseOverlays } from "./overlays.ts";
 import { serve } from "./server.ts";
 import { layout } from "./diagram.ts";
 import { parseView, viewOf, viewList, type ViewOptions } from "./views.ts";
@@ -36,7 +37,9 @@ Commands:
                      hotspots | packages |
                      timeline [--base --head] | coverage. --mermaid auto|flowchart|c4|quadrant|
                      pie|gitgraph|mindmap picks the Mermaid type (auto: a sequence, class or
-                     gitGraph where the view has one, else a flowchart). --changes lays the review's marks
+                     gitGraph where the view has one, else a flowchart). --overlay tests,storages,heat
+                     marks untested modules, labels the storages, shades by calls in, on any view.
+                     --changes lays the review's marks
                      (--base, --head) over the view: structure and change in one picture. --packages draws the
                      packages a module imports; --limit folds a bigger picture into
                      "… N more" (default 80)
@@ -98,7 +101,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid", "overlay"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -223,8 +226,8 @@ export async function main(argv: readonly string[]): Promise<number> {
           diagram = layout(timelineDiagram(await history(analysis.root, from, to), from, to));
         } else if (flags.has("changes")) {
           const result = await review(analysis.root, typeof flags.get("base") === "string" ? (flags.get("base") as string) : null, typeof flags.get("head") === "string" ? (flags.get("head") as string) : null);
-          diagram = layout(overlayDiff(viewOf(analysis, view, options), result.diff));
-        } else diagram = layout(viewOf(analysis, view, options));
+          diagram = layout(applyOverlays(overlayDiff(viewOf(analysis, view, options), result.diff), analysis, parseOverlays(flags.get("overlay") as string | undefined)));
+        } else diagram = layout(applyOverlays(viewOf(analysis, view, options), analysis, parseOverlays(flags.get("overlay") as string | undefined)));
 
         if (diagram.missing) return fail(`diagram: ${diagram.reason} (archdiff views lists them)`);
         const mermaid = (flags.get("mermaid") ?? "auto") as string;

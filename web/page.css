@@ -303,9 +303,14 @@ body.hide-right #right {
 }
 
 #reason {
+  /* Right of Excalidraw's zoom island, left of its help button. */
   position: absolute;
-  left: 12px;
+  left: 132px;
+  right: 60px;
   bottom: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #legend {
@@ -862,4 +867,69 @@ body.editing #reason {
 
 #chat {
   position: relative;
+}
+
+#options-menu {
+  position: relative;
+}
+
+#options-menu summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  background: var(--panel);
+}
+
+#options-menu[open] summary {
+  border-color: var(--accent);
+}
+
+#options {
+  /* Fixed, placed by the page under its summary: the header clips what overflows it. */
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 320px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+}
+
+#options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#options fieldset {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#options legend {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 4px;
+}
+
+#options select {
+  font: inherit;
+  max-width: 260px;
+}
+
+#options .row {
+  display: flex;
+  gap: 6px;
 }

@@ -9,7 +9,8 @@
 // Entry points: `layout`, `SIZE`, and the types.
 
 /** The marking of a shape in the picture of a diff (`archdiff review`). */
-export type DiffMark = "added" | "removed" | "changed";
+/** `added`, `removed`, `changed`: a review's marks; `warning`: an overlay's finding (a module without tests), orange like `changed` but no diff. */
+export type DiffMark = "added" | "removed" | "changed" | "warning";
 
 /** One shape: what it stands for, its lane, and its box once laid out. */
 export interface DiagramNode {

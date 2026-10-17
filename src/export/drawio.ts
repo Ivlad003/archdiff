@@ -11,7 +11,7 @@ function escape(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\n/g, "&#xa;");
 }
 
-const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00" } as const;
+const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00" } as const;
 
 function style(node: DiagramNode): string {
   const base: Record<DiagramNode["kind"], string> = {
@@ -30,7 +30,7 @@ function style(node: DiagramNode): string {
     class: "rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacingLeft=6;fontFamily=Courier New;fontSize=10;fillColor=#fff8e1;strokeColor=#4e342e;",
   };
   // The heat of a shape darkens its fill (a hotspot's calls in, a matrix cell's count).
-  const heat = node.heat !== undefined && node.heat > 0 && !node.diff ? `fillColor=${heatColour(node.heat)};` : "";
+  const heat = node.heat !== undefined && node.heat > 0 ? `fillColor=${heatColour(node.heat)};` : "";
   const mark = node.diff ? `strokeColor=${DIFF_STROKE[node.diff]};strokeWidth=3;${node.diff === "removed" ? "dashed=1;" : ""}` : "";
 
   return base[node.kind] + heat + mark;

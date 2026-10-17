@@ -9,6 +9,8 @@
 - The extractor records the event name of listeners (`on`, `subscribe`, `addEventListener`…) beside emitters.
 - `--changes` (and the "changes" box on the page) lays the review's marks over any view: structure and change in one picture.
 - `--mermaid c4|quadrant|pie|gitgraph|mindmap` writes the Mermaid type that fits a view; `classes` and `sequence:` have their own; the README says which fits where.
+- Overlays over any view, in any mix: `--overlay tests,storages,heat` marks the modules no test imports, labels the storages and shades every shape by the calls into it; with `--changes` the review's marks lie over the same picture.
+- The page's ⚙ options panel (`o`) sets the depth, the fold limit, the packages, the overlays and the Mermaid type; every option travels in the link, "remember as defaults" keeps them in the browser, "reset" forgets them.
 - docs/media: screenshots of every view and a walkthrough video.
 
 ## 0.1.1 — 2026-10-17

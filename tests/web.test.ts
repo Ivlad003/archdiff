@@ -108,6 +108,14 @@ test("a drawing saved by the editor places the shapes of the live diagram and me
   assert.equal(bad.status, 400);
 });
 
+test("the scene takes the options of the page: limit, overlays, the Mermaid type", async () => {
+  const view = "layer:lib";
+  const scene = await getJson<{ diagram: { nodes: { id: string; label: string; kind: string }[]; reason?: string }; markdown: string }>(`/api/scene?view=${encodeURIComponent(view)}&limit=1&overlay=storages&mermaid=mindmap`);
+  assert.ok(scene.diagram.nodes.some((node) => node.kind === "more"), JSON.stringify(scene.diagram.nodes.map((node) => node.id)));
+  assert.ok(scene.markdown.includes("mindmap"), scene.markdown.slice(0, 300));
+  assert.equal((await fetch(`${base}/api/scene?view=${encodeURIComponent(view)}&overlay=nope`)).status, 400);
+});
+
 test("a foreign Host header and a path out of the page directory are refused", async () => {
   assert.equal(await rawRequest("/api/views", "evil.example"), 421);
   assert.equal(await rawRequest("/api/views", "localhost:1"), 200);
