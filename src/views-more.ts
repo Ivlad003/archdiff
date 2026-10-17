@@ -18,7 +18,7 @@ import type { HistoryRow } from "./diff.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { stronglyConnected } from "./scc.ts";
-import { fnNode, lane, lanesOf, moduleNode, unplaced } from "./views.ts";
+import { fnNode, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 
 /** The runtime imports between modules as adjacency (type-only imports do not run). */
 function moduleAdjacency(graph: Graph): Map<string, Set<string>> {
