@@ -716,7 +716,8 @@ function toggleSplit(force?: boolean): void {
 
   if (on && !frame.src) frame.src = `${location.pathname}?embed=1${location.hash}`;
   element<HTMLButtonElement>("tool-split").classList.toggle("active", on);
-  canvas?.scrollToContent();
+  // The canvas has its new width only after the layout settles: fit then, not now.
+  setTimeout(() => canvas?.scrollToContent(), 200);
 }
 
 /** The page of a tapped line: what it joins and the imports and calls behind it. */
