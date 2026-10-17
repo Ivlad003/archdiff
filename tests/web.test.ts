@@ -223,3 +223,47 @@ test("chat tags are suggested and expanded into context; mocks come from the typ
   assert.deepEqual(body.input, { id: "id-1", total: 1 });
   assert.deepEqual(Object.keys(body.storages), ["src/db/store.ts"]);
 });
+
+test("web without --port takes the next free port when 7080 is taken, and a named port that is taken is an error", async () => {
+  // A blocker on 7080 (or whatever is free from there: the test only needs two servers in a row to pick different ports).
+  const first = spawn(process.execPath, [join(import.meta.dirname, "..", "bin", "archdiff.js"), "web", fixture, "--no-watch"], { stdio: ["ignore", "pipe", "pipe"] });
+  const firstUrl = await new Promise<string>((resolve, reject) => {
+    let text = "";
+    first.stderr!.on("data", (chunk: Buffer) => {
+      text += chunk.toString();
+      const match = text.match(/archdiff web: (http:\/\/[^/]+)\//);
+
+      if (match) resolve(match[1]!);
+    });
+    first.once("exit", (code) => reject(new Error(`exited ${code}: ${text}`)));
+  });
+
+  try {
+    const second = spawn(process.execPath, [join(import.meta.dirname, "..", "bin", "archdiff.js"), "web", fixture, "--no-watch"], { stdio: ["ignore", "pipe", "pipe"] });
+    const secondText = await new Promise<string>((resolve, reject) => {
+      let text = "";
+      second.stderr!.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+
+        if (/archdiff web: http/.test(text)) resolve(text);
+      });
+      second.once("exit", (code) => reject(new Error(`exited ${code}: ${text}`)));
+    });
+    const secondUrl = secondText.match(/archdiff web: (http:\/\/[^/]+)\//)![1]!;
+    assert.notEqual(secondUrl, firstUrl);
+    assert.ok(secondText.includes("was taken"), secondText);
+    second.kill();
+    // The named port of the first server is taken: a plain error, exit 2.
+    const port = Number(new URL(firstUrl).port);
+    const third = spawn(process.execPath, [join(import.meta.dirname, "..", "bin", "archdiff.js"), "web", fixture, "--no-watch", "--port", String(port)], { stdio: ["ignore", "pipe", "pipe"] });
+    const [code, thirdText] = await new Promise<[number | null, string]>((resolve) => {
+      let text = "";
+      third.stderr!.on("data", (chunk: Buffer) => (text += chunk.toString()));
+      third.once("exit", (exitCode) => resolve([exitCode, text]));
+    });
+    assert.equal(code, 2, thirdText);
+    assert.ok(thirdText.includes("EADDRINUSE"), thirdText);
+  } finally {
+    first.kill();
+  }
+});

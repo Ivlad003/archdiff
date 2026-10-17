@@ -80,7 +80,8 @@ Commands:
                      Markdown of a shape, the review against REF. --agent (or "agent" in
                      archdiff.json) lets the Chat tab hand a drawn task to Claude Code or
                      Cursor's CLI, run in this repository; every run starts from a button.
-                     The page reloads when a source file changes (--no-watch: it does not)
+                     The page reloads when a source file changes (--no-watch: it does not).
+                     Without --port: 7080, or the next free port above it when it is taken
   --version          Print the version
 
 Exit codes: 0 ok, 1 differences found (review), 2 wrong invocation or I/O error.
@@ -354,9 +355,9 @@ export async function main(argv: readonly string[]): Promise<number> {
       }
 
       case "web": {
-        const port = flags.has("port") ? Number(flags.get("port")) : 7080;
+        const port = flags.has("port") ? Number(flags.get("port")) : null;
 
-        if (!Number.isInteger(port) || port < 0 || port > 65535) return fail("web: --port must be a port number");
+        if (port !== null && (!Number.isInteger(port) || port < 0 || port > 65535)) return fail("web: --port must be a port number");
         const agentFlag = flags.get("agent");
 
         if (agentFlag === true) return fail("web: --agent needs claude or cursor");

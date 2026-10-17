@@ -22,7 +22,7 @@ The package is `@ivlad003/archdiff` on npm (npm refused the bare name as too clo
 | `archdiff history [dir] [--base REF] [--head REF] [--json]` | The drift commit by commit: modules, functions, imports, layer couplings and packages each commit added or removed | 0 |
 | `archdiff layouts [dir] [--prune]` | The saved drawings; `--prune` deletes those whose view the code no longer has | 0 |
 | `archdiff plan <view> [dir] [--json] [--out FILE]` | The task drawn on the saved drawing of a view: new shapes as modules or functions, arrows as imports or calls, deleted shapes as removals, notes — Markdown for an agent | 0 |
-| `archdiff web [dir] [--port N] [--base REF] [--agent claude\|cursor]` | The page: views on the left, one Excalidraw canvas (reading, and drawing on demand), and the Markdown, code, coverage and data flow of what is picked | 0 |
+| `archdiff web [dir] [--port N] [--base REF] [--agent claude\|cursor]` | The page: views on the left, one Excalidraw canvas (reading, and drawing on demand), and the Markdown, code, coverage and data flow of what is picked; without `--port` it takes 7080 or the next free port above it | 0 |
 
 Exit code `2` is a wrong invocation or an I/O error.
 

@@ -40,7 +40,8 @@ import { isJsonObject, isJsonString, parseJson } from "./json.ts";
 import { parseView, viewList, viewOf, type ViewOptions } from "./views.ts";
 
 export interface ServeOptions {
-  port: number;
+  /** The port to bind; null: the first free port from DEFAULT_PORT up. */
+  port: number | null;
   host: string;
   /** The base ref of the review panel; null: the merge-base with the main branch. */
   base: string | null;
@@ -110,6 +111,12 @@ function readBody(request: IncomingMessage, limit: number): Promise<string | nul
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 const STATIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".map": "application/json", ".woff2": "font/woff2", ".ttf": "font/ttf", ".svg": "image/svg+xml", ".png": "image/png" };
+
+/** Where `web` listens when no --port is given: this port, or the next free one above it when it is taken. */
+export const DEFAULT_PORT = 7080;
+
+/** How many ports above DEFAULT_PORT are tried before giving up. */
+const PORT_TRIES = 50;
 
 export async function serve(root: string, options: ServeOptions): Promise<void> {
   const web = await webDirectory();
@@ -638,13 +645,37 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     });
   });
 
-  await new Promise<void>((resolveStarted, reject) => {
-    server.once("error", reject);
-    server.listen(options.port, options.host, () => resolveStarted());
-  });
+  // A named port is binding: taken means an error. Without one, the default port or the next free one above it, so
+  // a second archdiff (or a page left running) does not stop this one.
+  const listen = (port: number): Promise<void> =>
+    new Promise<void>((resolveStarted, reject) => {
+      const onError = (error: Error): void => reject(error);
+      server.once("error", onError);
+      server.listen(port, options.host, () => {
+        server.off("error", onError);
+        resolveStarted();
+      });
+    });
+
+  if (options.port !== null) await listen(options.port);
+  else {
+    let bound = false;
+
+    for (let port = DEFAULT_PORT; port < DEFAULT_PORT + PORT_TRIES && !bound; port++) {
+      try {
+        await listen(port);
+        bound = true;
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "EADDRINUSE")) throw error;
+      }
+    }
+
+    if (!bound) throw new Error(`no free port between ${DEFAULT_PORT} and ${DEFAULT_PORT + PORT_TRIES - 1}; --port names one`);
+  }
+
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : options.port;
-  process.stderr.write(`archdiff web: http://${options.host}:${port}/  (${root})\n`);
+  process.stderr.write(`archdiff web: http://${options.host}:${port}/  (${root})${options.port === null && port !== DEFAULT_PORT ? `  (port ${DEFAULT_PORT} was taken)` : ""}\n`);
 
   // Runs until the process is stopped.
   await new Promise<void>((resolveStopped) => {

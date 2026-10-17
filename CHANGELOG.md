@@ -1,7 +1,10 @@
 # Changelog
 
-## 0.2.0 — 2026-10-17
+## 0.3.0 — 2026-10-17
 
+(0.2.0 was committed but never published; its changes are here.)
+
+- `web` without `--port` takes 7080 or the next free port above it, and says so; a named port that is taken is an error, as before.
 - Eleven views that each answer one architectural question: `classes` (the class diagram, Mermaid classDiagram), `cycles`/`cycle:`, `matrix`, `type:`, `path:`, `contract:`, `events`, `tests`, `hotspots`, `packages`, `timeline`.
 - Branches: a branch bar with the base (develop, main or master by default) and any number of heads; `compare` draws several heads against one base, every module labelled with what each head did; `archdiff branches` and `archdiff compare --heads a,b,WORKTREE` in the terminal.
 - Flow: mocks generated from the types or by the agent from a description; ▶ play lights the steps on the diagram.
