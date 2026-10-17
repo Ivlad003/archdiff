@@ -1,0 +1,56 @@
+{
+  "exclude": [
+    "tests/fixtures/**"
+  ],
+  "layers": {
+    "bin": [
+      "bin/**"
+    ],
+    "cli": [
+      "src/cli.ts"
+    ],
+    "server": [
+      "src/server.ts",
+      "src/routes/**"
+    ],
+    "page": [
+      "web/**"
+    ],
+    "views": [
+      "src/views.ts",
+      "src/views-more.ts",
+      "src/intent-view.ts",
+      "src/nodes.ts",
+      "src/shape.ts",
+      "src/overlays.ts",
+      "src/diff.ts",
+      "src/flow.ts",
+      "src/plan.ts",
+      "src/coverage.ts",
+      "src/spec.ts",
+      "src/scaffold.ts"
+    ],
+    "exports": [
+      "src/export/**",
+      "src/markdown.ts"
+    ],
+    "diagram": [
+      "src/diagram.ts",
+      "src/scene.ts",
+      "src/layouts.ts"
+    ],
+    "extract": [
+      "src/extract/**",
+      "src/languages.ts"
+    ],
+    "core": [
+      "src/*.ts"
+    ],
+    "tests": [
+      "tests/**"
+    ],
+    "scripts": [
+      "scripts/**"
+    ]
+  }
+}

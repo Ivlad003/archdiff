@@ -16,7 +16,8 @@
 import type { Analysis } from "./analyze.ts";
 import { SIZE, type Diagram, type DiagramEdge, type DiagramGroup, type DiagramNode } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
-import { INTENT_FILE, intentView } from "./intent.ts";
+import { INTENT_FILE } from "./intent.ts";
+import { intentView } from "./intent-view.ts";
 import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
 import { classesView, contractView, cyclesView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
