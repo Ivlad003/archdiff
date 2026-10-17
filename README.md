@@ -3,9 +3,11 @@
 Live diagrams of a TypeScript, JavaScript, Python, Rust or PHP repository, computed from the code: the layers and the imports between them, every module with what it imports and what imports it, the call tree from every entry point, the map of what the analysis cannot see, and the architectural diff of a change for reviewing pull requests. Algorithmic (tree-sitter and graph algorithms, no model), fast (a fact cache keyed by file content, parallel parsing), one npm package.
 
 ```bash
-npx archdiff web            # the diagrams of the current repository in a browser
-npx archdiff review         # the architectural diff against the main branch, as Markdown + Mermaid
+npx @ivlad003/archdiff web      # the diagrams of the current repository in a browser
+npx @ivlad003/archdiff review   # the architectural diff against the main branch, as Markdown + Mermaid
 ```
+
+The package is `@ivlad003/archdiff` on npm (npm refused the bare name as too close to `arr-diff`); the command it installs is `archdiff`, so after `npm i -g @ivlad003/archdiff` every example below reads as written.
 
 ## Commands
 

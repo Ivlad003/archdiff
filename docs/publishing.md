@@ -5,7 +5,7 @@ The package publishes from a git tag through `.github/workflows/release.yml`; th
 ## Once
 
 1. On npm, create an automation token (Access Tokens → Generate → Automation) and add it to the repository as the `NPM_TOKEN` secret — or set up trusted publishing for `Ivlad003/archdiff` and the `release.yml` workflow on the package's settings page, and drop the `NODE_AUTH_TOKEN` line.
-2. The name `archdiff` is free on npm (checked 2026-10-15); the first publish claims it.
+2. The package is `@ivlad003/archdiff`: npm refused the bare `archdiff` as too similar to `arr-diff` (2026-10-17). The scope must be the npm account's own or an organisation it owns; a 403/404 on the scope means the organisation `ivlad003` does not exist yet (create it on npm, free for public packages) or the account's scope is another one.
 
 ## Every release
 
@@ -35,6 +35,6 @@ npm publish --access public      # runs prepack: tsc, the grammars, the page bun
 ## After
 
 ```bash
-npx archdiff@latest --version
-npx archdiff@latest web .
+npx @ivlad003/archdiff@latest --version
+npx @ivlad003/archdiff@latest web .
 ```

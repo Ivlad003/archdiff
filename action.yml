@@ -37,7 +37,7 @@ runs:
       run: |
         set +e
         base="${BASE_INPUT:-$PR_BASE}"
-        if [ -n "$base" ]; then npx --yes archdiff review --base "$base" > archdiff-review.md; else npx --yes archdiff review > archdiff-review.md; fi
+        if [ -n "$base" ]; then npx --yes @ivlad003/archdiff review --base "$base" > archdiff-review.md; else npx --yes @ivlad003/archdiff review > archdiff-review.md; fi
         code=$?
         echo "code=$code" >> "$GITHUB_OUTPUT"
         cat archdiff-review.md >> "$GITHUB_STEP_SUMMARY"

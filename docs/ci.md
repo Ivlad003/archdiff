@@ -32,8 +32,8 @@ jobs:
 ## Any CI
 
 ```bash
-npx archdiff review --base origin/main --out archdiff-review.md   # 0 ok, 1 new layer coupling, 2 error
-npx archdiff history --base origin/main --head HEAD              # the drift commit by commit
+npx @ivlad003/archdiff review --base origin/main --out archdiff-review.md   # 0 ok, 1 new layer coupling, 2 error
+npx @ivlad003/archdiff history --base origin/main --head HEAD              # the drift commit by commit
 ```
 
 Persist `.archdiff/facts.json.gz` between runs (a cache keyed by the lockfile is enough) and the review is sub-second after the first run.

@@ -1,5 +1,5 @@
 {
-  "name": "archdiff",
+  "name": "@ivlad003/archdiff",
   "version": "0.1.0",
   "description": "Live diagrams of a TypeScript/JavaScript repository: structure, dependencies, call flows, and the architectural diff of a pull request \u2014 algorithmic, fast, no model",
   "license": "Apache-2.0",
