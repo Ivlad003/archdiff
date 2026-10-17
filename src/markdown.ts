@@ -20,19 +20,23 @@ function position(node: DiagramNode): string {
 
 /** The page of a diagram: title, Mermaid, the shapes by lane. */
 export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: MermaidStyle = "auto"): string {
-  const lines = [`<!-- archdiff:generated — view ${diagram.view} -->`, `# ${diagram.title}`, ""];
+  const lines = [`<!-- archdiff:generated — view ${diagram.view}${diagram.stamp ? ` — commit ${diagram.stamp.commit} (${diagram.stamp.date})` : ""} -->`, `# ${diagram.title}`, ""];
+
+  if (diagram.question) lines.push(`_${diagram.question[0]!.toUpperCase()}${diagram.question.slice(1)}._`, "");
 
   if (diagram.reason) lines.push(`_${diagram.reason}_`, "");
   lines.push(`${diagram.nodes.length} shapes, ${diagram.edges.length} lines; ${analysis.files.length} files analysed.`, "", "```mermaid", toMermaid(diagram, mermaid).trimEnd(), "```", "");
 
   // The matrix reads as a table: rows import columns.
-  if (diagram.view === "matrix") {
-    const layers = diagram.nodes.filter((node) => node.id.startsWith("row:")).map((node) => node.id.slice(4));
+  if (diagram.view === "matrix" || diagram.view.startsWith("matrix:")) {
+    const rows = diagram.nodes.filter((node) => node.id.startsWith("row:"));
+    const ids = rows.map((node) => node.id.slice(4));
+    const name = new Map(rows.map((node) => [node.id.slice(4), node.label]));
     const cell = new Map(diagram.nodes.filter((node) => node.id.startsWith("cell:")).map((node) => [node.id.slice(5), node]));
-    lines.push(`| imports → | ${layers.join(" | ")} |`, `| --- | ${layers.map(() => "---").join(" | ")} |`);
+    lines.push(`| imports → | ${ids.map((id) => name.get(id)).join(" | ")} |`, `| --- | ${ids.map(() => "---").join(" | ")} |`);
 
-    for (const from of layers) lines.push(`| **${from}** | ${layers.map((to) => (from === to ? "·" : cell.get(`${from}>${to}`)?.diff === "removed" ? `**${cell.get(`${from}>${to}`)!.label}** ⚠` : cell.get(`${from}>${to}`)?.label || "")).join(" | ")} |`);
-    lines.push("", "A cell in bold with ⚠ is an import against the layer order (a lower layer importing a higher one).");
+    for (const from of ids) lines.push(`| **${name.get(from)}** | ${ids.map((to) => (from === to ? "·" : cell.get(`${from}>${to}`)?.diff === "removed" ? `**${cell.get(`${from}>${to}`)!.label}** ⚠` : cell.get(`${from}>${to}`)?.label || "")).join(" | ")} |`);
+    lines.push("", diagram.view === "matrix" ? "A cell in bold with ⚠ is an import against the layer order (a lower layer importing a higher one)." : "A cell in bold with ⚠ is an import against the order of the rows (a module importing one placed above it).");
 
     return `${lines.join("\n").trimEnd()}\n`;
   }
@@ -60,7 +64,7 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
   if (diagram.sequence) {
     lines.push("## Messages", "");
 
-    for (const [i, message] of diagram.sequence.messages.entries()) lines.push(`${i + 1}. \`${message.from}\` → \`${message.to}\`: **${message.label}()** — ${message.from}:${message.line}`);
+    for (const [i, message] of diagram.sequence.messages.entries()) lines.push(`${i + 1}. \`${message.from}\` → \`${message.to}\`: **${message.label}()**${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""} — ${message.from}:${message.line}`);
     lines.push("", "## Participants", "", ...diagram.sequence.participants.map((module) => `- ${module}`), "");
 
     return `${lines.join("\n").trimEnd()}\n`;

@@ -55,7 +55,7 @@ test("the layers diagram follows tsconfig paths and counts the imports between l
 test("a calls view draws the call tree from an entry point in lanes, as Markdown with Mermaid", () => {
   const { status, stdout } = archdiff(["diagram", "calls:src/lib/orders.ts#placeOrder", fixture]);
   assert.equal(status, 0);
-  assert.ok(stdout.startsWith("<!-- archdiff:generated — view calls:src/lib/orders.ts#placeOrder -->\n# Calls from placeOrder\n"));
+  assert.match(stdout, /^<!-- archdiff:generated — view calls:src\/lib\/orders\.ts#placeOrder — commit [0-9a-f]+ \(\d{4}-\d\d-\d\d\) -->\n# Calls from placeOrder\n/);
   assert.ok(stdout.includes('subgraph "lib"'));
   assert.ok(stdout.includes("src_lib_orders_ts_placeOrder ==> src_db_store_ts_saveOrder"), stdout);
   assert.ok(stdout.includes("src_lib_orders_ts_placeOrder ==> src_lib_orders_ts_validate"), stdout);
@@ -708,6 +708,22 @@ test("--mermaid picks a Mermaid type that fits the view", () => {
   assert.ok(archdiff(["diagram", "layers", fixture, "--format", "mermaid", "--mermaid", "pie"]).stdout.includes('"lib" : 2'));
   assert.ok(archdiff(["diagram", "layer:lib", fixture, "--mermaid", "mindmap"]).stdout.includes("mindmap"));
   assert.equal(archdiff(["diagram", "layers", fixture, "--mermaid", "venn"]).status, 2);
+});
+
+test("matrix:<dir> is the dependency structure matrix of a directory's modules; --weight leaves light lines out", () => {
+  const matrix = archdiff(["diagram", "matrix:src", fixture]).stdout;
+  assert.ok(matrix.includes("# Matrix of src: rows import columns"), matrix.slice(0, 200));
+  assert.ok(matrix.includes("| **lib/orders.ts** |") && matrix.includes("| imports → |"), matrix);
+  assert.equal(archdiff(["diagram", "matrix:nowhere", fixture]).status, 2);
+  const light = JSON.parse(archdiff(["diagram", "layers", fixture, "--weight", "5", "--format", "json"]).stdout) as { edges: unknown[]; reason?: string; question?: string; stamp?: { commit: string; date: string } };
+  assert.equal(light.edges.length, 0);
+  assert.ok(light.reason?.includes("lighter than 5 left out"), light.reason);
+  assert.ok(light.question?.includes("which layers import which"), light.question);
+  assert.match(light.stamp?.commit ?? "", /^[0-9a-f]{7,}$/);
+  assert.equal(archdiff(["diagram", "layers", fixture, "--weight", "0"]).status, 2);
+  // Every export names the commit it was drawn from.
+  assert.ok(archdiff(["diagram", "layers", fixture, "--format", "mermaid"]).stdout.includes("%% commit "));
+  assert.ok(archdiff(["diagram", "layers", fixture, "--format", "drawio"]).stdout.includes('agent="archdiff commit '));
 });
 
 test("--overlay marks untested modules, labels storages and shades by calls in, on any view", () => {

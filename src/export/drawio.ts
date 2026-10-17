@@ -93,5 +93,5 @@ export function toDrawio(diagram: Diagram): string {
     );
   }
 
-  return `<mxfile host="archdiff" type="device"><diagram name="${escape(diagram.title)}" id="archdiff-${escape(diagram.view)}"><mxGraphModel archdiff_view="${escape(diagram.view)}" grid="1" gridSize="10" page="1" pageWidth="1654" pageHeight="1169"><root>${cells.join("")}</root></mxGraphModel></diagram></mxfile>\n`;
+  return `<mxfile host="archdiff" type="device"${diagram.stamp ? ` agent="archdiff commit ${escape(diagram.stamp.commit)}" modified="${escape(diagram.stamp.date)}"` : ""}><diagram name="${escape(diagram.title)}" id="archdiff-${escape(diagram.view)}"><mxGraphModel archdiff_view="${escape(diagram.view)}" grid="1" gridSize="10" page="1" pageWidth="1654" pageHeight="1169"><root>${cells.join("")}</root></mxGraphModel></diagram></mxfile>\n`;
 }

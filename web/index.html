@@ -20,7 +20,17 @@
         <summary title="Depth, folding, packages, overlays, the Mermaid type: the options of every picture (o)">⚙ options</summary>
         <div id="options">
           <label title="How far from the subject the picture goes">depth <input id="depth" type="number" min="0" max="12" value="" placeholder="auto" /></label>
-          <label title="More shapes than this fold by directory into one shape each">fold above <input id="limit" type="number" min="1" max="2000" value="" placeholder="80" /></label>
+          <label title="Who is reading: sets the options below at once">preset
+            <select id="preset">
+              <option value="">—</option>
+              <option value="reviewer">reviewer: changes since base, untested modules</option>
+              <option value="newcomer">newcomer: depth 1, fold above 30, hubs as badges</option>
+              <option value="architect">architect: heat, lines of weight 2+, fold above 60</option>
+            </select>
+          </label>
+          <label title="More shapes than this fold by directory into one shape each">fold above <input id="limit" type="number" min="1" max="2000" value="" placeholder="40" /></label>
+          <label title="Lines standing for fewer imports or calls than this are left out; the Markdown keeps them">lines of weight ≥ <input id="weight" type="number" min="1" max="999" value="" placeholder="1" /></label>
+          <label title="A module most of the picture imports (a logger, the types) becomes a badge on its importers instead of a tangle of lines"><input id="hubs" type="checkbox" checked /> hubs as badges</label>
           <label title="Draw the packages and Node built-ins a module imports"><input id="packages" type="checkbox" /> packages</label>
           <fieldset>
             <legend>overlays</legend>
@@ -102,6 +112,7 @@
           <span><i class="sw external"></i>package</span>
           <span><i class="sw hole"></i>not followed</span>
           <span><i class="sw more"></i>… more</span>
+          <span title="A grey line: the left imports the right. A blue line: the left calls the right. Dashed blue: passed as a value.">A → B: A imports B · blue: A calls B</span>
           <span><i class="sw added"></i>added</span>
           <span><i class="sw removed"></i>removed</span>
           <span><i class="sw changed"></i>changed</span>

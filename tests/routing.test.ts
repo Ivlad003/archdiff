@@ -11,7 +11,7 @@ import { analyze } from "../src/analyze.ts";
 import type { Diagram, DiagramNode } from "../src/diagram.ts";
 import { layout } from "../src/diagram.ts";
 import { routeEdges } from "../src/export/excalidraw.ts";
-import { parseView, viewList, viewOf } from "../src/views.ts";
+import { hubsAsBadges, parseView, viewList, viewOf } from "../src/views.ts";
 
 const fixture = join(import.meta.dirname, "fixtures", "sample");
 
@@ -89,4 +89,56 @@ test("no route of any view of the sample fixture runs through a shape", async ()
     const placed = layout(viewOf(analysis, view));
     assert.deepEqual(crossings(placed), [], key);
   }
+});
+
+/** How many times the routes of two different lines cross (segment pairs that intersect). */
+function crossingsOf(diagram: Diagram): number {
+  const orient = (p: { x: number; y: number }, q: { x: number; y: number }, r: { x: number; y: number }): number => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+  const routes = [...routeEdges(diagram).values()];
+  let n = 0;
+
+  for (let i = 0; i < routes.length; i++) {
+    for (let j = i + 1; j < routes.length; j++) {
+      for (let p = 1; p < routes[i]!.length; p++) {
+        for (let q = 1; q < routes[j]!.length; q++) {
+          const [a, b, c, d] = [routes[i]![p - 1]!, routes[i]![p]!, routes[j]![q - 1]!, routes[j]![q]!];
+          const marks = [orient(a, b, c), orient(a, b, d), orient(c, d, a), orient(c, d, b)];
+
+          if (marks.every((mark) => mark !== 0) && marks[0] !== marks[1] && marks[2] !== marks[3]) n++;
+        }
+      }
+    }
+  }
+
+  return n;
+}
+
+test("crossings of the fixture's views stay at or under their baseline (ordering and routing together)", async () => {
+  const analysis = await analyze(fixture, { cache: false });
+  // Counted on 2026-10-17; a change that adds crossings must raise these on purpose, with a reason.
+  const baseline: Record<string, number> = { layers: 0, "layer:lib": 2, "dir:src/lib": 2, "inside:src/lib/orders.ts": 4, "calls:src/routes/checkout.tsx#action": 2 };
+
+  for (const [key, allowed] of Object.entries(baseline)) {
+    const view = parseView(key);
+    assert.ok(view, key);
+    const count = crossingsOf(layout(viewOf(analysis, view)));
+    assert.ok(count <= allowed, `${key}: ${count} crossings, baseline ${allowed}`);
+  }
+});
+
+test("a module most of a picture imports becomes a badge on its importers, not a tangle of lines", () => {
+  const modules = ["a", "b", "c", "d", "e", "f", "g", "h", "log"];
+  const nodes: DiagramNode[] = modules.map((id) => ({ id, kind: "module", label: id, x: 0, y: 0, w: 0, h: 0 }));
+  const edges = modules.filter((id) => id !== "log" && id !== "h").map((id) => ({ from: id, to: "log", kind: "dependency" as const }));
+  edges.push({ from: "a", to: "b", kind: "dependency" });
+  const diagram: Diagram = { view: "layer:x", title: "x", nodes, edges, groups: [] };
+  const slim = hubsAsBadges(diagram, null);
+  assert.ok(!slim.nodes.some((node) => node.id === "log"), "the hub stayed");
+  assert.equal(slim.edges.length, 1);
+  assert.ok(slim.nodes.find((node) => node.id === "a")!.label.includes("+ log"));
+  assert.ok(!slim.nodes.find((node) => node.id === "h")!.label.includes("+ log"));
+  assert.ok(slim.reason?.includes("log (imported by 7 of 9)"), slim.reason);
+  // The view's own subject is never a hub; a small picture keeps every line.
+  assert.equal(hubsAsBadges(diagram, "log").nodes.length, 9);
+  assert.equal(hubsAsBadges({ ...diagram, nodes: nodes.slice(0, 5) }, null).nodes.length, 5);
 });

@@ -124,6 +124,10 @@ test("the scene takes the options of the page: limit, overlays, the Mermaid type
   assert.ok(scene.diagram.nodes.some((node) => node.kind === "more"), JSON.stringify(scene.diagram.nodes.map((node) => node.id)));
   assert.ok(scene.markdown.includes("mindmap"), scene.markdown.slice(0, 300));
   assert.equal((await fetch(`${base}/api/scene?view=${encodeURIComponent(view)}&overlay=nope`)).status, 400);
+  const light = await getJson<{ diagram: { edges: unknown[]; reason?: string; stamp?: { commit: string } } }>(`/api/scene?view=layers&weight=9&hubs=0`);
+  assert.equal(light.diagram.edges.length, 0);
+  // The server runs on a scratch copy outside git here, so the stamp is absent rather than wrong.
+  assert.equal(light.diagram.stamp, undefined);
 });
 
 test("a foreign Host header and a path out of the page directory are refused", async () => {

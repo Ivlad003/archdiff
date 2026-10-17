@@ -89,6 +89,10 @@ export interface Diagram {
   groups: DiagramGroup[];
   /** Why the diagram is empty or cut short. */
   reason?: string;
+  /** The one question the picture answers, for the page and the Markdown ("which modules of the layer import which"). */
+  question?: string;
+  /** The revision the picture was drawn from: the short commit and its date; exports carry it so a file says what it shows. */
+  stamp?: { commit: string; date: string };
   /** The subject of the view does not exist (no such module, function, layer or directory): the reason says which. */
   missing?: true;
   /** `down`: a stack, one shape per row (the layers view); else ranks as columns from the left. */
@@ -96,7 +100,7 @@ export interface Diagram {
   /** The shapes have their places already (a sequence view): `layout` keeps them, exports draw the routes given. */
   placed?: true;
   /** A sequence view: the Mermaid export is a sequenceDiagram and the Markdown lists the messages in order. */
-  sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number }[] };
+  sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number; times?: number }[] };
   /** A class view: the Mermaid export is a classDiagram. */
   classes?: { boxes: { id: string; name: string; kind: "class" | "interface" | "type"; fields: string[]; methods: string[] }[]; relations: { from: string; to: string; kind: "extends" | "implements" }[] };
 }
@@ -217,18 +221,24 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
   const slot = new Map<string, number>();
   const count = new Map<string, number>();
 
-  // Rank by rank: sort each rank's shapes by lane, the mean place of their
-  // predecessors (barycentre, to reduce crossings), then diagram order, and
-  // give each its slot in its (lane, rank) cell.
-  for (const r of [...byRank.keys()].sort((a, b) => a - b)) {
-    const pull = (node: DiagramNode): number => {
-      const known = (preds.get(node.id) ?? []).map((id) => ordinal.get(id)).filter((value): value is number => value !== undefined);
+  const succs = new Map<string, string[]>();
 
-      return known.length === 0 ? Infinity : known.reduce((sum, value) => sum + value, 0) / known.length;
+  for (const [from, list] of out) for (const to of list) if (forward.has(`${from}\u0000${to}`)) succs.set(from, [...(succs.get(from) ?? []), to]);
+
+  // One pass over a rank: sort its shapes by lane, the mean place of their neighbours on the side given (barycentre,
+  // to reduce crossings; a shape without neighbours keeps its place), then diagram order, and give each its slot in
+  // its (lane, rank) cell.
+  const place = (r: number, neighbours: Map<string, string[]>): void => {
+    const pull = (node: DiagramNode): number => {
+      const known = (neighbours.get(node.id) ?? []).map((id) => ordinal.get(id)).filter((value): value is number => value !== undefined);
+
+      return known.length === 0 ? (ordinal.get(node.id) ?? Infinity) : known.reduce((sum, value) => sum + value, 0) / known.length;
     };
 
     const keys = new Map(byRank.get(r)!.map((node) => [node.id, pull(node)]));
     const sorted = [...byRank.get(r)!].sort((a, b) => laneOf(a) - laneOf(b) || keys.get(a.id)! - keys.get(b.id)! || index.get(a.id)! - index.get(b.id)!);
+
+    for (const node of byRank.get(r)!) count.delete(`${laneOf(node)}:${r}`);
 
     for (const node of sorted) {
       const key = `${laneOf(node)}:${r}`;
@@ -237,6 +247,18 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
       slot.set(node.id, n);
       ordinal.set(node.id, laneOf(node) * 100000 + n);
     }
+  };
+
+  // Rank by rank from the left, then two sweeps back (by successors) and forth (by predecessors): the usual layered
+  // ordering, which settles most crossings a single pass leaves.
+  const ranks = [...byRank.keys()].sort((a, b) => a - b);
+
+  for (const r of ranks) place(r, preds);
+
+  for (let sweep = 0; sweep < 2; sweep++) {
+    for (const r of [...ranks].reverse()) place(r, succs);
+
+    for (const r of ranks) place(r, preds);
   }
 
   // A lane's rank with many shapes wraps into columns of at most MAX_ROWS (filled top to bottom, then

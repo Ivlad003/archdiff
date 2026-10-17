@@ -58,18 +58,23 @@ function shape(node: DiagramNode, id: string): string {
   }
 }
 
+/** The revision line of an export, when the diagram carries one. */
+function stampLines(diagram: Diagram): string[] {
+  return diagram.stamp ? [`%% commit ${diagram.stamp.commit} (${diagram.stamp.date})`] : [];
+}
+
 /** A sequence view as Mermaid's own sequenceDiagram: participants in order, one message per call. */
 function sequenceMermaid(diagram: Diagram): string {
   const sequence = diagram.sequence!;
   const ids = new Map(sequence.participants.map((module, i) => [module, `P${i}`]));
-  const lines = [`%% archdiff:generated — view ${diagram.view}`];
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram)];
 
   if (diagram.reason) lines.push(`%% ${diagram.reason}`);
   lines.push("sequenceDiagram");
 
   for (const module of sequence.participants) lines.push(`  participant ${ids.get(module)} as ${module.replace(/[:;]/g, " ")}`);
 
-  for (const [i, message] of sequence.messages.entries()) lines.push(`  ${ids.get(message.from)}->>${ids.get(message.to)}: ${i + 1}. ${message.label}()`);
+  for (const [i, message] of sequence.messages.entries()) lines.push(`  ${ids.get(message.from)}->>${ids.get(message.to)}: ${i + 1}. ${message.label}()${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`);
 
   return `${lines.join("\n")}\n`;
 }
@@ -78,7 +83,7 @@ function sequenceMermaid(diagram: Diagram): string {
 function classMermaid(diagram: Diagram): string {
   const classes = diagram.classes!;
   const ids = mermaidIds(diagram.nodes);
-  const lines = [`%% archdiff:generated — view ${diagram.view}`];
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram)];
 
   if (diagram.reason) lines.push(`%% ${diagram.reason}`);
   lines.push("classDiagram");
@@ -112,7 +117,7 @@ export type MermaidStyle = (typeof MERMAID_STYLES)[number];
 
 function c4Mermaid(diagram: Diagram): string {
   const ids = mermaidIds(diagram.nodes);
-  const lines = [`%% archdiff:generated — view ${diagram.view}`, "C4Context", `  title ${diagram.title.replace(/\n/g, " ")}`];
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "C4Context", `  title ${diagram.title.replace(/\n/g, " ")}`];
   const byGroup = new Map<string | undefined, DiagramNode[]>();
 
   for (const node of diagram.nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);
@@ -147,7 +152,7 @@ function c4Mermaid(diagram: Diagram): string {
 
 /** Hotspots as a quadrant chart: lines across, calls in up; the big and called sit top right. */
 function quadrantMermaid(diagram: Diagram): string {
-  const lines = [`%% archdiff:generated — view ${diagram.view}`, "quadrantChart", `  title ${diagram.title.replace(/\n/g, " ")}`, "  x-axis small --> large", "  y-axis few calls in --> many calls in", "  quadrant-1 big and central", "  quadrant-2 small but central", "  quadrant-3 small and quiet", "  quadrant-4 big but quiet"];
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "quadrantChart", `  title ${diagram.title.replace(/\n/g, " ")}`, "  x-axis small --> large", "  y-axis few calls in --> many calls in", "  quadrant-1 big and central", "  quadrant-2 small but central", "  quadrant-3 small and quiet", "  quadrant-4 big but quiet"];
   const sizes = diagram.nodes.map((node) => node.w);
   const maxSize = Math.max(1, ...sizes);
   const minSize = Math.min(...sizes, maxSize);
@@ -163,7 +168,7 @@ function quadrantMermaid(diagram: Diagram): string {
 
 /** The layers (or any lanes) as a pie of their module counts. */
 function pieMermaid(diagram: Diagram): string {
-  const lines = [`%% archdiff:generated — view ${diagram.view}`, "pie showData", `  title ${diagram.title.replace(/\n/g, " ")}`];
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "pie showData", `  title ${diagram.title.replace(/\n/g, " ")}`];
   const counted = diagram.nodes.filter((node) => node.count !== undefined);
 
   for (const node of counted.length > 0 ? counted : diagram.nodes) lines.push(`  "${node.label.split("\n")[0]!.replace(/"/g, "'")}" : ${node.count ?? 1}`);
@@ -173,7 +178,7 @@ function pieMermaid(diagram: Diagram): string {
 
 /** The timeline as a gitGraph: one commit per bar, tagged with the couplings it added or removed. */
 function gitgraphMermaid(diagram: Diagram): string {
-  const lines = [`%% archdiff:generated — view ${diagram.view}`, "gitGraph"];
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "gitGraph"];
 
   for (const node of diagram.nodes.filter((candidate) => candidate.id.startsWith("commit:"))) {
     const [head, subject] = node.label.split("\n");
@@ -187,7 +192,7 @@ function gitgraphMermaid(diagram: Diagram): string {
 
 /** The shapes as a mindmap under their lanes: a directory or layer tree at a glance. */
 function mindmapMermaid(diagram: Diagram): string {
-  const lines = [`%% archdiff:generated — view ${diagram.view}`, "mindmap", `  root((${diagram.title.split("\n")[0]!.replace(/[()]/g, "")}))`];
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "mindmap", `  root((${diagram.title.split("\n")[0]!.replace(/[()]/g, "")}))`];
   const byGroup = new Map<string | undefined, DiagramNode[]>();
 
   for (const node of diagram.nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);
@@ -226,7 +231,7 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
 
   if (chosen === "mindmap") return mindmapMermaid(diagram);
   const ids = mermaidIds(diagram.nodes);
-  const lines = [`%% archdiff:generated — view ${diagram.view}`];
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram)];
 
   if (diagram.reason) lines.push(`%% ${diagram.reason}`);
   lines.push(`flowchart ${diagram.direction === "down" ? "TB" : "LR"}`);

@@ -83,7 +83,12 @@ function layerOrder(graph: Graph): string[] {
     if (from && to && from !== to && !dep.typeOnly) counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
   }
 
-  const remaining = new Set(graph.layers);
+  return greedyOrder(graph.layers, counts);
+}
+
+/** The same greedy order over any items with `counts` of imports between them (keyed `from\u0000to`). */
+function greedyOrder(items: readonly string[], counts: ReadonlyMap<string, number>): string[] {
+  const remaining = new Set(items);
   const order: string[] = [];
 
   while (remaining.size > 0) {
@@ -121,27 +126,57 @@ function layerOrder(graph: Graph): string[] {
  * go against the order (a lower layer importing a higher one) and are marked
  * red. Placed, with the layer names as the first row and column.
  */
-export function matrixView(graph: Graph): Diagram {
-  const order = layerOrder(graph);
-
-  if (order.length === 0) return unplaced("matrix", "Matrix", [], [], [], { reason: "no layers" });
+export function matrixView(graph: Graph, scope: string | null = null): Diagram {
+  // The matrix of a directory: its modules in the rows and columns, ordered by their layers' order and then greedily
+  // by their imports, so that an import against the order (upward) stands out as it does between layers.
   const counts = new Map<string, number>();
+  let order: string[];
+  let label: (id: string) => string;
+  let view = "matrix";
+  let title = "Matrix: rows import columns";
 
-  for (const dep of graph.deps) {
-    const from = graph.modules.get(dep.from)?.layer;
-    const to = graph.modules.get(dep.to)?.layer;
+  if (scope === null) {
+    order = layerOrder(graph);
 
-    if (from && to && from !== to && !dep.typeOnly) counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
+    if (order.length === 0) return unplaced("matrix", "Matrix", [], [], [], { reason: "no layers" });
+
+    for (const dep of graph.deps) {
+      const from = graph.modules.get(dep.from)?.layer;
+      const to = graph.modules.get(dep.to)?.layer;
+
+      if (from && to && from !== to && !dep.typeOnly) counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
+    }
+
+    label = (id) => id;
+  } else {
+    const prefix = `${scope}/`;
+    const modules = [...graph.modules.keys()].filter((id) => id.startsWith(prefix)).sort();
+    view = `matrix:${scope}`;
+    title = `Matrix of ${scope}: rows import columns`;
+
+    if (modules.length === 0) return unplaced(view, title, [], [], [], { reason: `no modules under "${scope}"`, missing: true });
+    const inside = new Set(modules);
+
+    for (const dep of graph.deps) if (inside.has(dep.from) && inside.has(dep.to) && dep.from !== dep.to && !dep.typeOnly) counts.set(`${dep.from}\u0000${dep.to}`, (counts.get(`${dep.from}\u0000${dep.to}`) ?? 0) + 1);
+    const layers = layerOrder(graph);
+    const byLayer = new Map<string, string[]>();
+
+    for (const id of modules) byLayer.set(graph.modules.get(id)!.layer, [...(byLayer.get(graph.modules.get(id)!.layer) ?? []), id]);
+    order = [];
+
+    for (const layer of [...layers, ...[...byLayer.keys()].filter((layer) => !layers.includes(layer))]) order.push(...greedyOrder(byLayer.get(layer) ?? [], counts));
+    label = (id) => id.slice(prefix.length);
   }
 
   const cell = SIZE.cell;
-  const head = 150;
+  const head = scope === null ? 150 : 220;
   const nodes: DiagramNode[] = [];
   const max = Math.max(1, ...counts.values());
 
-  order.forEach((layer, row) => {
-    nodes.push({ id: `row:${layer}`, kind: "cell", label: layer, ref: { id: layer }, x: 0, y: head + row * cell.h, w: head, h: cell.h });
-    nodes.push({ id: `col:${layer}`, kind: "cell", label: layer, ref: { id: layer }, x: head + row * cell.w, y: head - cell.h, w: cell.w, h: cell.h });
+  order.forEach((item, row) => {
+    const ref = scope === null ? { id: item } : { id: item, file: item, line: 1 };
+    nodes.push({ id: `row:${item}`, kind: "cell", label: label(item), ref, x: 0, y: head + row * cell.h, w: head, h: cell.h });
+    nodes.push({ id: `col:${item}`, kind: "cell", label: label(item), ref, x: head + row * cell.w, y: head - cell.h, w: cell.w, h: cell.h });
   });
 
   order.forEach((from, row) => {
@@ -158,7 +193,7 @@ export function matrixView(graph: Graph): Diagram {
   });
   const back = nodes.filter((node) => node.diff === "removed").length;
 
-  return unplaced("matrix", "Matrix: rows import columns", nodes, [], [], { placed: true, reason: back > 0 ? `${back} cells go against the layer order (red)` : "every import follows the layer order" });
+  return unplaced(view, title, nodes, [], [], { placed: true, reason: back > 0 ? `${back} cells go against the ${scope === null ? "layer" : "import"} order (red)` : `every import follows the ${scope === null ? "layer" : "import"} order` });
 }
 
 /** The role a function has for a type by its signature: it returns it, takes it, or both. */

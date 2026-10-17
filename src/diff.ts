@@ -761,3 +761,13 @@ export function overlayDiff(diagram: Diagram, diff: GraphDiff): Diagram {
 
   return { ...diagram, nodes, edges, reason, title: `${diagram.title} — changes since ${diff.base}` };
 }
+
+/** The short commit and its date, for the stamp of an export; null outside git or before the first commit. */
+export function revisionStamp(root: string): { commit: string; date: string } | null {
+  const result = git(root, ["log", "-1", "--format=%h %cs"]);
+
+  if (!result.ok) return null;
+  const [commit, date] = result.out.trim().split(" ");
+
+  return commit && date ? { commit, date } : null;
+}

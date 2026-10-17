@@ -396,5 +396,5 @@ export function toExcalidraw(diagram: Diagram): string {
     }
   }
 
-  return `${JSON.stringify({ type: "excalidraw", version: 2, source: "archdiff", elements, appState: { viewBackgroundColor: "#ffffff", gridSize: null }, files: {} }, null, 2)}\n`;
+  return `${JSON.stringify({ type: "excalidraw", version: 2, source: diagram.stamp ? `archdiff — commit ${diagram.stamp.commit} (${diagram.stamp.date})` : "archdiff", elements, appState: { viewBackgroundColor: "#ffffff", gridSize: null }, files: {} }, null, 2)}\n`;
 }

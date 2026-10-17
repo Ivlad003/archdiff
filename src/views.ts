@@ -33,7 +33,7 @@ export type View =
   | { kind: "cycles" }
   | { kind: "cycle"; id: string }
   | { kind: "classes"; scope: string | null }
-  | { kind: "matrix" }
+  | { kind: "matrix"; scope: string | null }
   | { kind: "events" }
   | { kind: "tests" }
   | { kind: "hotspots" }
@@ -45,7 +45,7 @@ export type View =
 const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "events", "tests", "hotspots", "packages", "timeline"]);
 
 /** The views with a subject (`kind:<subject>`). */
-const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "classes"]);
+const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "classes", "matrix"]);
 
 export interface ViewOptions {
   /** How far from the subject the picture goes; each view has its default. */
@@ -54,10 +54,48 @@ export interface ViewOptions {
   packages?: boolean;
   /** At most this many shapes; the rest fold into one `more` shape. Default `MAX_SHAPES`. */
   limit?: number;
+  /** Lines standing for fewer imports or calls than this are left out (the Markdown keeps them). Default 1: every line. */
+  weight?: number;
+  /** Modules most of a picture imports (a logger, the types) become a badge on their importers instead of a tangle of lines. Default on. */
+  hubs?: boolean;
 }
 
-/** More shapes than this and a view folds the tail into one shape. */
-export const MAX_SHAPES = 80;
+/**
+ * More shapes than this and a view folds the tail into one shape. Studies of
+ * diagram reading put the comfortable count far lower (7–10 at a glance); 40
+ * keeps a lane grid readable while a folded shape still opens on a tap.
+ */
+export const MAX_SHAPES = 40;
+
+/** A module imported by at least this many of a picture's modules, and at least HUB_SHARE of them, is a hub. */
+const HUB_MIN_IMPORTERS = 6;
+
+/** The share of a picture's modules that must import a module for it to be a hub: a quarter marks the logger and the shared types, not a busy neighbour. */
+const HUB_SHARE = 0.25;
+
+/** The one question each kind of view answers. */
+const QUESTION: Record<View["kind"], string> = {
+  layers: "which layers import which, and how much",
+  layer: "which modules of the layer import which, and what they touch outside it",
+  dir: "which modules of the directory import which, and their neighbours",
+  module: "what the module imports and what imports it",
+  inside: "which functions of the module call which, and what they call outside",
+  contract: "which exports of the module are used, by whom",
+  calls: "what a function calls, step by step, and where the trail ends",
+  sequence: "in what order a function's calls cross the modules",
+  path: "which calls lead from a function to a store",
+  type: "where a type is produced, consumed and transformed",
+  cycles: "which modules import each other in a circle",
+  cycle: "which modules form this circle, and through which imports",
+  classes: "which classes and interfaces exist, with what fields and methods, extending what",
+  matrix: "who imports whom, and which imports go against the order",
+  events: "which modules emit which events, and which listen",
+  tests: "which modules the tests import, and which none does",
+  hotspots: "which modules are big, and which are called from everywhere",
+  packages: "which packages depend on which, declared or not",
+  timeline: "how the coupling between layers drifted, commit by commit",
+  coverage: "where the diagrams are blind: calls and imports archdiff could not follow",
+};
 
 export interface ViewEntry {
   key: string;
@@ -70,6 +108,8 @@ export interface ViewEntry {
 /** `layers`, `layer:<name>`, `module:<path>`, `calls:<path>#<fn>`, `coverage` → the view, or null. */
 export function parseView(key: string): View | null {
   if (key === "classes") return { kind: "classes", scope: null };
+
+  if (key === "matrix") return { kind: "matrix", scope: null };
 
   if (PLAIN_VIEWS.has(key)) return { kind: key } as View;
   const at = key.indexOf(":");
@@ -84,13 +124,13 @@ export function parseView(key: string): View | null {
 
   if (kind === "dir") return { kind, path: rest.replace(/\/+$/, "") };
 
-  if (kind === "classes") return { kind, scope: rest.replace(/\/+$/, "") };
+  if (kind === "classes" || kind === "matrix") return { kind, scope: rest.replace(/\/+$/, "") };
 
   return { kind, id: rest } as View;
 }
 
 export function viewKey(view: View): string {
-  if (view.kind === "classes") return view.scope === null ? "classes" : `classes:${view.scope}`;
+  if (view.kind === "classes" || view.kind === "matrix") return view.scope === null ? view.kind : `${view.kind}:${view.scope}`;
 
   if ("name" in view) return `${view.kind}:${view.name}`;
 
@@ -435,8 +475,9 @@ function fold(diagram: Diagram, limit: number): Diagram {
   }
 
   for (const shape of folded) shape.label = `… ${shape.count} in ${shape.label}`;
-  const seen = new Set<string>();
-  const edges: DiagramEdge[] = [];
+  // The lines into or out of a folded shape merge into one per (from, to, kind), which counts the lines behind it, so
+  // a weight filter can thin them and the Markdown can say how many.
+  const merged = new Map<string, DiagramEdge>();
 
   for (const edge of diagram.edges) {
     const from = keptIds.has(edge.from) ? edge.from : (groupOfId.get(edge.from) ?? "more");
@@ -444,16 +485,18 @@ function fold(diagram: Diagram, limit: number): Diagram {
 
     if (from === to) continue;
     const key = `${from}\u0000${to}\u0000${edge.kind}`;
+    const existing = merged.get(key);
 
-    if (seen.has(key)) continue;
-    seen.add(key);
-    edges.push(from === edge.from && to === edge.to ? edge : { from, to, kind: edge.kind });
+    if (existing) existing.count = (existing.count ?? 1) + (edge.count ?? 1);
+    else merged.set(key, from === edge.from && to === edge.to ? { ...edge } : { from, to, kind: edge.kind, count: edge.count ?? 1 });
   }
 
+  const edges = [...merged.values()].map((edge) => (edge.count === 1 && !diagram.edges.includes(edge) ? { from: edge.from, to: edge.to, kind: edge.kind } : edge));
   const nodes = [...kept, ...folded.map(({ members: _members, ...shape }) => shape)];
   const lanes = diagram.groups.filter((group) => nodes.some((node) => node.group === group.id));
+  const note = `${dropped.length} of ${diagram.nodes.length} shapes folded by directory; tap a folded shape to open it, the Markdown lists them all`;
 
-  return { ...diagram, nodes, edges, groups: lanes, reason: `${dropped.length} of ${diagram.nodes.length} shapes folded by directory; tap a folded shape to open it, the Markdown lists them all` };
+  return { ...diagram, nodes, edges, groups: lanes, reason: [diagram.reason, note].filter(Boolean).join("; ") };
 }
 
 /** The call tree from a function: the functions it calls, and theirs, `depth` levels (default 3); gaps as holes. */
@@ -591,7 +634,7 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
   const callsFrom = new Map<string, typeof graph.calls>();
 
   for (const call of graph.calls) if (call.kind === "call") callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call]);
-  const messages: { from: string; to: string; label: string; line: number; depth: number }[] = [];
+  const messages: { from: string; to: string; label: string; line: number; depth: number; times?: number }[] = [];
   const active = new Set<string>();
 
   const walk = (from: string, level: number): void => {
@@ -613,9 +656,38 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
   };
 
   walk(id, 0);
+  // Consecutive repeats of one call (a loop body, a helper called twice in a row) collapse into one message "×N".
+  const collapsed: (typeof messages[number] & { times: number })[] = [];
+
+  for (const message of messages) {
+    const last = collapsed[collapsed.length - 1];
+
+    if (last && last.from === message.from && last.to === message.to && last.label === message.label) last.times++;
+    else collapsed.push({ ...message, times: 1 });
+  }
+
+  messages.length = 0;
+  messages.push(...collapsed);
   const participants = [moduleOf(id)];
 
   for (const message of messages) for (const module of [message.from, message.to]) if (!participants.includes(module)) participants.push(module);
+
+  // More than MAX_PARTICIPANTS lifelines no longer read as a sequence: the rest share one "… N more" lifeline.
+  let foldedParticipants = 0;
+
+  if (participants.length > MAX_PARTICIPANTS) {
+    const kept = new Set(participants.slice(0, MAX_PARTICIPANTS - 1));
+    foldedParticipants = participants.length - kept.size;
+    const more = `… ${foldedParticipants} more`;
+
+    for (const message of messages) {
+      if (!kept.has(message.from)) message.from = more;
+
+      if (!kept.has(message.to)) message.to = more;
+    }
+
+    participants.splice(0, participants.length, ...kept, more);
+  }
   const column = new Map(participants.map((module, i) => [module, 20 + i * SEQ_COLUMN]));
   const bottom = 80 + (messages.length + 1) * SEQ_ROW;
   const nodes: DiagramNode[] = [];
@@ -634,16 +706,21 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
     const toX = column.get(message.to)! + SIZE.participant.w / 2;
     // A call within one module loops out to the right and back.
     const route = message.from === message.to ? [{ x: fromX, y: y - 12 }, { x: fromX + 70, y: y - 12 }, { x: fromX + 70, y: y + 12 }, { x: fromX + 6, y: y + 12 }] : [{ x: fromX, y }, { x: toX, y }];
-    edges.push({ from: message.from, to: message.to, kind: "message", label: `${i + 1}. ${message.label}()`, route });
+    edges.push({ from: message.from, to: message.to, kind: "message", label: `${i + 1}. ${message.label}()${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`, route });
   });
 
-  const diagram = unplaced(`sequence:${id}`, `Sequence from ${start.parent ? `${start.parent}.` : ""}${start.name}`, nodes, edges, [], { placed: true, sequence: { participants, messages: messages.map(({ from, to, label, line }) => ({ from, to, label, line })) } });
+  const diagram = unplaced(`sequence:${id}`, `Sequence from ${start.parent ? `${start.parent}.` : ""}${start.name}`, nodes, edges, [], { placed: true, sequence: { participants, messages: messages.map(({ from, to, label, line, times }) => ((times ?? 1) > 1 ? { from, to, label, line, times: times as number } : { from, to, label, line })) } });
 
   if (messages.length === 0) diagram.reason = "the function calls nothing archdiff can follow";
   else if (messages.length >= limit) diagram.reason = `cut at ${limit} messages; --limit raises it`;
 
+  if (foldedParticipants > 0) diagram.reason = [diagram.reason, `${foldedParticipants} modules share the last lifeline (at most ${MAX_PARTICIPANTS})`].filter(Boolean).join("; ");
+
   return diagram;
 }
+
+/** Lifelines a sequence keeps apart; beyond it the picture is a wall of arrows (the usual guidance says 10–12). */
+const MAX_PARTICIPANTS = 12;
 
 const DEFAULT_DEPTH: Partial<Record<View["kind"], number>> = { layer: 1, dir: 1, module: 1, inside: 1, calls: 3, sequence: 4, path: 8, type: 1 };
 
@@ -681,7 +758,7 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
       case "classes":
         return classesView(analysis, view.scope, options.limit ?? MAX_SHAPES);
       case "matrix":
-        return matrixView(graph);
+        return matrixView(graph, view.scope);
       case "events":
         return eventsView(analysis);
       case "tests":
@@ -700,5 +777,57 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
 
   const diagram = full();
 
-  return diagram.placed || diagram.classes ? diagram : fold(diagram, options.limit ?? MAX_SHAPES);
+  // Hubs leave before the fold (they would eat its budget); the weight filter runs after it, on the merged lines.
+  const subject = "id" in view ? view.id : null;
+  const slimmed = options.hubs === false || !MODULE_VIEWS.has(view.kind) ? diagram : hubsAsBadges(diagram, subject);
+  const answered = slimmed.question ? slimmed : { ...slimmed, question: QUESTION[view.kind] };
+
+  return dropLightLines(answered.placed || answered.classes ? answered : fold(answered, options.limit ?? MAX_SHAPES), options.weight ?? 1);
+}
+
+/** The views whose shapes are modules, where a hub (a module most of them import) is noise rather than news. */
+const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests"]);
+
+/**
+ * Modules that most of a picture's modules import — a logger, the shared
+ * types — leave the picture: their lines would cross everything and say
+ * little. Each importer gets a badge line "+ log.ts, types.ts" instead, and
+ * the reason names the hubs with their counts. The view's own subject is
+ * never a hub. The Markdown of a module still lists every import.
+ */
+export function hubsAsBadges(diagram: Diagram, subject: string | null): Diagram {
+  const modules = diagram.nodes.filter((node) => node.kind === "module");
+
+  if (modules.length < 8) return diagram;
+  const ids = new Set(modules.map((node) => node.id));
+  const importers = new Map<string, Set<string>>();
+
+  for (const edge of diagram.edges) {
+    if (edge.kind !== "dependency" || !ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to) continue;
+    importers.set(edge.to, new Set([...(importers.get(edge.to) ?? []), edge.from]));
+  }
+
+  const hubs = modules.filter((node) => node.id !== subject && (importers.get(node.id)?.size ?? 0) >= Math.max(HUB_MIN_IMPORTERS, Math.ceil(modules.length * HUB_SHARE))).map((node) => node.id);
+
+  if (hubs.length === 0) return diagram;
+  const hubSet = new Set(hubs);
+  const badge = new Map<string, string[]>();
+
+  for (const hub of hubs) for (const importer of importers.get(hub)!) badge.set(importer, [...(badge.get(importer) ?? []), hub.slice(hub.lastIndexOf("/") + 1)]);
+  const nodes = diagram.nodes.filter((node) => !hubSet.has(node.id)).map((node) => (badge.has(node.id) ? { ...node, label: `${node.label}\n+ ${badge.get(node.id)!.join(", ")}` } : node));
+  const edges = diagram.edges.filter((edge) => !hubSet.has(edge.from) && !hubSet.has(edge.to));
+  const note = `hubs as badges, not drawn: ${hubs.map((hub) => `${hub} (imported by ${importers.get(hub)!.size} of ${modules.length})`).join(", ")}`;
+
+  return { ...diagram, nodes, edges, reason: [diagram.reason, note].filter(Boolean).join("; ") };
+}
+
+/** Lines standing for fewer imports or calls than `weight` leave the picture; the shapes stay. */
+export function dropLightLines(diagram: Diagram, weight: number): Diagram {
+  if (weight <= 1) return diagram;
+  const kept = diagram.edges.filter((edge) => edge.kind === "lifeline" || edge.kind === "message" || (edge.count ?? 1) >= weight);
+  const dropped = diagram.edges.length - kept.length;
+
+  if (dropped === 0) return diagram;
+
+  return { ...diagram, edges: kept, reason: [diagram.reason, `${dropped} lines lighter than ${weight} left out`].filter(Boolean).join("; ") };
 }

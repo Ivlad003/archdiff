@@ -50,6 +50,10 @@ interface State {
   overlays: string[];
   /** The Mermaid type of the Markdown and the export; `auto` picks per view. */
   mermaid: string;
+  /** Lines lighter than this are left out; null: every line. */
+  weight: number | null;
+  /** Hubs (modules most of the picture imports) as badges rather than lines. */
+  hubs: boolean;
 }
 
 /** The options a link may leave out, remembered in this browser as defaults ("remember as defaults"). */
@@ -59,7 +63,16 @@ interface Defaults {
   packages: boolean;
   overlays: string[];
   mermaid: string;
+  weight?: number | null;
+  hubs?: boolean;
 }
+
+/** The option sets of the presets: who is reading, and what they want to see at once. */
+const PRESETS: Record<string, Partial<State>> = {
+  reviewer: { changes: true, overlays: ["tests"], depth: null, limit: null, weight: null, hubs: true },
+  newcomer: { changes: false, overlays: [], depth: 1, limit: 30, weight: null, hubs: true, packages: false },
+  architect: { changes: false, overlays: ["heat"], depth: null, limit: 60, weight: 2, hubs: true },
+};
 
 function readDefaults(): Defaults {
   try {
@@ -70,7 +83,7 @@ function readDefaults(): Defaults {
     // No storage: the built-in defaults.
   }
 
-  return { depth: null, limit: null, packages: false, overlays: [], mermaid: "auto" };
+  return { depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", weight: null, hubs: true };
 }
 
 let views: ViewEntry[] = [];
@@ -104,6 +117,8 @@ function stateFromHash(): State {
     limit: limit === null ? defaults.limit : limit === "" ? null : Number(limit),
     overlays: overlay === null ? defaults.overlays : overlay.split(",").filter((name) => name !== "" && name !== "none"),
     mermaid: params.get("mermaid") ?? defaults.mermaid,
+    weight: params.get("weight") === null ? (defaults.weight ?? null) : params.get("weight") === "" ? null : Number(params.get("weight")),
+    hubs: params.has("hubs") ? params.get("hubs") !== "0" : (defaults.hubs ?? true),
   };
 }
 
@@ -135,6 +150,10 @@ function setHash(state: State): void {
   if (state.overlays.join(",") !== defaults.overlays.join(",")) params.set("overlay", state.overlays.length > 0 ? state.overlays.join(",") : "none");
 
   if (state.mermaid !== defaults.mermaid) params.set("mermaid", state.mermaid);
+
+  if (state.weight !== (defaults.weight ?? null)) params.set("weight", state.weight === null ? "" : String(state.weight));
+
+  if (state.hubs !== (defaults.hubs ?? true)) params.set("hubs", state.hubs ? "1" : "0");
   location.hash = params.toString();
 }
 
@@ -591,7 +610,7 @@ function renderExports(view: string, base: string | null, head: string | null = 
   exportLinks.replaceChildren();
 
   const now = stateFromHash();
-  const extra = `${now.overlays.length > 0 ? `&overlay=${encodeURIComponent(now.overlays.join(","))}` : ""}${now.changes ? "&changes=1" : ""}${now.limit !== null ? `&limit=${now.limit}` : ""}${now.packages ? "&packages=1" : ""}`;
+  const extra = `${now.overlays.length > 0 ? `&overlay=${encodeURIComponent(now.overlays.join(","))}` : ""}${now.changes ? "&changes=1" : ""}${now.limit !== null ? `&limit=${now.limit}` : ""}${now.weight !== null ? `&weight=${now.weight}` : ""}${now.hubs ? "" : "&hubs=0"}${now.packages ? "&packages=1" : ""}`;
 
   for (const format of ["mermaid", "drawio", "excalidraw", "archimate", "json"]) {
     const link = document.createElement("a");
@@ -695,7 +714,7 @@ async function relayout(): Promise<void> {
   if (!canvas) return;
   await saveDrawing();
   const now = stateFromHash();
-  const scene = await api.scene(now.view, { depth: now.depth, limit: now.limit, packages: now.packages, changes: false, overlays: now.overlays, mermaid: now.mermaid, base: null, head: null });
+  const scene = await api.scene(now.view, { depth: now.depth, limit: now.limit, weight: now.weight, hubs: now.hubs, packages: now.packages, changes: false, overlays: now.overlays, mermaid: now.mermaid, base: null, head: null });
   canvas.replace(scene.elements);
 }
 
@@ -710,6 +729,8 @@ async function load(): Promise<void> {
   packagesInput.checked = state.packages;
   changesInput.checked = state.changes;
   element<HTMLInputElement>("limit").value = state.limit === null ? "" : String(state.limit);
+  element<HTMLInputElement>("weight").value = state.weight === null ? "" : String(state.weight);
+  element<HTMLInputElement>("hubs").checked = state.hubs;
   element<HTMLSelectElement>("mermaid").value = state.mermaid;
 
   for (const box of document.querySelectorAll<HTMLInputElement>("#options .overlay")) box.checked = state.overlays.includes(box.value);
@@ -736,6 +757,7 @@ async function load(): Promise<void> {
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
       reason.title = reason.textContent;
+      title.title = result.diagram.question ? `${result.diagram.question[0]!.toUpperCase()}${result.diagram.question.slice(1)}.` : "";
       renderExports("compare", baseInput.value.trim() || null, null, state.heads);
       element("commits").hidden = true;
       void loadBranches(state);
@@ -748,11 +770,12 @@ async function load(): Promise<void> {
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
       reason.title = reason.textContent;
+      title.title = result.diagram.question ? `${result.diagram.question[0]!.toUpperCase()}${result.diagram.question.slice(1)}.` : "";
       renderExports(`review:${result.diff.base}`, baseInput.value.trim() || null, state.head);
       void loadCommits(state);
       void loadBranches(state);
     } else {
-      const result = await api.scene(state.view, { depth: state.depth, limit: state.limit, packages: state.packages, changes: state.changes, overlays: state.overlays, mermaid: state.mermaid, base: state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, head: state.view === "timeline" || state.changes ? state.head : null });
+      const result = await api.scene(state.view, { depth: state.depth, limit: state.limit, weight: state.weight, hubs: state.hubs, packages: state.packages, changes: state.changes, overlays: state.overlays, mermaid: state.mermaid, base: state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, head: state.view === "timeline" || state.changes ? state.head : null });
       title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
@@ -761,6 +784,7 @@ async function load(): Promise<void> {
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
       reason.title = reason.textContent;
+      title.title = result.diagram.question ? `${result.diagram.question[0]!.toUpperCase()}${result.diagram.question.slice(1)}.` : "";
       renderExports(state.view, null);
     }
 
@@ -1357,6 +1381,17 @@ element<HTMLInputElement>("limit").addEventListener("change", () => {
   setHash({ ...stateFromHash(), limit: value === "" ? null : Math.max(1, Number(value)) });
 });
 element<HTMLSelectElement>("mermaid").addEventListener("change", () => setHash({ ...stateFromHash(), mermaid: element<HTMLSelectElement>("mermaid").value }));
+element<HTMLInputElement>("weight").addEventListener("change", () => {
+  const value = element<HTMLInputElement>("weight").value;
+  setHash({ ...stateFromHash(), weight: value === "" || Number(value) <= 1 ? null : Math.floor(Number(value)) });
+});
+element<HTMLInputElement>("hubs").addEventListener("change", () => setHash({ ...stateFromHash(), hubs: element<HTMLInputElement>("hubs").checked }));
+element<HTMLSelectElement>("preset").addEventListener("change", () => {
+  const preset = PRESETS[element<HTMLSelectElement>("preset").value];
+  element<HTMLSelectElement>("preset").value = "";
+
+  if (preset) applyOptions({ ...stateFromHash(), ...preset });
+});
 
 for (const box of document.querySelectorAll<HTMLInputElement>("#options .overlay")) {
   box.addEventListener("change", () => {
@@ -1391,7 +1426,7 @@ function applyOptions(state: State): void {
 
 element<HTMLButtonElement>("options-default").addEventListener("click", () => {
   const now = stateFromHash();
-  const defaults: Defaults = { depth: now.depth, limit: now.limit, packages: now.packages, overlays: now.overlays, mermaid: now.mermaid };
+  const defaults: Defaults = { depth: now.depth, limit: now.limit, packages: now.packages, overlays: now.overlays, mermaid: now.mermaid, weight: now.weight, hubs: now.hubs };
 
   try {
     localStorage.setItem("archdiff.defaults", JSON.stringify(defaults));
@@ -1409,7 +1444,7 @@ element<HTMLButtonElement>("options-reset").addEventListener("click", () => {
     // Nothing stored.
   }
 
-  applyOptions({ ...stateFromHash(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false });
+  applyOptions({ ...stateFromHash(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false, weight: null, hubs: true });
 });
 baseInput.addEventListener("change", () => {
   if (stateFromHash().review) setHash(stateFromHash());
