@@ -304,7 +304,7 @@ export function planMarkdown(plan: Plan, analysis: Analysis): string {
     "- Change only what the task names; keep the existing layers and their dependencies as they are, except what the task adds.",
     "- Put a new function next to related ones in the named file, exported, typed, with a short doc comment.",
     "- Run the project's typecheck and tests before finishing, and report what you changed as a list of `file:line`.",
-    `- When done, \`npx archdiff review\` in ${analysis.root} shows the architectural diff; it should contain only this task.`,
+    `- When done, \`npx @ivlad003/archdiff review\` in ${analysis.root} shows the architectural diff; it should contain only this task.`,
   );
 
   return `${lines.join("\n").trimEnd()}\n`;
