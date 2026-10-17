@@ -72,9 +72,6 @@ function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
     <Excalidraw
       initialData={{ elements: restoreElements(elements as never, null), appState: { viewBackgroundColor: "#ffffff" }, scrollToContent: true }}
       excalidrawAPI={(ready) => {
-        // The container may still be laid out when Excalidraw mounts: fit once the frame is drawn.
-        const fit = (): void => ready.scrollToContent(undefined, { fitToContent: true, animate: false });
-        requestAnimationFrame(() => requestAnimationFrame(fit));
         onApi(ready);
       }}
       viewModeEnabled={mode === "view"}
@@ -163,12 +160,34 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       true,
     );
 
+    // Fits the whole scene into the container: Excalidraw's own scrollToContent zooms out far too much for a small
+    // scene, so the zoom is computed here from the scene's bounds (never above 1, so a tiny diagram stays readable).
+    const fit = (): void => {
+      if (!api) return;
+      const all = (api.getSceneElements() as unknown as SceneElement[]).filter((element) => !element.isDeleted);
+
+      if (all.length === 0) return;
+      const minX = Math.min(...all.map((element) => element.x));
+      const minY = Math.min(...all.map((element) => element.y));
+      const maxX = Math.max(...all.map((element) => element.x + element.width));
+      const maxY = Math.max(...all.map((element) => element.y + element.height));
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      if (width === 0 || height === 0) return;
+      const margin = 32;
+      const zoom = Math.max(0.1, Math.min(1, (width - 2 * margin) / (maxX - minX), (height - 2 * margin) / (maxY - minY)));
+      const scrollX = width / zoom / 2 - (minX + (maxX - minX) / 2);
+      const scrollY = height / zoom / 2 - (minY + (maxY - minY) / 2);
+      api.updateScene({ appState: { scrollX, scrollY, zoom: { value: zoom as never } } });
+    };
+
     const handle: CanvasHandle = {
       scene: () => (api ? (api.getSceneElementsIncludingDeleted() as unknown as SceneElement[]) : elements),
       replace: (next) => {
         // A saved element may lack fields Excalidraw needs (a scene saved through the API, an older version): restore fills them.
         api?.updateScene({ elements: restoreElements(next as never, null) });
-        api?.scrollToContent(undefined, { fitToContent: true, animate: false });
+        requestAnimationFrame(fit);
       },
       setMode: (next) => {
         mode = next;
@@ -195,7 +214,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
 
         return exportToBlob({ elements: chosen, appState, files, mimeType: "image/png", quality: 1, exportPadding: 24 });
       },
-      scrollToContent: () => api?.scrollToContent(undefined, { fitToContent: true, animate: false }),
+      scrollToContent: fit,
       viewport: () => {
         if (!api) return null;
         const state = api.getAppState();
@@ -217,6 +236,9 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         modeState={modeState}
         onApi={(ready) => {
           api = ready;
+          // The container may still be laid out when Excalidraw mounts: fit once the frames are drawn.
+          requestAnimationFrame(() => requestAnimationFrame(fit));
+          setTimeout(fit, 300);
           resolve(handle);
         }}
       />,

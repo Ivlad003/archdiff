@@ -8,7 +8,7 @@ import type { Diagram } from "../../src/diagram.ts";
 export interface ViewEntry {
   key: string;
   title: string;
-  kind: "layers" | "layer" | "dir" | "module" | "calls" | "coverage";
+  kind: "layers" | "layer" | "dir" | "module" | "inside" | "calls" | "sequence" | "coverage";
   layer?: string;
 }
 

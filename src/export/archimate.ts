@@ -32,11 +32,15 @@ function elementType(node: DiagramNode): string {
       return "ApplicationEvent";
     case "more":
       return "Grouping";
+    case "participant":
+      return "ApplicationComponent";
+    case "anchor":
+      return "Junction";
   }
 }
 
 function relationType(edge: DiagramEdge): string {
-  return edge.kind === "dependency" ? "Serving" : edge.kind === "call" ? "Triggering" : "Association";
+  return edge.kind === "dependency" ? "Serving" : edge.kind === "call" || edge.kind === "message" ? "Triggering" : "Association";
 }
 
 const DIFF_FILL = { added: { r: 200, g: 230, b: 201 }, removed: { r: 255, g: 205, b: 210 }, changed: { r: 255, g: 224, b: 178 } } as const;
@@ -48,6 +52,7 @@ export function toArchimate(diagram: Diagram): string {
   const viewEdges: string[] = [];
 
   for (const node of diagram.nodes) {
+    if (node.kind === "anchor") continue;
     const id = xmlId("id", node.id);
     const documentation = [node.ref?.file ? `${node.ref.file}${node.ref.line ? `:${node.ref.line}` : ""}` : "", node.signature ?? "", node.reason ? `not followed: ${node.reason}` : "", node.doc ?? ""].filter((part) => part !== "").join("\n");
     elements.push(`    <element identifier="${id}" xsi:type="${elementType(node)}"><name xml:lang="en">${escape(node.label.replace(/\n.*/s, ""))}</name>${documentation ? `<documentation xml:lang="en">${escape(documentation)}</documentation>` : ""}</element>`);
@@ -59,12 +64,13 @@ export function toArchimate(diagram: Diagram): string {
   const groupNodes = diagram.groups.map((group) => `      <node identifier="${xmlId("lane", group.id)}" xsi:type="Container" x="${Math.round(group.x)}" y="${Math.round(group.y)}" w="${Math.round(group.w)}" h="${Math.round(group.h)}"><label xml:lang="en">${escape(group.label)}</label><style><fillColor r="250" g="250" b="250"/></style></node>`);
   const known = new Set(diagram.nodes.map((node) => node.id));
 
-  for (const edge of diagram.edges) {
-    if (!known.has(edge.from) || !known.has(edge.to)) continue;
-    const id = xmlId("rel", `${edge.from}->${edge.to}:${edge.kind}`);
+  for (const [index, edge] of diagram.edges.entries()) {
+    // Lifelines are drawing, not architecture; a sequence's messages are numbered so two calls between the same pair stay apart.
+    if (!known.has(edge.from) || !known.has(edge.to) || edge.kind === "lifeline") continue;
+    const id = xmlId("rel", `${edge.from}->${edge.to}:${edge.kind}${edge.kind === "message" ? `:${index}` : ""}`);
     relationships.push(`    <relationship identifier="${id}" source="${xmlId("id", edge.from)}" target="${xmlId("id", edge.to)}" xsi:type="${relationType(edge)}">${edge.label ? `<name xml:lang="en">${escape(edge.label)}</name>` : ""}</relationship>`);
     const colour = edge.diff === "added" ? '<style><lineColor r="46" g="125" b="50"/></style>' : edge.diff === "removed" ? '<style><lineColor r="198" g="40" b="40"/></style>' : "";
-    viewEdges.push(`      <connection identifier="${xmlId("conn", `${edge.from}->${edge.to}:${edge.kind}`)}" relationshipRef="${id}" xsi:type="Relationship" source="${xmlId("node", edge.from)}" target="${xmlId("node", edge.to)}">${colour}</connection>`);
+    viewEdges.push(`      <connection identifier="${xmlId("conn", `${edge.from}->${edge.to}:${edge.kind}${edge.kind === "message" ? `:${index}` : ""}`)}" relationshipRef="${id}" xsi:type="Relationship" source="${xmlId("node", edge.from)}" target="${xmlId("node", edge.to)}">${colour}</connection>`);
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>

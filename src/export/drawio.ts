@@ -22,6 +22,8 @@ function style(node: DiagramNode): string {
     hole: "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;dashed=1;fillColor=#fff3e0;strokeColor=#ef6c00;",
     start: "ellipse;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;",
     more: "rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=1 3;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontColor=#616161;",
+    participant: "rounded=0;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#455a64;fontStyle=1;",
+    anchor: "shape=ellipse;fillColor=none;strokeColor=none;",
   };
   const mark = node.diff ? `strokeColor=${DIFF_STROKE[node.diff]};strokeWidth=3;${node.diff === "removed" ? "dashed=1;" : ""}` : "";
 
@@ -67,10 +69,10 @@ export function toDrawio(diagram: Diagram): string {
 
     if (from === undefined || to === undefined) continue;
     const id = next++;
-    const dashed = edge.kind === "ref" || edge.diff === "removed" ? "dashed=1;" : "";
-    const colour = edge.diff === "added" ? "strokeColor=#2e7d32;strokeWidth=2;" : edge.diff === "removed" ? "strokeColor=#c62828;strokeWidth=2;" : edge.kind === "call" ? "strokeColor=#1565c0;" : "strokeColor=#616161;";
+    const dashed = edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" ? "dashed=1;" : "";
+    const colour = edge.diff === "added" ? "strokeColor=#2e7d32;strokeWidth=2;" : edge.diff === "removed" ? "strokeColor=#c62828;strokeWidth=2;" : edge.kind === "call" || edge.kind === "message" ? "strokeColor=#1565c0;" : edge.kind === "lifeline" ? "strokeColor=#b0bec5;endArrow=none;" : "strokeColor=#616161;";
     // The bends of the route (without its two ends, which the cells give) as waypoints, so draw.io draws the same path.
-    const bends = (routes.get(edge) ?? []).slice(1, -1);
+    const bends = (edge.route ?? routes.get(edge) ?? []).slice(1, -1);
     const points = bends.length > 0 ? `<Array as="points">${bends.map((point) => `<mxPoint x="${Math.round(point.x)}" y="${Math.round(point.y)}"/>`).join("")}</Array>` : "";
     cells.push(
       `<object label="${escape(edge.label ?? "")}" archdiff_kind="${edge.kind}" id="${id}"><mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;${dashed}${colour}" edge="1" parent="1" source="${from}" target="${to}"><mxGeometry relative="1" as="geometry">${points}</mxGeometry></mxCell></object>`,

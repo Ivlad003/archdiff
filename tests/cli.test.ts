@@ -497,3 +497,20 @@ test("a class extending a package's class: a missing member is the package's, no
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("inside shows a module's functions and their calls in module lanes; sequence lists the calls in order", () => {
+  const inside = archdiff(["diagram", "inside:src/lib/orders.ts", fixture, "--format", "mermaid"]).stdout;
+  assert.ok(inside.includes('subgraph "src/lib/orders.ts"'), inside);
+  assert.ok(inside.includes("src_lib_orders_ts_placeOrder ==> src_lib_orders_ts_validate"), inside);
+  // Depth 1 brings the functions of other modules the module calls, each in its module's lane.
+  assert.ok(inside.includes('subgraph "src/db/store.ts"') && inside.includes("src_lib_orders_ts_placeOrder ==> src_db_store_ts_saveOrder"), inside);
+  const sequence = archdiff(["diagram", "sequence:src/routes/checkout.tsx#action", fixture]).stdout;
+  assert.ok(sequence.includes("sequenceDiagram"), sequence);
+  assert.ok(sequence.includes("participant P0 as src/routes/checkout.tsx"), sequence);
+  assert.ok(sequence.includes("## Messages\n\n1. `src/routes/checkout.tsx` → `src/lib/orders.ts`: **OrderService()**"), sequence);
+  const json = JSON.parse(archdiff(["diagram", "sequence:src/routes/checkout.tsx#action", fixture, "--format", "json"]).stdout) as { placed?: boolean; nodes: { kind: string }[]; edges: { kind: string; route?: unknown[] }[] };
+  assert.equal(json.placed, true);
+  assert.ok(json.nodes.some((node) => node.kind === "participant"));
+  assert.ok(json.edges.every((edge) => edge.kind === "lifeline" || edge.kind === "message") && json.edges.every((edge) => Array.isArray(edge.route)));
+  assert.equal(archdiff(["diagram", "inside:nope.ts", fixture]).status, 2);
+});

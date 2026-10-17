@@ -89,7 +89,7 @@ function text(id: string, container: string | null, x: number, y: number, width:
 
 function shapeOf(node: DiagramNode): { type: string; fill: string; stroke: string; style: ExcalidrawElement["strokeStyle"]; width: number } {
   const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "external" || node.kind === "more" ? "#757575" : "#1e1e1e";
-  const fill = node.kind === "layer" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "more" ? "#f5f5f5" : "#ffffff";
+  const fill = node.kind === "layer" || node.kind === "participant" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "more" ? "#f5f5f5" : "#ffffff";
 
   return { type: node.kind === "start" || node.kind === "external" ? "ellipse" : node.kind === "hole" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.kind === "hole" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
 }
@@ -107,6 +107,8 @@ function viewLink(node: DiagramNode): string | null {
       return `archdiff://view/${encodeURIComponent(`module:${id}`)}`;
     case "fn":
       return `archdiff://view/${encodeURIComponent(`calls:${id}`)}`;
+    case "participant":
+      return `archdiff://view/${encodeURIComponent(`inside:${id}`)}`;
     default:
       return null;
   }
@@ -130,46 +132,88 @@ export interface Point {
 export function routeEdges(diagram: Diagram): Map<DiagramEdge, Point[]> {
   const boxes = new Map(diagram.nodes.map((node) => [node.id, node]));
   const routes = new Map<DiagramEdge, Point[]>();
-  // How many edges already run in the gap right of column `x`, for the channel offset.
-  const used = new Map<number, number>();
   const lowest = Math.max(0, ...diagram.nodes.map((node) => node.y + node.h));
+  const centreY = (node: DiagramNode): number => node.y + node.h / 2;
+  const usable = diagram.edges.filter((edge) => boxes.has(edge.from) && boxes.has(edge.to) && edge.from !== edge.to && !edge.route);
 
-  for (const edge of diagram.edges) {
-    const from = boxes.get(edge.from);
-    const to = boxes.get(edge.to);
+  // Ports: the edges leaving a shape spread down its right side in the order of their targets, the edges entering a
+  // shape spread down its left side in the order of their sources, so no two lines share an end point.
+  const outgoing = new Map<string, DiagramEdge[]>();
+  const incoming = new Map<string, DiagramEdge[]>();
 
-    if (!from || !to || from === to) continue;
-    const fromRight = from.x + from.w;
-    const fromMid = from.y + from.h / 2;
-    const toMid = to.y + to.h / 2;
-
-    if (to.x >= fromRight + 16) {
-      // Forward: right side → channel in the gap → left side of the target.
-      const gapKey = Math.round(to.x);
-      const n = used.get(gapKey) ?? 0;
-      used.set(gapKey, n + 1);
-      const channel = to.x - 10 - (n % 6) * 5;
-      const route: Point[] = [{ x: fromRight, y: fromMid }];
-
-      if (Math.abs(fromMid - toMid) > 1) route.push({ x: channel, y: fromMid }, { x: channel, y: toMid });
-      route.push({ x: to.x, y: toMid });
-      routes.set(edge, route);
-    } else {
-      // Backward or same column: down from the source, along the bottom, up into the target's bottom.
-      const key = -1;
-      const n = used.get(key) ?? 0;
-      used.set(key, n + 1);
-      const below = lowest + 20 + (n % 8) * 6;
-      const fromX = from.x + from.w / 2;
-      const toX = to.x + to.w / 2;
-      routes.set(edge, [
-        { x: fromX, y: from.y + from.h },
-        { x: fromX, y: below },
-        { x: toX, y: below },
-        { x: toX, y: to.y + to.h },
-      ]);
-    }
+  for (const edge of usable) {
+    outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge]);
+    incoming.set(edge.to, [...(incoming.get(edge.to) ?? []), edge]);
   }
+
+  const portY = (node: DiagramNode, index: number, count: number): number => {
+    if (count <= 1) return centreY(node);
+    const span = node.h * 0.7;
+
+    return node.y + node.h * 0.15 + (span * index) / (count - 1);
+  };
+
+  const outPort = new Map<DiagramEdge, number>();
+  const inPort = new Map<DiagramEdge, number>();
+
+  for (const [id, edges] of outgoing) {
+    const sorted = [...edges].sort((a, b) => centreY(boxes.get(a.to)!) - centreY(boxes.get(b.to)!));
+    sorted.forEach((edge, i) => outPort.set(edge, portY(boxes.get(id)!, i, sorted.length)));
+  }
+
+  for (const [id, edges] of incoming) {
+    const sorted = [...edges].sort((a, b) => centreY(boxes.get(a.from)!) - centreY(boxes.get(b.from)!));
+    sorted.forEach((edge, i) => inPort.set(edge, portY(boxes.get(id)!, i, sorted.length)));
+  }
+
+  // Channels: the vertical run of a forward edge sits in the gap before the target's column; the edges of one gap take
+  // distinct x positions spread over the middle of the gap, ordered by where they start, so their runs do not overlap.
+  const byGap = new Map<number, DiagramEdge[]>();
+  const backward: DiagramEdge[] = [];
+
+  for (const edge of usable) {
+    const from = boxes.get(edge.from)!;
+    const to = boxes.get(edge.to)!;
+
+    if (to.x >= from.x + from.w + 16) byGap.set(Math.round(to.x), [...(byGap.get(Math.round(to.x)) ?? []), edge]);
+    else backward.push(edge);
+  }
+
+  for (const [gapRight, edges] of byGap) {
+    const gapLeft = Math.max(...edges.map((edge) => boxes.get(edge.from)!.x + boxes.get(edge.from)!.w));
+    const width = gapRight - gapLeft;
+    const sorted = [...edges].sort((a, b) => outPort.get(a)! - outPort.get(b)!);
+    const n = sorted.length;
+
+    sorted.forEach((edge, i) => {
+      const from = boxes.get(edge.from)!;
+      const to = boxes.get(edge.to)!;
+      const startY = outPort.get(edge)!;
+      const endY = inPort.get(edge)!;
+      // The middle 60% of the gap holds the channels; one edge runs down the centre.
+      const channel = n === 1 ? gapLeft + width / 2 : gapLeft + width * 0.2 + (width * 0.6 * i) / (n - 1);
+      const route: Point[] = [{ x: from.x + from.w, y: startY }];
+
+      if (Math.abs(startY - endY) > 1) route.push({ x: channel, y: startY }, { x: channel, y: endY });
+      route.push({ x: to.x, y: endY });
+      routes.set(edge, route);
+    });
+  }
+
+  // Backward or same column: down from the source, along a lane below everything, up into the target's bottom.
+  backward.forEach((edge, i) => {
+    const from = boxes.get(edge.from)!;
+    const to = boxes.get(edge.to)!;
+    const below = lowest + 24 + (i % 8) * 8;
+    const fromX = from.x + from.w * 0.6;
+    const toX = to.x + to.w * 0.4;
+    routes.set(edge, [
+      { x: fromX, y: from.y + from.h },
+      { x: fromX, y: below },
+      { x: toX, y: below },
+      { x: toX, y: to.y + to.h },
+    ]);
+  });
 
   return routes;
 }
@@ -186,10 +230,16 @@ export function toExcalidraw(diagram: Diagram): string {
   const centre = new Map<string, { x: number; y: number }>();
 
   for (const node of diagram.nodes) {
-    const look = shapeOf(node);
-    const bound: ExcalidrawElement["boundElements"] = [{ id: `${node.id}:text`, type: "text" }];
+    if (node.kind === "anchor") {
+      // The foot of a lifeline: nothing to see, a point for the line to end at.
+      elements.push({ ...base(node.id, "ellipse", node.x, node.y, node.w, node.h), opacity: 0, customData: { archdiff: "anchor" } });
+      centre.set(node.id, { x: node.x + node.w / 2, y: node.y + node.h / 2 });
+      continue;
+    }
 
-    for (const edge of diagram.edges) if (edge.from === node.id || edge.to === node.id) bound.push({ id: `edge:${edge.from}->${edge.to}`, type: "arrow" });
+    const look = shapeOf(node);
+    // Only the label is bound; the arrows keep their own points (see below).
+    const bound: ExcalidrawElement["boundElements"] = [{ id: `${node.id}:text`, type: "text" }];
     const customData: Record<string, string | number> = { archdiff: "node", kind: node.kind };
 
     if (node.ref?.file) customData["file"] = node.ref.file;
@@ -211,9 +261,9 @@ export function toExcalidraw(diagram: Diagram): string {
     const target = boxes.get(edge.to);
 
     if (!source || !target) continue;
-    const id = `edge:${edge.from}->${edge.to}`;
-    const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.kind === "call" ? "#1565c0" : "#616161";
-    const route = routes.get(edge) ?? [centre.get(edge.from)!, centre.get(edge.to)!];
+    const id = `edge:${edge.from}->${edge.to}${edge.kind === "message" ? `:${diagram.edges.indexOf(edge)}` : ""}`;
+    const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.kind === "call" || edge.kind === "message" ? "#1565c0" : edge.kind === "lifeline" ? "#b0bec5" : "#616161";
+    const route = edge.route ?? routes.get(edge) ?? [centre.get(edge.from)!, centre.get(edge.to)!];
     const start = route[0]!;
     const finish = route[route.length - 1]!;
     const xs = route.map((point) => point.x);
@@ -221,20 +271,28 @@ export function toExcalidraw(diagram: Diagram): string {
     elements.push({
       ...base(id, "arrow", start.x, start.y, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
       strokeColor: stroke,
-      strokeStyle: edge.kind === "ref" || edge.diff === "removed" ? "dashed" : "solid",
+      strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" ? "dashed" : "solid",
       strokeWidth: edge.diff ? 2 : 1,
       points: route.map((point) => [point.x - start.x, point.y - start.y]),
-      startBinding: { elementId: edge.from, focus: 0, gap: 2 },
-      endBinding: { elementId: edge.to, focus: 0, gap: 2 },
+      // No binding: Excalidraw would pull every end to the centre of a side and the ports would collapse into one point.
+      // A re-layout redraws the arrows when shapes move.
+      startBinding: null,
+      endBinding: null,
       startArrowhead: null,
-      endArrowhead: "arrow",
+      endArrowhead: edge.kind === "lifeline" ? null : "arrow",
       elbowed: false,
-      roundness: { type: 2 },
+      roundness: null,
       boundElements: edge.label ? [{ id: `${id}:text`, type: "text" }] : null,
       customData: { archdiff: "edge", kind: edge.kind },
     });
 
-    if (edge.label) elements.push({ ...text(`${id}:text`, id, (start.x + finish.x) / 2 - 20, (start.y + finish.y) / 2 - 10, 40, 20, edge.label, 12), customData: { archdiff: "label" } });
+    // A message's label sits just above its line (beside the loop of a self-call); another edge's label at the middle of the line.
+    if (edge.label) {
+      const self = edge.kind === "message" && edge.from === edge.to;
+      const labelX = self ? start.x + 80 : (start.x + finish.x) / 2 - 60;
+      const labelY = edge.kind === "message" ? (self ? start.y + 4 : Math.min(start.y, finish.y) - 18) : (start.y + finish.y) / 2 - 10;
+      elements.push({ ...text(`${id}:text`, id, labelX, labelY, 120, 16, edge.label, 12), ...(self ? { textAlign: "left" } : {}), customData: { archdiff: "label" } });
+    }
   }
 
   return `${JSON.stringify({ type: "excalidraw", version: 2, source: "archdiff", elements, appState: { viewBackgroundColor: "#ffffff", gridSize: null }, files: {} }, null, 2)}\n`;

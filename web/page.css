@@ -732,3 +732,46 @@ body.editing #reason {
 #history-box {
   margin-top: 8px;
 }
+
+.prose details {
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.prose details[open] {
+  padding-bottom: 6px;
+}
+
+.prose summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.prose summary::before {
+  content: "▸ ";
+  color: var(--muted);
+}
+
+.prose details[open] > summary::before {
+  content: "▾ ";
+}
+
+.prose summary code {
+  font-size: 11px;
+}
+
+.prose details pre {
+  max-height: 320px;
+}
+
+#view-type {
+  font: inherit;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+#view-type[hidden] {
+  display: none;
+}

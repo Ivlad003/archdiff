@@ -28,8 +28,9 @@ Commands:
   views [dir]        List the views that can be drawn: layers, every module, every entry point
   diagram <view> [dir] [--format F] [--depth N] [--packages] [--limit N] [--out FILE]
                      Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,
-                     drawio, excalidraw, archimate. Views: layers | layer:<name> |
-                     module:<path> | calls:<path>#<fn> | coverage. --packages draws the
+                     drawio, excalidraw, archimate. Views: layers | layer:<name> | dir:<path> |
+                     module:<path> | inside:<path> | calls:<path>#<fn> | sequence:<path>#<fn> |
+                     coverage. --packages draws the
                      packages a module imports; --limit folds a bigger picture into
                      "… N more" (default 80)
   layouts [dir] [--prune]

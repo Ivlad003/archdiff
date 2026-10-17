@@ -44,10 +44,31 @@ function shape(node: DiagramNode, id: string): string {
       return `${id}[${text}]`;
     case "more":
       return `${id}[/${text}/]`;
+    case "participant":
+      return `${id}[${text}]`;
+    case "anchor":
+      return `${id}(( ))`;
   }
 }
 
+/** A sequence view as Mermaid's own sequenceDiagram: participants in order, one message per call. */
+function sequenceMermaid(diagram: Diagram): string {
+  const sequence = diagram.sequence!;
+  const ids = new Map(sequence.participants.map((module, i) => [module, `P${i}`]));
+  const lines = [`%% archdiff:generated — view ${diagram.view}`];
+
+  if (diagram.reason) lines.push(`%% ${diagram.reason}`);
+  lines.push("sequenceDiagram");
+
+  for (const module of sequence.participants) lines.push(`  participant ${ids.get(module)} as ${module.replace(/[:;]/g, " ")}`);
+
+  for (const [i, message] of sequence.messages.entries()) lines.push(`  ${ids.get(message.from)}->>${ids.get(message.to)}: ${i + 1}. ${message.label}()`);
+
+  return `${lines.join("\n")}\n`;
+}
+
 export function toMermaid(diagram: Diagram): string {
+  if (diagram.sequence) return sequenceMermaid(diagram);
   const ids = mermaidIds(diagram.nodes);
   const lines = [`%% archdiff:generated — view ${diagram.view}`];
 
@@ -73,8 +94,8 @@ export function toMermaid(diagram: Diagram): string {
     const from = ids.get(edge.from);
     const to = ids.get(edge.to);
 
-    if (!from || !to) continue;
-    const arrow = edge.kind === "ref" ? "-.->" : edge.kind === "call" ? "==>" : "-->";
+    if (!from || !to || edge.kind === "lifeline") continue;
+    const arrow = edge.kind === "ref" ? "-.->" : edge.kind === "call" || edge.kind === "message" ? "==>" : "-->";
     const text = edge.label ? `|${label(edge.label)}|` : "";
     lines.push(`  ${from} ${arrow}${text} ${to}`);
   }

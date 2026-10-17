@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 — 2026-10-17
+
+- Two views: `inside:<module>` (its functions and the calls among them, modules as lanes) and `sequence:<fn>` (the calls from a function as a sequence diagram, Mermaid `sequenceDiagram` in the Markdown); a second tap on a module opens its inside; a select beside the title switches between the pictures of one subject.
+- Arrows: ports spread along a shape's sides, channels spread across a wider gap, no overlapping ends; generated arrows keep their routes.
+- The canvas fits the scene itself (Excalidraw's fit zoomed a small scene out to a speck).
+- A module's declarations fold open in the Markdown panel to their calls and their code.
+- Published as `@ivlad003/archdiff`; `prepack` no longer asks for provenance outside CI.
+
 ## 0.1.0 — 2026-10-17
 
 The first release.

@@ -5,17 +5,20 @@
 // modules of a directory and their neighbours), `module:<path>` (what
 // imports it and what it imports), `calls:<path>#<fn>` (the call tree from a
 // function), `coverage` (the modules with calls archdiff could not follow).
-// Lanes are layers; the depth is how far from the subject the picture goes.
+// `inside:<path>` (the functions of a module and the calls among them,
+// lanes being modules), `sequence:<path>#<fn>` (the calls from a function
+// as a sequence diagram, placed). Lanes are layers elsewhere; the depth is
+// how far from the subject the picture goes.
 //
 // Pipeline: Analysis → View → Diagram → layout → canvas/exports/markdown.
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
 
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "./diagram.ts";
+import { SIZE, type Diagram, type DiagramEdge, type DiagramGroup, type DiagramNode } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
 
-export type View = { kind: "layers" } | { kind: "layer"; name: string } | { kind: "dir"; path: string } | { kind: "module"; id: string } | { kind: "calls"; id: string } | { kind: "coverage" };
+export type View = { kind: "layers" } | { kind: "layer"; name: string } | { kind: "dir"; path: string } | { kind: "module"; id: string } | { kind: "inside"; id: string } | { kind: "calls"; id: string } | { kind: "sequence"; id: string } | { kind: "coverage" };
 
 export interface ViewOptions {
   /** How far from the subject the picture goes; each view has its default. */
@@ -56,7 +59,11 @@ export function parseView(key: string): View | null {
 
   if (kind === "module") return { kind, id: rest };
 
+  if (kind === "inside") return { kind, id: rest };
+
   if (kind === "calls") return { kind, id: rest };
+
+  if (kind === "sequence") return { kind, id: rest };
 
   return null;
 }
@@ -72,8 +79,12 @@ export function viewKey(view: View): string {
       return `dir:${view.path}`;
     case "module":
       return `module:${view.id}`;
+    case "inside":
+      return `inside:${view.id}`;
     case "calls":
       return `calls:${view.id}`;
+    case "sequence":
+      return `sequence:${view.id}`;
   }
 }
 
@@ -492,7 +503,124 @@ function coverageView(graph: Graph): Diagram {
   return unplaced("coverage", "What the diagrams cannot show", nodes, [], lanesOf(graph, nodes), nodes.length === 0 ? { reason: "every import and call was followed" } : {});
 }
 
-const DEFAULT_DEPTH: Record<View["kind"], number> = { layers: 0, layer: 1, dir: 1, module: 1, calls: 3, coverage: 0 };
+/**
+ * Inside a module: its functions, classes and methods, the calls among
+ * them, and (depth 1, default) the functions of other modules they call,
+ * each module a lane. The map of one file.
+ */
+function insideView(graph: Graph, id: string, depth: number): Diagram {
+  const module = graph.modules.get(id);
+
+  if (!module) return unplaced(`inside:${id}`, id, [], [], [], { reason: `no module "${id}"`, missing: true });
+  const own = [...graph.nodes.values()].filter((node) => node.module === id && node.kind !== "type").map((node) => node.id);
+  const members = new Set(own);
+  let frontier = new Set(own);
+
+  for (let step = 0; step < depth && frontier.size > 0; step++) {
+    const next = new Set<string>();
+
+    for (const call of graph.calls) if (frontier.has(call.from) && !members.has(call.to) && graph.nodes.get(call.to)?.kind !== "type") next.add(call.to);
+
+    for (const target of next) members.add(target);
+    frontier = next;
+  }
+
+  const seen = new Set<string>();
+  const edges: DiagramEdge[] = [];
+
+  for (const call of graph.calls) {
+    if (!members.has(call.from) || !members.has(call.to) || call.from === call.to) continue;
+    const key = `${call.from}\u0000${call.to}\u0000${call.kind}`;
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    edges.push({ from: call.from, to: call.to, kind: call.kind });
+  }
+
+  // Lanes are modules here, the subject first; a function sits in its module's lane.
+  const modules = [id, ...[...members].map((member) => moduleOf(member)).filter((other) => other !== id).sort()];
+  const nodes = [...members]
+    .sort((a, b) => Number(moduleOf(b) === id) - Number(moduleOf(a) === id) || (graph.nodes.get(a)!.line - graph.nodes.get(b)!.line))
+    .map((member) => ({ ...fnNode(graph, member), group: moduleOf(member) }));
+
+  if (nodes.length === 0) return unplaced(`inside:${id}`, `Inside ${id}`, [], [], [], { reason: "the module declares no function or class" });
+
+  return unplaced(`inside:${id}`, `Inside ${id}`, nodes, edges, [...new Set(modules)].map(lane));
+}
+
+/** The width of a column of the sequence view and the height of one message row. */
+const SEQ_COLUMN = 190;
+
+const SEQ_ROW = 44;
+
+/**
+ * The sequence of calls from a function, drawn like a sequence diagram:
+ * the modules on the way as participants across the top, their lifelines
+ * down, every call a horizontal message in the order the code makes them
+ * (depth first, by line), `depth` levels deep, at most `limit` messages.
+ */
+function sequenceView(graph: Graph, id: string, depth: number, limit: number): Diagram {
+  const start = graph.nodes.get(id);
+
+  if (!start) return unplaced(`sequence:${id}`, id, [], [], [], { reason: `no function "${id}"`, missing: true });
+  const callsFrom = new Map<string, typeof graph.calls>();
+
+  for (const call of graph.calls) if (call.kind === "call") callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call]);
+  const messages: { from: string; to: string; label: string; line: number; depth: number }[] = [];
+  const active = new Set<string>();
+
+  const walk = (from: string, level: number): void => {
+    if (level >= depth || messages.length >= limit) return;
+    active.add(from);
+
+    for (const call of [...(callsFrom.get(from) ?? [])].sort((a, b) => a.line - b.line)) {
+      if (messages.length >= limit) break;
+      const target = graph.nodes.get(call.to);
+
+      if (!target) continue;
+      messages.push({ from: moduleOf(from), to: moduleOf(call.to), label: target.parent ? `${target.parent}.${target.name}` : target.name, line: call.line, depth: level });
+
+      // A call back into a function already on the stack is drawn, not followed: no loop.
+      if (!active.has(call.to)) walk(call.to, level + 1);
+    }
+
+    active.delete(from);
+  };
+
+  walk(id, 0);
+  const participants = [moduleOf(id)];
+
+  for (const message of messages) for (const module of [message.from, message.to]) if (!participants.includes(module)) participants.push(module);
+  const column = new Map(participants.map((module, i) => [module, 20 + i * SEQ_COLUMN]));
+  const bottom = 80 + (messages.length + 1) * SEQ_ROW;
+  const nodes: DiagramNode[] = [];
+  const edges: DiagramEdge[] = [];
+
+  for (const module of participants) {
+    const x = column.get(module)!;
+    nodes.push({ id: module, kind: "participant", label: module, ref: { id: module, file: module, line: 1 }, x, y: 20, w: SIZE.participant.w, h: SIZE.participant.h });
+    nodes.push({ id: `foot:${module}`, kind: "anchor", label: "", x: x + SIZE.participant.w / 2 - 1, y: bottom, w: 2, h: 2 });
+    edges.push({ from: module, to: `foot:${module}`, kind: "lifeline", route: [{ x: x + SIZE.participant.w / 2, y: 20 + SIZE.participant.h }, { x: x + SIZE.participant.w / 2, y: bottom }] });
+  }
+
+  messages.forEach((message, i) => {
+    const y = 80 + (i + 1) * SEQ_ROW;
+    const fromX = column.get(message.from)! + SIZE.participant.w / 2;
+    const toX = column.get(message.to)! + SIZE.participant.w / 2;
+    // A call within one module loops out to the right and back.
+    const route = message.from === message.to ? [{ x: fromX, y: y - 12 }, { x: fromX + 70, y: y - 12 }, { x: fromX + 70, y: y + 12 }, { x: fromX + 6, y: y + 12 }] : [{ x: fromX, y }, { x: toX, y }];
+    edges.push({ from: message.from, to: message.to, kind: "message", label: `${i + 1}. ${message.label}()`, route });
+  });
+
+  const diagram = unplaced(`sequence:${id}`, `Sequence from ${start.parent ? `${start.parent}.` : ""}${start.name}`, nodes, edges, [], { placed: true, sequence: { participants, messages: messages.map(({ from, to, label, line }) => ({ from, to, label, line })) } });
+
+  if (messages.length === 0) diagram.reason = "the function calls nothing archdiff can follow";
+  else if (messages.length >= limit) diagram.reason = `cut at ${limit} messages; --limit raises it`;
+
+  return diagram;
+}
+
+const DEFAULT_DEPTH: Record<View["kind"], number> = { layers: 0, layer: 1, dir: 1, module: 1, inside: 1, calls: 3, sequence: 4, coverage: 0 };
 
 /** The unplaced diagram of a view, folded to `limit` shapes. */
 export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}): Diagram {
@@ -509,12 +637,18 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
         return dirView(graph, view.path, depth);
       case "module":
         return moduleView(graph, view.id, depth, options.packages === true);
+      case "inside":
+        return insideView(graph, view.id, depth);
       case "calls":
         return callsView(graph, view.id, depth);
+      case "sequence":
+        return sequenceView(graph, view.id, depth, options.limit ?? MAX_SHAPES);
       case "coverage":
         return coverageView(graph);
     }
   };
 
-  return fold(full(), options.limit ?? MAX_SHAPES);
+  const diagram = full();
+
+  return diagram.placed ? diagram : fold(diagram, options.limit ?? MAX_SHAPES);
 }

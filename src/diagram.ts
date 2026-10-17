@@ -19,9 +19,11 @@ export interface DiagramNode {
    * `fn`: a function, method or class; `external`: a package or a built-in;
    * `hole`: a call archdiff could not resolve; `start`: an entry point;
    * `more`: the shapes a big view folds away (`count` of them), so the
-   * picture stays readable — the Markdown lists them all.
+   * picture stays readable — the Markdown lists them all; `participant`:
+   * a module at the top of a sequence view; `anchor`: an invisible point
+   * (the foot of a lifeline).
    */
-  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more";
+  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor";
   label: string;
   /** The code the shape stands for: a graph ID and a position. */
   ref?: { id?: string; file?: string; line?: number; endLine?: number };
@@ -47,9 +49,14 @@ export interface DiagramNode {
 export interface DiagramEdge {
   from: string;
   to: string;
-  /** `dependency`: an import; `call`: a resolved call; `ref`: a function passed as a value (may be called). */
-  kind: "dependency" | "call" | "ref";
+  /**
+   * `dependency`: an import; `call`: a resolved call; `ref`: a function passed as a value (may be called);
+   * `message`: one call of a sequence view, in order; `lifeline`: the dashed line under a participant.
+   */
+  kind: "dependency" | "call" | "ref" | "message" | "lifeline";
   label?: string;
+  /** The line's own bends, scene coordinates, when the view placed it (a sequence): exports draw these instead of routing. */
+  route?: { x: number; y: number }[];
   /** How many underlying edges the line stands for (a layer edge: imports between its modules). */
   count?: number;
   diff?: "added" | "removed";
@@ -80,6 +87,10 @@ export interface Diagram {
   missing?: true;
   /** `down`: a stack, one shape per row (the layers view); else ranks as columns from the left. */
   direction?: "down";
+  /** The shapes have their places already (a sequence view): `layout` keeps them, exports draw the routes given. */
+  placed?: true;
+  /** A sequence view: the Mermaid export is a sequenceDiagram and the Markdown lists the messages in order. */
+  sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number }[] };
 }
 
 /** Manual places that win over the computed ones, by node ID. */
@@ -94,12 +105,14 @@ export const SIZE: Record<DiagramNode["kind"], { w: number; h: number }> = {
   hole: { w: 60, h: 40 },
   start: { w: 36, h: 36 },
   more: { w: 150, h: 50 },
+  participant: { w: 150, h: 44 },
+  anchor: { w: 2, h: 2 },
 };
 
 /** One cell of the grid: the largest shape and the gaps around it. */
-const CELL_W = 210;
+const CELL_W = 260;
 
-const CELL_H = 84;
+const CELL_H = 90;
 
 const LANE_PAD = 20;
 
@@ -116,6 +129,11 @@ const MAX_ROWS = 8;
  * Pure: a new diagram.
  */
 export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
+  // A placed diagram keeps its places; only manual positions win.
+  if (diagram.placed) {
+    return { ...diagram, nodes: diagram.nodes.map((node) => (Object.hasOwn(positions, node.id) ? { ...node, x: positions[node.id]!.x, y: positions[node.id]!.y } : node)) };
+  }
+
   // The edges as adjacency, ignoring self-loops and edges to unknown shapes.
   const index = new Map(diagram.nodes.map((node, i) => [node.id, i]));
   const out = new Map<string, string[]>();

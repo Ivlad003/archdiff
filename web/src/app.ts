@@ -85,7 +85,8 @@ function ownView(node: DiagramNode): string | null {
     case "layer":
       return `layer:${id}`;
     case "module":
-      return `module:${id}`;
+    case "participant":
+      return `inside:${id}`;
     case "fn":
       return `calls:${id}`;
     case "more":
@@ -93,6 +94,19 @@ function ownView(node: DiagramNode): string | null {
     default:
       return null;
   }
+}
+
+/** The other pictures of the same subject: a module's dependencies or its inside, a function's call tree or its sequence. */
+function siblingViews(view: string): { label: string; key: string }[] {
+  const at = view.indexOf(":");
+  const kind = view.slice(0, at);
+  const rest = view.slice(at + 1);
+
+  if (kind === "module" || kind === "inside") return [{ label: "dependencies", key: `module:${rest}` }, { label: "inside: functions and calls", key: `inside:${rest}` }];
+
+  if (kind === "calls" || kind === "sequence") return [{ label: "call tree", key: `calls:${rest}` }, { label: "sequence of calls", key: `sequence:${rest}` }];
+
+  return [];
 }
 
 /** The path above a view, for the breadcrumbs: layers › layer › directories › module › function. */
@@ -118,21 +132,41 @@ function crumbsOf(view: string): { label: string; key: string }[] {
     const parts = rest.split("/");
 
     for (let depth = 1; depth <= parts.length; depth++) crumbs.push({ label: `${parts[depth - 1]}/`, key: `dir:${parts.slice(0, depth).join("/")}` });
-  } else if (kind === "module" || kind === "calls") {
-    const module = kind === "module" ? rest : rest.slice(0, rest.indexOf("#"));
+  } else if (kind === "module" || kind === "inside" || kind === "calls" || kind === "sequence") {
+    const module = kind === "module" || kind === "inside" ? rest : rest.slice(0, rest.indexOf("#"));
     const layer = layerOf(module);
 
     if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
     directories(module);
     crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: `module:${module}` });
 
-    if (kind === "calls") crumbs.push({ label: rest.slice(rest.indexOf("#") + 1), key: view });
+    if (kind === "inside") crumbs.push({ label: "inside", key: view });
+
+    if (kind === "calls" || kind === "sequence") crumbs.push({ label: rest.slice(rest.indexOf("#") + 1), key: `calls:${rest}` });
+
+    if (kind === "sequence") crumbs.push({ label: "sequence", key: view });
   } else if (kind === "coverage") crumbs.push({ label: "coverage", key: view });
 
   return crumbs;
 }
 
+function renderTypeSelect(state: State): void {
+  const select = element<HTMLSelectElement>("view-type");
+  const siblings = state.review ? [] : siblingViews(state.view);
+  select.replaceChildren();
+  select.hidden = siblings.length === 0;
+
+  for (const sibling of siblings) {
+    const option = document.createElement("option");
+    option.value = sibling.key;
+    option.textContent = sibling.label;
+    option.selected = sibling.key === state.view;
+    select.append(option);
+  }
+}
+
 function renderCrumbs(state: State): void {
+  renderTypeSelect(state);
   const box = element<HTMLSpanElement>("crumbs");
   box.replaceChildren();
 
@@ -337,6 +371,7 @@ function renderViews(filter: string): void {
   const groups: [string, ViewEntry["kind"][]][] = [
     ["Overview", ["layers", "coverage"]],
     ["Layers", ["layer"]],
+    ["Directories", ["dir"]],
     ["Entry points (call flows)", ["calls"]],
     ["Modules", ["module"]],
   ];
@@ -811,6 +846,7 @@ api.changes((path) => {
 // ── Controls ─────────────────────────────────────────────────────────────────
 
 element<HTMLButtonElement>("fit").addEventListener("click", () => canvas?.scrollToContent());
+element<HTMLSelectElement>("view-type").addEventListener("change", () => setHash({ ...stateFromHash(), view: element<HTMLSelectElement>("view-type").value, review: false }));
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 element<HTMLButtonElement>("review").addEventListener("click", () => {
   if (leaveEdit()) setHash({ ...stateFromHash(), review: true, head: headInput.value.trim() || null });

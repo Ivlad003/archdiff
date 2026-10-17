@@ -334,7 +334,9 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
           if (!node) return problem(response, 404, "no such shape in the view");
 
-          return json(response, { markdown: nodeMarkdown(node, analysis) });
+          const readSource = (file: string): string | null => (analysis.facts.has(file) ? readFileSync(join(root, file), "utf8") : null);
+
+          return json(response, { markdown: nodeMarkdown(node, analysis, readSource) });
         }
 
         case "/api/file": {

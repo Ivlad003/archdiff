@@ -24,6 +24,16 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis): string {
 
   if (diagram.reason) lines.push(`_${diagram.reason}_`, "");
   lines.push(`${diagram.nodes.length} shapes, ${diagram.edges.length} lines; ${analysis.files.length} files analysed.`, "", "```mermaid", toMermaid(diagram).trimEnd(), "```", "");
+
+  // A sequence reads as a numbered list: who calls what, in order, with the line of each call.
+  if (diagram.sequence) {
+    lines.push("## Messages", "");
+
+    for (const [i, message] of diagram.sequence.messages.entries()) lines.push(`${i + 1}. \`${message.from}\` → \`${message.to}\`: **${message.label}()** — ${message.from}:${message.line}`);
+    lines.push("", "## Participants", "", ...diagram.sequence.participants.map((module) => `- ${module}`), "");
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
   const byGroup = new Map<string, DiagramNode[]>();
 
   for (const node of diagram.nodes) byGroup.set(node.group ?? "", [...(byGroup.get(node.group ?? "") ?? []), node]);
@@ -44,8 +54,41 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis): string {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-/** The Markdown of one shape, for the panel beside the canvas. */
-export function nodeMarkdown(node: DiagramNode, analysis: Analysis): string {
+/** How many lines of a declaration's code the panel shows before cutting; the Code tab has the whole file. */
+const CODE_LINES = 60;
+
+/** The code of lines `from`..`to` of a file as a fenced block, cut at `CODE_LINES`; null when the source is not readable. */
+function codeBlock(source: string | null, file: string, from: number, to: number): string | null {
+  if (source === null) return null;
+  const lines = source.split("\n").slice(from - 1, to);
+  const fence = lines.some((line) => line.includes("```")) ? "````" : "```";
+  const language = file.slice(file.lastIndexOf(".") + 1).replace(/^[cm]?(ts|js)x?$/, (match) => match);
+  const shown = lines.slice(0, CODE_LINES);
+  const cut = lines.length > CODE_LINES ? `\n… ${lines.length - CODE_LINES} more lines (the Code tab has the file)` : "";
+
+  return `${fence}${language}\n${shown.join("\n")}\n${fence}${cut}`;
+}
+
+/** What a function calls and what it could not follow, as list lines. */
+function callLines(id: string, analysis: Analysis): string[] {
+  const { graph } = analysis;
+  const lines: string[] = [];
+  const calls = graph.calls.filter((call) => call.from === id);
+  const gaps = graph.gaps.filter((gap) => gap.from === id && (gap.reason === "dynamic" || gap.reason === "unknown-member" || gap.reason === "interface"));
+
+  for (const call of calls) lines.push(`- ${call.kind === "ref" ? "passes " : "calls "}\`${call.to}\` — line ${call.line}`);
+
+  for (const gap of gaps) lines.push(`- cannot follow \`${gap.callee}\` (${gap.reason}) — line ${gap.line}`);
+
+  return lines;
+}
+
+/**
+ * The Markdown of one shape, for the panel beside the canvas. With
+ * `readSource` (a file's text, or null), a module's declarations fold
+ * open to their calls and their code.
+ */
+export function nodeMarkdown(node: DiagramNode, analysis: Analysis, readSource: (file: string) => string | null = () => null): string {
   const { graph } = analysis;
   const lines = [`# ${node.label.replace(/\n.*/s, "")}`, ""];
   const where = position(node);
@@ -95,12 +138,30 @@ export function nodeMarkdown(node: DiagramNode, analysis: Analysis): string {
 
       if (module.decls.length > 0) {
         lines.push("## Declarations", "");
+        const source = readSource(id);
 
-        for (const decl of module.decls) {
-          const found = graph.nodes.get(decl)!;
-          lines.push(`- ${found.exported ? "export " : ""}${found.kind} **${found.name}**${found.signature ? ` \`${found.signature}\`` : ""} — line ${found.line}`);
-        }
+        // Each declaration folds open to what it calls and its code; a class lists its members the same way.
+        const describe = (declId: string, depth: number): void => {
+          const found = graph.nodes.get(declId)!;
+          const head = `${found.exported ? "export " : ""}${found.kind} <b>${found.name}</b>${found.signature ? ` <code>${found.signature.replace(/</g, "&lt;")}</code>` : ""} — line ${found.line}`;
+          const body: string[] = [];
 
+          if (found.doc) body.push(found.doc, "");
+          const calls = callLines(declId, analysis);
+
+          if (calls.length > 0) body.push(...calls, "");
+          const members = [...graph.nodes.values()].filter((candidate) => candidate.module === id && candidate.parent === (found.parent ? `${found.parent}.${found.name}` : found.name));
+
+          for (const member of members) body.push(`- ${member.kind} **${member.name}**${member.signature ? ` \`${member.signature}\`` : ""} — line ${member.line}`);
+
+          if (members.length > 0) body.push("");
+          const code = codeBlock(source, id, found.line, found.endLine);
+
+          if (code) body.push(code);
+          lines.push(`<details${depth > 0 ? ' class="member"' : ""}><summary>${head}</summary>`, "", ...body, "", "</details>");
+        };
+
+        for (const decl of module.decls) describe(decl, 0);
         lines.push("");
       }
 
