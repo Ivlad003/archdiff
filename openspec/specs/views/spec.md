@@ -8,7 +8,7 @@ Each view is one picture that answers one architectural question, computed from 
 
 ### Requirement: Every view answers one question
 
-The system SHALL offer these views, each with a one-sentence question it answers: `layers`, `modules`, `layer:<name>`, `dir:<path>`, `module:<path>`, `inside:<path>`, `contract:<path>`, `calls:<path>#<fn>`, `sequence:<path>#<fn>`, `path:<path>#<fn>`, `type:<path>#<Type>`, `cycles`, `cycle:<path>`, `classes`, `classes:<scope>`, `matrix`, `matrix:<dir>`, `events`, `tests`, `hotspots`, `packages`, `timeline`, `coverage`, `intent`. A view with a subject that does not exist SHALL be empty with a reason naming the subject.
+The system SHALL offer these views, each with a one-sentence question it answers: `layers`, `modules`, `layer:<name>`, `dir:<path>`, `module:<path>`, `inside:<path>`, `contract:<path>`, `calls:<path>#<fn>`, `sequence:<path>#<fn>`, `path:<path>#<fn>`, `type:<path>#<Type>`, `cycles`, `cycles:fns`, `cycle:<path>`, `cycle:<path>#<fn>`, `classes`, `classes:<scope>`, `matrix`, `matrix:<dir>`, `metrics`, `metrics:<layer>`, `machines`, `machine:<path>#<name>`, `events`, `tests`, `hotspots`, `packages`, `timeline`, `coverage`, `intent`. A view with a subject that does not exist SHALL be empty with a reason naming the subject.
 
 #### Scenario: A module view
 
@@ -91,3 +91,39 @@ The system SHALL draw at most 12 lifelines in a `sequence:` view, the rest shari
 
 - **WHEN** a function's calls cross 13 modules
 - **THEN** the sequence shows 11 of them and one "… 2 more" lifeline, and the reason says so
+
+### Requirement: Cycles say where to cut
+
+The system SHALL draw every strongly connected component of two or more modules (or, in `cycles:fns`, of functions across modules) as a lane and mark the fewest, then lightest, lines whose removal breaks it (exact up to 14 lines, a greedy order beyond), red and dashed with "cut: N imports"; layers importing each other SHALL get a lane of their own; `--types` SHALL count type-only imports too (dashed) in `cycles`, `cycle:` and `matrix`.
+
+#### Scenario: A type-only circle
+
+- **WHEN** `archdiff diagram cycles --types --format mermaid` runs on the sample
+- **THEN** the line from `src/db/store.ts` to `src/lib/orders.ts` is dashed and labelled "cut: 1 import", and the reason names "layers in a circle: db ⇄ lib"
+
+### Requirement: The steps after a view are data
+
+The system SHALL apply, after a view, the steps of one list in order — hidden lanes, modules opened in place, hubs as badges, the question, the fold, the light lines, the review's marks, only the changed, the overlays, the lane mode — each a pure function of the picture that appends to its reason; the CLI, the server and the page SHALL run the same list with the same table of options.
+
+#### Scenario: The same picture everywhere
+
+- **WHEN** a picture is asked for with the same options from the CLI and from the API
+- **THEN** the shapes, lines, lanes and reason are the same
+
+### Requirement: Lanes lie as rows or as columns
+
+The system SHALL lay the lanes as bands down the picture (rows) or as blocks across it in the order the lines flow (columns, `--lanes columns`), and SHALL choose columns by itself for a map of more than six lanes (`modules`, `layer:`, `dir:`); every shape SHALL sit inside its lane either way.
+
+#### Scenario: Columns on request
+
+- **WHEN** `archdiff diagram modules --lanes columns --format json` runs on the sample
+- **THEN** the lanes' x-ranges do not overlap and the routes lane sits left of the lib lane
+
+### Requirement: Shapes placed by hand keep the lines off them
+
+The system SHALL, when a saved drawing moved shapes out of the layout's columns, route the lines on a grid of the shapes' sides so that no line runs through a shape but its own ends, orthogonally; a computed shape SHALL never sit on a shape placed by hand.
+
+#### Scenario: Random placements
+
+- **WHEN** 150 random placements of 6–22 shapes with random lines are routed
+- **THEN** no segment crosses a shape and every segment is horizontal or vertical

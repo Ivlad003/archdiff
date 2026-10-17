@@ -8,13 +8,35 @@
 // `store` after. Entry points: `FactCache`, `contentHash`, `CACHE_FILE`.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import type { FileFacts } from "./extract/facts.ts";
 
-/** Bumped when the extractor changes what it records: every cached entry is then stale. */
-export const EXTRACTOR_VERSION = 6;
+/**
+ * The version of the extractors: a hash of their own source files (the
+ * `extract/` directory beside this module, .ts in a checkout, .js in the
+ * package), read once per process. A change to any extractor — a new
+ * fact, a fixed walk — makes every cached entry stale by itself; nobody
+ * has to remember to bump a number (which was forgotten once, and left
+ * stale syntax errors in the cache for a day).
+ */
+export const EXTRACTOR_VERSION: string = extractorVersion();
+
+function extractorVersion(): string {
+  const directory = join(dirname(fileURLToPath(import.meta.url)), "extract");
+  const hash = createHash("sha256");
+
+  try {
+    for (const name of readdirSync(directory).filter((file) => /\.(ts|js|mjs)$/.test(file)).sort()) hash.update(name).update("\0").update(readFileSync(join(directory, name))).update("\0");
+  } catch {
+    // No extractor directory beside this module (an unusual bundle): a fixed version, every run then trusts the cache.
+    return "unknown";
+  }
+
+  return hash.digest("hex").slice(0, 16);
+}
 
 export const CACHE_DIRECTORY = ".archdiff";
 
@@ -27,7 +49,7 @@ interface CacheEntry {
 }
 
 interface CacheFile {
-  version: number;
+  version: string;
   entries: Record<string, CacheEntry>;
 }
 

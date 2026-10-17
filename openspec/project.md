@@ -27,3 +27,6 @@ Live architecture diagrams of a TypeScript, JavaScript, Python, Rust or PHP repo
 - `exports`: Markdown, Mermaid, draw.io, Excalidraw, ArchiMate, JSON.
 - `review`: the architectural diff of a change, branches, history, the GitHub Action.
 - `cli`: the commands, their flags, exit codes and output channels.
+- `metrics`: coupling and cohesion as numbers, the instability overlay.
+- `machines`: state machines, explicit and implicit, and the guards of calls.
+- `run`: a real run of an entry with the storages mocked.

@@ -130,3 +130,131 @@ test("the metrics of the sample: a store is stable and depended upon, a route is
   assert.equal(lib.ca, 1);
   assert.equal(lib.ce, 1);
 });
+
+/** A small deterministic generator, so a failing case can be reproduced from its seed. */
+function random32(seed: number): () => number {
+  let a = seed >>> 0;
+
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test("property: the fold keeps the limit and the lines it merges count what they stand for, on 200 random pictures", async () => {
+  const { fold } = await import("../src/shape.ts");
+
+  for (let seed = 1; seed <= 200; seed++) {
+    const random = random32(seed);
+    const count = 5 + Math.floor(random() * 80);
+    const directories = ["src/a", "src/b", "src/c/d", "lib", ""];
+    const nodes = Array.from({ length: count }, (_, i) => {
+      const directory = directories[Math.floor(random() * directories.length)]!;
+
+      return { id: `${directory ? `${directory}/` : ""}m${i}.ts`, kind: "module" as const, label: `m${i}`, group: random() < 0.5 ? "one" : "two", x: 0, y: 0, w: 0, h: 0 };
+    });
+    const edges = Array.from({ length: Math.floor(random() * count * 2) }, () => ({ from: nodes[Math.floor(random() * count)]!.id, to: nodes[Math.floor(random() * count)]!.id, kind: "dependency" as const })).filter((edge) => edge.from !== edge.to);
+    const limit = 1 + Math.floor(random() * 30);
+    const folded = fold({ view: "test", title: "test", nodes, edges, groups: [{ id: "one", label: "one", kind: "lane", x: 0, y: 0, w: 0, h: 0 }, { id: "two", label: "two", kind: "lane", x: 0, y: 0, w: 0, h: 0 }] }, limit);
+    const kept = folded.nodes.filter((node) => node.kind !== "more");
+    const more = folded.nodes.filter((node) => node.kind === "more");
+
+    if (count <= limit) {
+      assert.equal(folded.nodes.length, count, `seed ${seed}: nothing to fold`);
+      continue;
+    }
+
+    assert.equal(kept.length, limit, `seed ${seed}: the first ${limit} shapes stay`);
+    assert.ok(more.length <= 12, `seed ${seed}: at most a dozen folded shapes`);
+    assert.equal(more.reduce((sum, node) => sum + (node.count ?? 0), 0), count - limit, `seed ${seed}: the folded shapes count every dropped shape`);
+    // Every line joins shapes of the picture, every line between kept shapes is still there, and the merged lines count at least them.
+    const ids = new Set(folded.nodes.map((node) => node.id));
+    assert.ok(folded.edges.every((edge) => ids.has(edge.from) && ids.has(edge.to)), `seed ${seed}: lines between present shapes`);
+    const keptEdges = edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
+    assert.ok(keptEdges.every((edge) => folded.edges.some((line) => line.from === edge.from && line.to === edge.to)), `seed ${seed}: lines between kept shapes stay`);
+    const total = folded.edges.reduce((sum, edge) => sum + (edge.count ?? 1), 0);
+    assert.ok(total >= keptEdges.length && total <= edges.length, `seed ${seed}: ${total} lines stand for at most the ${edges.length} original`);
+  }
+});
+
+test("property: the intent survives a round trip through its Markdown, on 100 random contracts", async () => {
+  const { intentMarkdown, parseIntent } = await import("../src/intent.ts");
+
+  for (let seed = 1; seed <= 100; seed++) {
+    const random = random32(seed);
+    const layers = Array.from({ length: 1 + Math.floor(random() * 4) }, (_, i) => (random() < 0.5 ? { name: `layer${i}` } : { name: `layer${i}`, description: `what layer ${i} does & why` }));
+    const modules = Array.from({ length: 1 + Math.floor(random() * 8) }, (_, i): { id: string; layer: string; description?: string; fns: { name: string; description?: string }[] } => {
+      const layer = layers[Math.floor(random() * layers.length)]!.name;
+      const fns = Array.from({ length: Math.floor(random() * 3) }, (_, j) => (random() < 0.5 ? { name: `f${j}` } : { name: `f${j}`, description: `does ${j}` }));
+
+      return random() < 0.5 ? { id: `src/${layer}/m${i}.ts`, layer, description: `module ${i} with "quotes" and <a tag>`, fns } : { id: `src/${layer}/m${i}.ts`, layer, fns };
+    });
+    const edges = Array.from({ length: Math.floor(random() * 6) }, () => ({ from: modules[Math.floor(random() * modules.length)]!.id, to: modules[Math.floor(random() * modules.length)]!.id })).filter((edge, i, all) => edge.from !== edge.to && all.findIndex((other) => other.from === edge.from && other.to === edge.to) === i);
+    const intent = { layers, modules, edges, before: "# Architecture\n\nSome prose.\n\n", after: "" };
+    const back = parseIntent(intentMarkdown(intent));
+    const byId = (a: { id: string }, b: { id: string }): number => (a.id < b.id ? -1 : 1);
+    assert.deepEqual(back.layers, layers, `seed ${seed}: layers`);
+    // The Markdown groups the modules by layer: the same modules, in the layers' order.
+    assert.deepEqual([...back.modules].sort(byId), [...modules].sort(byId), `seed ${seed}: modules`);
+    assert.deepEqual(back.edges, edges, `seed ${seed}: edges`);
+    assert.equal(intentMarkdown(back), intentMarkdown(intent), `seed ${seed}: the Markdown is stable`);
+  }
+});
+
+test("property: the layout keeps every shape in its lane, apart from the others, with the ranks following the lines, on 150 random pictures", async () => {
+  const { layout } = await import("../src/diagram.ts");
+
+  for (let seed = 1; seed <= 150; seed++) {
+    const random = random32(seed);
+    const count = 2 + Math.floor(random() * 30);
+    const lanes = ["a", "b", "c"].slice(0, 1 + Math.floor(random() * 3));
+    const nodes = Array.from({ length: count }, (_, i) => ({ id: `n${i}`, kind: "module" as const, label: `n${i}`, group: lanes[Math.floor(random() * lanes.length)]!, x: 0, y: 0, w: 0, h: 0 }));
+    // Lines forward in the order of the shapes, so the picture is acyclic and the ranks are known.
+    const edges = Array.from({ length: Math.floor(random() * count * 2) }, () => {
+      const a = Math.floor(random() * count);
+      const b = Math.floor(random() * count);
+
+      return a < b ? { from: `n${a}`, to: `n${b}`, kind: "dependency" as const } : null;
+    }).filter((edge): edge is NonNullable<typeof edge> => edge !== null);
+    const placed = layout({ view: "test", title: "test", nodes, edges, groups: lanes.map((lane) => ({ id: lane, label: lane, kind: "lane" as const, x: 0, y: 0, w: 0, h: 0 })) });
+
+    for (const node of placed.nodes) {
+      const lane = placed.groups.find((group) => group.id === node.group)!;
+      assert.ok(node.x >= lane.x && node.x + node.w <= lane.x + lane.w && node.y >= lane.y && node.y + node.h <= lane.y + lane.h, `seed ${seed}: ${node.id} in its lane`);
+    }
+
+    for (const a of placed.nodes) for (const b of placed.nodes) if (a.id < b.id) assert.ok(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y, `seed ${seed}: ${a.id} and ${b.id} apart`);
+    const at = new Map(placed.nodes.map((node) => [node.id, node]));
+
+    for (const edge of edges) assert.ok(at.get(edge.to)!.x > at.get(edge.from)!.x, `seed ${seed}: ${edge.from} → ${edge.to} runs forward`);
+  }
+});
+
+test("the resolver follows tsconfig paths, extensionless specifiers, index files and node built-ins", async () => {
+  const { createResolver } = await import("../src/resolve.ts");
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-resolve-"));
+
+  try {
+    mkdirSync(join(dir, "src/lib"), { recursive: true });
+    writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@/*": ["src/*"] } } }));
+    writeFileSync(join(dir, "src/lib/a.ts"), "");
+    writeFileSync(join(dir, "src/lib/index.ts"), "");
+    writeFileSync(join(dir, "src/b.ts"), "");
+    const resolve = createResolver(dir, ["src/lib/a.ts", "src/lib/index.ts", "src/b.ts"]);
+    assert.deepEqual(resolve("src/b.ts", "@/lib/a"), { kind: "file", path: "src/lib/a.ts" });
+    assert.deepEqual(resolve("src/b.ts", "./lib"), { kind: "file", path: "src/lib/index.ts" });
+    assert.deepEqual(resolve("src/b.ts", "./lib/a.ts"), { kind: "file", path: "src/lib/a.ts" });
+    assert.deepEqual(resolve("src/b.ts", "node:fs"), { kind: "builtin", name: "fs" });
+    assert.deepEqual(resolve("src/b.ts", "react-dom/client"), { kind: "package", name: "react-dom" });
+    assert.equal(resolve("src/b.ts", "./nope").kind, "unresolved");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

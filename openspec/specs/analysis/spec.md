@@ -88,3 +88,30 @@ The system SHALL report, by module, the calls it could not follow with their rea
 
 - **WHEN** `archdiff coverage` runs
 - **THEN** the report lists the modules with gaps, biggest first, each gap with its line and reason
+
+### Requirement: The files found are the repository's
+
+The system SHALL list the sources as git lists them, or by a walk that follows a symbolic link to a file or a directory inside the root once, under its own path, and never back up the tree; Rust files under `tests/`, `benches/` and `examples/` SHALL be crate roots of their own, so `mod util;` finds `tests/util.rs` and `use <crate>::` the library.
+
+#### Scenario: A linked directory
+
+- **WHEN** `src/linked` is a link to `src/real` and `src/loop` a link to the root
+- **THEN** `src/real/a.ts` is a module, `src/linked/a.ts` and `src/loop/…` are not
+
+### Requirement: The cache follows the extractors
+
+The system SHALL version the fact cache by a hash of the extractors' own source files, so a change to any extractor makes every cached entry stale without anyone bumping a number.
+
+#### Scenario: An extractor changes
+
+- **WHEN** a file of `src/extract/` changes between two runs
+- **THEN** the second run reports every file as a cache miss
+
+### Requirement: Storages are known by what the code does
+
+The system SHALL call a module a storage by `archdiff.json`'s `storages` globs and `storagePackages`, by the storage packages it imports, by the calls it makes (the file system, `fetch`, the browser's stores, a database client's `query`, Python's `open` and `connect`, Rust's `std::fs`, PHP's `PDO` and `file_put_contents`), or by its name, in that order.
+
+#### Scenario: A module that calls fetch
+
+- **WHEN** a module named like nothing in particular calls `fetch`
+- **THEN** the storages overlay labels it "⛁ HTTP (fetch)"

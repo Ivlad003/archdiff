@@ -80,20 +80,30 @@ function labelOf(element: SceneElement, elements: readonly SceneElement[]): stri
   return isJsonString(text) ? text.replace(/\s+/g, " ").trim() : "";
 }
 
-/** The plan read from the scene of `viewKey`. */
-export function planFromScene(analysis: Analysis, viewKey: string, elements: readonly SceneElement[]): Plan {
+/** What the passes over a drawing share: the live elements, the lanes and the generated shapes among them, the subject module. */
+interface Drawing {
+  analysis: Analysis;
+  view: ReturnType<typeof parseView>;
+  elements: readonly SceneElement[];
+  live: SceneElement[];
+  lanes: SceneElement[];
+  nodes: SceneElement[];
+  /** The module a function drawn here belongs to by default: the subject of the view. */
+  subjectModule: string | null;
+  plan: Plan;
+}
+
+/** The kind a generated shape stands for (`customData.kind`). */
+function nodeKind(element: SceneElement): string {
+  return isJsonObject(element.customData) && isJsonString(element.customData["kind"]) ? element.customData["kind"] : "";
+}
+
+/** The shapes the user drew: a module, a function or a layer by their label and place. */
+function plannedShapes(d: Drawing): Map<string, PlannedNode> {
+  const { analysis, view, elements, live, lanes, nodes, subjectModule, plan } = d;
   const { graph } = analysis;
-  const view = parseView(viewKey);
-  const plan: Plan = { view: viewKey, added: [], edges: [], removed: [], notes: [], layerWarnings: [], ignored: [] };
-  const live = elements.filter((element) => !element.isDeleted);
-  const lanes = live.filter((element) => generated(element) === "lane");
-  const nodes = live.filter((element) => generated(element) === "node");
-  const nodeKind = (element: SceneElement): string => (isJsonObject(element.customData) && isJsonString(element.customData["kind"]) ? element.customData["kind"] : "");
-  // The module a function drawn here belongs to by default: the subject of the view.
-  const subjectModule = view?.kind === "module" ? view.id : view?.kind === "calls" ? moduleOf(view.id) : null;
   const planned = new Map<string, PlannedNode>();
 
-  // Shapes the user drew: a module, a function or a layer by their label and place.
   for (const element of live) {
     if (generated(element) !== null || !["rectangle", "ellipse", "diamond"].includes(element.type)) continue;
     const label = labelOf(element, elements);
@@ -152,7 +162,13 @@ export function planFromScene(analysis: Analysis, viewKey: string, elements: rea
     planned.set(element.id, node);
   }
 
-  plan.added = [...planned.values()];
+  return planned;
+}
+
+/** The arrows the user drew between shapes: imports or calls, with a warning when they couple layers that are not coupled today. */
+function plannedArrows(d: Drawing, planned: ReadonlyMap<string, PlannedNode>): void {
+  const { analysis, live, nodes, plan } = d;
+  const { graph } = analysis;
 
   // The end of an arrow: an existing node, a planned shape, or nothing readable.
   const endOf = (elementId: string | undefined): PlannedEdge["from"] | null => {
@@ -210,9 +226,11 @@ export function planFromScene(analysis: Analysis, viewKey: string, elements: rea
       if (!exists) plan.layerWarnings.push(`${fromLayer} → ${toLayer}: no module of ${fromLayer} imports ${toLayer} today`);
     }
   }
+}
 
-  // Generated shapes deleted in the drawing: planned removals.
-  for (const element of elements) {
+/** Generated shapes deleted in the drawing: planned removals, with the file and line they stood for. */
+function plannedRemovals(d: Drawing): void {
+  for (const element of d.elements) {
     if (!element.isDeleted || generated(element) !== "node") continue;
     const removal: Plan["removed"][number] = { id: element.id, kind: nodeKind(element), label: element.id };
     const file = isJsonObject(element.customData) ? element.customData["file"] : undefined;
@@ -221,18 +239,47 @@ export function planFromScene(analysis: Analysis, viewKey: string, elements: rea
     if (isJsonString(file)) removal.file = file;
 
     if (typeof line === "number") removal.line = line;
-    plan.removed.push(removal);
+    d.plan.removed.push(removal);
   }
+}
 
-  for (const element of live) {
+/** Free text the user wrote (not a shape's label): the notes of the task. */
+function notesOf(d: Drawing): void {
+  for (const element of d.live) {
     if (element.type === "text" && generated(element) === null && !isJsonString(element["containerId"])) {
-      const text = labelOf(element, elements);
+      const text = labelOf(element, d.elements);
 
-      if (text !== "") plan.notes.push(text);
+      if (text !== "") d.plan.notes.push(text);
     }
   }
+}
 
-  return plan;
+/**
+ * The task drawn on the saved scene of a view: the shapes the user drew
+ * (modules, functions, layers), the arrows between shapes (imports,
+ * calls), the generated shapes deleted (removals) and the free text
+ * (notes), each with the reason it was read so.
+ */
+export function planFromScene(analysis: Analysis, viewKey: string, elements: readonly SceneElement[]): Plan {
+  const view = parseView(viewKey);
+  const live = elements.filter((element) => !element.isDeleted);
+  const d: Drawing = {
+    analysis,
+    view,
+    elements,
+    live,
+    lanes: live.filter((element) => generated(element) === "lane"),
+    nodes: live.filter((element) => generated(element) === "node"),
+    subjectModule: view?.kind === "module" ? view.id : view?.kind === "calls" ? moduleOf(view.id) : null,
+    plan: { view: viewKey, added: [], edges: [], removed: [], notes: [], layerWarnings: [], ignored: [] },
+  };
+  const planned = plannedShapes(d);
+  d.plan.added = [...planned.values()];
+  plannedArrows(d, planned);
+  plannedRemovals(d);
+  notesOf(d);
+
+  return d.plan;
 }
 
 /** Whether the plan asks for anything. */

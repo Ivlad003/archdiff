@@ -1017,3 +1017,35 @@ test("run executes an entry for real with the storages mocked, traced function b
   assert.equal(archdiff(["run", "layers", fixture]).status, 2);
   assert.ok(!existsSync(join(fixture, ".archdiff")) || !readdirSync(join(fixture, ".archdiff")).some((name) => name.startsWith("run-")), "the plan file is removed after the run");
 });
+
+test("spec --tests writes a test skeleton per Gherkin scenario and keeps a test file archdiff did not write", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-gherkin-"));
+
+  try {
+    mkdirSync(join(dir, "features"), { recursive: true });
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/a.ts"), "export const a = 1;\n");
+    writeFileSync(join(dir, "features/orders.feature"), "# a comment\n@tag\nFeature: Orders\n  Orders are placed and paid.\n\n  Background:\n    Given a store\n\n  Scenario: Place an order\n    When I place an order of 5\n    Then it is saved\n    And it is logged\n\n  Scenario Outline: Pay\n    Given an order\n    When I pay <amount>\n    Then it is paid\n");
+    writeFileSync(join(dir, "features/mine.feature"), "Feature: Mine\n  Scenario: Kept\n    Then nothing\n");
+    mkdirSync(join(dir, "tests"));
+    writeFileSync(join(dir, "tests/mine.test.ts"), "// my own test file\n");
+    const { status, stdout } = archdiff(["spec", dir, "--tests"]);
+    assert.equal(status, 0, stdout);
+    assert.ok(stdout.includes("tests/orders.test.ts\twritten") && stdout.includes("tests/mine.test.ts\tkept"), stdout);
+    const written = readFileSync(join(dir, "tests/orders.test.ts"), "utf8");
+    assert.ok(written.startsWith("// archdiff:generated — test skeletons of features/orders.feature"), written);
+    assert.ok(written.includes("// Background: Given a store"), written);
+    assert.ok(written.includes('test("Place an order", { todo: "not written yet" }, () => {\n  // When I place an order of 5\n  // Then it is saved\n  // And it is logged\n});'), written);
+    assert.ok(written.includes('test("Pay", { todo: "not written yet" }, () => {'), written);
+    assert.equal(readFileSync(join(dir, "tests/mine.test.ts"), "utf8"), "// my own test file\n");
+    // The skeleton is a valid test file: node runs it with every test marked to do.
+    // Outside this test run's own context, so the child's reporter writes to its stdout as it would for a user.
+    const env = { ...process.env };
+    delete env["NODE_TEST_CONTEXT"];
+    const ran = spawnSync(process.execPath, ["--test", join(dir, "tests/orders.test.ts")], { encoding: "utf8", env });
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.ok(ran.stdout.includes("todo 2"), ran.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

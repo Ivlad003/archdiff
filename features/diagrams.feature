@@ -47,3 +47,14 @@ Feature: Diagrams from the code
     When I run "archdiff diagram modules"
     Then the title is "Modules: 5 in 4 layers"
     And every module sits in its layer's lane
+
+  Scenario: Lanes as columns
+    When I run "archdiff diagram modules --lanes columns --format json"
+    Then the lanes lie side by side, the routes lane left of the lib lane it imports
+    And every shape sits inside its lane
+
+  Scenario: Shapes moved by hand keep the lines off them
+    Given shapes placed anywhere, as a saved drawing places them
+    When the lines are routed
+    Then no segment of any line overlaps a shape that is not its own source or target
+    And every segment is horizontal or vertical

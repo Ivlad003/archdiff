@@ -96,19 +96,19 @@ export interface External {
   name: string;
 }
 
-/** The whole graph of one analysis. */
+/** The whole graph of one analysis: built once by `buildGraph`, read everywhere, changed nowhere (a view that needs more makes its own structures). */
 export interface Graph {
-  layers: string[];
-  modules: Map<string, Module>;
-  nodes: Map<string, GraphNode>;
-  deps: Dependency[];
-  calls: CallEdge[];
-  externals: Map<string, External>;
-  gaps: Gap[];
+  readonly layers: readonly string[];
+  readonly modules: ReadonlyMap<string, Module>;
+  readonly nodes: ReadonlyMap<string, GraphNode>;
+  readonly deps: readonly Dependency[];
+  readonly calls: readonly CallEdge[];
+  readonly externals: ReadonlyMap<string, External>;
+  readonly gaps: readonly Gap[];
   /** Imports that resolve to no file, package or built-in, with the reason. */
-  unresolvedImports: { from: string; specifier: string; reason: string; line: number }[];
+  readonly unresolvedImports: readonly { from: string; specifier: string; reason: string; line: number }[];
   /** Per module, every exported name → the node it stands for, re-exports followed (`module.exports = require("./x")`, `export * from`). */
-  resolvedExports: Map<string, Map<string, string>>;
+  readonly resolvedExports: ReadonlyMap<string, ReadonlyMap<string, string>>;
 }
 
 export function nodeId(module: string, name: string, parent?: string): string {
@@ -241,20 +241,25 @@ class ExportTable {
   }
 }
 
-/** Builds the graph of the repository from the facts of every file. */
-export function buildGraph(facts: readonly FileFacts[], config: Config, resolve: (from: string, specifier: string) => Resolution): Graph {
-  const modules = new Map<string, Module>();
-  const nodes = new Map<string, GraphNode>();
-  const deps: Dependency[] = [];
-  const calls: CallEdge[] = [];
-  const externals = new Map<string, External>();
-  const gaps: Gap[] = [];
-  const unresolvedImports: Graph["unresolvedImports"] = [];
-  const scopes = new Map<string, Scope>();
-  const sorted = [...facts].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+/** The graph while it is built, shared by the passes: the tables being filled and the scopes of every file. */
+interface Building {
+  /** The facts in path order, so every table is filled in a stable order. */
+  facts: readonly FileFacts[];
+  config: Config;
+  resolve: (from: string, specifier: string) => Resolution;
+  modules: Map<string, Module>;
+  nodes: Map<string, GraphNode>;
+  deps: Dependency[];
+  calls: CallEdge[];
+  externals: Map<string, External>;
+  gaps: Gap[];
+  unresolvedImports: { from: string; specifier: string; reason: string; line: number }[];
+  scopes: Map<string, Scope>;
+}
 
-  // Pass 1: modules and nodes, so calls across files can find their targets.
-  for (const file of sorted) {
+/** Pass 1: every file is a module, every declaration (and member) a node, so calls across files can find their targets. */
+function declareModules(b: Building): void {
+  for (const file of b.facts) {
     const locals = new Map<string, string>();
     const decls: string[] = [];
 
@@ -267,7 +272,7 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
       if (decl.fingerprint) node.fingerprint = decl.fingerprint;
 
       if (decl.doc) node.doc = decl.doc;
-      nodes.set(id, node);
+      b.nodes.set(id, node);
 
       if (!parent) {
         decls.push(id);
@@ -278,19 +283,21 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
     };
 
     for (const decl of file.decls) addDecl(decl);
-    const module: Module = { id: file.path, layer: layerOf(file.path, config), decls, lines: file.endLine, opaque: file.completeness === "opaque" };
+    const module: Module = { id: file.path, layer: layerOf(file.path, b.config), decls, lines: file.endLine, opaque: file.completeness === "opaque" };
 
     if (file.doc) module.doc = file.doc;
-    modules.set(file.path, module);
-    scopes.set(file.path, { locals, imports: new Map() });
+    b.modules.set(file.path, module);
+    b.scopes.set(file.path, { locals, imports: new Map() });
   }
+}
 
-  // Pass 2: imports become dependencies and fill the scopes.
-  for (const file of sorted) {
-    const scope = scopes.get(file.path)!;
+/** Pass 2: imports become dependencies (on a module, a package or a built-in) and fill the scopes; an import of nothing known is recorded as unresolved. */
+function bindImports(b: Building): void {
+  for (const file of b.facts) {
+    const scope = b.scopes.get(file.path)!;
 
     for (const fact of file.imports) {
-      const target = resolve(file.path, fact.source);
+      const target = b.resolve(file.path, fact.source);
 
       for (const binding of fact.bindings) {
         scope.imports.set(binding.local, { target, imported: binding.kind === "named" ? binding.imported : binding.kind === "default" ? "default" : "*" });
@@ -299,22 +306,30 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
       if (target.kind === "self") continue;
 
       if (target.kind === "file") {
-        deps.push({ from: file.path, to: target.path, typeOnly: fact.typeOnly === true, reexport: fact.reexport, line: fact.line });
+        b.deps.push({ from: file.path, to: target.path, typeOnly: fact.typeOnly === true, reexport: fact.reexport, line: fact.line });
       } else if (target.kind === "package" || target.kind === "builtin") {
         const id = `${target.kind === "package" ? "pkg" : "node"}:${target.name}`;
 
-        if (!externals.has(id)) externals.set(id, { id, kind: target.kind, name: target.name });
-        deps.push({ from: file.path, to: id, typeOnly: fact.typeOnly === true, reexport: fact.reexport, line: fact.line });
+        if (!b.externals.has(id)) b.externals.set(id, { id, kind: target.kind, name: target.name });
+        b.deps.push({ from: file.path, to: id, typeOnly: fact.typeOnly === true, reexport: fact.reexport, line: fact.line });
       } else {
-        unresolvedImports.push({ from: file.path, specifier: fact.source, reason: target.reason, line: fact.line });
+        b.unresolvedImports.push({ from: file.path, specifier: fact.source, reason: target.reason, line: fact.line });
       }
     }
   }
+}
 
-  const exports = new ExportTable(sorted, nodes, resolve);
-  const resolvedExports = new Map<string, Map<string, string>>();
+/** Where a call lands: one node, several (a call through an interface, dispatched to every class implementing it), or a gap with its reason. */
+type CallTarget = { id: string } | { ids: string[] } | { gap: Gap["reason"] };
 
-  for (const file of sorted) resolvedExports.set(file.path, exports.allOf(file.path));
+/**
+ * The resolver of calls: what a local name of a module stands for (a
+ * declaration, or an import followed to its export), the member of a
+ * class up its `extends` chain, the classes implementing a type, and
+ * `resolveCall` itself, in the order the module header describes.
+ */
+function callResolver(b: Building, exports: ExportTable): (module: string, enclosingClass: string | null, call: CallFact) => CallTarget {
+  const { facts, nodes, scopes } = b;
 
   // The node a local name of `module` stands for: a declaration, or an import followed to its export.
   const nameTarget = (module: string, name: string): { id: string } | { gap: Gap["reason"] } => {
@@ -357,11 +372,10 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
     return "id" in baseTarget ? memberOf(baseTarget.id, member, depth + 1) : null;
   };
 
-  // Pass 3: calls of every node (and the module's top level) resolved against the scopes.
   // The classes implementing or extending a type or class, by the names written on `implements`/`extends`, resolved in each class's own file.
   const implementerIndex = new Map<string, string[]>();
 
-  for (const file of sorted) {
+  for (const file of facts) {
     const walkClasses = (decl: DeclFact, parent?: string): void => {
       if (decl.kind === "class") {
         const own = nodeId(file.path, decl.name, parent);
@@ -394,7 +408,7 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
     return "id" in target ? externalAncestor(target.id, depth + 1) : target.gap === "external";
   };
 
-  const resolveCall = (module: string, enclosingClass: string | null, call: CallFact): { id: string } | { ids: string[] } | { gap: Gap["reason"] } => {
+  return (module, enclosingClass, call) => {
     if (call.opaque) return { gap: "dynamic" };
     const callee = call.callee;
 
@@ -474,46 +488,76 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
 
     return externalAncestor(owner.id) ? { gap: "external" } : { gap: "unknown-member" };
   };
+}
 
-  for (const file of sorted) {
-    const walk = (decl: DeclFact, parent: string | null, enclosingClass: string | null): void => {
-      const id = nodeId(file.path, decl.name, parent ?? undefined);
-      const ownClass = decl.kind === "class" ? id : enclosingClass;
+/** Pass 3: the calls of every node (and of the module's top level) resolved against the scopes; a call not followed is a gap, a function read as a value a `ref`. */
+function resolveCalls(b: Building, resolveCall: ReturnType<typeof callResolver>, nameOf: (module: string, name: string) => { id: string } | { gap: Gap["reason"] }): void {
+  for (const file of b.facts) {
+    const record = (from: string, call: CallFact): void => {
+      const target = resolveCall(file.path, from.includes("#") ? classOf(b, from) : null, call);
+      const edge = (to: string): CallEdge => (call.guards ? { from, to, kind: "call", line: call.line, guards: call.guards } : { from, to, kind: "call", line: call.line });
 
-      for (const call of decl.calls) {
-        const target = resolveCall(file.path, ownClass, call);
-        const edge = (to: string): CallEdge => (call.guards ? { from: id, to, kind: "call", line: call.line, guards: call.guards } : { from: id, to, kind: "call", line: call.line });
-
-        if ("id" in target) calls.push(edge(target.id));
-        else if ("ids" in target) for (const to of target.ids) calls.push(edge(to));
-        else gaps.push({ from: id, callee: call.callee, reason: target.gap, line: call.line });
-      }
-
-      for (const member of decl.members) walk(member, parent ? `${parent}.${decl.name}` : decl.name, ownClass);
+      if ("id" in target) b.calls.push(edge(target.id));
+      else if ("ids" in target) for (const to of target.ids) b.calls.push(edge(to));
+      else b.gaps.push({ from, callee: call.callee, reason: target.gap, line: call.line });
     };
 
-    for (const decl of file.decls) walk(decl, null, null);
+    const walk = (decl: DeclFact, parent: string | null): void => {
+      const id = nodeId(file.path, decl.name, parent ?? undefined);
 
-    for (const call of file.moduleCalls) {
-      const target = resolveCall(file.path, null, call);
+      for (const call of decl.calls) record(id, call);
 
-      if ("id" in target) calls.push({ from: file.path, to: target.id, kind: "call", line: call.line });
-      else if ("ids" in target) for (const to of target.ids) calls.push({ from: file.path, to, kind: "call", line: call.line });
-      else gaps.push({ from: file.path, callee: call.callee, reason: target.gap, line: call.line });
-    }
+      for (const member of decl.members) walk(member, parent ? `${parent}.${decl.name}` : decl.name);
+    };
+
+    for (const decl of file.decls) walk(decl, null);
+
+    for (const call of file.moduleCalls) record(file.path, call);
 
     // A function read as a value (`later(save)`, `{ save }`): it may be called by whoever holds it.
     for (const ref of file.valueRefs) {
       if (ref.member) continue;
-      const target = nameTarget(file.path, ref.name);
+      const target = nameOf(file.path, ref.name);
 
-      if ("id" in target && nodes.get(target.id)?.kind === "fn") calls.push({ from: file.path, to: target.id, kind: "ref", line: ref.line });
+      if ("id" in target && b.nodes.get(target.id)?.kind === "fn") b.calls.push({ from: file.path, to: target.id, kind: "ref", line: ref.line });
     }
 
-    if (file.parseError) gaps.push({ from: file.path, callee: "", reason: "parse-error", line: file.parseError.line });
+    if (file.parseError) b.gaps.push({ from: file.path, callee: "", reason: "parse-error", line: file.parseError.line });
   }
+}
 
-  const layers = [...new Set([...modules.values()].map((module) => module.layer))].sort();
+/** The class a node sits in (`path#Class.method` → `path#Class`, a class itself → itself); null for a plain function. */
+function classOf(b: Building, id: string): string | null {
+  const node = b.nodes.get(id);
 
-  return { layers, modules, nodes, deps, calls, externals, gaps, unresolvedImports, resolvedExports };
+  if (!node) return null;
+
+  if (node.kind === "class") return id;
+
+  if (!node.parent) return null;
+  const owner = nodeId(node.module, node.parent.includes(".") ? node.parent.slice(node.parent.lastIndexOf(".") + 1) : node.parent, node.parent.includes(".") ? node.parent.slice(0, node.parent.lastIndexOf(".")) : undefined);
+
+  return b.nodes.get(owner)?.kind === "class" ? owner : classOf(b, owner);
+}
+
+/** Builds the graph of the repository from the facts of every file: three passes over the files in path order. */
+export function buildGraph(facts: readonly FileFacts[], config: Config, resolve: (from: string, specifier: string) => Resolution): Graph {
+  const b: Building = { facts: [...facts].sort((a, c) => (a.path < c.path ? -1 : a.path > c.path ? 1 : 0)), config, resolve, modules: new Map(), nodes: new Map(), deps: [], calls: [], externals: new Map(), gaps: [], unresolvedImports: [], scopes: new Map() };
+  declareModules(b);
+  bindImports(b);
+  const exports = new ExportTable(b.facts, b.nodes, resolve);
+  const resolvedExports = new Map<string, Map<string, string>>();
+
+  for (const file of b.facts) resolvedExports.set(file.path, exports.allOf(file.path));
+  const resolveCall = callResolver(b, exports);
+  // A function read as a value is looked up like the head of a call: through the resolver, with no member.
+  const nameOf = (module: string, name: string): { id: string } | { gap: Gap["reason"] } => {
+    const target = resolveCall(module, null, { callee: name, line: 0, col: 0, endLine: 0, endCol: 0 });
+
+    return "id" in target ? target : "ids" in target ? { id: target.ids[0]! } : target;
+  };
+  resolveCalls(b, resolveCall, nameOf);
+  const layers = [...new Set([...b.modules.values()].map((module) => module.layer))].sort();
+
+  return { layers, modules: b.modules, nodes: b.nodes, deps: b.deps, calls: b.calls, externals: b.externals, gaps: b.gaps, unresolvedImports: b.unresolvedImports, resolvedExports };
 }

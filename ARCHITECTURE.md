@@ -32,6 +32,7 @@ flowchart LR
     n_src_cycles_ts["src/cycles.ts<br>import, call and layer cycles, and where to cut them"]
     n_src_machines_ts["src/machines.ts<br>state machines: declared by a library, or written with literal states"]
     n_src_run_ts["src/run.ts<br>a real run of an entry with the storages mocked, traced function by function"]
+    n_src_gherkin_ts["src/gherkin.ts<br>Gherkin features as data, and test skeletons written from them"]
   end
   subgraph n_exports["exports — the picture as text and files"]
     n_src_export_index_ts["src/export/index.ts<br>Mermaid, draw.io, Excalidraw, ArchiMate, JSON"]
@@ -64,6 +65,7 @@ flowchart LR
   subgraph n_tests["tests — behaviour through the real CLI, HTTP API and page"]
     n_tests_cli_test_ts["tests/cli.test.ts<br>the commands on the fixtures"]
     n_tests_routing_test_ts["tests/routing.test.ts<br>the layout and the router: no line through a shape"]
+    n_tests_extract_test_ts["tests/extract.test.ts<br>the language frontends on snippets"]
   end
   subgraph n_scripts["scripts — build and pack"]
     n_scripts_build_web_mjs["scripts/build-web.mjs<br>bundles the page into dist/web"]
@@ -111,6 +113,8 @@ flowchart LR
   n_src_graph_ts --> n_src_extract_facts_ts
   n_tests_cli_test_ts --> n_src_flow_ts
   n_tests_routing_test_ts --> n_src_views_ts
+  n_tests_extract_test_ts --> n_src_extract_ts_ts
+  n_src_gherkin_ts --> n_src_cycles_ts
   n_tests_routing_test_ts --> n_src_export_excalidraw_ts
   n_tests_routing_test_ts --> n_src_diagram_ts
   n_tests_routing_test_ts --> n_src_analyze_ts

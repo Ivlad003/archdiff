@@ -106,3 +106,12 @@ The system SHALL reload the picture when a source file changes (`--no-watch` tur
 
 - **WHEN** a source file is saved while the page is open
 - **THEN** the picture reloads within a second and the reason names the file
+
+### Requirement: The page's modules take the page as their context
+
+The system SHALL keep the page's tabs (chat, flow, spec, the review bars) in modules of their own that reach the canvas, the picture's shapes and lines, the views, the mode and the mocks through one bound context (`page.ts`), the way the server's routes take theirs; the Flow tab SHALL offer ▶ run, the Chat tab *run checks*, the toolbar *lanes ↔*, and the options the *instability* overlay.
+
+#### Scenario: The page loads
+
+- **WHEN** the page opens on the sample repository
+- **THEN** the views list, the canvas and every tab work as before the split, and the page tests pass

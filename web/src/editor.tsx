@@ -10,7 +10,8 @@
 // screenshot, scrollToContent, unmount), used by app.ts.
 
 import { Excalidraw, exportToBlob, exportToSvg, restoreElements } from "@excalidraw/excalidraw";
-import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import type { ExcalidrawImperativeAPI, NormalizedZoomValue } from "@excalidraw/excalidraw/types";
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import "@excalidraw/excalidraw/index.css";
 import { useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -64,6 +65,21 @@ export interface PickedLine {
 
 /** The prefix of the view a shape opens (`customData.view` of a generated shape). */
 export const VIEW_LINK = "archdiff://view/";
+
+/**
+ * A scene element as Excalidraw's own type. archdiff's `SceneElement` types
+ * only what it reads (id, type, box, customData); Excalidraw's type has every
+ * field of every element kind, which `restoreElements` fills in. One
+ * conversion, here, for every call into the API.
+ */
+function asExcalidraw(elements: readonly SceneElement[]): readonly ExcalidrawElement[] {
+  return elements as unknown as readonly ExcalidrawElement[];
+}
+
+/** A zoom factor as Excalidraw's branded type (a number in 0.1–30). */
+function asZoom(value: number): NormalizedZoomValue {
+  return value as NormalizedZoomValue;
+}
 
 interface CanvasProps {
   elements: SceneElement[];
@@ -126,7 +142,7 @@ function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
   useEffect(() => modeState[1](setMode), [modeState]);
   return (
     <Excalidraw
-      initialData={{ elements: restoreElements(elements as never, null), appState: { viewBackgroundColor: "#ffffff" }, scrollToContent: true }}
+      initialData={{ elements: restoreElements(asExcalidraw(elements), null), appState: { viewBackgroundColor: "#ffffff" }, scrollToContent: true }}
       excalidrawAPI={(ready) => {
         onApi(ready);
       }}
@@ -248,7 +264,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       const zoom = Math.max(0.1, Math.min(1, (width - 2 * margin) / (maxX - minX), (height - 2 * margin) / (maxY - minY)));
       const scrollX = width / zoom / 2 - (minX + (maxX - minX) / 2);
       const scrollY = height / zoom / 2 - (minY + (maxY - minY) / 2);
-      api.updateScene({ appState: { scrollX, scrollY, zoom: { value: zoom as never } } });
+      api.updateScene({ appState: { scrollX, scrollY, zoom: { value: asZoom(zoom) } } });
     };
 
     // Hover: the line under the pointer, lit lightly; checked at most once a frame, and never over a lit shape or line.
@@ -315,7 +331,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         return element;
       });
 
-      if (changed) api.updateScene({ elements: next as never });
+      if (changed) api.updateScene({ elements: asExcalidraw(next) });
     };
 
     // Dimming: the opacity of everything outside the focus, put back when the focus clears.
@@ -351,7 +367,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         return element;
       });
 
-      if (changed) api.updateScene({ elements: next as never });
+      if (changed) api.updateScene({ elements: asExcalidraw(next) });
     };
 
     // The hover light sits under the tap light: a line the tap lit keeps its look; one line at a time.
@@ -381,7 +397,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         return element;
       });
 
-      if (changed) api.updateScene({ elements: next as never });
+      if (changed) api.updateScene({ elements: asExcalidraw(next) });
     };
 
     const handle: CanvasHandle = {
@@ -389,7 +405,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       replace: (next) => {
         // A saved element may lack fields Excalidraw needs (a scene saved through the API, an older version): restore fills them.
         lit.clear();
-        api?.updateScene({ elements: restoreElements(next as never, null) });
+        api?.updateScene({ elements: restoreElements(asExcalidraw(next), null) });
         requestAnimationFrame(fit);
       },
       setMode: (next) => {
@@ -436,7 +452,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
 
         return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom.value };
       },
-      setViewport: (viewport) => api?.updateScene({ appState: { scrollX: viewport.scrollX, scrollY: viewport.scrollY, zoom: { value: viewport.zoom as never } } }),
+      setViewport: (viewport) => api?.updateScene({ appState: { scrollX: viewport.scrollX, scrollY: viewport.scrollY, zoom: { value: asZoom(viewport.zoom) } } }),
       unmount: () => {
         root?.unmount();
         root = null;

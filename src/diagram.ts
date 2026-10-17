@@ -228,23 +228,17 @@ const COLUMNS_ABOVE = 6;
 /** The room kept around a shape the user placed by hand, so a computed shape never sits on it. */
 const MANUAL_MARGIN = 12;
 
-/**
- * Places the shapes: the rank of a node is its longest path from a node
- * without predecessors (back edges of a cycle ignored), its column block;
- * within a lane and a rank, nodes go next to their predecessors (their mean
- * place), then by their order in the diagram; more than `MAX_ROWS` of them
- * wrap into further columns of the block. Lanes are horizontal bands as tall
- * as their fullest rank. `positions` override the computed place of a node.
- * Pure: a new diagram.
- */
-export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
-  // A placed diagram keeps its places; only manual positions win.
-  if (diagram.placed) {
-    return { ...diagram, nodes: diagram.nodes.map((node) => (Object.hasOwn(positions, node.id) ? { ...node, x: positions[node.id]!.x, y: positions[node.id]!.y } : node)) };
-  }
+/** The ranks of a picture: each shape's longest path from a root (back edges of a cycle ignored), and the forward edges kept. */
+interface Ranked {
+  rank: Map<string, number>;
+  /** The edges that go forward in the depth-first order (`from\u0000to`); the others close a cycle and are ignored. */
+  forward: Set<string>;
+  out: Map<string, string[]>;
+}
 
+/** Ranks by depth: a depth-first order from every root (then from whatever a cycle left unreached), an edge back onto the stack ignored, and the longest path along the edges kept. */
+function rankNodes(diagram: Diagram, index: ReadonlyMap<string, number>): Ranked {
   // The edges as adjacency, ignoring self-loops and edges to unknown shapes.
-  const index = new Map(diagram.nodes.map((node, i) => [node.id, i]));
   const out = new Map<string, string[]>();
   const indegree = new Map<string, number>();
 
@@ -254,8 +248,6 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
     indegree.set(edge.to, (indegree.get(edge.to) ?? 0) + 1);
   }
 
-  // Depth first from every root in order, then from whatever a cycle left unreached: an edge back onto the stack is ignored.
-  const rank = new Map<string, number>();
   const state = new Map<string, "open" | "done">();
   const order: string[] = [];
 
@@ -293,6 +285,7 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
   const position = new Map(order.map((id, i) => [id, i]));
 
   for (const [from, list] of out) for (const to of list) if (position.get(from)! > position.get(to)!) forward.add(`${from}\u0000${to}`);
+  const rank = new Map<string, number>();
 
   for (const id of [...order].reverse()) {
     const own = rank.get(id) ?? 0;
@@ -301,26 +294,44 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
     for (const to of out.get(id) ?? []) if (forward.has(`${id}\u0000${to}`)) rank.set(to, Math.max(rank.get(to) ?? 0, own + 1));
   }
 
-  const laneIds = diagram.groups.map((group) => group.id);
-  const laneOf = (node: DiagramNode): number => (node.group !== undefined && laneIds.includes(node.group) ? laneIds.indexOf(node.group) : laneIds.length);
-  // Within a lane and a rank: next to what leads into them (the mean place of their predecessors, rank by rank), then diagram order.
-  const preds = new Map<string, string[]>();
+  return { rank, forward, out };
+}
 
-  for (const [from, list] of out) for (const to of list) if (forward.has(`${from}\u0000${to}`)) preds.set(to, [...(preds.get(to) ?? []), from]);
+/** Where each shape sits in its (lane, rank) cell: its slot, and how many shapes the cell holds. */
+interface Ordered {
+  slot: Map<string, number>;
+  count: Map<string, number>;
+}
+
+/**
+ * Orders the shapes of every rank: by lane, then next to what leads into
+ * them (the mean place of their predecessors, rank by rank: the
+ * barycentre, to reduce crossings; a shape without neighbours keeps its
+ * place), then diagram order; then two sweeps back (by successors) and
+ * forth (by predecessors), the usual layered ordering, which settles most
+ * crossings a single pass leaves.
+ */
+function orderRanks(diagram: Diagram, ranked: Ranked, index: ReadonlyMap<string, number>, laneOf: (node: DiagramNode) => number): Ordered {
+  const preds = new Map<string, string[]>();
+  const succs = new Map<string, string[]>();
+
+  for (const [from, list] of ranked.out) {
+    for (const to of list) {
+      if (!ranked.forward.has(`${from}\u0000${to}`)) continue;
+      preds.set(to, [...(preds.get(to) ?? []), from]);
+      succs.set(from, [...(succs.get(from) ?? []), to]);
+    }
+  }
+
   const ordinal = new Map<string, number>();
   const byRank = new Map<number, DiagramNode[]>();
 
-  for (const node of diagram.nodes) byRank.set(rank.get(node.id)!, [...(byRank.get(rank.get(node.id)!) ?? []), node]);
+  for (const node of diagram.nodes) byRank.set(ranked.rank.get(node.id)!, [...(byRank.get(ranked.rank.get(node.id)!) ?? []), node]);
   const slot = new Map<string, number>();
   const count = new Map<string, number>();
 
-  const succs = new Map<string, string[]>();
-
-  for (const [from, list] of out) for (const to of list) if (forward.has(`${from}\u0000${to}`)) succs.set(from, [...(succs.get(from) ?? []), to]);
-
-  // One pass over a rank: sort its shapes by lane, the mean place of their neighbours on the side given (barycentre,
-  // to reduce crossings; a shape without neighbours keeps its place), then diagram order, and give each its slot in
-  // its (lane, rank) cell.
+  // One pass over a rank: sort its shapes by lane, the mean place of their neighbours on the side given, then diagram
+  // order, and give each its slot in its (lane, rank) cell.
   const place = (r: number, neighbours: Map<string, string[]>): void => {
     const pull = (node: DiagramNode): number => {
       const known = (neighbours.get(node.id) ?? []).map((id) => ordinal.get(id)).filter((value): value is number => value !== undefined);
@@ -342,8 +353,6 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
     }
   };
 
-  // Rank by rank from the left, then two sweeps back (by successors) and forth (by predecessors): the usual layered
-  // ordering, which settles most crossings a single pass leaves.
   const ranks = [...byRank.keys()].sort((a, b) => a - b);
 
   for (const r of ranks) place(r, preds);
@@ -354,61 +363,101 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
     for (const r of ranks) place(r, preds);
   }
 
-  // A lane's rank with many shapes wraps into columns of at most MAX_ROWS (filled top to bottom, then
-  // the next column): a fn calling thirty others is a block, not a column taller than the screen.
+  return { slot, count };
+}
+
+/** The grid: the left edge of every rank's block, the top of every lane, the cell size, and how many rows a cell wraps into. */
+interface Grid {
+  left: Map<number, number>;
+  top: Map<number, number>;
+  rows: Map<number, number>;
+  gridW: number;
+  gridH: number;
+  rowsOf(key: string): number;
+}
+
+/**
+ * The grid of the cells: a lane's rank with many shapes wraps into columns
+ * of at most MAX_ROWS (a fn calling thirty others is a block, not a
+ * column taller than the screen); a rank is as wide as the most columns
+ * any lane's cell needs; a lane is as tall as its fullest rank; cells grow
+ * to the tallest and widest shape (class boxes carry their own size).
+ */
+function gridOf(diagram: Diagram, ordered: Ordered, laneCount: number, sized: (node: DiagramNode) => { w: number; h: number }): Grid {
   const columns = new Map<number, number>();
 
   const rowsOf = (key: string): number => {
-    const n = count.get(key) ?? 0;
+    const n = ordered.count.get(key) ?? 0;
 
     return Math.ceil(n / Math.ceil(n / MAX_ROWS));
   };
 
-  // How many columns each rank needs: the most any lane's cell wraps into.
-  for (const [key, n] of count) {
+  for (const [key, n] of ordered.count) {
     const r = Number(key.split(":")[1]);
     columns.set(r, Math.max(columns.get(r) ?? 1, Math.ceil(n / MAX_ROWS)));
   }
 
-  // Cells grow to the tallest and widest shape of the diagram (class boxes carry their own size).
-  const sized = (node: DiagramNode): { w: number; h: number } => (node.w > 0 && node.h > 0 ? { w: node.w, h: node.h } : SIZE[node.kind]);
   const gridW = Math.max(CELL_W, ...diagram.nodes.map((node) => sized(node).w + 40));
   const gridH = Math.max(CELL_H, ...diagram.nodes.map((node) => sized(node).h + 24));
   const left = new Map<number, number>();
   let x = LANE_PAD;
 
-  // The left edge of every rank, columns side by side.
   for (let r = 0; r <= Math.max(0, ...columns.keys()); r++) {
     left.set(r, x);
     x += (columns.get(r) ?? 1) * gridW;
   }
 
-  // Each lane is as tall as its fullest rank.
   const rows = new Map<number, number>();
 
-  for (const key of count.keys()) {
+  for (const key of ordered.count.keys()) {
     const lane = Number(key.split(":")[0]);
     rows.set(lane, Math.max(rows.get(lane) ?? 0, rowsOf(key)));
   }
 
   const top = new Map<number, number>();
   let y = 0;
-  // Shapes without a lane go last.
-  const laneSeq = [...laneIds.map((_, i) => i), laneIds.length];
 
-  for (const lane of laneSeq) {
+  // Shapes without a lane go last.
+  for (const lane of [...Array.from({ length: laneCount }, (_, i) => i), laneCount]) {
     if (!rows.has(lane)) continue;
     top.set(lane, y);
     y += rows.get(lane)! * gridH + 2 * LANE_PAD;
   }
 
+  return { left, top, rows, gridW, gridH, rowsOf };
+}
+
+/**
+ * Places the shapes: the rank of a node is its longest path from a node
+ * without predecessors (back edges of a cycle ignored), its column block;
+ * within a lane and a rank, nodes go next to their predecessors (their mean
+ * place), then by their order in the diagram; more than `MAX_ROWS` of them
+ * wrap into further columns of the block. Lanes are horizontal bands as tall
+ * as their fullest rank, or blocks across the picture (`lanes: "columns"`).
+ * `positions` override the computed place of a node, and the computed
+ * shapes keep clear of them. Pure: a new diagram.
+ */
+export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
+  // A placed diagram keeps its places; only manual positions win.
+  if (diagram.placed) {
+    return { ...diagram, nodes: diagram.nodes.map((node) => (Object.hasOwn(positions, node.id) ? { ...node, x: positions[node.id]!.x, y: positions[node.id]!.y } : node)) };
+  }
+
+  const index = new Map(diagram.nodes.map((node, i) => [node.id, i]));
+  const laneIds = diagram.groups.map((group) => group.id);
+  const laneOf = (node: DiagramNode): number => (node.group !== undefined && laneIds.includes(node.group) ? laneIds.indexOf(node.group) : laneIds.length);
+  const sized = (node: DiagramNode): { w: number; h: number } => (node.w > 0 && node.h > 0 ? { w: node.w, h: node.h } : SIZE[node.kind]);
+  const ranked = rankNodes(diagram, index);
+  const ordered = orderRanks(diagram, ranked, index, laneOf);
+  const { left, top, rows, gridW, gridH, rowsOf } = gridOf(diagram, ordered, laneIds.length, sized);
+
   // Place each shape centred in its grid cell; a manual position wins.
   const nodes = diagram.nodes.map((node): DiagramNode => {
     const size = sized(node);
     const lane = laneOf(node);
-    const r = rank.get(node.id)!;
+    const r = ranked.rank.get(node.id)!;
     const height = rowsOf(`${lane}:${r}`);
-    const n = slot.get(node.id)!;
+    const n = ordered.slot.get(node.id)!;
 
     // A stack: one row per shape, in the diagram's order; the canvas draws its edges as arcs beside it.
     const placed =

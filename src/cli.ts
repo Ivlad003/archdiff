@@ -26,6 +26,8 @@ import { parseView, viewOf, viewList, viewOptionsOf } from "./views.ts";
 import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, mergePlan, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
 import { listSpecs, specPrompt, validateSpecs } from "./spec.ts";
+import { writeTestSkeletons } from "./gherkin.ts";
+import { FEATURES_DIRECTORY as FEATURES_DIRECTORY_NAME } from "./spec.ts";
 import { pictureFlags, pictureOptionsHelp, readPictureOptions } from "./options.ts";
 import { metricsOf } from "./metrics.ts";
 
@@ -481,12 +483,24 @@ const COMMANDS: readonly Command[] = [
   },
   {
     name: "spec",
-    usage: "[dir] [--json] [--prompt <view>|all|update] [--validate] [--out FILE]",
-    help: ["The specification: list openspec/specs and features/; --prompt prints", "the task that has the agent write the spec of a view's subject (or of", "every layer, or review every spec); --validate runs the OpenSpec CLI"],
+    usage: "[dir] [--json] [--prompt <view>|all|update] [--validate] [--tests [DIR]] [--out FILE]",
+    help: ["The specification: list openspec/specs and features/; --prompt prints", "the task that has the agent write the spec of a view's subject (or of", "every layer, or review every spec); --validate runs the OpenSpec CLI;", "--tests writes a test skeleton per Gherkin scenario (tests/<feature>.test.ts,", "each test to do with its steps as comments; a file archdiff did not write is kept)"],
     arity: 1,
-    flags: [flag("json"), flag("prompt", true), flag("validate"), flag("out", true)],
+    flags: [flag("json"), flag("prompt", true), flag("validate"), flag("tests", true), flag("out", true)],
     async run(call) {
       const analysis = await analyze(call.dir(0));
+
+      if (call.has("tests")) {
+        const target = call.text("tests") ?? "tests";
+        const { written, skipped } = writeTestSkeletons(analysis.root, target);
+
+        for (const file of written) process.stdout.write(`${file}\twritten\n`);
+
+        for (const file of skipped) process.stdout.write(`${file}\tkept (not written by archdiff)\n`);
+        process.stderr.write(`archdiff spec: ${written.length} test files written from ${FEATURES_DIRECTORY_NAME}/, ${skipped.length} kept\n`);
+
+        return 0;
+      }
 
       if (call.has("validate")) {
         const result = validateSpecs(analysis.root);

@@ -59,3 +59,21 @@ The system SHALL generate the mock input and storages of a call flow from the ty
 
 - **WHEN** mocks are asked for a `calls:` view without an agent
 - **THEN** the answer's source is "types"
+
+### Requirement: The checks run after the agent
+
+The system SHALL, when an agent's run ends, run the contract check and the commands `archdiff.json` names in `checks`, each in a shell in the repository with a time limit, and append their results to the run's events before the exit (✔ with the command, or ✘ with the exit code and the tail of the output); `POST /api/checks` and the Chat tab's *run checks* SHALL run them on request. Claude Code SHALL be allowed exactly those commands and archdiff itself (`--allowedTools Bash(<command>:*)`).
+
+#### Scenario: One check passes, one fails
+
+- **WHEN** archdiff.json names a command that exits 0 and one that writes "boom" and exits 3, and a run ends
+- **THEN** the run's events hold "✔ archdiff check: the code follows ARCHITECTURE.md", a ✔ line for the first command and a ✘ line "(exit 3)" ending in "boom", then the exit
+
+### Requirement: Cursor's stream is read like Claude's
+
+The system SHALL read Cursor's stream-json (`chat_id` as the session, `--resume <chatId>` to continue) the way it reads Claude Code's, including the question protocol.
+
+#### Scenario: A question through Cursor
+
+- **WHEN** a Cursor-format agent answers with an archdiff-question block and the user picks an option
+- **THEN** the next run resumes the chat with the answer
