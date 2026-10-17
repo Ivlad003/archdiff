@@ -9,7 +9,8 @@
 // /api/file?path=, /api/coverage, /api/review?base=,
 // /api/export?view=&format=, /api/scene?view= (the editor's scene: the
 // code's picture merged into the saved drawing), /api/layout?view=,
-// /api/flow?view= (the data flow of a calls view with its saved mocks).
+// /api/flow?view= (the data flow of a calls view with its saved mocks),
+// /api/graph (the whole repository for the project map).
 // POST /api/layout saves a drawing to .archdiff/layouts/. /api/plan?view=
 // reads the task drawn on a view; POST /api/agent/run starts the agent on
 // a prompt (saved to .archdiff/tasks/), /api/agent/events?id= streams its
@@ -22,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
 import { layout } from "./diagram.ts";
 import { review, withTimeline } from "./diff.ts";
+import { withLogic } from "./logic.ts";
 import { mergeBase, revisionStamp } from "./git.ts";
 import { watch as watchFs } from "node:fs";
 import { AgentRunner, type AgentSpec } from "./agent.ts";
@@ -174,8 +176,10 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     const viewOptions = viewOptionsOf(picked);
     let source = analysis;
 
-    // The timeline is built from the commits of a range; `changes` lays the review's marks over the view: both read git here, at the edge.
+    // The timeline is built from the commits of a range and the logic of a function from its file; `changes` lays the review's
+    // marks over the view: all read git or the disk here, at the edge.
     if (view.kind === "timeline") source = await withTimeline(analysis, base || options.base || mergeBase(root), head || "HEAD");
+    else if (view.kind === "logic" && view.scope !== null) source = await withLogic(analysis, view.scope);
     else if (picked.changes) viewOptions.diff = (await review(root, base || options.base, head)).diff;
     const diagram = layout(viewOf(source, view, viewOptions), positionsOf(saved?.elements ?? null));
     const stamp = revisionStamp(root);

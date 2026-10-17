@@ -1,5 +1,5 @@
 // The keys of the views: the `View` type, how a key (`module:src/x.ts`,
-// `calls:src/x.ts#f`, `matrix`) is parsed and written, the one question
+// `calls:src/x.ts#f`, `matrix`, `focus:src/x.ts#f`, `logic:src/x.ts#f`) is parsed and written, the one question
 // each kind answers, the default depth of each, and which kinds draw
 // modules (where a hub is noise). Plain data and pure functions, no
 // imports: views.ts builds the pictures from them, pipeline.ts shapes
@@ -26,6 +26,8 @@ export type View =
   | { kind: "metrics"; scope: string | null }
   | { kind: "machines" }
   | { kind: "machine"; id: string }
+  | { kind: "focus"; id: string }
+  | { kind: "logic"; scope: string | null }
   | { kind: "events" }
   | { kind: "tests" }
   | { kind: "hotspots" }
@@ -36,10 +38,10 @@ export type View =
   | { kind: "modules" };
 
 /** The views without a subject. */
-const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "metrics", "events", "tests", "hotspots", "packages", "timeline", "intent", "modules", "machines"]);
+const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "metrics", "logic", "events", "tests", "hotspots", "packages", "timeline", "intent", "modules", "machines"]);
 
 /** The views with a subject (`kind:<subject>`). */
-const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "cycles", "classes", "matrix", "metrics", "machine"]);
+const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "cycles", "classes", "matrix", "metrics", "machine", "focus", "logic"]);
 
 /** The one question each kind of view answers. */
 export const QUESTION: Record<View["kind"], string> = {
@@ -60,6 +62,8 @@ export const QUESTION: Record<View["kind"], string> = {
   metrics: "how coupled and how cohesive each module is: Ca, Ce, instability, abstractness, the distance from the main sequence",
   machines: "which state machines the code has, declared by a library or written with literal states",
   machine: "which states a machine has, which transitions, and which function or event makes each",
+  focus: "everything joined to this one shape: what calls or imports it, what it calls or imports, across every module",
+  logic: "which branches, loops and early exits a function's body has, and which conditions lead to which outcome",
   events: "which modules emit which events, and which listen",
   tests: "which modules the tests import, and which none does",
   hotspots: "which modules are big, and which are called from everywhere",
@@ -77,6 +81,8 @@ export function parseView(key: string): View | null {
   if (key === "matrix") return { kind: "matrix", scope: null };
 
   if (key === "metrics") return { kind: "metrics", scope: null };
+
+  if (key === "logic") return { kind: "logic", scope: null };
 
   if (key === "cycles") return { kind: "cycles", scope: null };
 
@@ -97,13 +103,13 @@ export function parseView(key: string): View | null {
 
   if (kind === "cycles") return null;
 
-  if (kind === "classes" || kind === "matrix" || kind === "metrics") return { kind, scope: rest.replace(/\/+$/, "") };
+  if (kind === "classes" || kind === "matrix" || kind === "metrics" || kind === "logic") return { kind, scope: rest.replace(/\/+$/, "") };
 
   return { kind, id: rest } as View;
 }
 
 export function viewKey(view: View): string {
-  if (view.kind === "classes" || view.kind === "matrix" || view.kind === "metrics" || view.kind === "cycles") return view.scope === null ? view.kind : `${view.kind}:${view.scope}`;
+  if (view.kind === "classes" || view.kind === "matrix" || view.kind === "metrics" || view.kind === "logic" || view.kind === "cycles") return view.scope === null ? view.kind : `${view.kind}:${view.scope}`;
 
   if ("name" in view) return `${view.kind}:${view.name}`;
 
@@ -114,7 +120,7 @@ export function viewKey(view: View): string {
   return view.kind;
 }
 
-export const DEFAULT_DEPTH: Partial<Record<View["kind"], number>> = { layer: 1, dir: 1, module: 1, inside: 1, calls: 3, sequence: 4, path: 8, type: 1 };
+export const DEFAULT_DEPTH: Partial<Record<View["kind"], number>> = { layer: 1, dir: 1, module: 1, inside: 1, calls: 3, sequence: 4, path: 8, type: 1, focus: 1 };
 
 /** The views whose shapes are modules, where a hub (a module most of them import) is noise rather than news. */
 export const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests", "intent", "modules"]);

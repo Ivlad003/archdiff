@@ -49,6 +49,8 @@ export interface GraphNode {
   /** SHA-256 of the body without layout and comments: changes when the code does. */
   fingerprint?: string;
   doc?: string;
+  /** A function: how many branching statements its body holds (`if`, `switch`, a loop, `try`); absent when none. */
+  branches?: number;
 }
 
 /** An import of one module by another, or of a package or built-in. */
@@ -270,6 +272,8 @@ function declareModules(b: Building): void {
       if (parent) node.parent = parent;
 
       if (decl.fingerprint) node.fingerprint = decl.fingerprint;
+
+      if (decl.branches) node.branches = decl.branches;
 
       if (decl.doc) node.doc = decl.doc;
       b.nodes.set(id, node);

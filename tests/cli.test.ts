@@ -1049,3 +1049,31 @@ test("spec --tests writes a test skeleton per Gherkin scenario and keeps a test 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("focus draws everything joined to a function or a module; logic draws a function's body as a flowchart with its paths as rules", () => {
+  const machines = join(root, "tests/fixtures/machines");
+  const focus = archdiff(["diagram", "focus:src/lib/orders.ts#placeOrder", fixture]);
+  assert.equal(focus.status, 0, focus.stderr);
+  assert.ok(focus.stdout.includes("# Everything joined to placeOrder") && focus.stdout.includes("src_lib_orders_ts_OrderService_place ==> src_lib_orders_ts_placeOrder") && focus.stdout.includes('subgraph "src/db/store.ts"'), focus.stdout);
+  const moduleFocus = JSON.parse(archdiff(["diagram", "focus:src/lib/orders.ts", fixture, "--format", "json"]).stdout) as { groups: { id: string }[]; nodes: { id: string }[]; reason: string };
+  assert.ok(moduleFocus.groups.map((group) => group.id).includes("src/routes/checkout.tsx") && moduleFocus.nodes.some((node) => node.id === "src/routes/checkout.tsx#action"), moduleFocus.reason);
+  assert.equal(archdiff(["diagram", "focus:src/nope.ts", fixture]).status, 2);
+  // A loop, a branch inside it and a try: diamonds with labelled arrows, and every path from the start to the return as a rule.
+  const logic = archdiff(["diagram", "logic:src/checkout.ts#checkout", machines]);
+  assert.equal(logic.status, 0, logic.stderr);
+  assert.ok(logic.stdout.includes("flowchart TB") && logic.stdout.includes('n2{{"↻ const order of orders"}}') && logic.stdout.includes('n4{"rush"}') && logic.stdout.includes('n2 -->|"each"| n3') && logic.stdout.includes('n7 -->|"error"| n9') && logic.stdout.includes('n5 --> n2'), logic.stdout);
+  assert.ok(logic.stdout.includes("| `const order of orders: each` and `rush: yes` and `try: ok` | `pay`, `ship`, `audit` | **return shipped** |"), logic.stdout);
+  assert.ok(logic.stdout.includes("| `const order of orders: done` and `try: error` | `cancel` | **return shipped** |"), logic.stdout);
+  // A switch: one arrow per case, the default a throw (orange); a Python match: no match carries on.
+  const pay = archdiff(["diagram", "logic:src/order.ts#pay", machines]).stdout;
+  assert.ok(pay.includes('n1{"switch order.status"}') && pay.includes('n1 -->|"#quot;new#quot;"| n2') && pay.includes("class n3 warning") && pay.includes("| `switch order.status: default` |  | **throw new Error"), pay);
+  const door = archdiff(["diagram", "logic:src/door.py#Door.lock", machines]).stdout;
+  assert.ok(door.includes('n1{"match self.state"}') && door.includes('n1 -->|"no match"| n4') && door.includes("**raise ValueError"), door);
+  // The list of branching functions, in the views and as a picture; an unknown function is refused; the Excalidraw export draws diamonds.
+  const list = archdiff(["diagram", "logic", machines]).stdout;
+  assert.ok(list.includes("# Logic: 7 functions with branches") && list.includes("checkout<br/>3 branches"), list);
+  assert.ok(archdiff(["views", machines]).stdout.includes("logic:src/checkout.ts#checkout\tcheckout (src/checkout.ts) — 3 branches"));
+  assert.equal(archdiff(["diagram", "logic:src/nope.ts#f", machines]).status, 2);
+  const excalidraw = archdiff(["diagram", "logic:src/checkout.ts#checkout", machines, "--format", "excalidraw"]).stdout;
+  assert.equal((excalidraw.match(/"type": "diamond"/g) ?? []).length, 3, "three diamonds: the loop, the branch, the try");
+});

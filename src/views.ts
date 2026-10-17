@@ -7,8 +7,9 @@
 // function), `coverage` (the modules with calls archdiff could not follow).
 // `inside:<path>` (the functions of a module and the calls among them,
 // lanes being modules), `sequence:<path>#<fn>` (the calls from a function
-// as a sequence diagram, placed). Lanes are layers elsewhere; the depth is
-// how far from the subject the picture goes.
+// as a sequence diagram, placed), `focus:<path>[#<fn>]` (everything joined
+// to one shape across the modules). Lanes are layers elsewhere; the depth
+// is how far from the subject the picture goes.
 //
 // Pipeline: Analysis → View → Diagram → layout → canvas/exports/markdown.
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
@@ -23,6 +24,7 @@ import { classesView, contractView, eventsView, hotspotsView, matrixView, packag
 import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
+import { logicList, logicView } from "./logic.ts";
 import { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 import { MAX_SHAPES } from "./shape.ts";
 import { DEFAULT_DEPTH, type View } from "./view-keys.ts";
@@ -167,6 +169,9 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   list.push({ key: "machines", title: "State machines: declared by a library or written with literal states", kind: "machines" });
 
   for (const machine of machinesOf(analysis)) list.push({ key: machine.id, title: `${machine.name} (${machine.module}) — ${machine.states.length} states`, kind: "machine", layer: graph.modules.get(machine.module)!.layer });
+  list.push({ key: "logic", title: "Logic: the functions with branches in them, the most branching first", kind: "logic" });
+
+  for (const fn of logicList(analysis)) list.push({ key: `logic:${fn.id}`, title: `${fn.parent ? `${fn.parent}.` : ""}${fn.name} (${fn.module}) — ${fn.branches} ${fn.branches === 1 ? "branch" : "branches"}`, kind: "logic", layer: graph.modules.get(fn.module)!.layer });
   list.push({ key: "events", title: "Events: emitters and listeners", kind: "events" });
   list.push({ key: "tests", title: "Tests: which modules the tests cover", kind: "tests" });
   list.push({ key: "hotspots", title: "Hotspots: size and calls in", kind: "hotspots" });
@@ -366,6 +371,96 @@ function insideView(graph: Graph, id: string, depth: number): Diagram {
   if (nodes.length === 0) return unplaced(`inside:${id}`, `Inside ${id}`, [], [], [], { reason: "the module declares no function or class" });
 
   return unplaced(`inside:${id}`, `Inside ${id}`, nodes, edges, [...new Set(modules)].map(lane));
+}
+
+/**
+ * Everything joined to one shape, across the modules: for a function, the
+ * functions that call it (`depth` steps back) and the ones it calls
+ * (`depth` steps on), calls and references alike; for a module, its own
+ * functions with their callers and callees in other modules, and the
+ * modules that import it or that it imports without a call between them
+ * (the module itself as a shape then). Lanes are modules.
+ */
+function focusView(graph: Graph, id: string, depth: number): Diagram {
+  const key = `focus:${id}`;
+  const fn = graph.nodes.get(id);
+  const module = graph.modules.get(id);
+
+  if ((!fn || fn.kind === "type") && !module) return unplaced(key, id, [], [], [], { reason: `no function or module "${id}"`, missing: true });
+  const own = module ? [...graph.nodes.values()].filter((node) => node.module === id && node.kind !== "type").map((node) => node.id) : [id];
+  const members = new Set(own);
+  const edges: DiagramEdge[] = [];
+  const seen = new Set<string>();
+
+  const take = (from: string, to: string, kind: DiagramEdge["kind"]): void => {
+    const edgeKey = `${from}\u0000${to}\u0000${kind}`;
+
+    if (seen.has(edgeKey) || from === to) return;
+    seen.add(edgeKey);
+    edges.push({ from, to, kind });
+  };
+
+  // Out along the calls, then back along them, `depth` steps each way; a call at a module's top level comes from the module.
+  let frontier = new Set(own);
+
+  for (let step = 0; step < depth && frontier.size > 0; step++) {
+    const next = new Set<string>();
+
+    for (const call of graph.calls) {
+      if (!frontier.has(call.from) || graph.nodes.get(call.to)?.kind === "type") continue;
+
+      if (!members.has(call.to)) next.add(call.to);
+    }
+
+    for (const target of next) members.add(target);
+    frontier = next;
+  }
+
+  frontier = new Set(own);
+
+  for (let step = 0; step < depth && frontier.size > 0; step++) {
+    const next = new Set<string>();
+
+    for (const call of graph.calls) {
+      if (!frontier.has(call.to) || !graph.nodes.has(call.from)) continue;
+
+      if (!members.has(call.from)) next.add(call.from);
+    }
+
+    for (const source of next) members.add(source);
+    frontier = next;
+  }
+
+  for (const call of graph.calls) if (members.has(call.from) && members.has(call.to)) take(call.from, call.to, call.kind);
+  const nodes: DiagramNode[] = [...members].filter((member) => graph.nodes.has(member)).map((member) => ({ ...fnNode(graph, member), group: moduleOf(member) }));
+
+  // A module: the modules joined by an import with no call drawn between them, as module shapes beside the subject's own.
+  if (module) {
+    const drawn = new Set(nodes.map((node) => moduleOf(node.id)));
+    const importers = graph.deps.filter((dep) => dep.to === id && !dep.typeOnly && graph.modules.has(dep.from) && !drawn.has(dep.from)).map((dep) => dep.from);
+    const imported = graph.deps.filter((dep) => dep.from === id && !dep.typeOnly && graph.modules.has(dep.to) && !drawn.has(dep.to)).map((dep) => dep.to);
+    const others = [...new Set([...importers, ...imported])].sort();
+
+    if (others.length > 0 || nodes.length === 0) {
+      nodes.unshift({ ...moduleNode(graph, id), label: `${id}\n(the module)`, group: id });
+
+      for (const other of others) nodes.push({ ...moduleNode(graph, other), group: other });
+
+      for (const other of importers) take(other, id, "dependency");
+
+      for (const other of imported) take(id, other, "dependency");
+    }
+  }
+
+  // The subject's lane first, then the others as they come; the subject's shapes first, so a folded picture keeps them.
+  const subjectModule = module ? id : moduleOf(id);
+  nodes.sort((a, b) => Number((b.group ?? "") === subjectModule) - Number((a.group ?? "") === subjectModule) || Number(own.includes(b.id)) - Number(own.includes(a.id)));
+  const lanes = [subjectModule, ...[...new Set(nodes.map((node) => node.group ?? ""))].filter((group) => group !== subjectModule && group !== "").sort()];
+  const subject = fn ? `${fn.parent ? `${fn.parent}.` : ""}${fn.name}` : id;
+  const callers = edges.filter((edge) => edge.kind !== "dependency" && own.includes(edge.to) && !own.includes(edge.from)).length;
+  const callees = edges.filter((edge) => edge.kind !== "dependency" && own.includes(edge.from) && !own.includes(edge.to)).length;
+
+  return unplaced(key, `Everything joined to ${subject}`, nodes, edges, lanes.map(lane), { reason: `${callers} calls in, ${callees} calls out, ${lanes.length - 1} other modules, ${depth} ${depth === 1 ? "step" : "steps"} each way (--depth goes further)` });
 }
 
 /** The width of a column of the sequence view and the height of one message row. */
@@ -572,6 +667,10 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
         return machinesView(analysis);
       case "machine":
         return machineView(analysis, view.id);
+      case "focus":
+        return focusView(graph, view.id, depth);
+      case "logic":
+        return logicView(analysis, view.scope);
       case "events":
         return eventsView(analysis);
       case "tests":

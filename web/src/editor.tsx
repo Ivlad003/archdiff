@@ -3,8 +3,10 @@
 // view (shapes marked with `customData.archdiff`) merged into the saved
 // drawing. In view mode Excalidraw selects nothing, so clicks are read
 // from the pointer: a tap on a generated shape picks it (the page shows
-// its code), a second tap within half a second opens its own view; the
-// link icon of a shape does the same through `onLinkOpen`.
+// its code), a tap with Shift or Ctrl adds it to the selection, a second
+// tap within half a second opens its own view, a right click asks the
+// page for its menu; the link icon of a shape does the same through
+// `onLinkOpen`.
 //
 // Entry point: `mountCanvas` (returns a handle: scene, replace, mode,
 // screenshot, scrollToContent, unmount), used by app.ts.
@@ -20,14 +22,18 @@ import type { SceneElement } from "../../src/scene.ts";
 export interface CanvasEvents {
   /**
    * A tap on a generated shape (its element ID is the node ID), on a generated line, or on nothing. `lines` are the
-   * generated lines within reach of the tap, the nearest first (several where arrows run close together); `follow` is a
-   * tap with Shift held: trace the chain onward from the line.
+   * generated lines within reach of the tap, the nearest first (several where arrows run close together); `extend` is a
+   * tap with Shift, Ctrl or Cmd held: on a shape, add it to the selection; on a line, trace the chain onward from it.
    */
-  pick(id: string | null, lines?: PickedLine[], shift?: boolean): void;
+  pick(id: string | null, lines?: PickedLine[], extend?: boolean): void;
   /** A double tap on a shape, or its link: open the view the link names (`archdiff://view/<key>`). */
   open(id: string, link: string | null): void;
   /** The scene changed by hand (edit mode). */
   changed(): void;
+  /** The generated shapes Excalidraw has selected (edit mode: a box drawn around several, Shift+clicks). */
+  selection?(ids: string[]): void;
+  /** A right click (view mode): on a shape, on a line, or on nothing, at these client coordinates. */
+  menu?(id: string | null, at: { x: number; y: number }, lines: PickedLine[]): void;
 }
 
 export interface CanvasHandle {
@@ -156,8 +162,12 @@ function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
 
         if (mode === "edit") {
           if (known.baseline !== null && fingerprint !== known.baseline) events.changed();
-          const selected = Object.keys(appState.selectedElementIds);
+          // The generated shapes among the selected elements, in the scene's order: one picks, several select.
+          const chosen = new Set(Object.keys(appState.selectedElementIds));
+          const selected = changed.filter((element) => chosen.has(element.id) && !element.isDeleted && (element.customData as { archdiff?: string } | undefined)?.archdiff === "node").map((element) => element.id);
           events.pick(selected.length === 1 ? (selected[0] ?? null) : null);
+
+          if (selected.length !== 1) events.selection?.(selected);
         }
       }}
       UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: true, toggleTheme: false, clearCanvas: false, changeViewBackgroundColor: false } }}
@@ -197,17 +207,18 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       return { x: (event.clientX - box.left) / state.zoom.value - state.scrollX, y: (event.clientY - box.top) / state.zoom.value - state.scrollY };
     };
 
+    // Only the main button taps: a right click is the menu (below), and on Linux its press comes before its contextmenu.
     container.addEventListener(
       "pointerdown",
       (event) => {
-        if (mode === "view") down = scenePoint(event);
+        if (mode === "view" && event.button === 0) down = scenePoint(event);
       },
       true,
     );
     container.addEventListener(
       "pointerup",
       (event) => {
-        if (mode !== "view" || !down || !api) return;
+        if (mode !== "view" || !down || !api || event.button !== 0) return;
         const at = scenePoint(event);
         const from = down;
         down = null;
@@ -220,19 +231,21 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         const hit = shapeAt(scene, at.x, at.y);
         const now = Date.now();
 
+        const extend = event.shiftKey || event.ctrlKey || event.metaKey;
+
         // No shape under the tap: the lines within a few screen pixels, when any; Shift follows the chain from the nearest.
         if (!hit) {
           const lines = arrowsAt(scene, at.x, at.y, 8 / api.getAppState().zoom.value);
           lastTap = null;
 
           if (lines.length > 0) {
-            events.pick(lines[0]!.id, lines, event.shiftKey);
+            events.pick(lines[0]!.id, lines, extend);
 
             return;
           }
         }
 
-        if (hit && lastTap && lastTap.id === hit.id && now - lastTap.at < 500) {
+        if (hit && !extend && lastTap && lastTap.id === hit.id && now - lastTap.at < 500) {
           lastTap = null;
           events.open(hit.id, typeof hit.customData?.["view"] === "string" && hit.customData["view"] !== "" ? hit.customData["view"] : null);
 
@@ -240,7 +253,25 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         }
 
         lastTap = hit ? { id: hit.id, at: now } : null;
-        events.pick(hit?.id ?? null, undefined, event.shiftKey);
+        events.pick(hit?.id ?? null, undefined, extend);
+      },
+      true,
+    );
+
+    // A right click in view mode is the page's menu, not Excalidraw's: the shape or the lines under the pointer.
+    container.addEventListener(
+      "contextmenu",
+      (event) => {
+        if (mode !== "view" || !api || !events.menu) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const at = scenePoint(event as unknown as PointerEvent);
+
+        if (!at) return;
+        const scene = api.getSceneElements() as unknown as SceneElement[];
+        const hit = shapeAt(scene, at.x, at.y);
+        const lines = hit ? [] : arrowsAt(scene, at.x, at.y, 8 / api.getAppState().zoom.value);
+        events.menu(hit?.id ?? null, { x: event.clientX, y: event.clientY }, lines);
       },
       true,
     );

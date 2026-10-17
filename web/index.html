@@ -87,7 +87,7 @@
           <button id="back" class="icon" title="Back to the previous view (Backspace)">←</button>
           <span id="crumbs"></span>
           <span id="title-text"></span>
-          <span id="hint" class="muted">tap a shape for its code, a line for where it leads · tap a shape again to open its own view · drag to pan · wheel to zoom</span>
+          <span id="hint" class="muted">tap a shape for its code, a line for where it leads · tap again to open its own view · Shift/Ctrl+tap selects several · right-click for the menu · drag to pan · wheel to zoom</span>
         </div>
         <div id="branches" hidden>
           <label>base <select id="base-select" title="The branch every head is compared against (develop, main or master by default)"></select></label>
@@ -113,7 +113,7 @@
               <button id="depth-less">depth −</button><button id="depth-more">depth +</button>
             </span>
             <button id="tool-mix" title="Mix: tap a module to open it in place as a lane of its functions, with the lines landing on the functions they concern; tap it again to close it (m)">mix</button>
-            <button id="tool-focus" title="Focus: tap a shape to dim everything but it and its neighbours; tap nothing to clear (f)">focus</button>
+            <button id="tool-focus" title="Dim: tap a shape to dim everything but it and its neighbours; tap nothing to clear (f). Right-click a shape for its focus view: everything joined to it across the modules">dim</button>
             <button id="mix-clear" hidden title="Close every module opened in place">close opened</button>
             <details id="lanes-menu" title="Which lanes the picture shows">
               <summary>lanes</summary>
@@ -121,10 +121,24 @@
             </details>
             <input id="find" type="search" placeholder="find shape (/)" title="Type to light the matching shapes; Enter centres the first and opens it; Esc clears" />
             <button id="tool-split" title="A second picture beside this one, with its own view and options (s)">split</button>
-            <button id="tool-map" title="The minimap: the whole picture small, the viewport as a box; shown by itself above 60 shapes">map</button>
+            <button id="tool-graph" title="The project map: every module as a dot coloured by layer, every import as a line, laid out by forces; the dots of this picture wear a ring (g)">graph</button>
+            <button id="tool-map" title="The minimap at the bottom right: the whole picture small, the viewport as a box; drag it to move (on by default)">map</button>
             <button id="tool-lanes" title="Lanes as rows (bands down the picture) or as columns (blocks across it): a map of many layers reads better across (l)">lanes ↔</button>
           </div>
           <div id="split" hidden><iframe id="split-frame" title="The second picture"></iframe></div>
+          <div id="project-map" hidden>
+            <div id="project-map-bar">
+              <strong>project map</strong>
+              <input id="map-search" type="search" placeholder="find a module" />
+              <span id="map-layers"></span>
+              <span id="map-note" class="muted"></span>
+              <button id="map-fit" class="small" title="Fit the whole map">fit</button>
+              <button id="map-relayout" class="small" title="Lay the map out again">re-layout</button>
+              <button id="map-close" class="icon" title="Close the map (Esc)">×</button>
+            </div>
+            <canvas id="project-map-canvas"></canvas>
+            <div id="map-tip" class="muted" hidden></div>
+          </div>
           <canvas id="minimap" width="220" height="150" hidden title="Tap to move there"></canvas>
           <div id="reason" class="muted"></div>
         </div>
@@ -135,6 +149,7 @@
           <span><i class="sw external"></i>package</span>
           <span><i class="sw hole"></i>not followed</span>
           <span><i class="sw more"></i>… more</span>
+          <span title="A function's logic: a diamond is a branch or a loop, a box one or two statements, an ellipse an exit"><i class="sw decision"></i>branch · <i class="sw action"></i>step · <i class="sw end"></i>exit</span>
           <span title="A grey line: the left imports the right. A blue line: the left calls the right. Dashed blue: passed as a value.">A → B: A imports B · blue: A calls B</span>
           <span><i class="sw added"></i>added</span>
           <span><i class="sw removed"></i>removed</span>
@@ -152,11 +167,18 @@
           <button id="copy" class="small" title="Copy what this tab shows: the Markdown, the code, the coverage, the flow, the transcript or the spec">copy</button>
           <button id="raw" class="small" title="Show the Markdown as text, to copy it">raw</button>
         </nav>
+        <div id="selection" hidden></div>
         <div id="neighbours" hidden></div>
         <div id="markdown" class="panel prose active"></div>
         <pre id="code" class="panel"></pre>
         <div id="coverage" class="panel prose"></div>
         <div id="chat" class="panel">
+          <div id="ask-row" class="row">
+            <input id="ask" type="text" placeholder="ask about this picture, or about the selected shapes (Enter)" title="A question for the agent, answered without changing any file: the picture (or the selected shapes) goes along as context" />
+            <label title="Send the current picture (its Markdown and Mermaid) with the question"><input id="ask-picture" type="checkbox" checked /> this picture</label>
+            <button id="ask-go" title="Ask (Enter)">ask</button>
+          </div>
+          <div id="ask-about" class="muted" hidden></div>
           <p class="muted">Draw the change on this view (✎ edit: a shape with a name is a new module or function, an arrow is an import or a call, a deleted shape is a removal, text is a note), save, then <em>code this</em>: the drawing goes into ARCHITECTURE.md (the contract) and the agent builds it. <em>improve the diagram</em> asks the agent to review the contract; <em>from document</em> turns a design note into it. The agent may ask you a question with options. Nothing runs by itself.</p>
           <div class="row">
             <button id="code-this" title="Fold the drawing of this view into ARCHITECTURE.md and have the agent build what is not built yet (/code)">code this</button>

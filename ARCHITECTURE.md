@@ -18,7 +18,8 @@ flowchart LR
     n_src_routes_agent_ts["src/routes/agent.ts<br>the routes of the agent and the contract"]
   end
   subgraph n_page["page — the browser page (web/src), built by esbuild"]
-    n_web_src_app_ts["web/src/app.ts<br>the page: the canvas, the panels, the tools; reads only the types of the diagram"]
+    n_web_src_app_ts["web/src/app.ts<br>the page: the canvas, the panels, the tools, the selection and the menu; reads only the types of the diagram"]
+    n_web_src_project_map_ts["web/src/project-map.ts<br>the project map: the repository as dots laid out by forces"]
   end
   subgraph n_views["views — one picture per question, and the reports"]
     n_src_views_ts["src/views.ts<br>the structural views and viewOf: the chain of pure steps after a view"]
@@ -33,6 +34,8 @@ flowchart LR
     n_src_machines_ts["src/machines.ts<br>state machines: declared by a library, or written with literal states"]
     n_src_run_ts["src/run.ts<br>a real run of an entry with the storages mocked, traced function by function"]
     n_src_gherkin_ts["src/gherkin.ts<br>Gherkin features as data, and test skeletons written from them"]
+    n_src_logic_ts["src/logic.ts<br>a function's body as a flowchart with its paths as rules, and the list of branching functions"]
+    n_src_project_map_ts["src/project-map.ts<br>the whole repository as dots and lines for the page's project map"]
   end
   subgraph n_exports["exports — the picture as text and files"]
     n_src_export_index_ts["src/export/index.ts<br>Mermaid, draw.io, Excalidraw, ArchiMate, JSON"]
@@ -56,7 +59,8 @@ flowchart LR
   subgraph n_extract["extract — the language frontends on tree-sitter"]
     n_src_extract_ts_ts["src/extract/ts.ts<br>TypeScript and JavaScript facts"]
     n_src_extract_facts_ts["src/extract/facts.ts<br>the FileFacts contract every frontend fills"]
-    n_src_extract_control_ts["src/extract/control.ts<br>control flow as facts: guards, literal states, declared machines"]
+    n_src_extract_control_ts["src/extract/control.ts<br>control flow as facts: guards, literal states, declared machines, the count of branches"]
+    n_src_extract_logic_ts["src/extract/logic.ts<br>one function's body read into a control-flow graph, on demand"]
     n_src_extract_bodies_ts["src/extract/bodies.ts<br>where every function's body starts and ends, for the run's trace"]
     n_src_extract_pool_ts["src/extract/pool.ts<br>extraction on worker threads"]
     n_src_extract_grammars_ts["src/extract/grammars.ts<br>the grammars and their WASM files"]
@@ -94,6 +98,10 @@ flowchart LR
   n_src_cli_ts --> n_src_run_ts
   n_src_run_ts --> n_src_flow_ts
   n_src_run_ts --> n_src_extract_bodies_ts
+  n_src_logic_ts --> n_src_extract_logic_ts
+  n_src_views_ts --> n_src_logic_ts
+  n_src_routes_pictures_ts --> n_src_project_map_ts
+  n_src_extract_logic_ts --> n_src_extract_control_ts
   n_src_server_ts --> n_src_checks_ts
   n_src_extract_ts_ts --> n_src_extract_control_ts
   n_src_pipeline_ts --> n_src_shape_ts

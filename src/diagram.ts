@@ -34,9 +34,12 @@ export interface DiagramNode {
    * of the class diagram, its label the fields and methods line by line;
    * `state`: a state of a state machine (or a machine in the list of them);
    * `fragment`: a dashed frame of a sequence around the calls under one
-   * guard (`opt`, `loop`), its label top left.
+   * guard (`opt`, `loop`), its label top left; `decision`: a branch of a
+   * function's logic (a diamond: an `if`, a `switch`, a loop header, a
+   * `try`); `action`: one or two plain statements of it; `end`: where a
+   * path of it ends (`return`, `throw`, the end of the body).
    */
-  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package" | "class" | "state" | "fragment";
+  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package" | "class" | "state" | "fragment" | "decision" | "action" | "end";
   /** How hot the shape is, 0–1 (a hotspot's calls in, a matrix cell's count): the fill darkens with it. */
   heat?: number;
   label: string;
@@ -66,9 +69,10 @@ export interface DiagramEdge {
   to: string;
   /**
    * `dependency`: an import; `call`: a resolved call; `ref`: a function passed as a value (may be called);
-   * `message`: one call of a sequence view, in order; `lifeline`: the dashed line under a participant.
+   * `message`: one call of a sequence view, in order; `lifeline`: the dashed line under a participant;
+   * `flow`: the next step of a function's logic, labelled with the branch taken (`yes`, `no`, a case, `each`, `done`).
    */
-  kind: "dependency" | "call" | "ref" | "message" | "lifeline";
+  kind: "dependency" | "call" | "ref" | "message" | "lifeline" | "flow";
   label?: string;
   /** The line's own bends, scene coordinates, when the view placed it (a sequence): exports draw these instead of routing. */
   route?: { x: number; y: number }[];
@@ -120,6 +124,8 @@ export interface Diagram {
   machine?: MachineData;
   /** A metrics view: the numbers behind the table, for the Markdown and the quadrant chart. */
   metrics?: Metrics;
+  /** A logic view: the function, and every path from its start to an exit as a rule (the Markdown's table); the Mermaid is a flowchart TB. */
+  logic?: LogicData;
   /** A class view: the Mermaid export is a classDiagram. */
   classes?: { boxes: { id: string; name: string; kind: "class" | "interface" | "type"; fields: string[]; methods: string[] }[]; relations: { from: string; to: string; kind: "extends" | "implements" }[] };
 }
@@ -143,6 +149,58 @@ export interface MachineData {
   states: { name: string; declared: boolean; assigned: boolean }[];
   /** `from` is `*` for a transition from any state; `event` names a library's event, `fn` the function that makes it. */
   transitions: { from: string; to: string; event?: string; fn?: string; line: number }[];
+}
+
+/** A function's logic as a picture carries it (logic.ts): the paths from the start to every exit, each the conditions taken and what it ends in. */
+export interface LogicData {
+  fn: string;
+  module: string;
+  /** How many branches, loops and exits the body has. */
+  decisions: number;
+  loops: number;
+  exits: number;
+  paths: LogicPath[];
+  /** The body had more statements than the picture holds. */
+  truncated?: true;
+  /** More paths than the table lists. */
+  morePaths?: number;
+}
+
+/** One way through a function: the branches taken in order (`total < 0: yes`), the calls on the way, and how it ends. */
+export interface LogicPath {
+  conditions: string[];
+  calls: string[];
+  /** `return order`, `throw new Error("…")`, or `end` for the end of the body. */
+  outcome: string;
+  kind: "return" | "throw" | "end";
+}
+
+/** The whole repository for the page's project map (project-map.ts): a dot per module (or directory), a line per import. */
+export interface ProjectMap {
+  layers: string[];
+  nodes: ProjectMapNode[];
+  edges: ProjectMapEdge[];
+  /** `module`, or `dir:<depth>` when the modules were folded to directories of that depth. */
+  level: string;
+}
+
+export interface ProjectMapNode {
+  /** The module's path, or a directory's when the map is folded (`dir:` prefix). */
+  id: string;
+  label: string;
+  layer: string;
+  /** Lines of code, the size of the dot. */
+  lines: number;
+  fns: number;
+  /** Folded: how many modules the dot stands for. */
+  modules?: number;
+}
+
+export interface ProjectMapEdge {
+  from: string;
+  to: string;
+  count: number;
+  typeOnly?: true;
 }
 
 /** The coupling and cohesion of one module (metrics.ts): Martin's Ca, Ce, I, A and D, and the cohesion of its functions. */
@@ -207,6 +265,9 @@ export const SIZE: Record<DiagramNode["kind"], { w: number; h: number }> = {
   class: { w: 230, h: 80 },
   state: { w: 150, h: 50 },
   fragment: { w: 2, h: 2 },
+  decision: { w: 230, h: 80 },
+  action: { w: 230, h: 64 },
+  end: { w: 170, h: 48 },
 };
 
 /** One cell of the grid: the largest shape and the gaps around it. */

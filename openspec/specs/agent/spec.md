@@ -42,6 +42,15 @@ The system SHALL offer "code this" (the drawing into the contract, then the agen
 - **WHEN** "code this" is pressed on the intent view of a project whose contract names modules the code lacks
 - **THEN** the agent runs with a task listing those modules, and when it finishes the picture reloads with them built
 
+### Requirement: A question is answered, not built
+
+The system SHALL send a question typed in the Chat tab's first row to the agent with the instruction to answer and change no file, with the selected shapes attached as tags (`@module:`, `@fn:`, `@logic:`, …) and, when the box is ticked, the current picture as `@view:<key>` with its options, every tag expanded into its Markdown; without an agent the question with its context SHALL go into the task box. The transcript SHALL show the question, fold the agent's tool calls and thoughts under one summary line, render the result as the answer, and list the checks and the exit under it.
+
+#### Scenario: A question about the picture
+
+- **WHEN** "What does this layer do?" is sent with the picture ticked
+- **THEN** the prompt holds `@view:layer:lib` expanded into the picture's Markdown, the transcript's own row reads the question "(with the picture)", and the answer is rendered under the folded steps
+
 ### Requirement: The agent's work is visible
 
 The system SHALL stream the agent's events into the Chat tab, light the shapes of the files it reads or edits while it works, reload the picture when it finishes, and offer the review against the base.

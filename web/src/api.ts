@@ -3,6 +3,8 @@
 // per API route of src/server.ts.
 
 export type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "../../src/diagram.ts";
+export type { ProjectMap, ProjectMapEdge, ProjectMapNode } from "../../src/diagram.ts";
+import type { ProjectMap } from "../../src/diagram.ts";
 import type { Diagram } from "../../src/diagram.ts";
 import { pictureQueryText, type PictureOptions } from "../../src/options.ts";
 import type { View } from "../../src/view-keys.ts";
@@ -121,8 +123,9 @@ export interface CompareResponse {
 
 export const api = {
   tags: (q: string) => get<{ tags: { tag: string; title: string }[] }>(`/api/tags?q=${encodeURIComponent(q)}`),
-  expand: async (text: string): Promise<string> => {
-    const response = await fetch("/api/expand", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+  /** The context of the tags in `text`; `query` is the picture's options, for `@view:` (the picture as the page shows it). */
+  expand: async (text: string, query = ""): Promise<string> => {
+    const response = await fetch("/api/expand", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, query }) });
     const body = (await response.json()) as { context: string } | { error: string };
 
     if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : response.statusText);
@@ -206,6 +209,8 @@ export const api = {
     return body;
   },
   views: () => get<ViewsResponse>("/api/views"),
+  /** The whole repository for the project map: every module (or directory, folded) with its layer, every import between them. */
+  graph: () => get<ProjectMap>("/api/graph"),
   diagram: (view: string, depth: number | null) => get<DiagramResponse>(`/api/diagram?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
   edge: (view: string, from: string, to: string, kind: string, options = "") => get<{ markdown: string }>(`/api/edge?view=${encodeURIComponent(view)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&kind=${encodeURIComponent(kind)}${options}`),
   node: (view: string, id: string, options = "") => get<{ markdown: string }>(`/api/node?view=${encodeURIComponent(view)}&id=${encodeURIComponent(id)}${options}`),

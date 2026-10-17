@@ -61,3 +61,20 @@ Feature: The page
     Then the clipboard holds the file without line numbers
     When I open the Spec tab in a repository without openspec/
     Then it says "no openspec/ yet" and offers "spec this view"
+
+  Scenario: Several shapes, the menu and the project map
+    Given the page open on "layer:lib"
+    When I tap orders.ts, then log.ts and store.ts with Ctrl held
+    Then the panel says "3 shapes selected" and the strip reads "3 selected"
+    When I right-click orders.ts and choose "Focus: everything joined to it"
+    Then the link holds "focus:src/lib/orders.ts"
+    When I press g
+    Then the project map opens with a dot per module
+    When I click the dot of store.ts
+    Then the map closes and the link holds "module:src/db/store.ts"
+
+  Scenario: A question about the picture, and a compact transcript
+    Given the page open on "layer:lib" with the fake agent
+    When I type "What does this layer do?" in the ask row and press Enter
+    Then the transcript's own row reads the question "(with the picture)"
+    And the agent's steps fold under one line and the answer is rendered

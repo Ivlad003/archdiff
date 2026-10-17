@@ -12,7 +12,7 @@ import { builtinModules } from "node:module";
 import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, TypeFieldFact, TypeRefFact, UnsupportedFact, ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, grammarFor, located, query, startCol, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Tree } from "./treesitter.ts";
-import { collectTsMachines, collectTsStates, guardsOf, TS_CONTROL } from "./control.ts";
+import { collectTsMachines, collectTsStates, countBranches, guardsOf, TS_CONTROL } from "./control.ts";
 
 // Every call and `new`, whatever its callee: each becomes an edge or a hole, never nothing.
 const CALLS_QUERY = `
@@ -777,6 +777,10 @@ function decl(kind: DeclFact["kind"], name: string, node: Node, signature: strin
   const fact: DeclFact = { kind, name, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, signature, exported, calls, types, members, ...fingerprintFacts(node) };
 
   if (doc !== undefined) fact.doc = doc;
+  // How much a function branches, for the logic view's list (a class counts its members' branches each on its own).
+  const branches = kind === "fn" ? countBranches(node, TS_CONTROL) : 0;
+
+  if (branches > 0) fact.branches = branches;
 
   return fact;
 }

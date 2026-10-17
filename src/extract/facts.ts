@@ -337,6 +337,12 @@ export interface DeclFact {
   /** `fingerprint()` of the declaring node: changes with the body and signature, not with comments or layout. */
   fingerprint?: string;
   /**
+   * Functions and methods: how many branching statements the body holds
+   * (`if`, `switch`/`match`, a loop, `try`), nested functions included.
+   * The `logic` view lists the functions with the most; absent when zero.
+   */
+  branches?: number;
+  /**
    * Names the declaration reads as values that an import binds whose syntax
    * does not tell whether its target is in the repository (Python
    * `from app.limits import MAX`, PHP `use App\Limits`): the graph marks the

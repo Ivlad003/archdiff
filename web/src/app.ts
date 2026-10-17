@@ -10,15 +10,17 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { api, type DiagramEdge, type DiagramNode, type ViewEntry } from "./api.ts";
 import { mountCanvas, VIEW_LINK, type CanvasHandle, type PickedLine } from "./editor.tsx";
-import { element } from "./dom.ts";
-import { agentNameOf, loadTasks, runButton, setAgentName, transcript } from "./chat.ts";
+import { element, h, remember } from "./dom.ts";
+import { agentNameOf, askAbout, loadTasks, runButton, setAgentName, transcript } from "./chat.ts";
 import { flowText, loadFlow } from "./flow-tab.ts";
 import { bindPage } from "./page.ts";
 import { loadBranches, loadCommits } from "./review.ts";
 import { loadSpecs, specTextOf } from "./spec-tab.ts";
 import "./theme.ts";
+import { closeMenu, menuOpen, openMenu, type MenuItem } from "./menu.ts";
+import { mapDots, mapSettled, projectMapOpen, refreshProjectMap, toggleProjectMap } from "./project-map.ts";
 import { chainFrom, findShapes, lineElementId, neighbourhoodOf, pathBetween } from "./graph.ts";
-import { crumbsOf, ownView, siblingViews } from "./navigation.ts";
+import { crumbsOf, ownView, siblingViews, subjectOf, tagOf } from "./navigation.ts";
 import { DETAIL, OVERVIEWS, PRESETS, forgetDefaults, rememberDefaults, setHash, stateFromHash, type State } from "./state.ts";
 import { MERMAID_STYLES, OVERLAYS, pictureQueryText, type MermaidStyle, type Overlay } from "../../src/options.ts";
 
@@ -379,10 +381,129 @@ function renderNeighbours(node: DiagramNode | null): void {
 /** Picks a shape as a tap would: centred, lit, its page shown; the start of the next path or arrow-key walk. */
 function pickShape(id: string): void {
   if (!nodes.has(id)) return;
-  canvas?.centreOn(id);
-  canvas?.highlight([id]);
-  lastPicked = id;
-  void showNode(id);
+  select([id], true);
+}
+
+// ── The selection: several shapes at once ────────────────────────────────────
+
+/** The shapes selected with Shift or Ctrl (or a box in the editor), in the order picked; a plain tap selects one. */
+let selected: string[] = [];
+
+/** The strip under the tabs: the selected shapes as chips, and what to do with them together. */
+function renderSelection(): void {
+  const strip = element<HTMLDivElement>("selection");
+  strip.replaceChildren();
+  strip.className = "line-strip";
+  strip.hidden = selected.length < 2;
+
+  if (strip.hidden) return;
+  strip.append(h("span", { class: "muted" }, `${selected.length} selected:`));
+
+  for (const id of selected) strip.append(h("button", { class: "chip", title: "Centre on it; Shift+click takes it out of the selection", on: { click: (event) => (event.shiftKey ? toggleSelected(id) : canvas?.centreOn(id)) } }, labelOf(id)));
+  strip.append(
+    h("button", { class: "act", title: "Ask the agent about the selected shapes (the Chat tab): their code and calls go along as context", on: { click: () => askSelected() } }, "ask about them"),
+    h("button", { class: "act", title: "Dim everything but the selected shapes and their neighbours", on: { click: () => canvas?.dim([...new Set(selected.flatMap((id) => neighbourhoodOf(edges, id)))]) } }, "dim others"),
+    h("button", { class: "act", title: "Clear the selection (Esc)", on: { click: () => select([]) } }, "clear"),
+  );
+}
+
+/**
+ * Selects shapes: one is picked (its page, its neighbours), two light the
+ * shortest path between them, more list themselves with the lines among
+ * them; an empty list clears everything back to the picture's page.
+ */
+function select(ids: string[], centre = false): void {
+  selected = ids.filter((id) => nodes.has(id));
+  canvas?.highlight(selected);
+  renderSelection();
+
+  if (selected.length === 1) {
+    lastPicked = selected[0]!;
+
+    if (centre) canvas?.centreOn(lastPicked);
+    void showNode(lastPicked);
+  } else if (selected.length === 2) showPath(selected[0]!, selected[1]!);
+  else if (selected.length > 2) showSelection();
+  else void showNode(null);
+}
+
+function toggleSelected(id: string): void {
+  if (!nodes.has(id)) return;
+  select(selected.includes(id) ? selected.filter((each) => each !== id) : [...selected, id]);
+}
+
+/** The page of several selected shapes: what each is, and the lines among them in this picture. */
+function showSelection(): void {
+  const lines = [`# ${selected.length} shapes selected`, "", ...selected.map((id) => {
+    const node = nodes.get(id)!;
+
+    return `- **${labelOf(id)}** (${node.kind})${node.ref?.file ? ` — \`${node.ref.file}${node.ref.line ? `:${node.ref.line}` : ""}\`` : ""}`;
+  })];
+  const among = edges.filter((edge) => selected.includes(edge.from) && selected.includes(edge.to) && edge.kind !== "lifeline");
+  lines.push("", `## Lines among them (${among.length})`, "", ...(among.length === 0 ? ["none in this picture"] : among.map((edge) => `- ${labelOf(edge.from)} → **${labelOf(edge.to)}**${edge.kind === "dependency" ? "" : ` (${edge.kind})`}`)), "", "_Shift+tap or Ctrl+tap adds or removes a shape; **ask about them** sends them to the agent; **dim others** keeps their neighbourhood._");
+  setMarkdown(markdownPanel, `${lines.join("\n")}\n`);
+  showTab("markdown");
+  renderNeighbours(null);
+}
+
+/** The question box of the Chat tab with the shapes attached: the selection, else the picked shape, else the picture alone. */
+function askSelected(ids: string[] = selected.length > 0 ? selected : lastPicked ? [lastPicked] : []): void {
+  askAbout(ids.map((id) => nodes.get(id)).filter((node): node is DiagramNode => node !== undefined).map(tagOf).filter((tag): tag is { tag: string; label: string } => tag !== null));
+}
+
+// ── The context menu ─────────────────────────────────────────────────────────
+
+/** What "open" means for a view key: the words of the second tap. */
+function openLabel(key: string): string {
+  const kind = key.slice(0, key.indexOf(":") === -1 ? key.length : key.indexOf(":"));
+  const words: Record<string, string> = { inside: "Open: inside it (its functions and calls)", calls: "Open: its calls", layer: "Open: the layer", logic: "Open: its logic", machine: "Open: the machine", dir: "Open: the directory" };
+
+  return words[kind] ?? `Open ${key}`;
+}
+
+/** The menu of a right click: on a shape (its views, the selection, the agent, its code), on a line, or on the empty canvas. */
+function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
+  const now = stateFromHash();
+  const go = (key: string) => () => setHash({ ...now, view: key, review: false });
+  const node = id ? nodes.get(id) : undefined;
+
+  if (node) {
+    const own = ownView(node);
+    const subject = subjectOf(node);
+    const target = node.ref?.id ?? node.id;
+    const fnLike = node.kind === "fn" || (node.kind === "action" && target.includes("#"));
+    const tag = tagOf(node);
+    const items: MenuItem[] = [];
+
+    if (own) items.push({ label: openLabel(own), hint: "tap again", run: go(own) });
+
+    if (node.kind === "module" || node.kind === "participant" || fnLike) items.push({ label: "Focus: everything joined to it", hint: "callers, callees, imports, across the modules", run: go(`focus:${target}`) });
+
+    if (fnLike) items.push({ label: "Logic: the flowchart and its rules", run: go(`logic:${target}`) });
+
+    for (const sibling of subject ? siblingViews(subject) : []) if (sibling.key !== own && !sibling.key.startsWith("focus:") && !sibling.key.startsWith("logic:")) items.push({ label: sibling.label, run: go(sibling.key) });
+    items.push("—", { label: selected.includes(node.id) ? "Take out of the selection" : "Add to the selection", hint: "Shift+tap", run: () => toggleSelected(node.id) });
+    items.push({ label: "Ask the agent about it", hint: tag?.tag ?? "no tag for this kind of shape", disabled: tag === null, run: () => askSelected([node.id]) });
+    items.push({ label: "Dim all but its neighbours", run: () => canvas?.dim(neighbourhoodOf(edges, node.id)) });
+    items.push("—", { label: "Show the code", disabled: !node.ref?.file, run: () => void showCode(node) });
+    items.push({ label: "Copy the name", hint: target, run: () => void copyText(target) });
+
+    return items;
+  }
+
+  if (lines.length > 0) {
+    const line = lines[0]!;
+
+    return [{ label: "Where this line leads", hint: `${labelOf(line.from)} → ${labelOf(line.to)}`, run: () => void showEdge(lines, false) }, { label: "Follow the chain onward", hint: "Shift+tap", run: () => void showEdge(lines, true) }];
+  }
+
+  return [
+    { label: "Ask the agent about this picture", run: () => askSelected([]) },
+    { label: "Project map", hint: "g", run: () => toggleProjectMap(true) },
+    { label: "Fit the picture", hint: "0", run: () => canvas?.scrollToContent() },
+    { label: "Clear the selection", hint: "Esc", disabled: selected.length === 0, run: () => select([]) },
+    { label: "Edit the drawing", hint: "e", run: () => setMode("edit") },
+  ];
 }
 
 /** The next shape along the arrows from the picked one (→), against them (←), or beside it in its lane (↑ ↓); cycles on repeated presses. */
@@ -472,7 +593,8 @@ function renderLanes(state: State, groups: readonly { id: string; label: string 
 }
 
 const minimap = element<HTMLCanvasElement>("minimap");
-let minimapWanted: boolean | null = null;
+/** Shown unless this browser turned it off (null: the default, on). */
+let minimapWanted: boolean | null = remembered("archdiff.minimap.off") ? false : null;
 let minimapTimer: ReturnType<typeof setInterval> | null = null;
 let minimapFrame: { scale: number; minX: number; minY: number } | null = null;
 
@@ -491,7 +613,28 @@ function drawMinimap(): void {
   minimapFrame = { scale, minX: minX - pad / scale, minY: minY - pad / scale };
   const context = minimap.getContext("2d")!;
   context.clearRect(0, 0, minimap.width, minimap.height);
-  const dark = document.body.classList.contains("dark");
+  const dark = document.documentElement.classList.contains("dark");
+  // The lines first, faint, so the shape of the picture reads; then the shapes over them.
+  context.strokeStyle = dark ? "rgba(144,164,174,0.5)" : "rgba(96,125,139,0.35)";
+  context.lineWidth = 1;
+
+  for (const line of canvas.scene()) {
+    if (line.isDeleted || line.customData?.["archdiff"] !== "edge") continue;
+    const points = (line as { points?: [number, number][] }).points ?? [];
+
+    if (points.length < 2) continue;
+    context.beginPath();
+
+    for (const [i, [px, py]] of points.entries()) {
+      const x = (line.x + px - minimapFrame.minX) * scale;
+      const y = (line.y + py - minimapFrame.minY) * scale;
+
+      if (i === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+
+    context.stroke();
+  }
 
   for (const element of elements) {
     const role = element.customData?.["archdiff"];
@@ -511,9 +654,9 @@ function drawMinimap(): void {
   }
 }
 
-/** Shows the minimap when wanted (by the button, or by a picture over 60 shapes) and keeps it drawn while the viewport moves. */
+/** Shows the minimap unless it was turned off (the button, remembered) and keeps it drawn while the viewport moves. */
 function updateMinimap(): void {
-  const shown = minimapWanted ?? nodes.size > 60;
+  const shown = minimapWanted ?? true;
   minimap.hidden = !shown || document.body.classList.contains("editing");
   element<HTMLButtonElement>("tool-map").classList.toggle("active", shown);
 
@@ -526,7 +669,8 @@ function updateMinimap(): void {
   }
 }
 
-minimap.addEventListener("click", (event) => {
+/** Moves the viewport so the scene point under the pointer is at its centre; a drag keeps moving it. */
+function minimapMoveTo(event: PointerEvent): void {
   if (!canvas || !minimapFrame) return;
   const viewport = canvas.viewport();
   const size = canvas.size();
@@ -537,7 +681,19 @@ minimap.addEventListener("click", (event) => {
   const sceneY = minimapFrame.minY + (event.clientY - box.top) / minimapFrame.scale;
   canvas.setViewport({ scrollX: size.width / viewport.zoom / 2 - sceneX, scrollY: size.height / viewport.zoom / 2 - sceneY, zoom: viewport.zoom });
   drawMinimap();
+}
+
+let minimapDragging = false;
+minimap.addEventListener("pointerdown", (event) => {
+  minimapDragging = true;
+  minimap.setPointerCapture(event.pointerId);
+  minimapMoveTo(event);
 });
+minimap.addEventListener("pointermove", (event) => {
+  if (minimapDragging) minimapMoveTo(event);
+});
+minimap.addEventListener("pointerup", () => (minimapDragging = false));
+minimap.addEventListener("pointercancel", () => (minimapDragging = false));
 
 /** The canvas toolbar: the picture select (this subject's pictures, then the overviews), the detail buttons and the tool states. */
 function renderCanvasTools(state: State): void {
@@ -568,6 +724,7 @@ function renderCanvasTools(state: State): void {
   element<HTMLButtonElement>("mix-clear").hidden = state.expand.length === 0;
   element<HTMLButtonElement>("mix-clear").textContent = `close opened (${state.expand.length})`;
   element<HTMLButtonElement>("tool-split").classList.toggle("active", document.body.classList.contains("split"));
+  element<HTMLButtonElement>("tool-graph").classList.toggle("active", projectMapOpen());
   renderLanes(state, currentGroups);
   updateMinimap();
 }
@@ -751,23 +908,27 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
   }
 
   canvas = await mountCanvas(element("canvas"), elements, {
-    pick: (id, lines, shift) => {
+    pick: (id, lines, extend) => {
+      closeMenu();
+
       // A tap on lines lights them with their ends (or the chain onward, with Shift); a shape or nothing puts the light out.
       if (lines && lines.length > 0) {
-        void showEdge(lines, shift === true);
+        void showEdge(lines, extend === true);
+
+        return;
+      }
+
+      const node = id === null ? null : nodes.get(id);
+
+      // Shift or Ctrl held: the shape joins the selection or leaves it (two selected light the path between them); a tap
+      // on nothing with them held changes nothing.
+      if (extend) {
+        if (node) toggleSelected(node.id);
 
         return;
       }
 
       canvas?.highlight([]);
-      const node = id === null ? null : nodes.get(id);
-
-      // Shift+tap on a second shape: the shortest path from the one picked before, along the arrows.
-      if (shift && node && lastPicked && lastPicked !== node.id && nodes.has(lastPicked)) {
-        showPath(lastPicked, node.id);
-
-        return;
-      }
 
       if (node) lastPicked = node.id;
 
@@ -780,9 +941,9 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
         return;
       }
 
-      // The focus tool: everything but the shape and its neighbours dims; a tap on nothing clears it.
+      // The dim tool: everything but the shape and its neighbours dims; a tap on nothing clears it.
       if (tools.focus) canvas?.dim(node ? neighbourhoodOf(edges, node.id) : null);
-      void showNode(id);
+      select(node ? [node.id] : []);
     },
     open: (id, link) => {
       const key = link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : nodes.has(id) ? ownView(nodes.get(id)!) : null;
@@ -795,6 +956,9 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
         saveButton.classList.add("dirty");
       }
     },
+    // The editor's own selection (a box around several shapes) is the page's selection too.
+    selection: (ids) => select(ids),
+    menu: (id, at, lines) => openMenu(menuItems(id, lines), at),
   });
 
   return canvas;
@@ -843,6 +1007,10 @@ async function relayout(): Promise<void> {
 async function load(): Promise<void> {
   const state = stateFromHash();
   const base = new URLSearchParams(location.hash.slice(1)).get("base");
+  // A new picture: nothing selected in it yet.
+  selected = [];
+  renderSelection();
+  closeMenu();
 
   if (base !== null) baseInput.value = base;
   depthInput.value = state.depth === null ? "" : String(state.depth);
@@ -921,6 +1089,7 @@ async function load(): Promise<void> {
     }
 
     setMarkdown(markdownPanel, diagramMarkdown);
+    refreshProjectMap();
     await loadFlow();
   } catch (error) {
     title.textContent = "archdiff";
@@ -1010,9 +1179,11 @@ element<HTMLButtonElement>("tool-lanes").addEventListener("click", () => {
   setHash({ ...now, lanes: rows ? "columns" : "rows" });
 });
 element<HTMLButtonElement>("tool-map").addEventListener("click", () => {
-  minimapWanted = minimapWanted === null ? !(nodes.size > 60) : !minimapWanted;
+  minimapWanted = !(minimapWanted ?? true);
+  remember("archdiff.minimap.off", !minimapWanted);
   updateMinimap();
 });
+element<HTMLButtonElement>("tool-graph").addEventListener("click", () => toggleProjectMap());
 element<HTMLInputElement>("only-changes").addEventListener("change", () => setHash({ ...stateFromHash(), onlyChanges: element<HTMLInputElement>("only-changes").checked, changes: element<HTMLInputElement>("only-changes").checked ? true : stateFromHash().changes }));
 
 const findInput = element<HTMLInputElement>("find");
@@ -1026,10 +1197,7 @@ findInput.addEventListener("keydown", (event) => {
     const first = findShapes(nodes, findInput.value)[0];
 
     if (first) {
-      canvas?.centreOn(first.id);
-      canvas?.highlight([first.id]);
-      lastPicked = first.id;
-      void showNode(first.id);
+      select([first.id], true);
     } else {
       // Nothing in this picture (folded away, or elsewhere): the first view whose subject matches opens instead.
       const needle = findInput.value.trim().toLowerCase();
@@ -1166,6 +1334,20 @@ if (remembered("archdiff.hide-right")) document.body.classList.add("hide-right")
 window.addEventListener("keydown", (event) => {
   const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
 
+  // The project map and the menu take Escape first; `g` opens and closes the map from anywhere but a field.
+  if (event.key === "Escape" && (menuOpen() || projectMapOpen())) {
+    closeMenu();
+    toggleProjectMap(false);
+
+    return;
+  }
+
+  if (event.key === "g" && !typing && mode === "view" && !stateFromHash().review) {
+    toggleProjectMap();
+
+    return;
+  }
+
   if (event.ctrlKey && event.key === "b") {
     event.preventDefault();
     togglePanel("left");
@@ -1207,7 +1389,7 @@ window.addEventListener("keydown", (event) => {
   } else if (event.key === "e" && !stateFromHash().review) {
     setMode("edit");
   } else if (event.key === "Escape") {
-    void showNode(null);
+    select([]);
   }
 });
 
@@ -1218,7 +1400,7 @@ window.addEventListener("beforeunload", rememberViewport);
 setInterval(rememberViewport, 2000);
 
 // A handle for the browser tests and for debugging in the console: the canvas and the state of the page.
-(window as unknown as { archdiff: unknown }).archdiff = { canvas: () => canvas, state: stateFromHash, nodes: () => nodes };
+(window as unknown as { archdiff: unknown }).archdiff = { canvas: () => canvas, state: stateFromHash, nodes: () => nodes, selected: () => selected, mapDots, mapSettled, menuOpen };
 
 void (async () => {
   await loadViews();

@@ -225,7 +225,11 @@ test("find, lanes, split, the path between two shapes and the minimap", { skip: 
   await routesBox.uncheck();
   await page!.waitForFunction(`location.hash.includes("hide=routes")`);
   await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("lanes hidden: routes")`);
-  // The minimap by the button, the split pane with the embedded page.
+  // The minimap is on by default; the button hides it (remembered) and shows it again; then the split pane with the embedded page.
+  await page!.waitForFunction(`!document.querySelector("#minimap").hidden`);
+  await page!.click("#tool-map");
+  await page!.waitForFunction(`document.querySelector("#minimap").hidden`);
+  assert.equal(await page!.evaluate("localStorage.getItem('archdiff.minimap.off')"), "1");
   await page!.click("#tool-map");
   await page!.waitForFunction(`!document.querySelector("#minimap").hidden`);
   await page!.click("#tool-split");
@@ -323,6 +327,16 @@ test("the agent's question shows its options; an answer resumes the session", { 
     await page!.click("#question .options button:has-text('SQLite')");
     await page!.waitForFunction(`document.querySelector("#question").hidden`);
     await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev")].some((row) => (row.textContent ?? "").includes("Noted: SQLite"))`, undefined, { timeout: 15_000 });
+    // The transcript is compact: the steps fold under a summary, the result is the answer, rendered.
+    await page!.waitForFunction(`document.querySelector("#transcript .answer")?.textContent?.includes("Done.")`, undefined, { timeout: 15_000 });
+    assert.equal(await page!.evaluate("document.querySelector('#transcript details.steps').open"), false);
+    assert.ok(((await page!.textContent("#transcript details.steps summary")) ?? "").includes("step"));
+    // A question about the picture: a new run (the transcript starts afresh), the picture goes along as a tag, the row shows the question.
+    await page!.fill("#ask", "What does this layer do?");
+    await page!.press("#ask", "Enter");
+    await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev.you")].some((row) => (row.textContent ?? "").includes("What does this layer do? (with the picture)"))`, undefined, { timeout: 15_000 });
+    await page!.waitForFunction(`document.querySelector("#transcript .answer")?.textContent?.includes("Done.")`, undefined, { timeout: 15_000 });
+    assert.equal(await page!.evaluate(`document.querySelectorAll("#transcript .ev.you").length`), 1);
   } finally {
     agentServer.kill();
     rmSync(agentDir, { recursive: true, force: true });
@@ -350,4 +364,44 @@ test("copy takes the active tab's text; the Spec tab lists the repository's spec
   await page!.click("#tabs button[data-tab='spec']");
   await page!.waitForFunction(`(document.querySelector("#spec-state")?.textContent ?? "").includes("no openspec/ yet")`);
   assert.equal(await page!.isVisible("#spec-generate"), true);
+});
+
+test("Shift or Ctrl+tap selects several shapes; a right click opens the menu; the project map opens with g and a dot opens its module", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.evaluate("localStorage.clear()");
+  await page!.goto(`${base}/?fresh=9#view=layer%3Alib`);
+  await page!.waitForSelector(".excalidraw canvas");
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.includes("lib")`);
+  await page!.waitForTimeout(1000);
+  // The minimap is on by default.
+  assert.equal(await page!.evaluate("document.querySelector('#minimap').hidden"), false);
+  const orders = await screenPointOf("layer:lib", "src/lib/orders.ts");
+  const log = await screenPointOf("layer:lib", "src/lib/log.ts");
+  const store = await screenPointOf("layer:lib", "src/db/store.ts");
+  await page!.mouse.click(orders.x, orders.y);
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/lib/orders.ts"`, undefined, { timeout: 8000 });
+  await page!.keyboard.down("Control");
+  await page!.mouse.click(log.x, log.y);
+  await page!.mouse.click(store.x, store.y);
+  await page!.keyboard.up("Control");
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "3 shapes selected"`, undefined, { timeout: 8000 });
+  assert.deepEqual(await page!.evaluate("window.archdiff.selected()"), ["src/lib/orders.ts", "src/lib/log.ts", "src/db/store.ts"]);
+  assert.ok(((await page!.textContent("#selection")) ?? "").includes("3 selected"));
+  // The menu of a right click on a shape: its focus view is one line of it.
+  await page!.mouse.click(orders.x, orders.y, { button: "right" });
+  await page!.waitForSelector("#context-menu:not([hidden])");
+  const items = (await page!.evaluate(`[...document.querySelectorAll("#context-menu li")].map((li) => li.textContent)`)) as string[];
+  assert.ok(items.some((item) => item.startsWith("Focus: everything joined to it")) && items.some((item) => item.startsWith("Ask the agent about it")), items.join(" | "));
+  await page!.click("#context-menu li:has-text('Focus: everything joined to it')");
+  await page!.waitForFunction(`location.hash.includes("focus%3Asrc%2Flib%2Forders.ts")`);
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.startsWith("Everything joined to")`);
+  // The project map: a dot per module; a click on one opens its view and closes the map.
+  await page!.keyboard.press("g");
+  await page!.waitForFunction(`!document.querySelector("#project-map").hidden`);
+  await page!.waitForFunction(`window.archdiff.mapSettled()`, undefined, { timeout: 20_000 });
+  const dots = (await page!.evaluate("window.archdiff.mapDots()")) as { id: string; x: number; y: number }[];
+  assert.ok(dots.length >= 5, `${dots.length} dots`);
+  const storeDot = dots.find((dot) => dot.id === "src/db/store.ts")!;
+  await page!.mouse.click(storeDot.x, storeDot.y);
+  await page!.waitForFunction(`location.hash.includes("module%3Asrc%2Fdb%2Fstore.ts")`);
+  await page!.waitForFunction(`document.querySelector("#project-map").hidden`);
 });

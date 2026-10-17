@@ -68,6 +68,19 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
     return `${lines.join("\n").trimEnd()}\n`;
   }
 
+  // A function's logic reads as its rules: every path from the start to an exit, the conditions taken, the calls made, how it ends.
+  if (diagram.logic) {
+    const logic = diagram.logic;
+    lines.push("## Paths: the rules of the function", "", `${logic.decisions} decisions, ${logic.loops} loops, ${logic.exits} exits in \`${logic.module}\`.${logic.truncated ? " The body is longer than the picture holds." : ""}`, "", "| when | calls | ends with |", "| --- | --- | --- |");
+
+    for (const path of logic.paths) lines.push(`| ${path.conditions.length === 0 ? "always" : path.conditions.map((condition) => `\`${condition.replace(/\|/g, "\\|")}\``).join(" and ")} | ${path.calls.map((call) => `\`${call.replace(/\|/g, "\\|")}\``).join(", ")} | ${path.kind === "end" ? "the end of the body" : `**${path.outcome.replace(/\|/g, "\\|")}**`} |`);
+
+    if (logic.morePaths) lines.push("", `… ${logic.morePaths} more paths`);
+    lines.push("", "A condition reads `condition: branch`; `each` and `done` are a loop's body and its end; `ok` and `error` a try's.");
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
   // A machine reads as its states and a table of transitions.
   if (diagram.machine) {
     const machine = diagram.machine;

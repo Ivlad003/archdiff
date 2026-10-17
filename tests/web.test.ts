@@ -416,3 +416,18 @@ test("the Flow tab's run: POST /api/flow/run executes the entry with the saved m
   assert.ok(markdown.startsWith("<!-- archdiff:generated — run "), markdown);
   assert.equal((await fetch(`${base}/api/flow/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers" }) })).status, 400);
 });
+
+test("the project map lists every module with its layer and every import; a tag of a view or of a function's logic expands into context", async () => {
+  const map = await getJson<{ layers: string[]; nodes: { id: string; layer: string; lines: number }[]; edges: { from: string; to: string; count: number }[]; level: string }>("/api/graph");
+  assert.equal(map.level, "module");
+  assert.deepEqual(map.layers, ["cartridge", "db", "lib", "routes"]);
+  assert.ok(map.nodes.some((node) => node.id === "src/lib/orders.ts" && node.layer === "lib" && node.lines > 0), JSON.stringify(map.nodes));
+  assert.ok(map.edges.some((edge) => edge.from === "src/lib/orders.ts" && edge.to === "src/db/store.ts" && edge.count === 1), JSON.stringify(map.edges));
+  const expanded = await fetch(`${base}/api/expand`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Why? @view:layer:lib and @logic:src/lib/orders.ts#validate", query: "depth=0" }) });
+  const { context } = (await expanded.json()) as { context: string };
+  assert.ok(context.includes("### @view:layer:lib") && context.includes("# Layer lib"), context.slice(0, 300));
+  assert.ok(context.includes("### @logic:src/lib/orders.ts#validate") && context.includes("Paths: the rules of the function") && context.includes("`order.total < 0: yes`"), context);
+  // A shape of a logic view has a page like any other shape.
+  const node = await getJson<{ markdown: string }>(`/api/node?view=${encodeURIComponent("logic:src/lib/orders.ts#validate")}&id=n1`);
+  assert.ok(node.markdown.startsWith("# order.total < 0"), node.markdown.slice(0, 80));
+});

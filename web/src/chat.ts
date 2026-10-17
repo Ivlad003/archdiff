@@ -1,14 +1,18 @@
 // The Chat tab: the task drawn on the view, and the agent that does it —
-// the run with its streamed events, the question protocol (an
-// archdiff-question block becomes option buttons, an answer resumes the
-// session), the @tags expanded into context, the slash commands, the
-// checks after a run, the document that becomes the contract, and the
-// previous tasks. Takes the page as its context (page.ts).
+// the run with its streamed events (a turn is the question, its steps
+// folded under a summary, and the answer rendered), the question protocol
+// (an archdiff-question block becomes option buttons, an answer resumes
+// the session), the @tags expanded into context, a question about the
+// picture or the selected shapes (answered without edits), the slash
+// commands, the checks after a run, the document that becomes the
+// contract, and the previous tasks. Takes the page as its context
+// (page.ts).
 
 import { api } from "./api.ts";
-import { element } from "./dom.ts";
+import { element, h } from "./dom.ts";
 import { page } from "./page.ts";
 import { setHash, stateFromHash } from "./state.ts";
+import { pictureQueryText } from "../../src/options.ts";
 
 export const taskField = element<HTMLTextAreaElement>("task");
 export const runButton = element<HTMLButtonElement>("run");
@@ -19,11 +23,51 @@ const followup = element<HTMLInputElement>("followup");
 let agentName: string | null = null;
 let currentRun: { id: string; close: () => void; sessionId: string | null } | null = null;
 
+/** The turn being written: the question's row, its steps folded under a summary, and the answer. */
+let turn: { steps: HTMLDetailsElement; summary: HTMLElement; count: number; answer: HTMLDivElement; lastText: string; answered: boolean } | null = null;
+
+function row(kind: string, text: string): HTMLDivElement {
+  return h("div", { class: `ev ${kind}${kind === "check" && text.startsWith("✘") ? " failed" : ""}` }, text);
+}
+
+/** The answer of the turn, rendered as Markdown under its folded steps. */
+function showAnswer(text: string): void {
+  if (!turn) return;
+  turn.answered = true;
+  turn.answer.className = "answer ev result";
+  page.renderMarkdown(turn.answer, text);
+  turn.summary.textContent = `${turn.count} ${turn.count === 1 ? "step" : "steps"} (tools, thoughts) — click to unfold`;
+}
+
+/**
+ * One event of a run in the transcript: the question opens a turn; tool
+ * calls, thoughts and noise go under its folded summary (which names the
+ * latest); the result is the answer, shown; the checks and the exit stand
+ * below it. The text is kept in `.ev` rows for the copy button.
+ */
 function appendEvent(kind: string, text: string): void {
-  const row = document.createElement("div");
-  row.className = `ev ${kind}${kind === "check" && text.startsWith("✘") ? " failed" : ""}`;
-  row.textContent = text;
-  transcript.append(row);
+  if (kind === "you") {
+    const summary = h("summary", {}, "working…");
+    const steps = h("details", { class: "steps" }, summary);
+    const answer = h("div", { class: "answer" });
+    transcript.append(row("you", text), steps, answer);
+    turn = { steps, summary, count: 0, answer, lastText: "", answered: false };
+  } else if (turn && kind === "result") {
+    // The result is the answer, shown in full; an empty one leaves the last text as the answer at the exit.
+    if (text.trim() !== "") showAnswer(text);
+  } else if (turn && kind !== "check" && kind !== "exit") {
+    turn.steps.append(row(kind, text));
+    turn.count++;
+    const line = text.split("\n")[0] ?? "";
+    turn.summary.textContent = `${turn.count} ${turn.count === 1 ? "step" : "steps"} · ${line.length > 90 ? `${line.slice(0, 90)}…` : line}`;
+
+    if (kind === "text") turn.lastText = text;
+  } else {
+    // The exit without a result (a custom agent): the last text is the answer.
+    if (turn && kind === "exit" && !turn.answered && turn.lastText) showAnswer(turn.lastText);
+    transcript.append(row(kind, text));
+  }
+
   transcript.scrollTop = transcript.scrollHeight;
 }
 
@@ -63,18 +107,83 @@ function shapesOfFiles(files: readonly string[]): string[] {
   return ids;
 }
 
-/** Tags in a text (@module:…, @fn:…, @layer:…, @dir:…, @flow:…, @type:…) become their context for the agent. */
+/** Tags in a text (@module:…, @fn:…, @layer:…, @dir:…, @flow:…, @type:…, @logic:…, @view:…) become their context for the agent; @view: takes the picture's options. */
 async function withContext(prompt: string): Promise<string> {
-  if (!/@(module|fn|layer|dir|flow|type):\S/.test(prompt)) return prompt;
+  if (!/@(module|fn|layer|dir|flow|type|logic|view):\S/.test(prompt)) return prompt;
 
   try {
-    const context = await api.expand(prompt);
+    const context = await api.expand(prompt, pictureQueryText(stateFromHash()).replace(/^&/, ""));
 
     return context ? `${prompt}\n\n${context}` : prompt;
   } catch {
     return prompt;
   }
 }
+
+// ── A question about the picture or the selected shapes ──────────────────────
+
+const askInput = element<HTMLInputElement>("ask");
+let askSubjects: { tag: string; label: string }[] = [];
+
+function renderAskAbout(): void {
+  const box = element<HTMLDivElement>("ask-about");
+  box.replaceChildren();
+  box.hidden = askSubjects.length === 0;
+
+  if (box.hidden) return;
+  box.append("about: ");
+
+  for (const subject of askSubjects) {
+    box.append(h("span", { class: "chip", title: subject.tag }, subject.label, h("button", { title: "Leave it out", on: { click: () => {
+      askSubjects = askSubjects.filter((each) => each.tag !== subject.tag);
+      renderAskAbout();
+    } } }, "×")));
+  }
+}
+
+/** Puts the shapes in the question box ("about: …") and opens the Chat tab on it; an empty list asks about the picture alone. */
+export function askAbout(subjects: { tag: string; label: string }[]): void {
+  const seen = new Set<string>();
+  askSubjects = subjects.filter((subject) => !seen.has(subject.tag) && seen.add(subject.tag));
+  renderAskAbout();
+  page.showTab("chat");
+  askInput.focus();
+}
+
+/**
+ * Sends the question to the agent with its subjects as tags (expanded into
+ * their Markdown by `withContext`) and, when the box is ticked, the picture
+ * itself as `@view:`; the agent is told to answer, not to edit. Without an
+ * agent the question with its context goes into the task box, to be copied.
+ */
+function askQuestion(): void {
+  const question = askInput.value.trim();
+
+  if (question === "") return;
+  const state = stateFromHash();
+  const picture = element<HTMLInputElement>("ask-picture").checked && !state.review;
+  const about = askSubjects.length > 0 ? `\n\nIt is about: ${askSubjects.map((subject) => `${subject.label} (${subject.tag})`).join(", ")}.` : "";
+  const prompt = `Answer the question below about this repository: read the code you need, and change no file.\n\nQuestion: ${question}${about}${picture ? `\n\nThe picture I am looking at: @view:${state.view}` : ""}`;
+  askInput.value = "";
+
+  if (agentName) {
+    runTask(prompt, null, `${question}${askSubjects.length > 0 ? ` (about ${askSubjects.map((subject) => subject.label).join(", ")})` : ""}${picture ? " (with the picture)" : ""}`);
+
+    return;
+  }
+
+  runState.textContent = "no agent: writing the question with its context into the task box…";
+  void withContext(prompt).then((text) => {
+    taskField.value = text;
+    runState.textContent = "no agent: the question with its context is in the task box — copy it to your assistant (start web with --agent claude to ask here)";
+  });
+}
+
+element<HTMLButtonElement>("ask-go").addEventListener("click", askQuestion);
+askInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") askQuestion();
+  event.stopPropagation();
+});
 
 // `@` in the task or the follow-up opens suggestions; Enter or a click inserts the tag.
 const suggest = element<HTMLUListElement>("tag-suggest");
@@ -263,7 +372,8 @@ async function runCommand(command: "code" | "diagram" | "doc", argument: string)
   else runState.textContent = "no agent: start web with --agent claude to run it";
 }
 
-export function runTask(written: string, resume: string | null): void {
+/** Runs `written` on the agent; `shown` is what the transcript's own row says when the prompt wraps a shorter question. */
+export function runTask(written: string, resume: string | null, shown: string = written): void {
   if (!agentName || written.trim() === "") return;
   element<HTMLDivElement>("question").hidden = true;
 
@@ -282,8 +392,12 @@ export function runTask(written: string, resume: string | null): void {
   followup.disabled = true;
   runState.textContent = `running ${agentName}…`;
 
-  if (!resume) transcript.replaceChildren();
-  appendEvent("you", `▸ ${written.length > 300 ? `${written.slice(0, 300)}…` : written}`);
+  if (!resume) {
+    transcript.replaceChildren();
+    turn = null;
+  }
+
+  appendEvent("you", `▸ ${shown.length > 300 ? `${shown.slice(0, 300)}…` : shown}`);
   const touched = new Set<string>();
   let lightTimer: ReturnType<typeof setTimeout> | null = null;
   void withContext(written)

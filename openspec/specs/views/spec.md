@@ -8,7 +8,7 @@ Each view is one picture that answers one architectural question, computed from 
 
 ### Requirement: Every view answers one question
 
-The system SHALL offer these views, each with a one-sentence question it answers: `layers`, `modules`, `layer:<name>`, `dir:<path>`, `module:<path>`, `inside:<path>`, `contract:<path>`, `calls:<path>#<fn>`, `sequence:<path>#<fn>`, `path:<path>#<fn>`, `type:<path>#<Type>`, `cycles`, `cycles:fns`, `cycle:<path>`, `cycle:<path>#<fn>`, `classes`, `classes:<scope>`, `matrix`, `matrix:<dir>`, `metrics`, `metrics:<layer>`, `machines`, `machine:<path>#<name>`, `events`, `tests`, `hotspots`, `packages`, `timeline`, `coverage`, `intent`. A view with a subject that does not exist SHALL be empty with a reason naming the subject.
+The system SHALL offer these views, each with a one-sentence question it answers: `layers`, `modules`, `layer:<name>`, `dir:<path>`, `module:<path>`, `inside:<path>`, `contract:<path>`, `calls:<path>#<fn>`, `sequence:<path>#<fn>`, `path:<path>#<fn>`, `type:<path>#<Type>`, `cycles`, `cycles:fns`, `cycle:<path>`, `cycle:<path>#<fn>`, `classes`, `classes:<scope>`, `matrix`, `matrix:<dir>`, `metrics`, `metrics:<layer>`, `machines`, `machine:<path>#<name>`, `focus:<path>`, `focus:<path>#<fn>`, `logic`, `logic:<path>#<fn>`, `events`, `tests`, `hotspots`, `packages`, `timeline`, `coverage`, `intent`. A view with a subject that does not exist SHALL be empty with a reason naming the subject.
 
 #### Scenario: A module view
 
@@ -19,6 +19,15 @@ The system SHALL offer these views, each with a one-sentence question it answers
 
 - **WHEN** `archdiff diagram layer:nope` runs
 - **THEN** the command exits 2 with `no layer "nope"`
+
+### Requirement: A focus view joins everything to one shape
+
+The system SHALL draw, as `focus:<path>#<fn>`, the function with the functions that call it and the ones it calls (`--depth` steps each way, calls and references alike), and as `focus:<path>` the module's functions with their callers and callees in other modules and the modules joined to it by an import alone (then the module itself as a shape, with dependency lines); each module SHALL be a lane, the subject's first.
+
+#### Scenario: A function's focus
+
+- **WHEN** `archdiff diagram focus:src/lib/orders.ts#placeOrder` runs
+- **THEN** the picture holds `placeOrder` with `OrderService.place` calling it and `validate`, `saveOrder` and `log` called by it, in the lanes of their modules, and the reason counts the calls in and out
 
 ### Requirement: Big pictures fold by directory
 

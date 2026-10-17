@@ -35,7 +35,9 @@
       "src/metrics.ts",
       "src/machines.ts",
       "src/run.ts",
-      "src/gherkin.ts"
+      "src/gherkin.ts",
+      "src/logic.ts",
+      "src/project-map.ts"
     ],
     "exports": [
       "src/export/**",

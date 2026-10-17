@@ -54,7 +54,7 @@ The system SHALL, on a tap on a line, light it with its two ends and show its pa
 
 ### Requirement: The canvas has tools
 
-The system SHALL offer on the canvas: a picture select (the pictures of this subject, then the overviews), detail presets minimal / normal / full and depth −/+, mix (a tapped module opens in place), focus (all but a shape and its neighbours dims), the lanes menu, find (`/`, Enter centres the first match or opens the matching view), split (a second embedded picture), a minimap (by itself above 60 shapes), and the shortest path between two shapes on Shift+tap.
+The system SHALL offer on the canvas: a picture select (the pictures of this subject, then the overviews), detail presets minimal / normal / full and depth −/+, mix (a tapped module opens in place), dim (all but a shape and its neighbours dims), the lanes menu, find (`/`, Enter centres the first match or opens the matching view), split (a second embedded picture), graph (the project map), a minimap (on by default, remembered when hidden; the shapes and lines small with the viewport as a box, moved by a tap or a drag), and the shortest path between two shapes on Shift+tap.
 
 #### Scenario: Mix
 
@@ -65,6 +65,29 @@ The system SHALL offer on the canvas: a picture select (the pictures of this sub
 
 - **WHEN** a shape is tapped and another is Shift+tapped
 - **THEN** the shortest chain of lines between them lights and the panel lists its steps, or says no chain joins them
+
+### Requirement: Several shapes can be selected, and every shape has a menu
+
+The system SHALL add a shape to the selection on a tap with Shift, Ctrl or Cmd held (and take it out on another), count the editor's own box selection the same way, light the selected shapes, show two as the shortest path between them and more as a list with the lines among them, and offer in a strip under the tabs *ask about them* (the Chat tab's question row with the shapes attached), *dim others* and *clear* (Escape). A right click SHALL open a menu: on a shape, its own view, its focus view, its logic (a function), the other pictures of its subject, adding it to the selection, asking the agent about it, dimming all but its neighbours, its code and its name to copy; on a line, where it leads and the chain onward; on the empty canvas, a question about the picture, the project map, fit, clear and edit.
+
+#### Scenario: Three shapes
+
+- **WHEN** `orders.ts` is tapped, then `log.ts` and `store.ts` with Ctrl held
+- **THEN** the panel says "3 shapes selected" with the three lines among them, and the strip reads "3 selected"
+
+#### Scenario: The menu of a module
+
+- **WHEN** a module shape is right-clicked and "Focus: everything joined to it" is chosen
+- **THEN** the link holds `focus:<module>` and the title starts "Everything joined to"
+
+### Requirement: The project map shows where the picture sits
+
+The system SHALL open, on **graph** or `g`, a map of the whole repository over the canvas (`GET /api/graph`): a dot per module (per directory above 400 modules) coloured by layer and sized by lines, a line per import, laid out by forces; hover SHALL name a dot and light its neighbours, the dots of the current picture SHALL wear a ring, a click SHALL open the module's view, Shift+click its focus view, a double click its inside; layer chips SHALL hide layers and a search box SHALL find a module; Escape SHALL close it.
+
+#### Scenario: A dot opens its module
+
+- **WHEN** the map is open and the dot of `store.ts` is clicked
+- **THEN** the map closes and the link holds `module:src/db/store.ts`
 
 ### Requirement: Sideways navigation
 

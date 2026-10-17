@@ -39,24 +39,27 @@ interface ExcalidrawElement {
 /** Characters of a line of a label inside a shape. */
 const LINE = 22;
 
-/** A label in lines of at most `LINE` characters, broken after slashes and dots, three lines at most; the end of a path says the most, so the start is cut. */
-export function wrapLabel(text: string, max = 3): string {
+/**
+ * A label in lines of at most `width` characters (`LINE` by default), broken after slashes, dots and spaces, `max` lines at
+ * most; the end of a path says the most, so the start is cut — except for `keepStart` (a statement of code), whose end is cut.
+ */
+export function wrapLabel(text: string, max = 3, width = LINE, keepStart = false): string {
   const lines: string[] = [];
 
   for (const paragraph of text.split("\n")) {
     let line = "";
 
-    for (const part of paragraph.split(/(?<=[./])/)) {
-      if (line !== "" && line.length + part.length > LINE) {
+    for (const part of paragraph.split(keepStart ? /(?<=[./ ])/ : /(?<=[./])/)) {
+      if (line !== "" && line.length + part.length > width) {
         lines.push(line);
         line = "";
       }
 
       line += part;
 
-      while (line.length > LINE) {
-        lines.push(line.slice(0, LINE));
-        line = line.slice(LINE);
+      while (line.length > width) {
+        lines.push(line.slice(0, width));
+        line = line.slice(width);
       }
     }
 
@@ -65,7 +68,9 @@ export function wrapLabel(text: string, max = 3): string {
 
   if (lines.length <= max) return lines.join("\n");
 
-  return [`…${lines.slice(0, lines.length - max + 1).join("").slice(-(LINE - 1))}`, ...lines.slice(lines.length - max + 1)].join("\n");
+  if (keepStart) return [...lines.slice(0, max - 1), `${lines[max - 1]!.slice(0, width - 1)}…`].join("\n");
+
+  return [`…${lines.slice(0, lines.length - max + 1).join("").slice(-(width - 1))}`, ...lines.slice(lines.length - max + 1)].join("\n");
 }
 
 /** A stable 31-bit number from a string, for `seed` and `versionNonce`. */
@@ -90,12 +95,12 @@ function text(id: string, container: string | null, x: number, y: number, width:
 }
 
 function shapeOf(node: DiagramNode): { type: string; fill: string; stroke: string; style: ExcalidrawElement["strokeStyle"]; width: number } {
-  const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "class" ? "#4e342e" : node.kind === "state" ? "#2e7d32" : node.kind === "fragment" ? "#9e9e9e" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
-  const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : node.kind === "class" ? "#fff8e1" : node.kind === "state" ? "#e8f5e9" : node.kind === "fragment" ? "transparent" : "#ffffff";
+  const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "class" ? "#4e342e" : node.kind === "state" ? "#2e7d32" : node.kind === "fragment" ? "#9e9e9e" : node.kind === "decision" ? "#6a1b9a" : node.kind === "action" ? "#424242" : node.kind === "end" ? "#616161" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
+  const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : node.kind === "class" ? "#fff8e1" : node.kind === "state" ? "#e8f5e9" : node.kind === "fragment" ? "transparent" : node.kind === "decision" ? "#f3e5f5" : node.kind === "end" ? "#eeeeee" : "#ffffff";
   // Heat darkens the fill; a diff mark is the stroke, so both show at once.
   const fill = node.heat !== undefined && node.heat > 0 ? heatColour(node.heat) : plain;
 
-  return { type: node.kind === "start" || node.kind === "external" || node.kind === "event" ? "ellipse" : node.kind === "hole" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.diff === "planned" || node.kind === "hole" || node.kind === "fragment" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
+  return { type: node.kind === "start" || node.kind === "external" || node.kind === "event" || node.kind === "end" ? "ellipse" : node.kind === "hole" || node.kind === "decision" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.diff === "planned" || node.kind === "hole" || node.kind === "fragment" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
 }
 
 /** The view a shape opens on the page (`customData.view`, read by the page on a second tap); not an Excalidraw link, whose icon would clutter every shape. */
@@ -117,6 +122,9 @@ function viewLink(node: DiagramNode): string | null {
       return `archdiff://view/${encodeURIComponent(`inside:${id}`)}`;
     case "state":
       return node.ref?.id?.startsWith("machine:") ? `archdiff://view/${encodeURIComponent(node.ref.id)}` : null;
+    case "action":
+      // A step of a function's logic that calls one function of the repository opens that function's logic; a function of the logic list, its own.
+      return node.ref?.id?.includes("#") ? `archdiff://view/${encodeURIComponent(`logic:${node.ref.id}`)}` : null;
     default:
       return null;
   }
@@ -359,9 +367,11 @@ export function toExcalidraw(diagram: Diagram): string {
 
     if (node.ref?.line !== undefined) customData["line"] = node.ref.line;
     elements.push({ ...base(node.id, look.type, node.x, node.y, node.w, node.h), backgroundColor: look.fill, strokeColor: look.stroke, strokeStyle: look.style, strokeWidth: look.width, roundness: look.type === "rectangle" && node.kind !== "layer" ? { type: 3 } : null, boundElements: bound, link: null, customData: { ...customData, view: viewLink(node) ?? "" } });
-    // A class box keeps its lines as written (fields and methods), left-aligned in a monospace face; everything else is wrapped and centred.
-    const label = node.kind === "class" ? node.label : wrapLabel(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
-    const fontSize = node.kind === "layer" ? 15 : node.kind === "cell" ? 10 : node.kind === "class" ? 11 : 12;
+    // A class box keeps its lines as written (fields and methods), left-aligned in a monospace face; a box of a function's
+    // logic is wider and keeps the start of its statements; everything else is wrapped and centred.
+    const logicBox = node.kind === "decision" || node.kind === "action" || node.kind === "end";
+    const label = node.kind === "class" ? node.label : logicBox ? wrapLabel(node.label, 4, node.kind === "end" ? 24 : 32, true) : wrapLabel(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
+    const fontSize = node.kind === "layer" ? 15 : node.kind === "cell" ? 10 : node.kind === "class" || logicBox ? 11 : 12;
     const lines = label.split("\n").length;
     const dark = node.heat !== undefined && node.heat > 0.55;
     const classText = node.kind === "class" ? { textAlign: "left", verticalAlign: "top", fontFamily: 3 } : {};
@@ -378,7 +388,7 @@ export function toExcalidraw(diagram: Diagram): string {
 
     if (!source || !target) continue;
     const id = `edge:${edge.from}->${edge.to}${edge.kind === "message" ? `:${diagram.edges.indexOf(edge)}` : ""}`;
-    const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.diff === "warning" || edge.diff === "changed" ? "#ef6c00" : edge.diff === "planned" || edge.kind === "call" || edge.kind === "message" ? "#1565c0" : edge.kind === "lifeline" ? "#b0bec5" : edge.typeOnly ? "#9e9e9e" : "#616161";
+    const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.diff === "warning" || edge.diff === "changed" ? "#ef6c00" : edge.diff === "planned" || edge.kind === "call" || edge.kind === "message" ? "#1565c0" : edge.kind === "lifeline" ? "#b0bec5" : edge.kind === "flow" ? "#424242" : edge.typeOnly ? "#9e9e9e" : "#616161";
     const route = edge.route ?? routes.get(edge) ?? [centre.get(edge.from)!, centre.get(edge.to)!];
     const start = route[0]!;
     const finish = route[route.length - 1]!;

@@ -15,7 +15,7 @@
 import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, Kwarg, LiteralValue, PassFact, StatementFact, UnsupportedFact, ValueRefFact } from "./facts.ts";
 import { isLicense, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, located, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
-import { collectPyMachines, collectPyStates, guardsOf, PY_CONTROL } from "./control.ts";
+import { collectPyMachines, collectPyStates, countBranches, guardsOf, PY_CONTROL } from "./control.ts";
 
 /** Decorators that keep the function a plain function (or method) of that name. */
 const KEEPING_DECORATORS = new Set(
@@ -339,6 +339,9 @@ function fnDecl(node: Node, name: string, owner: Owner | null): DeclFact {
   const decl: DeclFact = { kind: "fn", name, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, signature, exported: false, calls, types: [], members: [], ...fingerprintFacts(node) };
 
   if (doc !== undefined) decl.doc = doc;
+  const branches = body ? countBranches(body, PY_CONTROL) : 0;
+
+  if (branches > 0) decl.branches = branches;
 
   return decl;
 }

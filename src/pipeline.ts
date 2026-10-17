@@ -40,7 +40,7 @@ export const STEPS: readonly Step[] = [
   { name: "open in place", applies: ({ options, view }) => (options.expand?.length ?? 0) > 0 && MODULE_VIEWS.has(view.kind), run: (diagram, { graph, options }) => expandInPlace(diagram, graph, options.expand ?? []) },
   { name: "hubs as badges", applies: ({ options, view }) => options.hubs !== false && MODULE_VIEWS.has(view.kind), run: (diagram, { subject, analysis }) => hubsAsBadges(diagram, subject, analysis.config.hubs) },
   { name: "question", applies: (_ctx, diagram) => !diagram.question, run: (diagram, { view }) => ({ ...diagram, question: QUESTION[view.kind] }) },
-  { name: "fold", applies: (_ctx, diagram) => !diagram.placed && !diagram.classes, run: (diagram, { options }) => fold(diagram, options.limit ?? MAX_SHAPES) },
+  { name: "fold", applies: (_ctx, diagram) => !diagram.placed && !diagram.classes && !diagram.logic, run: (diagram, { options }) => fold(diagram, options.limit ?? MAX_SHAPES) },
   { name: "light lines", applies: ({ options }) => (options.weight ?? 1) > 1, run: (diagram, { options }) => dropLightLines(diagram, options.weight ?? 1) },
   { name: "changes", applies: ({ options, view }) => options.diff !== undefined && view.kind !== "timeline", run: (diagram, { options }) => overlayDiff(diagram, options.diff!) },
   { name: "only changes", applies: ({ options, view }) => options.diff !== undefined && options.onlyChanges === true && view.kind !== "timeline", run: (diagram) => onlyChanged(diagram) },

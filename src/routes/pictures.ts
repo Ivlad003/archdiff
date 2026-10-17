@@ -15,7 +15,10 @@ import { planFromScene, planMarkdown } from "../plan.ts";
 import { mergeScene, parseLayout, readLayout, writeLayout, type SceneElement } from "../layouts.ts";
 import { diagramMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
-import { parseView, viewList, viewOf, viewOptionsOf } from "../views.ts";
+import { parseView, viewList, viewOf, viewOptionsOf, type View } from "../views.ts";
+import { withLogic } from "../logic.ts";
+import { projectMap } from "../project-map.ts";
+import { readPictureOptions } from "../options.ts";
 import { failed, json, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
 
 export async function postLayout(ctx: RouteContext, { url, body, response }: RouteRequest): Promise<void> {
@@ -33,9 +36,15 @@ export async function postLayout(ctx: RouteContext, { url, body, response }: Rou
   }
 }
 
+/** The analysis with what a view needs read at the edge: the logic of a function from its file. */
+async function sourceFor(analysis: Awaited<ReturnType<RouteContext["fresh"]>>, view: View): Promise<typeof analysis> {
+  return view.kind === "logic" && view.scope !== null ? withLogic(analysis, view.scope) : analysis;
+}
+
 export async function postExpand(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
   const { root } = ctx;
-  // The tags of a text (@module:path, @fn:path#name, @layer:name, @dir:path, @flow:path#fn, @type:path#Name) as context for an agent.
+  // The tags of a text (@module:path, @fn:path#name, @layer:name, @dir:path, @flow:path#fn, @type:path#Name, @logic:path#fn,
+  // @view:<key>) as context for an agent; `query` carries the picture's options for @view: (the picture as the page shows it).
   let parsed;
 
   try {
@@ -45,23 +54,27 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
   }
 
   const text = isJsonObject(parsed) && isJsonString(parsed["text"]) ? parsed["text"] : "";
+  const query = new URLSearchParams(isJsonObject(parsed) && isJsonString(parsed["query"]) ? parsed["query"] : "");
+  const picked = readPictureOptions((name) => query.get(name), "param");
+  const pictureOptions = picked.ok ? viewOptionsOf(picked.value.options) : {};
   const analysis = await ctx.fresh();
   const readSource = (file: string): string | null => (analysis.facts.has(file) ? readFileSync(join(root, file), "utf8") : null);
   const sections: string[] = [];
   const seenTags = new Set<string>();
 
-  for (const match of text.matchAll(/@(module|fn|layer|dir|flow|type):(\S+)/g)) {
+  for (const match of text.matchAll(/@(module|fn|layer|dir|flow|type|logic|view):(\S+)/g)) {
     const tag = match[0];
 
     if (seenTags.has(tag)) continue;
     seenTags.add(tag);
     const kind = match[1]!;
     const subject = match[2]!.replace(/[.,;:)]+$/, "");
-    const key = kind === "fn" ? `calls:${subject}` : kind === "flow" ? `calls:${subject}` : kind === "type" ? `type:${subject}` : `${kind}:${subject}`;
+    const key = kind === "fn" ? `calls:${subject}` : kind === "flow" ? `calls:${subject}` : kind === "type" ? `type:${subject}` : kind === "view" ? subject : `${kind}:${subject}`;
     const view = parseView(key);
 
     if (!view) continue;
-    const diagram = viewOf(analysis, view);
+    const source = await sourceFor(analysis, view);
+    const diagram = viewOf(source, view, kind === "view" ? pictureOptions : {});
 
     if (kind === "module" || kind === "fn" || kind === "type") {
       const node = diagram.nodes.find((candidate) => (candidate.ref?.id ?? candidate.id) === subject);
@@ -70,6 +83,13 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
   }
 
   return json(response, { context: sections.length > 0 ? `## Context from the diagrams\n\n${sections.join("\n\n")}` : "" });
+}
+
+export async function getGraph(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
+  // The whole repository for the project map: every module (or directory, folded) with its layer, every import between them.
+  const analysis = await ctx.fresh();
+
+  return json(response, projectMap(analysis.graph));
 }
 
 export async function getLayout(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
@@ -144,7 +164,7 @@ export async function getNode(ctx: RouteContext, { url, response }: RouteRequest
 
   if (!picked.ok) return failed(response, picked);
   // The same picture the page shows: with its expansions, hidden lanes, fold limit and weight, a shape is where the page has it.
-  const diagram = view.kind === "timeline" ? { nodes: [] as DiagramNode[] } : viewOf(analysis, view, viewOptionsOf(picked.value));
+  const diagram = view.kind === "timeline" ? { nodes: [] as DiagramNode[] } : viewOf(await sourceFor(analysis, view), view, viewOptionsOf(picked.value));
   const node = diagram.nodes.find((candidate) => candidate.id === id);
 
   if (!node) return problem(response, 404, "no such shape in the view");
@@ -165,7 +185,7 @@ export async function getEdge(ctx: RouteContext, { url, response }: RouteRequest
   const picked = ctx.optionsOf(url);
 
   if (!picked.ok) return failed(response, picked);
-  const diagram = view.kind === "timeline" ? { view: "timeline", title: "", nodes: [], edges: [], groups: [] } : viewOf(analysis, view, viewOptionsOf(picked.value));
+  const diagram = view.kind === "timeline" ? { view: "timeline", title: "", nodes: [], edges: [], groups: [] } : viewOf(await sourceFor(analysis, view), view, viewOptionsOf(picked.value));
   const edge = diagram.edges.find((candidate) => candidate.from === from && candidate.to === to && (kind === null || candidate.kind === kind));
 
   if (!edge) return problem(response, 404, "no such line in the view");
@@ -217,6 +237,7 @@ export async function getTags(ctx: RouteContext, { url, response }: RouteRequest
     else if (entry.kind === "module") tags.push({ tag: `@module:${entry.key.slice(7)}`, title: entry.title });
     else if (entry.kind === "calls") tags.push({ tag: `@flow:${entry.key.slice(6)}`, title: entry.title });
     else if (entry.kind === "type") tags.push({ tag: `@type:${entry.key.slice(5)}`, title: entry.title });
+    else if (entry.kind === "logic" && entry.key !== "logic") tags.push({ tag: `@logic:${entry.key.slice(6)}`, title: `${entry.title} — the flowchart and its rules` });
   }
 
   for (const node of analysis.graph.nodes.values()) if (node.kind === "fn") tags.push({ tag: `@fn:${node.id}`, title: `${node.parent ? `${node.parent}.` : ""}${node.name} (${node.module})` });
@@ -272,4 +293,5 @@ export const routes: Record<string, (ctx: RouteContext, request: RouteRequest) =
   "GET /api/changes": getChanges,
   "GET /api/tags": getTags,
   "GET /api/export": getExport,
+  "GET /api/graph": getGraph,
 };

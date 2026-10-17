@@ -19,6 +19,7 @@ import { agentFromConfig } from "./agent.ts";
 import { diagramMarkdown, metricsMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
 import { compareBranches, comparisonMarkdown, history, historyMarkdown, reviewFindings, reviewMarkdown, review, withTimeline } from "./diff.ts";
+import { withLogic } from "./logic.ts";
 import { defaultBase, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { serve } from "./server.ts";
 import { layout } from "./diagram.ts";
@@ -156,7 +157,8 @@ const COMMANDS: readonly Command[] = [
       "sequence:<path>#<fn> | path:<path>#<fn> | type:<path>#<Type> | cycles |",
       "cycle:<path> | classes | classes:<path|dir> | matrix | matrix:<dir> | events | tests |",
       "hotspots | packages | timeline [--base --head] | coverage | intent | modules | metrics |",
-      "metrics:<layer> | cycles:fns | machines | machine:<path>#<name>.",
+      "metrics:<layer> | cycles:fns | machines | machine:<path>#<name> | focus:<path>[#<fn>] |",
+      "logic | logic:<path>#<fn> (the function's body as a flowchart, with its paths as rules).",
       "Every export names the commit it was drawn from. The picture options:",
       ...pictureOptionsHelp().map((line) => `  ${line}`),
     ],
@@ -178,8 +180,10 @@ const COMMANDS: readonly Command[] = [
       const options = viewOptionsOf(picture.value.options);
       let analysis = await analyze(call.dir(1));
 
-      // The timeline reads the commits from --base (default the merge-base) to --head (default HEAD); --changes lays the review's marks over the view.
+      // The timeline reads the commits from --base (default the merge-base) to --head (default HEAD); the logic of a function reads its
+      // file; --changes lays the review's marks over the view.
       if (view.kind === "timeline") analysis = await withTimeline(analysis, call.text("base") ?? mergeBase(analysis.root), call.text("head") ?? "HEAD");
+      else if (view.kind === "logic" && view.scope !== null) analysis = await withLogic(analysis, view.scope);
       else if (picture.value.options.changes) options.diff = (await review(analysis.root, call.text("base"), call.text("head"))).diff;
       let diagram = layout(viewOf(analysis, view, options));
 

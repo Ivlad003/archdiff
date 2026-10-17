@@ -47,11 +47,16 @@ function elementType(node: DiagramNode): string {
       return "ApplicationEvent";
     case "fragment":
       return "Grouping";
+    case "decision":
+    case "action":
+      return "ApplicationProcess";
+    case "end":
+      return "ApplicationEvent";
   }
 }
 
 function relationType(edge: DiagramEdge): string {
-  return edge.kind === "dependency" ? "Serving" : edge.kind === "call" || edge.kind === "message" ? "Triggering" : "Association";
+  return edge.kind === "dependency" ? "Serving" : edge.kind === "call" || edge.kind === "message" || edge.kind === "flow" ? "Triggering" : "Association";
 }
 
 const DIFF_FILL = { added: { r: 200, g: 230, b: 201 }, removed: { r: 255, g: 205, b: 210 }, changed: { r: 255, g: 224, b: 178 }, warning: { r: 255, g: 224, b: 178 }, planned: { r: 187, g: 222, b: 251 } } as const;

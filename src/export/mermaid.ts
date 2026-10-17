@@ -59,6 +59,12 @@ function shape(node: DiagramNode, id: string): string {
       return `${id}([${text}])`;
     case "fragment":
       return `${id}[${text}]`;
+    case "decision":
+      return node.label.startsWith("↻ ") ? `${id}{{${text}}}` : `${id}{${text}}`;
+    case "action":
+      return `${id}[${text}]`;
+    case "end":
+      return `${id}([${text}])`;
   }
 }
 
@@ -292,7 +298,8 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
   const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram)];
 
   if (diagram.reason) lines.push(`%% ${diagram.reason}`);
-  lines.push(`flowchart ${diagram.direction === "down" ? "TB" : "LR"}`);
+  // A function's logic reads top down, as flowcharts do; the rest left to right, as the canvas draws them.
+  lines.push(`flowchart ${diagram.direction === "down" || diagram.logic ? "TB" : "LR"}`);
   const byGroup = new Map<string | undefined, DiagramNode[]>();
 
   for (const node of diagram.nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);

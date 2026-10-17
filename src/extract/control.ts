@@ -62,14 +62,14 @@ export const PY_CONTROL: ControlGrammar = {
 };
 
 /** The text of a condition or a header on one line, cut at 60 characters. */
-function short(text: string): string {
+export function short(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
 
   return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat;
 }
 
 /** The condition of a branch or loop, as the code writes it: `if (x > 1)` → `x > 1`, `for (const a of b)` → `const a of b`, Python's `if x > 1:` → `x > 1`. */
-function headerOf(node: Node): string {
+export function headerOf(node: Node): string {
   const condition = node.childForFieldName("condition") ?? node.childForFieldName("value");
 
   if (condition) return short(condition.text.replace(/^\(|\)$/g, ""));
@@ -78,6 +78,23 @@ function headerOf(node: Node): string {
   const head = body ? node.text.slice(0, body.startIndex - node.startIndex) : node.text;
 
   return short(head.replace(/^(for|while|do|if|elif|case|try|except|finally)\b/, "").replace(/[:{]\s*$/, "").replace(/^\s*\(|\)\s*$/g, ""));
+}
+
+/** How many branching statements a declaration holds: its ifs, cases (a switch or match as one), loops and tries, nested functions included. */
+export function countBranches(node: Node, grammar: ControlGrammar): number {
+  let count = 0;
+  const stack = [node];
+
+  while (stack.length > 0) {
+    const at = stack.pop()!;
+
+    // An `elif` is a branch of its own; a switch counts once (its cases are its branches), as does a try (its catches).
+    if (grammar.ifs.has(at.type) || grammar.loops.has(at.type) || grammar.tries.has(at.type) || at.type === "switch_statement" || at.type === "match_statement") count++;
+
+    for (const child of at.namedChildren) stack.push(child);
+  }
+
+  return count;
 }
 
 /**
