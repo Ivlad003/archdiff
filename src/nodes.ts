@@ -7,7 +7,7 @@
 // Entry points: `lane`, `unplaced`, `lanesOf`, `moduleNode`,
 // `externalNode`, `fnNode`, `depEdges`, `grow`.
 
-import { SIZE, type Diagram, type DiagramEdge, type DiagramGroup, type DiagramNode } from "./diagram.ts";
+import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "./diagram.ts";
 import type { Graph } from "./graph.ts";
 export function lane(id: string): DiagramGroup {
   return { id, label: id, kind: "lane", x: 0, y: 0, w: 0, h: 0 };

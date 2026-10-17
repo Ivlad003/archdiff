@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- One description of a picture's options (`src/options.ts`): the CLI's flags, the API's query and the page's link read and write the same table, `--help` prints it, and a wrong value names its option (`--depth two`, `overlay=nope`). The CLI is a table of commands: an unknown flag is an error with a "did you mean" (`--dept` → `--depth`), as is one positional argument too many.
+- The steps after a view (hidden lanes, the mix, hubs, the question, the fold, the weight, the review's marks, the overlays) are a list of pure steps (`src/pipeline.ts`) that `viewOf` runs; the CLI and the server no longer apply overlays and the review's marks each on their own; the timeline is a view like the others (`withTimeline` attaches the commits). The server lays a picture out once per analysis (switching back and forth is a lookup). `archdiff.json` `"hubs": { "min", "share", "max" }` sets when a module is a hub. `archdiff intent --init --layers` writes the layers with a few modules each, which a repository over 60 modules gets by itself.
+- archdiff keeps itself in its own contract: `archdiff.json` and `ARCHITECTURE.md` in the repository, `archdiff check` green; the matrix orders an acyclic layer graph topologically.
+
 - TypeScript: an import type expression (`import("./x.ts").T`, `typeof import("./x.ts")`) no longer makes the whole file a syntax error (it is masked before parsing, positions kept); a dynamic import call is still a call. Found by running archdiff on itself.
 - Monkey testing (random taps, keys, options, hashes; fuzzed API and CLI) found and fixed: a plain view got siblings like `module:modules`; the depth field took -1; a shape's page was built with the default options, so a function of a module opened in place had no page; the file route refused a package shape's package.json. `drawio.ts` and `excalidraw.ts` imported each other; the colour scale moved to `export/colour.ts`.
 

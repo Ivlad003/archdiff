@@ -239,6 +239,11 @@ export interface HistoryRow {
 }
 
 /** The architectural diff of every commit from `base` to `head`, one analysis per commit (the fact cache makes each cheap). */
+/** The analysis with the commits of a range attached, for the timeline view (`viewOf` reads them; git is read here, at the edge). */
+export async function withTimeline(analysis: Analysis, base: string, head: string): Promise<Analysis> {
+  return { ...analysis, timeline: { rows: await history(analysis.root, base, head), base, head } };
+}
+
 export async function history(root: string, base: string, head: string): Promise<HistoryRow[]> {
   const commits = commitsBetween(root, base, head);
   const config = loadConfig(root);

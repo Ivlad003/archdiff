@@ -5,44 +5,18 @@
 // request; the table at the end names them by method and path.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { analyze, type Analysis } from "../analyze.ts";
+import { join } from "node:path";
 import { coverageReport } from "../coverage.ts";
-import { layout, type DiagramNode } from "../diagram.ts";
-import { compareBranches, comparisonMarkdown, history, onlyChanged, overlayDiff, review, reviewMarkdown } from "../diff.ts";
-import { commitsBetween, defaultBase, fileHistory, listBranches, mergeBase, revisionStamp } from "../git.ts";
-import { timelineDiagram } from "../views-more.ts";
-import { watch as watchFs } from "node:fs";
+import type { DiagramNode } from "../diagram.ts";
+import { compareBranches, review } from "../diff.ts";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "../export/index.ts";
 import { toExcalidraw } from "../export/excalidraw.ts";
-import { AgentRunner, agentFromConfig, type AgentSpec } from "../agent.ts";
-import { dataFlow, flowMarkdown, jsonInAnswer, mockPrompt, mocksFromTypes } from "../flow.ts";
-import { applyOverlays, parseOverlays, type Overlay } from "../overlays.ts";
 import { planFromScene, planMarkdown } from "../plan.ts";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { CACHE_DIRECTORY } from "../cache.ts";
-import { layoutSlug } from "../layouts.ts";
-import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, mergePlan, parseIntent, writeIntent } from "../intent.ts";
-import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type SceneElement } from "../layouts.ts";
+import { mergeScene, parseLayout, readLayout, writeLayout, type SceneElement } from "../layouts.ts";
 import { diagramMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
-import { parseView, viewList, viewOf, type ViewOptions } from "../views.ts";
-import { json, problem, send, type PictureOptions, type RouteContext, type RouteRequest } from "./context.ts";
-
-/** The view options a picture's query implies, as `placed` builds them, for the routes that must see the same shapes. */
-function pictureOptions(picked: PictureOptions): ViewOptions {
-  const options: ViewOptions = { packages: picked.packages, hubs: picked.hubs, expand: picked.expand, hideLanes: picked.hide };
-
-  if (picked.depth !== undefined) options.depth = picked.depth;
-
-  if (picked.limit !== undefined) options.limit = picked.limit;
-
-  if (picked.weight !== undefined) options.weight = picked.weight;
-
-  return options;
-}
+import { parseView, viewList, viewOf, viewOptionsOf } from "../views.ts";
+import { failed, json, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
 
 export async function postLayout(ctx: RouteContext, { url, body, response }: RouteRequest): Promise<void> {
   const { root } = ctx;
@@ -110,15 +84,10 @@ export async function getScene(ctx: RouteContext, { url, response }: RouteReques
   const { root } = ctx;
   const key = url.searchParams.get("view") ?? "";
   const analysis = await ctx.fresh();
-  let picked;
+  const picked = ctx.optionsOf(url);
 
-  try {
-    picked = ctx.optionsOf(url);
-  } catch (error) {
-    return problem(response, 400, error instanceof Error ? error.message : String(error));
-  }
-
-  const diagram = await ctx.placed(analysis, key, picked, url.searchParams.get("base"), url.searchParams.get("head"));
+  if (!picked.ok) return failed(response, picked);
+  const diagram = await ctx.placed(analysis, key, picked.value, url.searchParams.get("base"), url.searchParams.get("head"));
 
   if (!diagram) return problem(response, 400, "unknown view");
   // The code's picture at the saved places, then the saved drawing's own elements (pencil, notes) on top.
@@ -154,12 +123,11 @@ export async function getDiagram(ctx: RouteContext, { url, response }: RouteRequ
   const view = parseView(url.searchParams.get("view") ?? "");
 
   if (!view) return problem(response, 400, "unknown view");
-  const depthText = url.searchParams.get("depth");
-
-  if (depthText !== null && depthText !== "" && !(Number.isInteger(Number(depthText)) && Number(depthText) >= 0)) return problem(response, 400, "depth must be a whole number");
   const analysis = await ctx.fresh();
   const picked = ctx.optionsOf(url);
-  const diagram = (await ctx.placed(analysis, url.searchParams.get("view") ?? "", picked, url.searchParams.get("base"), url.searchParams.get("head")))!;
+
+  if (!picked.ok) return failed(response, picked);
+  const diagram = (await ctx.placed(analysis, url.searchParams.get("view") ?? "", picked.value, url.searchParams.get("base"), url.searchParams.get("head")))!;
   const mermaid = (url.searchParams.get("mermaid") ?? "auto") as MermaidStyle;
 
   return json(response, { diagram, markdown: diagramMarkdown(diagram, analysis, MERMAID_STYLES.includes(mermaid) ? mermaid : "auto"), drawn: readLayout(root, url.searchParams.get("view") ?? "") !== null });
@@ -172,8 +140,11 @@ export async function getNode(ctx: RouteContext, { url, response }: RouteRequest
 
   if (!view) return problem(response, 400, "unknown view");
   const analysis = await ctx.fresh();
+  const picked = ctx.optionsOf(url);
+
+  if (!picked.ok) return failed(response, picked);
   // The same picture the page shows: with its expansions, hidden lanes, fold limit and weight, a shape is where the page has it.
-  const diagram = view.kind === "timeline" ? { nodes: [] as DiagramNode[] } : viewOf(analysis, view, pictureOptions(ctx.optionsOf(url)));
+  const diagram = view.kind === "timeline" ? { nodes: [] as DiagramNode[] } : viewOf(analysis, view, viewOptionsOf(picked.value));
   const node = diagram.nodes.find((candidate) => candidate.id === id);
 
   if (!node) return problem(response, 404, "no such shape in the view");
@@ -191,7 +162,10 @@ export async function getEdge(ctx: RouteContext, { url, response }: RouteRequest
 
   if (!view) return problem(response, 400, "unknown view");
   const analysis = await ctx.fresh();
-  const diagram = view.kind === "timeline" ? { view: "timeline", title: "", nodes: [], edges: [], groups: [] } : viewOf(analysis, view, pictureOptions(ctx.optionsOf(url)));
+  const picked = ctx.optionsOf(url);
+
+  if (!picked.ok) return failed(response, picked);
+  const diagram = view.kind === "timeline" ? { view: "timeline", title: "", nodes: [], edges: [], groups: [] } : viewOf(analysis, view, viewOptionsOf(picked.value));
   const edge = diagram.edges.find((candidate) => candidate.from === from && candidate.to === to && (kind === null || candidate.kind === kind));
 
   if (!edge) return problem(response, 404, "no such line in the view");
@@ -268,7 +242,9 @@ export async function getExport(ctx: RouteContext, { url, response }: RouteReque
     diagram = result.diagram;
   } else {
     const picked = ctx.optionsOf(url);
-    diagram = await ctx.placed(analysis, key, picked, url.searchParams.get("base"), url.searchParams.get("head"));
+
+    if (!picked.ok) return failed(response, picked);
+    diagram = await ctx.placed(analysis, key, picked.value, url.searchParams.get("base"), url.searchParams.get("head"));
 
     if (!diagram) return problem(response, 400, "unknown view");
   }

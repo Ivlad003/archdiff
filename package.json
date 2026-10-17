@@ -44,7 +44,7 @@
     "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/copy-wasm.mjs && node scripts/build-web.mjs && node scripts/pack-entry.mjs publish",
     "postpack": "node scripts/pack-entry.mjs restore",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
-    "test": "node --test tests/cli.test.ts tests/web.test.ts tests/routing.test.ts",
+    "test": "node --test tests/cli.test.ts tests/web.test.ts tests/routing.test.ts tests/unit.test.ts",
     "test:web": "node --test tests/page.test.ts",
     "web:build": "node scripts/build-web.mjs"
   },

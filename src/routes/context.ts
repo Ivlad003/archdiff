@@ -9,22 +9,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Analysis } from "../analyze.ts";
 import type { AgentRunner, AgentSpec } from "../agent.ts";
 import type { layout } from "../diagram.ts";
-import type { Overlay } from "../overlays.ts";
+import type { PictureOptions } from "../options.ts";
+import type { Result } from "../result.ts";
 import type { ServeOptions } from "../server.ts";
 
-/** The options of a picture as the query names them. */
-export interface PictureOptions {
-  depth?: number;
-  limit?: number;
-  weight?: number;
-  hubs: boolean;
-  packages: boolean;
-  changes: boolean;
-  onlyChanges: boolean;
-  overlays: Overlay[];
-  expand: string[];
-  hide: string[];
-}
+export type { PictureOptions } from "../options.ts";
 
 export interface RouteContext {
   root: string;
@@ -42,7 +31,8 @@ export interface RouteContext {
   changeListeners: Set<ServerResponse>;
   /** The placed diagram of a view with the picture's options; null for an unknown view. */
   placed(analysis: Analysis, key: string, picked: PictureOptions, base?: string | null, head?: string | null): Promise<ReturnType<typeof layout> | null>;
-  optionsOf(url: URL): PictureOptions;
+  /** The picture's options as the query names them (options.ts), or the problem with one of them. */
+  optionsOf(url: URL): Result<PictureOptions>;
 }
 
 export interface RouteRequest {
@@ -64,4 +54,9 @@ export function json(response: ServerResponse, value: unknown): void {
 
 export function problem(response: ServerResponse, status: number, message: string): void {
   send(response, status, "application/json", JSON.stringify({ error: message }));
+}
+
+/** The problem of a failed result, as the API reports it. */
+export function failed(response: ServerResponse, result: { ok: false; problem: { status: number; message: string } }): void {
+  problem(response, result.problem.status, result.problem.message);
 }

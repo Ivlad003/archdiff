@@ -7,6 +7,7 @@
 // Entry points: `hubsAsBadges`, `hideLanes`, `expandInPlace`, `fold`,
 // `dropLightLines`, `MAX_SHAPES`.
 
+import { DEFAULT_HUBS, type HubThresholds } from "./config.ts";
 import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode } from "./nodes.ts";
@@ -16,15 +17,6 @@ import { fnNode } from "./nodes.ts";
  * keeps a lane grid readable while a folded shape still opens on a tap.
  */
 export const MAX_SHAPES = 40;
-
-/** A module imported by at least this many of a picture's modules, and at least HUB_SHARE of them, is a hub. */
-const HUB_MIN_IMPORTERS = 6;
-
-/** The share of a picture's modules that must import a module for it to be a hub: a quarter marks the logger and the shared types, not a busy neighbour. */
-const HUB_SHARE = 0.25;
-
-/** On a big map a quarter is hundreds; this many importers make a hub whatever the picture's size. */
-const HUB_MAX_IMPORTERS = 40;
 
 /** The deepest directory holding every path; "" when they share none. */
 function commonDirectory(paths: readonly string[]): string {
@@ -144,7 +136,7 @@ export function fold(diagram: Diagram, limit: number): Diagram {
  * the reason names the hubs with their counts. The view's own subject is
  * never a hub. The Markdown of a module still lists every import.
  */
-export function hubsAsBadges(diagram: Diagram, subject: string | null): Diagram {
+export function hubsAsBadges(diagram: Diagram, subject: string | null, thresholds: HubThresholds = DEFAULT_HUBS): Diagram {
   const modules = diagram.nodes.filter((node) => node.kind === "module");
 
   if (modules.length < 8) return diagram;
@@ -156,7 +148,8 @@ export function hubsAsBadges(diagram: Diagram, subject: string | null): Diagram 
     importers.set(edge.to, new Set([...(importers.get(edge.to) ?? []), edge.from]));
   }
 
-  const threshold = Math.max(HUB_MIN_IMPORTERS, Math.min(HUB_MAX_IMPORTERS, Math.ceil(modules.length * HUB_SHARE)));
+  // At least `min` importers and `share` of the picture's modules, or `max` whatever its size (archdiff.json "hubs").
+  const threshold = Math.max(thresholds.min, Math.min(thresholds.max, Math.ceil(modules.length * thresholds.share)));
   const hubs = modules.filter((node) => node.id !== subject && (importers.get(node.id)?.size ?? 0) >= threshold).map((node) => node.id);
 
   if (hubs.length === 0) return diagram;

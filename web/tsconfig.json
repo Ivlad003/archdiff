@@ -8,6 +8,7 @@
     "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
     "exactOptionalPropertyTypes": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
@@ -15,5 +16,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../src/diagram.ts", "../src/json.ts", "../src/export/excalidraw.ts", "../src/scene.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../src/diagram.ts", "../src/json.ts", "../src/export/excalidraw.ts", "../src/scene.ts", "../src/options.ts", "../src/result.ts"]
 }

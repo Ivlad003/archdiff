@@ -552,19 +552,92 @@ export function mergePlan(intent: Intent, plan: Plan, graph: Graph | null = null
   return next;
 }
 
-/** An intent seeded from the code: its layers, every module in its layer, and the imports among them. The start for a repository that has code but no contract yet. */
-export function intentFromCode(analysis: Analysis): Intent {
+/** How much of the code `intentFromCode` writes: every module (`modules`), or the layers with a few modules each (`layers`); `auto` picks by size. */
+export interface IntentFromCodeOptions {
+  level?: "auto" | "modules" | "layers";
+}
+
+/** More modules than this and `auto` writes the layers only: hundreds of nodes in one Mermaid block read as noise, not as a contract. */
+const LAYERS_ONLY_ABOVE = 60;
+
+/** How many modules stand for a layer in the `layers` level: the ones most imported, which name what the layer offers. */
+const MODULES_PER_LAYER = 3;
+
+/**
+ * The intent written from the code: every layer, and either every module
+ * with every import between modules, or (the `layers` level) up to three
+ * modules per layer — the most imported ones — with one import per pair
+ * of layers (the pair of modules that carries the most imports), so the
+ * contract names what each layer offers and which layer may import which.
+ */
+export function intentFromCode(analysis: Analysis, options: IntentFromCodeOptions = {}): Intent {
   const { graph } = analysis;
   const layers = graph.layers.map((name) => ({ name }));
-  const modules: IntentModule[] = [...graph.modules.values()].sort((a, b) => (a.id < b.id ? -1 : 1)).map((module) => ({ id: module.id, layer: module.layer, fns: [] }));
-  const edges: IntentEdge[] = [];
-  const seen = new Set<string>();
+  const level = options.level === undefined || options.level === "auto" ? (graph.modules.size > LAYERS_ONLY_ABOVE ? "layers" : "modules") : options.level;
+  const deps = graph.deps.filter((dep) => !dep.typeOnly && graph.modules.has(dep.to) && dep.from !== dep.to);
 
-  for (const dep of graph.deps) {
-    if (dep.typeOnly || !graph.modules.has(dep.to) || dep.from === dep.to || seen.has(`${dep.from}\u0000${dep.to}`)) continue;
-    seen.add(`${dep.from}\u0000${dep.to}`);
-    edges.push({ from: dep.from, to: dep.to });
+  if (level === "modules") {
+    const modules: IntentModule[] = [...graph.modules.values()].sort((a, b) => (a.id < b.id ? -1 : 1)).map((module) => ({ id: module.id, layer: module.layer, fns: [] }));
+    const edges: IntentEdge[] = [];
+    const seen = new Set<string>();
+
+    for (const dep of deps) {
+      if (seen.has(`${dep.from}\u0000${dep.to}`)) continue;
+      seen.add(`${dep.from}\u0000${dep.to}`);
+      edges.push({ from: dep.from, to: dep.to });
+    }
+
+    return { layers, modules, edges, before: EMPTY_BEFORE, after: "" };
   }
+
+  // The representatives of a layer: its modules with the most importers (ties by name), with their doc as the description.
+  const importers = new Map<string, Set<string>>();
+
+  for (const dep of deps) importers.set(dep.to, new Set([...(importers.get(dep.to) ?? []), dep.from]));
+  const modules: IntentModule[] = [];
+
+  for (const layer of graph.layers) {
+    const own = [...graph.modules.values()].filter((module) => module.layer === layer).sort((a, b) => (importers.get(b.id)?.size ?? 0) - (importers.get(a.id)?.size ?? 0) || (a.id < b.id ? -1 : 1));
+
+    for (const module of own.slice(0, MODULES_PER_LAYER)) {
+      const entry: IntentModule = { id: module.id, layer, fns: [] };
+
+      if (module.doc) entry.description = module.doc.split("\n")[0]!.slice(0, 120);
+      modules.push(entry);
+    }
+  }
+
+  // One arrow per pair of layers: the pair of modules with the most imports between them; both ends join the modules when they are not representatives yet.
+  const pairs = new Map<string, Map<string, number>>();
+
+  for (const dep of deps) {
+    const from = graph.modules.get(dep.from)!.layer;
+    const to = graph.modules.get(dep.to)!.layer;
+
+    if (from === to) continue;
+    const key = `${from}\u0000${to}`;
+    const counts = pairs.get(key) ?? new Map<string, number>();
+    counts.set(`${dep.from}\u0000${dep.to}`, (counts.get(`${dep.from}\u0000${dep.to}`) ?? 0) + 1);
+    pairs.set(key, counts);
+  }
+
+  const edges: IntentEdge[] = [];
+  const named = new Set(modules.map((module) => module.id));
+
+  for (const [, counts] of [...pairs].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    const [best] = [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]!;
+    const [from, to] = best.split("\u0000") as [string, string];
+
+    for (const id of [from, to]) {
+      if (named.has(id)) continue;
+      named.add(id);
+      modules.push({ id, layer: graph.modules.get(id)!.layer, fns: [] });
+    }
+
+    edges.push({ from, to });
+  }
+
+  modules.sort((a, b) => graph.layers.indexOf(a.layer!) - graph.layers.indexOf(b.layer!) || (a.id < b.id ? -1 : 1));
 
   return { layers, modules, edges, before: EMPTY_BEFORE, after: "" };
 }

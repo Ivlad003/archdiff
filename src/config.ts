@@ -27,9 +27,20 @@ export interface Config {
   otherLayer: string;
   /** The coding agent the page may hand a task to; null: the Chat tab only writes the task. */
   agent: AgentSpec | null;
+  /** When a module of a picture is a hub (a badge, not lines): imported by at least `min` of its modules and `share` of them, or by `max` whatever the picture's size. */
+  hubs: HubThresholds;
 }
 
-export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null };
+export interface HubThresholds {
+  min: number;
+  share: number;
+  max: number;
+}
+
+/** A quarter of a picture marks the logger and the shared types, not a busy neighbour; at least 6 importers, and 40 on a big map whatever its size. */
+export const DEFAULT_HUBS: HubThresholds = { min: 6, share: 0.25, max: 40 };
+
+export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null, hubs: DEFAULT_HUBS };
 
 function stringList(value: JsonValue | undefined, file: string, field: string): string[] {
   if (value === undefined) return [];
@@ -65,7 +76,26 @@ export function loadConfig(root: string): Config {
 
   if (other !== undefined && !isJsonString(other)) throw new Error(`${CONFIG_FILE}: "other" must be a string`);
 
-  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: agentFromConfig(parsed["agent"]) };
+  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: agentFromConfig(parsed["agent"]), hubs: hubThresholds(parsed["hubs"]) };
+}
+
+/** `"hubs": { "min": 6, "share": 0.25, "max": 40 }`, each field optional; a wrong field names itself. */
+function hubThresholds(value: JsonValue | undefined): HubThresholds {
+  if (value === undefined) return DEFAULT_HUBS;
+
+  if (!isJsonObject(value)) throw new Error(`${CONFIG_FILE}: "hubs" must be an object with min, share and max`);
+  const out = { ...DEFAULT_HUBS };
+
+  for (const field of ["min", "share", "max"] as const) {
+    const item = value[field];
+
+    if (item === undefined) continue;
+
+    if (typeof item !== "number" || !(item >= 0) || (field !== "share" && !Number.isInteger(item)) || (field === "share" && item > 1)) throw new Error(`${CONFIG_FILE}: "hubs.${field}" must be ${field === "share" ? "a number between 0 and 1" : "a whole number"}`);
+    out[field] = item;
+  }
+
+  return out;
 }
 
 /**

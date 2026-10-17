@@ -14,47 +14,23 @@
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
 
 import type { Analysis } from "./analyze.ts";
-import { SIZE, type Diagram, type DiagramEdge, type DiagramGroup, type DiagramNode } from "./diagram.ts";
+import { SIZE, type Diagram, type DiagramEdge, type DiagramNode } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
 import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
 import { classesView, contractView, cyclesView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
-import { dropLightLines, expandInPlace, fold, hideLanes, hubsAsBadges, MAX_SHAPES } from "./shape.ts";
+import { MAX_SHAPES } from "./shape.ts";
+import { DEFAULT_DEPTH, type View } from "./view-keys.ts";
+import { runSteps } from "./pipeline.ts";
+import { timelineDiagram } from "./views-more.ts";
+import type { GraphDiff } from "./diff.ts";
+import type { LaneMode, Overlay, PictureOptions } from "./options.ts";
 
 export { MAX_SHAPES } from "./shape.ts";
+export { parseView, viewKey, QUESTION, type View } from "./view-keys.ts";
 export { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
-
-export type View =
-  | { kind: "layers" }
-  | { kind: "layer"; name: string }
-  | { kind: "dir"; path: string }
-  | { kind: "module"; id: string }
-  | { kind: "inside"; id: string }
-  | { kind: "contract"; id: string }
-  | { kind: "calls"; id: string }
-  | { kind: "sequence"; id: string }
-  | { kind: "path"; id: string }
-  | { kind: "type"; id: string }
-  | { kind: "cycles" }
-  | { kind: "cycle"; id: string }
-  | { kind: "classes"; scope: string | null }
-  | { kind: "matrix"; scope: string | null }
-  | { kind: "events" }
-  | { kind: "tests" }
-  | { kind: "hotspots" }
-  | { kind: "packages" }
-  | { kind: "timeline" }
-  | { kind: "coverage" }
-  | { kind: "intent" }
-  | { kind: "modules" };
-
-/** The views without a subject. */
-const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "events", "tests", "hotspots", "packages", "timeline", "intent", "modules"]);
-
-/** The views with a subject (`kind:<subject>`). */
-const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "classes", "matrix"]);
 
 export interface ViewOptions {
   /** How far from the subject the picture goes; each view has its default. */
@@ -71,33 +47,17 @@ export interface ViewOptions {
   hideLanes?: readonly string[];
   /** Modules opened in place: each becomes a lane of its functions, and the lines into and out of it land on the functions they concern (the mix of a module view and an inside view). */
   expand?: readonly string[];
+  /** Overlays laid over the picture after the fold, in order (tests, storages, heat, instability). */
+  overlays?: readonly Overlay[];
+  /** The review's diff whose marks are laid over the picture (`--changes`). */
+  diff?: GraphDiff;
+  /** With `diff`: keep the marked shapes and their neighbours only. */
+  onlyChanges?: boolean;
+  /** Lanes as rows or columns; `auto` lets the layout decide by the number of lanes. */
+  lanes?: LaneMode;
+  /** Count type-only imports too (cycles, matrix), drawn dashed. */
+  types?: boolean;
 }
-
-/** The one question each kind of view answers. */
-const QUESTION: Record<View["kind"], string> = {
-  layers: "which layers import which, and how much",
-  layer: "which modules of the layer import which, and what they touch outside it",
-  dir: "which modules of the directory import which, and their neighbours",
-  module: "what the module imports and what imports it",
-  inside: "which functions of the module call which, and what they call outside",
-  contract: "which exports of the module are used, by whom",
-  calls: "what a function calls, step by step, and where the trail ends",
-  sequence: "in what order a function's calls cross the modules",
-  path: "which calls lead from a function to a store",
-  type: "where a type is produced, consumed and transformed",
-  cycles: "which modules import each other in a circle",
-  cycle: "which modules form this circle, and through which imports",
-  classes: "which classes and interfaces exist, with what fields and methods, extending what",
-  matrix: "who imports whom, and which imports go against the order",
-  events: "which modules emit which events, and which listen",
-  tests: "which modules the tests import, and which none does",
-  hotspots: "which modules are big, and which are called from everywhere",
-  packages: "which packages depend on which, declared or not",
-  timeline: "how the coupling between layers drifted, commit by commit",
-  coverage: "where the diagrams are blind: calls and imports archdiff could not follow",
-  intent: "what was intended, what is built, and where the code went beyond the intent",
-  modules: "every module of the repository in its layer, and every import between them",
-};
 
 export interface ViewEntry {
   key: string;
@@ -105,42 +65,6 @@ export interface ViewEntry {
   kind: View["kind"];
   /** The lane the subject sits in. */
   layer?: string;
-}
-
-/** `layers`, `layer:<name>`, `module:<path>`, `calls:<path>#<fn>`, `coverage` → the view, or null. */
-export function parseView(key: string): View | null {
-  if (key === "classes") return { kind: "classes", scope: null };
-
-  if (key === "matrix") return { kind: "matrix", scope: null };
-
-  if (PLAIN_VIEWS.has(key)) return { kind: key } as View;
-  const at = key.indexOf(":");
-
-  if (at === -1) return null;
-  const kind = key.slice(0, at);
-  const rest = key.slice(at + 1);
-
-  if (rest === "" || !SUBJECT_VIEWS.has(kind)) return null;
-
-  if (kind === "layer") return { kind, name: rest };
-
-  if (kind === "dir") return { kind, path: rest.replace(/\/+$/, "") };
-
-  if (kind === "classes" || kind === "matrix") return { kind, scope: rest.replace(/\/+$/, "") };
-
-  return { kind, id: rest } as View;
-}
-
-export function viewKey(view: View): string {
-  if (view.kind === "classes" || view.kind === "matrix") return view.scope === null ? view.kind : `${view.kind}:${view.scope}`;
-
-  if ("name" in view) return `${view.kind}:${view.name}`;
-
-  if ("path" in view) return `${view.kind}:${view.path}`;
-
-  if ("id" in view) return `${view.kind}:${view.id}`;
-
-  return view.kind;
 }
 
 /** Modules whose public methods a framework calls: controllers, handlers, commands, jobs, listeners, middleware, routes. */
@@ -542,7 +466,18 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
 /** Lifelines a sequence keeps apart; beyond it the picture is a wall of arrows (the usual guidance says 10–12). */
 const MAX_PARTICIPANTS = 12;
 
-const DEFAULT_DEPTH: Partial<Record<View["kind"], number>> = { layer: 1, dir: 1, module: 1, inside: 1, calls: 3, sequence: 4, path: 8, type: 1 };
+/** The view options a picture's options (options.ts) imply, as `viewOf` takes them. */
+export function viewOptionsOf(picture: PictureOptions): ViewOptions {
+  const options: ViewOptions = { packages: picture.packages, hubs: picture.hubs, expand: picture.expand, hideLanes: picture.hideLanes, overlays: picture.overlays, onlyChanges: picture.onlyChanges, lanes: picture.lanes, types: picture.types };
+
+  if (picture.depth !== null) options.depth = picture.depth;
+
+  if (picture.limit !== null) options.limit = picture.limit;
+
+  if (picture.weight !== null) options.weight = picture.weight;
+
+  return options;
+}
 
 /** The unplaced diagram of a view, folded to `limit` shapes. */
 export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}): Diagram {
@@ -588,8 +523,8 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
       case "packages":
         return packagesView(analysis);
       case "timeline":
-        // The timeline needs git (commits): the server and the CLI build it with `timelineDiagram`; here it is a placeholder.
-        return unplaced("timeline", "Timeline", [], [], [], { placed: true, reason: "the timeline is built from the commits (archdiff diagram timeline --base --head)" });
+        // From the commits of a range, which the caller attaches with `withTimeline` (git is read at the edge, not here).
+        return analysis.timeline ? timelineDiagram(analysis.timeline.rows, analysis.timeline.base, analysis.timeline.head) : unplaced("timeline", "Timeline", [], [], [], { placed: true, reason: "the timeline is built from the commits (archdiff diagram timeline --base --head)" });
       case "coverage":
         return coverageView(graph);
       case "intent":
@@ -599,17 +534,9 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
     }
   };
 
-  const diagram = full();
-
-  // Hubs leave before the fold (they would eat its budget); the weight filter runs after it, on the merged lines.
-  const subject = "id" in view ? view.id : null;
-  const shown = options.hideLanes && options.hideLanes.length > 0 ? hideLanes(diagram, options.hideLanes) : diagram;
-  const mixed = options.expand && options.expand.length > 0 && MODULE_VIEWS.has(view.kind) ? expandInPlace(shown, graph, options.expand) : shown;
-  const slimmed = options.hubs === false || !MODULE_VIEWS.has(view.kind) ? mixed : hubsAsBadges(mixed, subject);
-  const answered = slimmed.question ? slimmed : { ...slimmed, question: QUESTION[view.kind] };
-
-  return dropLightLines(answered.placed || answered.classes ? answered : fold(answered, options.limit ?? MAX_SHAPES), options.weight ?? 1);
+  // The steps after a view — hidden lanes, the mix, hubs, the question, the fold, the weight, the review's marks, the
+  // overlays — are the pipeline's data (pipeline.ts), each a pure Diagram → Diagram that explains itself in `reason`.
+  return runSteps(full(), { analysis, graph, view, options, subject: "id" in view ? view.id : null });
 }
 
-/** The views whose shapes are modules, where a hub (a module most of them import) is noise rather than news. */
-const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests", "intent", "modules"]);
+

@@ -110,10 +110,9 @@ function classMermaid(diagram: Diagram): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** The Mermaid types a diagram can be written as, besides the flowchart: each fits some views and no other. */
-export const MERMAID_STYLES = ["auto", "flowchart", "c4", "quadrant", "pie", "gitgraph", "mindmap"] as const;
+import type { MermaidStyle } from "../options.ts";
 
-export type MermaidStyle = (typeof MERMAID_STYLES)[number];
+export { MERMAID_STYLES, type MermaidStyle } from "../options.ts";
 
 function c4Mermaid(diagram: Diagram): string {
   const ids = mermaidIds(diagram.nodes);

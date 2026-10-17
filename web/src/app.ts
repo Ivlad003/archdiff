@@ -13,7 +13,8 @@ import { mountCanvas, VIEW_LINK, type CanvasHandle, type PickedLine } from "./ed
 import { element } from "./dom.ts";
 import { chainFrom, findShapes, lineElementId, neighbourhoodOf, pathBetween } from "./graph.ts";
 import { crumbsOf, ownView, siblingViews } from "./navigation.ts";
-import { DETAIL, OVERVIEWS, PRESETS, readDefaults, setHash, stateFromHash, type Defaults, type State } from "./state.ts";
+import { DETAIL, OVERVIEWS, PRESETS, forgetDefaults, rememberDefaults, setHash, stateFromHash, type State } from "./state.ts";
+import { MERMAID_STYLES, OVERLAYS, pictureQueryText, type MermaidStyle, type Overlay } from "../../src/options.ts";
 
 let views: ViewEntry[] = [];
 let diagramMarkdown = "";
@@ -357,7 +358,7 @@ async function showNode(id: string | null): Promise<void> {
 
   if (!state.review) {
     try {
-      const { markdown } = await api.node(state.view, node.id, pictureQuery(state));
+      const { markdown } = await api.node(state.view, node.id, pictureQueryText(state));
       setMarkdown(markdownPanel, markdown);
     } catch (error) {
       setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
@@ -466,9 +467,6 @@ function walk(direction: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"): 
 let walked: { direction: string; from: string; index: number } = { direction: "", from: "", index: 0 };
 
 /** The options that change which shapes a picture has, as query parameters, so a shape's page is asked for the picture the page shows. */
-function pictureQuery(state: State): string {
-  return `${state.depth === null ? "" : `&depth=${state.depth}`}${state.limit === null ? "" : `&limit=${state.limit}`}${state.weight === null ? "" : `&weight=${state.weight}`}${state.hubs ? "" : "&hubs=0"}${state.packages ? "&packages=1" : ""}${state.expand.length > 0 ? `&expand=${encodeURIComponent(state.expand.join(","))}` : ""}${state.hide.length > 0 ? `&hide=${encodeURIComponent(state.hide.join(","))}` : ""}`;
-}
 
 /** The tools of the canvas that change what a tap does. */
 const tools = { mix: false, focus: false };
@@ -510,17 +508,17 @@ function showPath(from: string, to: string): void {
 function renderLanes(state: State, groups: readonly { id: string; label: string }[]): void {
   const list = element<HTMLDivElement>("lanes");
   list.replaceChildren();
-  const all = [...groups.map((group) => ({ id: group.id, label: group.label })), ...state.hide.filter((id) => !groups.some((group) => group.id === id)).map((id) => ({ id, label: id }))];
+  const all = [...groups.map((group) => ({ id: group.id, label: group.label })), ...state.hideLanes.filter((id) => !groups.some((group) => group.id === id)).map((id) => ({ id, label: id }))];
   element<HTMLDetailsElement>("lanes-menu").hidden = all.length === 0;
 
   for (const lane of all) {
     const label = document.createElement("label");
     const box = document.createElement("input");
     box.type = "checkbox";
-    box.checked = !state.hide.includes(lane.id);
+    box.checked = !state.hideLanes.includes(lane.id);
     box.addEventListener("change", () => {
       const now = stateFromHash();
-      setHash({ ...now, hide: box.checked ? now.hide.filter((id) => id !== lane.id) : [...now.hide, lane.id] });
+      setHash({ ...now, hideLanes: box.checked ? now.hideLanes.filter((id) => id !== lane.id) : [...now.hideLanes, lane.id] });
     });
     label.append(box, lane.label);
     list.append(label);
@@ -661,7 +659,7 @@ async function showEdge(lines: PickedLine[], follow: boolean): Promise<void> {
   let markdown: string;
 
   try {
-    markdown = (await api.edge(state.view, line.from, line.to, line.kind, pictureQuery(state))).markdown;
+    markdown = (await api.edge(state.view, line.from, line.to, line.kind, pictureQueryText(state))).markdown;
   } catch (error) {
     markdown = error instanceof Error ? error.message : String(error);
   }
@@ -884,7 +882,7 @@ async function relayout(): Promise<void> {
   if (!canvas) return;
   await saveDrawing();
   const now = stateFromHash();
-  const scene = await api.scene(now.view, { depth: now.depth, limit: now.limit, weight: now.weight, hubs: now.hubs, expand: now.expand, hide: now.hide, onlyChanges: false, packages: now.packages, changes: false, overlays: now.overlays, mermaid: now.mermaid, base: null, head: null });
+  const scene = await api.scene(now.view, { ...now, onlyChanges: false, changes: false }, null, null);
   canvas.replace(scene.elements);
 }
 
@@ -905,7 +903,7 @@ async function load(): Promise<void> {
   renderCanvasTools(state);
   element<HTMLSelectElement>("mermaid").value = state.mermaid;
 
-  for (const box of document.querySelectorAll<HTMLInputElement>("#options .overlay")) box.checked = state.overlays.includes(box.value);
+  for (const box of document.querySelectorAll<HTMLInputElement>("#options .overlay")) box.checked = state.overlays.includes(box.value as Overlay);
   renderViews(search.value);
   reason.textContent = "";
   element<HTMLButtonElement>("edit").disabled = state.review;
@@ -953,7 +951,7 @@ async function load(): Promise<void> {
       void loadCommits(state);
       void loadBranches(state);
     } else {
-      const result = await api.scene(state.view, { depth: state.depth, limit: state.limit, weight: state.weight, hubs: state.hubs, expand: state.expand, hide: state.hide, onlyChanges: state.onlyChanges, packages: state.packages, changes: state.changes, overlays: state.overlays, mermaid: state.mermaid, base: state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, head: state.view === "timeline" || state.changes ? state.head : null });
+      const result = await api.scene(state.view, state, state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, state.view === "timeline" || state.changes ? state.head : null);
       title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
@@ -1781,7 +1779,10 @@ element<HTMLInputElement>("limit").addEventListener("change", () => {
   const value = element<HTMLInputElement>("limit").value;
   setHash({ ...stateFromHash(), limit: value === "" ? null : Math.max(1, Number(value)) });
 });
-element<HTMLSelectElement>("mermaid").addEventListener("change", () => setHash({ ...stateFromHash(), mermaid: element<HTMLSelectElement>("mermaid").value }));
+element<HTMLSelectElement>("mermaid").addEventListener("change", () => {
+  const value = element<HTMLSelectElement>("mermaid").value;
+  setHash({ ...stateFromHash(), mermaid: MERMAID_STYLES.includes(value as MermaidStyle) ? (value as MermaidStyle) : "auto" });
+});
 element<HTMLInputElement>("weight").addEventListener("change", () => {
   const value = element<HTMLInputElement>("weight").value;
   setHash({ ...stateFromHash(), weight: value === "" || Number(value) <= 1 ? null : Math.floor(Number(value)) });
@@ -1796,7 +1797,7 @@ element<HTMLSelectElement>("preset").addEventListener("change", () => {
 
 for (const box of document.querySelectorAll<HTMLInputElement>("#options .overlay")) {
   box.addEventListener("change", () => {
-    const overlays = [...document.querySelectorAll<HTMLInputElement>("#options .overlay:checked")].map((checked) => checked.value);
+    const overlays = [...document.querySelectorAll<HTMLInputElement>("#options .overlay:checked")].map((checked) => checked.value).filter((value): value is Overlay => OVERLAYS.includes(value as Overlay));
     setHash({ ...stateFromHash(), overlays });
   });
 }
@@ -1827,25 +1828,12 @@ function applyOptions(state: State): void {
 
 element<HTMLButtonElement>("options-default").addEventListener("click", () => {
   const now = stateFromHash();
-  const defaults: Defaults = { depth: now.depth, limit: now.limit, packages: now.packages, overlays: now.overlays, mermaid: now.mermaid, weight: now.weight, hubs: now.hubs };
-
-  try {
-    localStorage.setItem("archdiff.defaults", JSON.stringify(defaults));
-    reason.textContent = "options remembered as the defaults of this browser";
-  } catch {
-    reason.textContent = "no storage: the options last this page";
-  }
-
+  reason.textContent = rememberDefaults(now) ? "options remembered as the defaults of this browser" : "no storage: the options last this page";
   applyOptions(now);
 });
 element<HTMLButtonElement>("options-reset").addEventListener("click", () => {
-  try {
-    localStorage.removeItem("archdiff.defaults");
-  } catch {
-    // Nothing stored.
-  }
-
-  applyOptions({ ...stateFromHash(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false, weight: null, hubs: true, expand: [] });
+  forgetDefaults();
+  applyOptions({ ...stateFromHash(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false, weight: null, hubs: true, expand: [], lanes: "auto" });
 });
 baseInput.addEventListener("change", () => {
   if (stateFromHash().review) setHash(stateFromHash());

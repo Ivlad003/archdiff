@@ -14,6 +14,7 @@ import { contentHash, FactCache } from "./cache.ts";
 import { loadConfig, type Config } from "./config.ts";
 import type { FileFacts } from "./extract/facts.ts";
 import { readIntent, type Intent } from "./intent.ts";
+import type { HistoryRow } from "./diff.ts";
 import { extractAll } from "./extract/pool.ts";
 import { listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
 import { frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
@@ -51,6 +52,8 @@ export interface Analysis {
   /** The intended architecture (ARCHITECTURE.md), null without the file. */
   intent: Intent | null;
   stats: AnalysisStats;
+  /** The commits of a range, attached by the caller (`withTimeline`) for the timeline view; absent otherwise. */
+  timeline?: { rows: readonly HistoryRow[]; base: string; head: string };
 }
 
 export interface AnalyzeOptions {

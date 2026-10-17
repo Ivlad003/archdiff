@@ -103,6 +103,8 @@ export interface Diagram {
   direction?: "down";
   /** The shapes have their places already (a sequence view): `layout` keeps them, exports draw the routes given. */
   placed?: true;
+  /** How the lanes lie: bands down the picture (`rows`) or blocks across it (`columns`); absent: rows, or columns on a map of many lanes. */
+  lanes?: "rows" | "columns";
   /** A sequence view: the Mermaid export is a sequenceDiagram and the Markdown lists the messages in order. */
   sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number; times?: number }[] };
   /** A class view: the Mermaid export is a classDiagram. */

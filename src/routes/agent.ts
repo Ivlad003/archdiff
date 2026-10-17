@@ -4,31 +4,17 @@
 // and its mocks.
 
 import { existsSync, readFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { analyze, type Analysis } from "../analyze.ts";
-import { coverageReport } from "../coverage.ts";
-import { layout, type DiagramNode } from "../diagram.ts";
-import { compareBranches, comparisonMarkdown, history, onlyChanged, overlayDiff, review, reviewMarkdown } from "../diff.ts";
-import { commitsBetween, defaultBase, fileHistory, listBranches, mergeBase, revisionStamp } from "../git.ts";
-import { timelineDiagram } from "../views-more.ts";
-import { watch as watchFs } from "node:fs";
-import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "../export/index.ts";
-import { toExcalidraw } from "../export/excalidraw.ts";
-import { AgentRunner, agentFromConfig, type AgentSpec } from "../agent.ts";
+import { join } from "node:path";
 import { dataFlow, flowMarkdown, jsonInAnswer, mockPrompt, mocksFromTypes } from "../flow.ts";
-import { applyOverlays, parseOverlays, type Overlay } from "../overlays.ts";
 import { planFromScene, planMarkdown } from "../plan.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { CACHE_DIRECTORY } from "../cache.ts";
 import { layoutSlug } from "../layouts.ts";
 import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, mergePlan, parseIntent, writeIntent } from "../intent.ts";
-import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type SceneElement } from "../layouts.ts";
-import { diagramMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
+import { readLayout } from "../layouts.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
-import { parseView, viewList, viewOf, type ViewOptions } from "../views.ts";
-import { json, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
+import { parseView } from "../views.ts";
+import { json, problem, type RouteContext, type RouteRequest } from "./context.ts";
 
 /** Where the prompts sent to the agent are kept, beside the drawings. */
 export const TASKS_DIRECTORY = `${CACHE_DIRECTORY}/tasks`;

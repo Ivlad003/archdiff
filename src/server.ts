@@ -20,30 +20,20 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
-import { coverageReport } from "./coverage.ts";
-import { layout, type DiagramNode } from "./diagram.ts";
-import { compareBranches, comparisonMarkdown, history, onlyChanged, overlayDiff, review, reviewMarkdown } from "./diff.ts";
-import { commitsBetween, defaultBase, fileHistory, listBranches, mergeBase, revisionStamp } from "./git.ts";
-import { timelineDiagram } from "./views-more.ts";
+import { layout } from "./diagram.ts";
+import { review, withTimeline } from "./diff.ts";
+import { mergeBase, revisionStamp } from "./git.ts";
 import { watch as watchFs } from "node:fs";
-import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "./export/index.ts";
-import { toExcalidraw } from "./export/excalidraw.ts";
-import { AgentRunner, agentFromConfig, type AgentSpec } from "./agent.ts";
-import { dataFlow, flowMarkdown, jsonInAnswer, mockPrompt, mocksFromTypes } from "./flow.ts";
-import { applyOverlays, parseOverlays, type Overlay } from "./overlays.ts";
-import { planFromScene, planMarkdown } from "./plan.ts";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { layoutSlug } from "./layouts.ts";
-import { problem, send, type PictureOptions, type RouteContext } from "./routes/context.ts";
+import { AgentRunner, type AgentSpec } from "./agent.ts";
+import { readPictureOptions, type PictureOptions } from "./options.ts";
+import type { Result } from "./result.ts";
+import { problem, send, type RouteContext } from "./routes/context.ts";
 import { routes as pictureRoutes } from "./routes/pictures.ts";
 import { routes as agentRoutes } from "./routes/agent.ts";
 import { routes as gitRoutes } from "./routes/git.ts";
 import { routes as specRoutes } from "./routes/spec.ts";
-import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, mergePlan, parseIntent, writeIntent } from "./intent.ts";
-import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type SceneElement } from "./layouts.ts";
-import { diagramMarkdown, edgeMarkdown, nodeMarkdown } from "./markdown.ts";
-import { isJsonObject, isJsonString, parseJson } from "./json.ts";
-import { parseView, viewList, viewOf, type ViewOptions } from "./views.ts";
+import { positionsOf, readLayout } from "./layouts.ts";
+import { parseView, viewOf, viewOptionsOf } from "./views.ts";
 
 export interface ServeOptions {
   /** The port to bind; null: the first free port from DEFAULT_PORT up. */
@@ -154,54 +144,41 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     return current;
   };
 
-  // The placed diagram of a view, at the saved places when the view was drawn by hand.
-  /** The options of a picture as the query names them: depth, limit, packages, changes, overlays. */
-  const optionsOf = (url: URL): PictureOptions => {
-    const depthText = url.searchParams.get("depth");
-    const limitText = url.searchParams.get("limit");
-    const weightText = url.searchParams.get("weight");
-    const list = (name: string): string[] => (url.searchParams.get(name) ?? "").split(",").filter((item) => item !== "");
-    const out: PictureOptions = { hubs: url.searchParams.get("hubs") !== "0", packages: url.searchParams.get("packages") === "1", changes: url.searchParams.get("changes") === "1", onlyChanges: url.searchParams.get("only") === "changes", overlays: parseOverlays(url.searchParams.get("overlay")), expand: list("expand"), hide: list("hide") };
+  /** The options of a picture as the query names them (the table of options.ts), or the problem with one of them. */
+  const optionsOf = (url: URL): Result<PictureOptions> => {
+    const read = readPictureOptions((name) => url.searchParams.get(name), "param");
 
-    if (depthText !== null && depthText !== "" && Number.isInteger(Number(depthText)) && Number(depthText) >= 0) out.depth = Number(depthText);
-
-    if (limitText !== null && limitText !== "" && Number.isInteger(Number(limitText)) && Number(limitText) >= 1) out.limit = Number(limitText);
-
-    if (weightText !== null && weightText !== "" && Number.isInteger(Number(weightText)) && Number(weightText) >= 1) out.weight = Number(weightText);
-
-    return out;
+    return read.ok ? { ok: true, value: read.value.options } : read;
   };
+
+  // Placed pictures by analysis: the same view with the same options and the same saved drawing is laid out once per
+  // analysis, so switching pictures back and forth costs a lookup. A new analysis (a changed file) starts a new map.
+  const pictures = new WeakMap<Analysis, Map<string, ReturnType<typeof layout>>>();
 
   /** The placed diagram of a view with the page's options, the saved drawing's positions and the revision stamp; null for an unknown view. */
   const placed = async (analysis: Analysis, key: string, picked: PictureOptions, base: string | null = null, head: string | null = null): Promise<ReturnType<typeof layout> | null> => {
     const view = parseView(key);
 
     if (!view) return null;
-    const viewOptions: ViewOptions = { packages: picked.packages, hubs: picked.hubs, expand: picked.expand, hideLanes: picked.hide };
+    const saved = readLayout(root, key);
+    const memo = pictures.get(analysis) ?? new Map<string, ReturnType<typeof layout>>();
+    pictures.set(analysis, memo);
+    const memoKey = JSON.stringify([key, picked, base, head, saved?.saved ?? null]);
+    const known = memo.get(memoKey);
 
-    if (picked.depth !== undefined) viewOptions.depth = picked.depth;
+    if (known) return known;
+    const viewOptions = viewOptionsOf(picked);
+    let source = analysis;
 
-    if (picked.limit !== undefined) viewOptions.limit = picked.limit;
-
-    if (picked.weight !== undefined) viewOptions.weight = picked.weight;
-    const positions = positionsOf(readLayout(root, key)?.elements ?? null);
-    let diagram: ReturnType<typeof layout>;
-
-    if (picked.changes && view.kind !== "timeline") {
-      // `changes`: the review's marks laid over the view, so the structure and what the change did to it are one picture.
-      const result = await review(root, base || options.base, head);
-      const marked = overlayDiff(viewOf(analysis, view, viewOptions), result.diff);
-      diagram = layout(applyOverlays(picked.onlyChanges ? onlyChanged(marked) : marked, analysis, picked.overlays), positions);
-    } else if (view.kind === "timeline") {
-      // The timeline is built from the commits of a range, not from one analysis.
-      const from = base || options.base || mergeBase(root);
-      const to = head || "HEAD";
-      diagram = layout(timelineDiagram(await history(root, from, to), from, to), positions);
-    } else diagram = layout(applyOverlays(viewOf(analysis, view, viewOptions), analysis, picked.overlays), positions);
-
+    // The timeline is built from the commits of a range; `changes` lays the review's marks over the view: both read git here, at the edge.
+    if (view.kind === "timeline") source = await withTimeline(analysis, base || options.base || mergeBase(root), head || "HEAD");
+    else if (picked.changes) viewOptions.diff = (await review(root, base || options.base, head)).diff;
+    const diagram = layout(viewOf(source, view, viewOptions), positionsOf(saved?.elements ?? null));
     const stamp = revisionStamp(root);
+    const picture = stamp ? { ...diagram, stamp } : diagram;
+    memo.set(memoKey, picture);
 
-    return stamp ? { ...diagram, stamp } : diagram;
+    return picture;
   };
 
   const routes = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes };

@@ -4,6 +4,7 @@
 
 export type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "../../src/diagram.ts";
 import type { Diagram } from "../../src/diagram.ts";
+import { pictureQueryText, type PictureOptions } from "../../src/options.ts";
 
 export interface ViewEntry {
   key: string;
@@ -188,8 +189,7 @@ export const api = {
     return () => source.close();
   },
   flow: (view: string, depth: number | null) => get<FlowResponse>(`/api/flow?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
-  scene: (view: string, options: { depth: number | null; limit: number | null; weight: number | null; hubs: boolean; expand: string[]; hide: string[]; onlyChanges: boolean; packages: boolean; changes: boolean; overlays: string[]; mermaid: string; base: string | null; head: string | null }) =>
-    get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${options.depth === null ? "" : `&depth=${options.depth}`}${options.limit === null ? "" : `&limit=${options.limit}`}${options.weight === null ? "" : `&weight=${options.weight}`}${options.hubs ? "" : "&hubs=0"}${options.expand.length > 0 ? `&expand=${encodeURIComponent(options.expand.join(","))}` : ""}${options.hide.length > 0 ? `&hide=${encodeURIComponent(options.hide.join(","))}` : ""}${options.onlyChanges && options.changes ? "&only=changes" : ""}${options.packages ? "&packages=1" : ""}${options.base ? `&base=${encodeURIComponent(options.base)}` : ""}${options.head ? `&head=${encodeURIComponent(options.head)}` : ""}${options.changes ? "&changes=1" : ""}${options.overlays.length > 0 ? `&overlay=${encodeURIComponent(options.overlays.join(","))}` : ""}${options.mermaid !== "auto" ? `&mermaid=${options.mermaid}` : ""}`),
+  scene: (view: string, options: PictureOptions, base: string | null, head: string | null) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${pictureQueryText(options)}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}`),
   saveLayout: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
     const response = await fetch(`/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
     const body = (await response.json()) as { saved: string } | { error: string };

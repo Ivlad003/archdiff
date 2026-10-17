@@ -11,9 +11,9 @@ import type { Diagram, DiagramNode } from "./diagram.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 
-export const OVERLAYS = ["tests", "storages", "heat"] as const;
+import { OVERLAYS, type Overlay } from "./options.ts";
 
-export type Overlay = (typeof OVERLAYS)[number];
+export { OVERLAYS, type Overlay } from "./options.ts";
 
 /** A test module, by its path (the same rule as the tests view). */
 const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|[.\-_](test|spec|stories)\.[cm]?[jt]sx?$|_test\.(py|rs|php)$|(^|\/)tests?_[^/]*\.py$|Test\.php$/;
