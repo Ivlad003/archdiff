@@ -80,6 +80,9 @@ const HUB_MIN_IMPORTERS = 6;
 /** The share of a picture's modules that must import a module for it to be a hub: a quarter marks the logger and the shared types, not a busy neighbour. */
 const HUB_SHARE = 0.25;
 
+/** On a big map a quarter is hundreds; this many importers make a hub whatever the picture's size. */
+const HUB_MAX_IMPORTERS = 40;
+
 /** The one question each kind of view answers. */
 const QUESTION: Record<View["kind"], string> = {
   layers: "which layers import which, and how much",
@@ -834,7 +837,8 @@ export function hubsAsBadges(diagram: Diagram, subject: string | null): Diagram 
     importers.set(edge.to, new Set([...(importers.get(edge.to) ?? []), edge.from]));
   }
 
-  const hubs = modules.filter((node) => node.id !== subject && (importers.get(node.id)?.size ?? 0) >= Math.max(HUB_MIN_IMPORTERS, Math.ceil(modules.length * HUB_SHARE))).map((node) => node.id);
+  const threshold = Math.max(HUB_MIN_IMPORTERS, Math.min(HUB_MAX_IMPORTERS, Math.ceil(modules.length * HUB_SHARE)));
+  const hubs = modules.filter((node) => node.id !== subject && (importers.get(node.id)?.size ?? 0) >= threshold).map((node) => node.id);
 
   if (hubs.length === 0) return diagram;
   const hubSet = new Set(hubs);

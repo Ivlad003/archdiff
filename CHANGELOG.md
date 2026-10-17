@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A hub is a module a quarter of the picture's modules import, or forty of them, whichever is less (a quarter of a 500-module map was never reached).
 - The `modules` view: the whole map, every module in its layer and every import. A picked shape's neighbours as chips above its page (click: pick here; Shift+click: its own view), the arrow keys walk them (→ ← along the arrows, ↑ ↓ along the lane) and Enter goes in: sideways navigation beside the deeper one.
 - A project from scratch: `archdiff new <dir> --lang ts|js --template blank|lib|cli|api|web` writes the skeleton, `archdiff.json`, `ARCHITECTURE.md` (the intent) and the first commit.
 - The intent as the contract: `ARCHITECTURE.md` with one Mermaid flowchart (subgraph = layer, node = module path and description, arrow = import) that archdiff reads and writes; the `intent` view draws it against the code (planned dashed, beyond the contract orange); `archdiff check` fails on an import between layers the contract does not allow; `archdiff import <file>` takes a document's flowchart; `archdiff intent --init` seeds one from the code; `--view` folds a drawing into it; archdiff.json's layers follow it.
