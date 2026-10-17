@@ -237,6 +237,29 @@ test("find, lanes, split, the path between two shapes and the minimap", { skip: 
   await page!.waitForFunction(`!document.body.classList.contains("split")`);
 });
 
+test("a picked shape's neighbours are chips; the arrow keys walk them sideways, Enter goes into the shape", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.evaluate("localStorage.clear()");
+  await page!.goto(`${base}/?fresh=8#view=modules`);
+  await page!.waitForSelector(".excalidraw canvas");
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.startsWith("Modules")`);
+  await page!.waitForTimeout(1000);
+  const orders = await screenPointOf("modules", "src/lib/orders.ts");
+  await page!.mouse.click(orders.x, orders.y);
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/lib/orders.ts"`, undefined, { timeout: 8000 });
+  const chips = (await page!.evaluate(`[...document.querySelectorAll("#neighbours button")].map((b) => b.textContent)`)) as string[];
+  assert.ok(chips.includes("→ src/db/store.ts") && chips.includes("← src/routes/checkout.tsx"), chips.join(", "));
+  // → walks along an arrow to what orders.ts imports; ← back to what imports it.
+  await page!.keyboard.press("ArrowRight");
+  await page!.waitForFunction(`["src/db/store.ts", "src/lib/log.ts"].includes(document.querySelector("#markdown h1")?.textContent)`, undefined, { timeout: 8000 });
+  await page!.keyboard.press("ArrowLeft");
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/lib/orders.ts"`, undefined, { timeout: 8000 });
+  // A chip picks sideways; Enter goes into the picked shape's own view.
+  await page!.click("#neighbours button:has-text('src/routes/checkout.tsx')");
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/routes/checkout.tsx"`, undefined, { timeout: 8000 });
+  await page!.keyboard.press("Enter");
+  await page!.waitForFunction(`location.hash.includes("inside%3Asrc%2Froutes%2Fcheckout.tsx")`);
+});
+
 test("the canvas toolbar switches the picture, sets the detail and opens a module in place with the mix tool", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.evaluate("localStorage.clear()");
   await page!.goto(`${base}/?fresh=5#view=layer%3Alib`);

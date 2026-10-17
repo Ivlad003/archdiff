@@ -1177,3 +1177,7 @@ body.embed main {
   color: inherit;
   min-width: 200px;
 }
+
+#neighbours {
+  margin: 6px 8px 0;
+}

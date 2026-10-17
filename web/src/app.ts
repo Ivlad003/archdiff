@@ -354,7 +354,8 @@ function renderMarkdown(target: HTMLElement, markdown: string): void {
   }
 
   const html = marked.parse(markdown, { async: false, gfm: true });
-  target.innerHTML = DOMPurify.sanitize(html);
+  // No images or media: a doc comment could name any URL, and the page would fetch it.
+  target.innerHTML = DOMPurify.sanitize(html, { FORBID_TAGS: ["img", "picture", "video", "audio", "iframe", "object", "embed"] });
 
   // The Mermaid source of the picture is for copying, not reading: folded under a summary.
   for (const code of target.querySelectorAll("pre > code.language-mermaid")) {
@@ -442,6 +443,7 @@ async function showNode(id: string | null): Promise<void> {
 
   if (!node) {
     setMarkdown(markdownPanel, diagramMarkdown);
+    renderNeighbours(null);
 
     return;
   }
@@ -471,8 +473,90 @@ async function showNode(id: string | null): Promise<void> {
   }
 
   showTab("markdown");
+  renderNeighbours(node);
   await showCode(node);
 }
+
+/**
+ * The strip above a shape's page: its neighbours in this picture — what it imports or calls (→) and what imports or
+ * calls it (←) — as chips. A click picks the neighbour here (sideways, the same picture); Shift+click opens the
+ * neighbour's own view (sideways, the same kind of picture for another subject). The ← → keys do the same walk.
+ */
+function renderNeighbours(node: DiagramNode | null): void {
+  const strip = element<HTMLDivElement>("neighbours");
+  strip.replaceChildren();
+  strip.className = "line-strip neighbours";
+  const out = node ? edges.filter((edge) => edge.from === node.id && edge.kind !== "lifeline" && nodes.has(edge.to)) : [];
+  const into = node ? edges.filter((edge) => edge.to === node.id && edge.kind !== "lifeline" && nodes.has(edge.from)) : [];
+  strip.hidden = out.length === 0 && into.length === 0;
+
+  if (strip.hidden) return;
+
+  const chip = (id: string, arrow: string): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.textContent = `${arrow} ${labelOf(id)}`;
+    button.title = `${arrow === "→" ? "imported or called by this shape" : "imports or calls this shape"}: click picks it here, Shift+click opens its own view, ← → walk the neighbours`;
+    button.addEventListener("click", (event) => {
+      if (event.shiftKey) {
+        const own = nodes.has(id) ? ownView(nodes.get(id)!) : null;
+
+        if (own) setHash({ ...stateFromHash(), view: own, review: false });
+      } else pickShape(id);
+    });
+
+    return button;
+  };
+
+  if (into.length > 0) {
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = `${into.length} in:`;
+    strip.append(label, ...into.slice(0, 12).map((edge) => chip(edge.from, "←")));
+  }
+
+  if (out.length > 0) {
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = `${out.length} out:`;
+    strip.append(label, ...out.slice(0, 12).map((edge) => chip(edge.to, "→")));
+  }
+}
+
+/** Picks a shape as a tap would: centred, lit, its page shown; the start of the next path or arrow-key walk. */
+function pickShape(id: string): void {
+  if (!nodes.has(id)) return;
+  canvas?.centreOn(id);
+  canvas?.highlight([id]);
+  lastPicked = id;
+  void showNode(id);
+}
+
+/** The next shape along the arrows from the picked one (→), against them (←), or beside it in its lane (↑ ↓); cycles on repeated presses. */
+function walk(direction: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"): void {
+  if (!lastPicked || !nodes.has(lastPicked)) return;
+  const current = nodes.get(lastPicked)!;
+  let candidates: string[];
+
+  if (direction === "ArrowRight") candidates = edges.filter((edge) => edge.from === current.id && edge.kind !== "lifeline" && nodes.has(edge.to)).map((edge) => edge.to);
+  else if (direction === "ArrowLeft") candidates = edges.filter((edge) => edge.to === current.id && edge.kind !== "lifeline" && nodes.has(edge.from)).map((edge) => edge.from);
+  else {
+    // Up and down: the shapes of the same lane, by their place from the top; the next below or above.
+    const lane = [...nodes.values()].filter((node) => node.group === current.group && node.kind !== "anchor").sort((a, b) => a.y - b.y || a.x - b.x);
+    const at = lane.findIndex((node) => node.id === current.id);
+    candidates = at === -1 ? [] : [lane[(at + (direction === "ArrowDown" ? 1 : lane.length - 1)) % lane.length]!.id];
+  }
+
+  if (candidates.length === 0) return;
+  // Along the arrows: repeated presses cycle through the neighbours.
+  const previous = walked.direction === direction && walked.from === current.id ? walked.index + 1 : 0;
+  const next = candidates[previous % candidates.length]!;
+  walked = { direction, from: current.id, index: previous };
+  pickShape(next);
+  // Picking moved the start; keep the cycle anchored at where the walk began.
+  walked.from = next;
+}
+
+let walked: { direction: string; from: string; index: number } = { direction: "", from: "", index: 0 };
 
 /** The tools of the canvas that change what a tap does. */
 const tools = { mix: false, focus: false };
@@ -669,7 +753,7 @@ const DETAIL: Record<string, Partial<State>> = {
 };
 
 /** The overview pictures of the picture select, after those of the current subject. */
-const OVERVIEWS: [string, string][] = [["layers", "layers"], ["matrix", "matrix of the layers"], ["cycles", "import cycles"], ["classes", "class diagram"], ["hotspots", "hotspots"], ["tests", "test coverage"], ["events", "events"], ["packages", "packages"], ["coverage", "blind spots"], ["timeline", "timeline"]];
+const OVERVIEWS: [string, string][] = [["layers", "layers"], ["modules", "every module and import"], ["intent", "the intent against the code"], ["matrix", "matrix of the layers"], ["cycles", "import cycles"], ["classes", "class diagram"], ["hotspots", "hotspots"], ["tests", "test coverage"], ["events", "events"], ["packages", "packages"], ["coverage", "blind spots"], ["timeline", "timeline"]];
 
 /** The canvas toolbar: the picture select (this subject's pictures, then the overviews), the detail buttons and the tool states. */
 function renderCanvasTools(state: State): void {
@@ -1853,6 +1937,15 @@ findInput.addEventListener("keydown", (event) => {
       canvas?.highlight([first.id]);
       lastPicked = first.id;
       void showNode(first.id);
+    } else {
+      // Nothing in this picture (folded away, or elsewhere): the first view whose subject matches opens instead.
+      const needle = findInput.value.trim().toLowerCase();
+      const entry = views.find((candidate) => candidate.key.includes(":") && candidate.key.slice(candidate.key.indexOf(":") + 1).toLowerCase() === needle) ?? views.find((candidate) => candidate.key.includes(":") && candidate.key.toLowerCase().includes(needle));
+
+      if (entry) {
+        reason.textContent = `not in this picture: opening ${entry.key}`;
+        setHash({ ...stateFromHash(), view: entry.key, review: false });
+      }
     }
   } else if (event.key === "Escape") {
     findInput.value = "";
@@ -2008,6 +2101,14 @@ window.addEventListener("keydown", (event) => {
     search.focus();
   } else if (event.key === "o") {
     element<HTMLDetailsElement>("options-menu").toggleAttribute("open");
+  } else if ((event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement) && !(event.target instanceof HTMLSelectElement) && mode === "view" && lastPicked) {
+    event.preventDefault();
+    walk(event.key);
+  } else if (event.key === "Enter" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement) && !(event.target instanceof HTMLSelectElement) && !(event.target instanceof HTMLButtonElement) && mode === "view" && lastPicked && nodes.has(lastPicked)) {
+    // Enter: into the picked shape's own view (deeper), as a second tap would.
+    const own = ownView(nodes.get(lastPicked)!);
+
+    if (own) setHash({ ...stateFromHash(), view: own, review: false });
   } else if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) {
     event.preventDefault();
     element<HTMLInputElement>("find").focus();

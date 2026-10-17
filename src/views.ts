@@ -41,10 +41,11 @@ export type View =
   | { kind: "packages" }
   | { kind: "timeline" }
   | { kind: "coverage" }
-  | { kind: "intent" };
+  | { kind: "intent" }
+  | { kind: "modules" };
 
 /** The views without a subject. */
-const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "events", "tests", "hotspots", "packages", "timeline", "intent"]);
+const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "events", "tests", "hotspots", "packages", "timeline", "intent", "modules"]);
 
 /** The views with a subject (`kind:<subject>`). */
 const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "classes", "matrix"]);
@@ -102,6 +103,7 @@ const QUESTION: Record<View["kind"], string> = {
   timeline: "how the coupling between layers drifted, commit by commit",
   coverage: "where the diagrams are blind: calls and imports archdiff could not follow",
   intent: "what was intended, what is built, and where the code went beyond the intent",
+  modules: "every module of the repository in its layer, and every import between them",
 };
 
 export interface ViewEntry {
@@ -236,6 +238,7 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   for (const node of [...graph.nodes.values()].filter((candidate) => candidate.kind === "type" && !candidate.parent && candidate.exported).sort((a, b) => (a.id < b.id ? -1 : 1))) list.push({ key: `type:${node.id}`, title: `${node.name} (${node.module})`, kind: "type", layer: graph.modules.get(node.module)!.layer });
   list.push({ key: "coverage", title: "Coverage: what the diagrams cannot show", kind: "coverage" });
   list.push({ key: "intent", title: `Intent: ${INTENT_FILE} against the code`, kind: "intent" });
+  list.push({ key: "modules", title: "Modules: the whole map, every module and import", kind: "modules" });
   list.push({ key: "classes", title: "Classes: every class and interface, fields and methods", kind: "classes" });
   list.push({ key: "matrix", title: "Matrix: who imports whom, layer by layer", kind: "matrix" });
   list.push({ key: "cycles", title: "Cycles: modules importing each other", kind: "cycles" });
@@ -394,6 +397,16 @@ function dirView(graph: Graph, path: string, depth: number): Diagram {
   const nodes = [...members].sort((a, b) => Number(ownSet.has(b)) - Number(ownSet.has(a)) || (a < b ? -1 : 1)).map((id) => moduleNode(graph, id));
 
   return unplaced(`dir:${path}`, `${path}/`, nodes, depEdges(graph, members, false), lanesOf(graph, nodes));
+}
+
+/** The whole map: every module in its layer's lane and every import between modules (packages left out). Big by nature: hubs, the fold and the weight keep it readable. */
+function modulesView(graph: Graph): Diagram {
+  const ids = [...graph.modules.keys()].sort();
+
+  if (ids.length === 0) return unplaced("modules", "Modules", [], [], [], { reason: "no modules" });
+  const nodes = ids.map((id) => moduleNode(graph, id));
+
+  return unplaced("modules", `Modules: ${ids.length} in ${graph.layers.length} layers`, nodes, depEdges(graph, new Set(ids), false), lanesOf(graph, nodes));
 }
 
 /** The deepest directory holding every path; "" when they share none. */
@@ -782,6 +795,8 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
         return coverageView(graph);
       case "intent":
         return intentView(analysis, analysis.intent);
+      case "modules":
+        return modulesView(graph);
     }
   };
 
@@ -798,7 +813,7 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
 }
 
 /** The views whose shapes are modules, where a hub (a module most of them import) is noise rather than news. */
-const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests", "intent"]);
+const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests", "intent", "modules"]);
 
 /**
  * Modules that most of a picture's modules import — a logger, the shared

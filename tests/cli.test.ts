@@ -714,6 +714,17 @@ test("--mermaid picks a Mermaid type that fits the view", () => {
   assert.equal(archdiff(["diagram", "layers", fixture, "--mermaid", "venn"]).status, 2);
 });
 
+test("modules is the whole map: every module in its layer and every import between them", () => {
+  const json = JSON.parse(archdiff(["diagram", "modules", fixture, "--format", "json"]).stdout) as { title: string; nodes: { id: string; kind: string; group?: string }[]; edges: { from: string; to: string }[]; groups: { id: string }[]; question?: string };
+  assert.equal(json.title, "Modules: 5 in 4 layers");
+  assert.equal(json.nodes.filter((node) => node.kind === "module").length, 5);
+  assert.equal(json.nodes.find((node) => node.id === "src/db/store.ts")?.group, "db");
+  assert.ok(json.edges.some((edge) => edge.from === "src/routes/checkout.tsx" && edge.to === "src/lib/orders.ts"));
+  assert.deepEqual(json.groups.map((group) => group.id).sort(), ["cartridge", "db", "lib", "routes"]);
+  assert.ok(json.question?.includes("every module"), json.question);
+  assert.ok(archdiff(["views", fixture]).stdout.includes("modules\tModules: the whole map"));
+});
+
 test("--hide-lanes leaves lanes and their shapes out of the picture", () => {
   const json = JSON.parse(archdiff(["diagram", "layer:lib", fixture, "--hide-lanes", "routes,nowhere", "--format", "json"]).stdout) as { groups: { id: string }[]; nodes: { id: string }[]; reason?: string };
   assert.ok(!json.groups.some((group) => group.id === "routes"));
