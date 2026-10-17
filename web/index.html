@@ -122,6 +122,7 @@
             <input id="find" type="search" placeholder="find shape (/)" title="Type to light the matching shapes; Enter centres the first and opens it; Esc clears" />
             <button id="tool-split" title="A second picture beside this one, with its own view and options (s)">split</button>
             <button id="tool-map" title="The minimap: the whole picture small, the viewport as a box; shown by itself above 60 shapes">map</button>
+            <button id="tool-lanes" title="Lanes as rows (bands down the picture) or as columns (blocks across it): a map of many layers reads better across (l)">lanes ↔</button>
           </div>
           <div id="split" hidden><iframe id="split-frame" title="The second picture"></iframe></div>
           <canvas id="minimap" width="220" height="150" hidden title="Tap to move there"></canvas>
@@ -162,6 +163,7 @@
             <button id="improve-diagram" title="Ask the agent to review ARCHITECTURE.md: names, missing links, layers, what the document leaves open (/diagram)">improve the diagram</button>
             <button id="from-document" title="Paste a design note, an ISD or a spec; the agent writes the architecture from it (/doc)">from document</button>
             <button id="plan" class="small" title="Only read the task from the drawing, without touching the contract">read the task</button>
+            <button id="checks" class="small" title="Run the contract check and the commands archdiff.json names in &quot;checks&quot; (npm test, …) now; they also run after every agent run">run checks</button>
             <span id="agent-name" class="muted"></span>
           </div>
           <textarea id="document" hidden placeholder="Paste the document here (a design note, an ISD, a spec in prose, or Markdown with a Mermaid flowchart), then press Ctrl+Enter or the button below."></textarea>
@@ -199,10 +201,12 @@
           <div class="row">
             <input id="mock-description" type="text" placeholder="describe the scenario (optional): an order of 42 with no customer…" />
             <button id="mock-generate" title="Mocks for the entry and the storages: from the agent with this description, else from the types">generate mocks</button>
-            <button id="flow-play" title="Play the steps on the diagram, one by one, like a run (▶)">▶ play</button>
+            <button id="flow-play" title="Play the predicted steps on the diagram, one by one (▶)">▶ play</button>
+            <button id="flow-run" title="Run the entry for real with the storages mocked (TypeScript/JavaScript, no writes, no network): the functions entered light up green, the predicted ones it never reached grey">▶ run</button>
           </div>
           <div id="flow-mocks"></div>
           <div id="flow-steps"></div>
+          <div id="flow-run-result" class="prose"></div>
         </div>
       </aside>
     </main>

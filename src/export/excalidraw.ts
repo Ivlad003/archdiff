@@ -5,6 +5,7 @@
 
 import type { Diagram, DiagramEdge, DiagramNode } from "../diagram.ts";
 import { heatColour } from "./colour.ts";
+import { routeFree } from "./route-free.ts";
 
 interface ExcalidrawElement {
   id: string;
@@ -161,6 +162,8 @@ function columnsOf(nodes: readonly DiagramNode[]): { column: Map<string, number>
  * `layout`.
  */
 export function routeEdges(diagram: Diagram): Map<DiagramEdge, Point[]> {
+  // Shapes the user moved out of the layout's columns: the grid router around every shape (route-free.ts).
+  if (diagram.freeform) return routeFree(diagram);
   const boxes = new Map(diagram.nodes.map((node) => [node.id, node]));
   const routes = new Map<DiagramEdge, Point[]>();
   const lowest = Math.max(0, ...diagram.nodes.map((node) => node.y + node.h));

@@ -12,6 +12,7 @@ import { resolve } from "node:path";
 import { analyze } from "./analyze.ts";
 import { coverageReport } from "./coverage.ts";
 import { dataFlow, flowMarkdown } from "./flow.ts";
+import { runFlow, runMarkdown } from "./run.ts";
 import { LAYOUTS_DIRECTORY, readLayout, readLayoutFile } from "./layouts.ts";
 import { planFromScene, planMarkdown } from "./plan.ts";
 import { agentFromConfig } from "./agent.ts";
@@ -257,6 +258,53 @@ const COMMANDS: readonly Command[] = [
       const flow = dataFlow(analysis, view.id, readLayout(analysis.root, key!)?.mocks ?? [], depth);
 
       return writeOut(call.has("json") ? `${JSON.stringify(flow, null, 2)}\n` : flowMarkdown(flow), call.text("out"));
+    },
+  },
+  {
+    name: "run",
+    usage: "<calls:view> [dir] [--input JSON] [--storages JSON] [--timeout MS] [--json] [--out FILE]",
+    help: ["Run an entry point for real, with the storages mocked: the repository's own", "TypeScript or JavaScript runs in a child Node process (no writes, no child", "processes) with every function traced and the storage packages (a database", "client, node:fs, fetch) answering from the mocks. --input: the arguments by", "parameter name; --storages: what each storage holds, by package (\"node:fs\")", "or by the module importing it; the mocks saved on the page are used without", "them. Prints the functions entered against the predicted flow, the storage", "calls and the result"],
+    arity: 2,
+    flags: [flag("input", true), flag("storages", true), flag("timeout", true), flag("json"), flag("out", true)],
+    async run(call) {
+      const key = call.positional[0];
+      const view = key ? parseView(key) : null;
+
+      if (!view || view.kind !== "calls") return fail("run: a calls:<path>#<fn> view is required");
+      const analysis = await analyze(call.dir(1));
+      const parse = (name: string): Record<string, unknown> | null | undefined => {
+        const text = call.text(name);
+
+        if (text === null) return undefined;
+
+        try {
+          const value: unknown = JSON.parse(text);
+
+          return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+        } catch {
+          return null;
+        }
+      };
+      const input = parse("input");
+      const storages = parse("storages");
+
+      if (input === null) return fail("run: --input must be a JSON object");
+
+      if (storages === null) return fail("run: --storages must be a JSON object");
+      const timeout = call.has("timeout") ? Number(call.text("timeout")) : undefined;
+
+      if (timeout !== undefined && !(Number.isInteger(timeout) && timeout > 0)) return fail("run: --timeout must be milliseconds");
+      const options: Parameters<typeof runFlow>[2] = { mocks: readLayout(analysis.root, key!)?.mocks ?? [] };
+
+      if (input) options.input = input;
+
+      if (storages) options.storages = storages;
+
+      if (timeout !== undefined) options.timeoutMs = timeout;
+      const result = await runFlow(analysis, view.id, options);
+      const written = writeOut(call.has("json") ? `${JSON.stringify(result, null, 2)}\n` : runMarkdown(result), call.text("out"));
+
+      return written !== 0 ? written : result.error ? 1 : 0;
     },
   },
   {

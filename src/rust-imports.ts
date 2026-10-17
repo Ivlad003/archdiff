@@ -36,6 +36,8 @@ interface Crate {
   lib: string | null;
   /** Root files of the binary targets. */
   bins: string[];
+  /** Root files of the integration tests, benches and examples (`tests/x.rs`, `tests/x/main.rs`, `benches/*.rs`, `examples/*.rs`): each a crate of its own whose `mod util;` is `tests/util.rs`. */
+  tests: string[];
   /** Names code uses for dependencies → the package name and, for a `path` dependency inside the repository, its directory. */
   deps: Map<string, { pkg: string; path: string | null }>;
 }
@@ -156,7 +158,7 @@ export class RustResolver implements SourceResolver {
 
   /** The target root whose module tree holds `file`; null for a file outside all of them (`build.rs`). */
   private rootOf(crate: Crate, file: string): string | null {
-    const roots = [...(crate.lib ? [crate.lib] : []), ...crate.bins];
+    const roots = [...(crate.lib ? [crate.lib] : []), ...crate.bins, ...crate.tests];
 
     if (roots.includes(file)) return file;
     // The deepest root directory that contains the file.
@@ -177,12 +179,13 @@ export class RustResolver implements SourceResolver {
     }
 
     if (best.length <= 1) return best[0] ?? null;
-    // `src/lib.rs` and `src/main.rs` share `src/`: the file is the binary's when only the binary declares its top module.
+    // `src/lib.rs` and `src/main.rs` share `src/` (and every integration test shares `tests/`): the file is the target's
+    // that declares its top module; the library's when the library does or none does.
     const top = modulePath(best[0]!, file)[0];
     const lib = best.find((root) => root === crate.lib) ?? null;
     const claiming = best.filter((root) => top !== undefined && this.declares(root, top));
 
-    if (claiming.length === 1 && claiming[0] !== lib) return claiming[0]!;
+    if (claiming.length >= 1 && !claiming.includes(lib ?? "")) return claiming[0]!;
 
     return lib ?? best[0]!;
   }
@@ -264,7 +267,23 @@ export class RustResolver implements SourceResolver {
       }
 
       for (const bin of Array.isArray(manifest.bin) ? manifest.bin.filter(isTable) : []) if (isText(bin.path)) bins.add(at(bin.path));
-      crate = { dir, name, lib: exists(libPath) ? libPath : null, bins: [...bins].sort(), deps };
+      // Cargo's auto-discovered integration tests, benches and examples: every `.rs` file directly in the directory, and
+      // every subdirectory's `main.rs`; a helper module beside them (`tests/util.rs`) is no target, `mod util;` reaches it.
+      const tests = new Set<string>();
+
+      for (const kind of ["tests", "benches", "examples"]) {
+        const targetDir = at(kind);
+
+        if (!exists(targetDir) || !existsSync(join(this.root, targetDir))) continue;
+
+        for (const entry of readdirSync(join(this.root, targetDir), { withFileTypes: true })) {
+          if (entry.isFile() && entry.name.endsWith(".rs")) tests.add(posix.join(targetDir, entry.name));
+          else if (entry.isDirectory() && exists(posix.join(targetDir, entry.name, "main.rs"))) tests.add(posix.join(targetDir, entry.name, "main.rs"));
+        }
+      }
+
+      for (const kind of ["test", "bench", "example"]) for (const target of Array.isArray(manifest[kind]) ? (manifest[kind] as TomlValue[]).filter(isTable) : []) if (isText(target.path)) tests.add(at(target.path));
+      crate = { dir, name, lib: exists(libPath) ? libPath : null, bins: [...bins].sort(), tests: [...tests].sort(), deps };
     }
 
     this.crates.set(dir, crate);

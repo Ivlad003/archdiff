@@ -33,7 +33,8 @@
       "src/view-keys.ts",
       "src/cycles.ts",
       "src/metrics.ts",
-      "src/machines.ts"
+      "src/machines.ts",
+      "src/run.ts"
     ],
     "exports": [
       "src/export/**",

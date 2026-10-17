@@ -31,6 +31,7 @@ flowchart LR
     n_src_metrics_ts["src/metrics.ts<br>coupling and cohesion: Ca, Ce, I, A, D, the cohesion of a module's functions"]
     n_src_cycles_ts["src/cycles.ts<br>import, call and layer cycles, and where to cut them"]
     n_src_machines_ts["src/machines.ts<br>state machines: declared by a library, or written with literal states"]
+    n_src_run_ts["src/run.ts<br>a real run of an entry with the storages mocked, traced function by function"]
   end
   subgraph n_exports["exports — the picture as text and files"]
     n_src_export_index_ts["src/export/index.ts<br>Mermaid, draw.io, Excalidraw, ArchiMate, JSON"]
@@ -48,11 +49,14 @@ flowchart LR
     n_src_intent_ts["src/intent.ts<br>the contract: parse and write ARCHITECTURE.md, check the code against it"]
     n_src_cache_ts["src/cache.ts<br>the fact cache, keyed by content hash and extractor version"]
     n_src_options_ts["src/options.ts<br>the options of a picture, described once for the CLI, the API and the page"]
+    n_src_run_hooks_ts["src/run-hooks.ts<br>the child process of a run: module hooks that trace and mock"]
+    n_src_checks_ts["src/checks.ts<br>the contract check and the commands run after an agent"]
   end
   subgraph n_extract["extract — the language frontends on tree-sitter"]
     n_src_extract_ts_ts["src/extract/ts.ts<br>TypeScript and JavaScript facts"]
     n_src_extract_facts_ts["src/extract/facts.ts<br>the FileFacts contract every frontend fills"]
     n_src_extract_control_ts["src/extract/control.ts<br>control flow as facts: guards, literal states, declared machines"]
+    n_src_extract_bodies_ts["src/extract/bodies.ts<br>where every function's body starts and ends, for the run's trace"]
     n_src_extract_pool_ts["src/extract/pool.ts<br>extraction on worker threads"]
     n_src_extract_grammars_ts["src/extract/grammars.ts<br>the grammars and their WASM files"]
     n_src_languages_ts["src/languages.ts<br>the languages archdiff reads and their extensions"]
@@ -85,6 +89,10 @@ flowchart LR
   n_src_views_ts --> n_src_metrics_ts
   n_src_views_ts --> n_src_cycles_ts
   n_src_views_ts --> n_src_machines_ts
+  n_src_cli_ts --> n_src_run_ts
+  n_src_run_ts --> n_src_flow_ts
+  n_src_run_ts --> n_src_extract_bodies_ts
+  n_src_server_ts --> n_src_checks_ts
   n_src_extract_ts_ts --> n_src_extract_control_ts
   n_src_pipeline_ts --> n_src_shape_ts
   n_src_views_ts --> n_src_shape_ts

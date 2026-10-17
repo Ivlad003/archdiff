@@ -18,6 +18,7 @@ import type { HistoryRow } from "./diff.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
+import { greedyOrder } from "./order.ts";
 
 /**
  * The layers ordered so that most imports point down the list: repeatedly
@@ -35,48 +36,6 @@ function layerOrder(graph: Graph, types = false): string[] {
   }
 
   return greedyOrder(graph.layers, counts);
-}
-
-/**
- * The same order over any items with `counts` of imports between them
- * (keyed `from\u0000to`): an item nothing of the rest imports goes next
- * (a source of the remaining graph, the one importing most of the rest
- * first), so an acyclic graph comes out in topological order; inside a
- * cycle, where every item is imported, the one importing the most and
- * imported the least goes next. Deterministic: ties by name.
- */
-function greedyOrder(items: readonly string[], counts: ReadonlyMap<string, number>): string[] {
-  const remaining = new Set(items);
-  const order: string[] = [];
-
-  while (remaining.size > 0) {
-    let best: string | null = null;
-    let bestScore = -Infinity;
-
-    for (const layer of [...remaining].sort()) {
-      let out = 0;
-      let into = 0;
-
-      for (const other of remaining) {
-        if (other === layer) continue;
-        out += counts.get(`${layer}\u0000${other}`) ?? 0;
-        into += counts.get(`${other}\u0000${layer}`) ?? 0;
-      }
-
-      // A source of what remains outranks every item still imported by something; among sources the busiest importer first.
-      const score = into === 0 ? 1_000_000 + out : out - into;
-
-      if (score > bestScore) {
-        bestScore = score;
-        best = layer;
-      }
-    }
-
-    order.push(best!);
-    remaining.delete(best!);
-  }
-
-  return order;
 }
 
 /**

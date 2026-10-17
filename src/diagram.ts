@@ -8,6 +8,8 @@
 // Pipeline: Graph → view → Diagram (unplaced) → `layout` → Diagram (placed).
 // Entry points: `layout`, `SIZE`, and the types.
 
+import { greedyOrder } from "./order.ts";
+
 /** The marking of a shape in the picture of a diff (`archdiff review`). */
 /**
  * `added`, `removed`, `changed`: a review's marks; `warning`: a finding (a
@@ -110,6 +112,8 @@ export interface Diagram {
   placed?: true;
   /** How the lanes lie: bands down the picture (`rows`) or blocks across it (`columns`); absent: rows, or columns on a map of many lanes. */
   lanes?: "rows" | "columns";
+  /** Some shapes sit where the user put them, not in the layout's columns: the lines are routed on a grid around every shape (route-free.ts). */
+  freeform?: true;
   /** A sequence view: the Mermaid export is a sequenceDiagram and the Markdown lists the messages in order. */
   sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number; times?: number }[]; fragments?: SequenceFragment[] };
   /** A machine view: the states and transitions behind the picture (Mermaid: a stateDiagram-v2; Markdown: a table). */
@@ -214,6 +218,15 @@ const LANE_PAD = 20;
 
 /** At most this many shapes one above another in a lane's rank; more wrap into the next column. */
 const MAX_ROWS = 8;
+
+/** The gap between two lanes lying as columns. */
+const LANE_GAP = 24;
+
+/** More lanes than this on a map, and they lie as columns unless the picture says rows. */
+const COLUMNS_ABOVE = 6;
+
+/** The room kept around a shape the user placed by hand, so a computed shape never sits on it. */
+const MANUAL_MARGIN = 12;
 
 /**
  * Places the shapes: the rank of a node is its longest path from a node
@@ -414,6 +427,10 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
     return manual ? { ...placed, x: manual.x, y: manual.y, w: manual.w ?? placed.w, h: manual.h ?? placed.h } : placed;
   });
 
+  // A computed shape never sits on one the user placed: it moves down its column, a row at a time, until it is clear.
+  const manualIds = new Set(nodes.filter((node) => Object.hasOwn(positions, node.id)).map((node) => node.id));
+
+  if (manualIds.size > 0) avoidManual(nodes, manualIds, gridH);
   const right = Math.max(0, ...nodes.map((node) => node.x + node.w)) + LANE_PAD;
 
   // Lanes span the full width and grow to enclose any shape moved outside their band.
@@ -425,5 +442,75 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
     return { ...group, x: 0, y: from, w: right, h: to - from };
   });
 
-  return { ...diagram, nodes, groups };
+  // Lanes as columns: a map of many layers reads across, each lane a block, in the order the lines flow.
+  const columnsWanted = diagram.lanes === "columns" || (diagram.lanes === undefined && groups.length > COLUMNS_ABOVE && /^(modules|layer:|dir:)/.test(diagram.view));
+
+  if (columnsWanted && diagram.direction !== "down" && manualIds.size === 0 && groups.length > 1) return lanesAsColumns({ ...diagram, nodes, groups }, laneOf);
+
+  return manualIds.size > 0 ? { ...diagram, nodes, groups, freeform: true } : { ...diagram, nodes, groups };
+}
+
+/** Shapes the user placed keep their place; a computed shape on top of one moves down its column until it is clear. */
+function avoidManual(nodes: DiagramNode[], manualIds: ReadonlySet<string>, step: number): void {
+  const manual = nodes.filter((node) => manualIds.has(node.id));
+
+  const clashes = (node: DiagramNode): boolean => manual.some((other) => node.x < other.x + other.w + MANUAL_MARGIN && node.x + node.w + MANUAL_MARGIN > other.x && node.y < other.y + other.h + MANUAL_MARGIN && node.y + node.h + MANUAL_MARGIN > other.y);
+
+  for (const node of nodes) {
+    if (manualIds.has(node.id) || node.kind === "anchor") continue;
+
+    for (let tries = 0; tries < 60 && clashes(node); tries++) node.y += step;
+  }
+}
+
+/**
+ * The lanes laid as columns: each lane a block holding its shapes as the
+ * row layout placed them (ranks left to right inside the block), the
+ * blocks side by side in the order most lines flow (a lane nothing of
+ * the rest imports first), top-aligned. Shapes without a lane make a
+ * last block. Pure: a new diagram.
+ */
+function lanesAsColumns(diagram: Diagram, laneOf: (node: DiagramNode) => number): Diagram {
+  const laneCount = diagram.groups.length;
+  const counts = new Map<string, number>();
+  const index = new Map(diagram.nodes.map((node) => [node.id, node]));
+
+  for (const edge of diagram.edges) {
+    const from = index.get(edge.from);
+    const to = index.get(edge.to);
+
+    if (!from || !to) continue;
+    const a = String(laneOf(from));
+    const b = String(laneOf(to));
+
+    if (a !== b) counts.set(`${a}\u0000${b}`, (counts.get(`${a}\u0000${b}`) ?? 0) + (edge.count ?? 1));
+  }
+
+  const lanes = [...new Set(diagram.nodes.map((node) => String(laneOf(node))))];
+  const order = greedyOrder(lanes, counts);
+  const moved = new Map<string, DiagramNode>();
+  const boxes = new Map<string, { x: number; w: number; h: number }>();
+  let offset = LANE_PAD;
+
+  for (const lane of order) {
+    const members = diagram.nodes.filter((node) => String(laneOf(node)) === lane);
+    const minX = Math.min(...members.map((node) => node.x));
+    const minY = Math.min(...members.map((node) => node.y));
+    const width = Math.max(...members.map((node) => node.x + node.w)) - minX + 2 * LANE_PAD;
+    const height = Math.max(...members.map((node) => node.y + node.h)) - minY + 3 * LANE_PAD;
+
+    for (const node of members) moved.set(node.id, { ...node, x: node.x - minX + offset + LANE_PAD, y: node.y - minY + 2 * LANE_PAD });
+    boxes.set(lane, { x: offset, w: width, h: height });
+    offset += width + LANE_GAP;
+  }
+
+  const nodes = diagram.nodes.map((node) => moved.get(node.id) ?? node);
+  const groups = diagram.groups.map((group, lane): DiagramGroup => {
+    const box = boxes.get(String(lane));
+
+    return box ? { ...group, x: box.x, y: 0, w: box.w, h: box.h } : { ...group, x: 0, y: 0, w: 0, h: 0 };
+  });
+
+  // A lane without shapes has no block: it is left out, as the row layout leaves an empty band out.
+  return { ...diagram, nodes, groups: groups.filter((group, lane) => boxes.has(String(lane)) || lane >= laneCount), lanes: "columns" };
 }

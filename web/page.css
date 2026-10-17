@@ -675,6 +675,29 @@ body.editing #reason {
   color: #b71c1c;
 }
 
+#flow-steps .step.entered {
+  border-left: 3px solid #66bb6a;
+}
+
+#flow-steps .step.missed {
+  opacity: 0.45;
+}
+
+#flow-run-result {
+  margin-top: 8px;
+}
+
+#transcript .ev.check {
+  white-space: pre-wrap;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--ok, #2e7d32);
+}
+
+#transcript .ev.check.failed {
+  color: #c62828;
+}
+
 #transcript .ev.exit {
   color: var(--muted);
   font-style: italic;
@@ -1089,6 +1112,28 @@ body.split #canvas-tools {
   right: 0;
   border-left: 2px solid var(--accent);
   background: var(--bg);
+}
+
+/* A window too narrow for two canvases side by side (Excalidraw folds into its phone layout under 730 px): one above the other. */
+body.split.stacked #canvas {
+  right: 0;
+  bottom: 50%;
+}
+
+body.split.stacked #canvas-tools {
+  max-width: none;
+}
+
+body.split.stacked #split {
+  left: 0;
+  top: 50%;
+  border-left: 0;
+  border-top: 2px solid var(--accent);
+}
+
+body.split.stacked #minimap {
+  right: 12px;
+  bottom: calc(50% + 12px);
 }
 
 #split iframe {

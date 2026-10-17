@@ -7,7 +7,7 @@
 // Entry points: `listSourceFiles`, `isSourceFile`, `SOURCE_EXTENSIONS`.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { matchesGlob } from "./glob.ts";
 import { LANGUAGES } from "./languages.ts";
@@ -46,19 +46,52 @@ function gitFiles(root: string): string[] | null {
   return result.stdout.split("\0").filter((path) => path !== "");
 }
 
-/** Every file under `root`, skipping generated directories. */
+/** Every file under `root`, skipping generated directories; a symbolic link is followed to a file or a directory, each directory once. */
 function walkFiles(root: string): string[] {
   const found: string[] = [];
   const stack = [root];
+  const seen = new Set<string>();
+
+  const enter = (directory: string): void => {
+    let real: string;
+
+    try {
+      real = realpathSync(directory);
+    } catch {
+      return;
+    }
+
+    // A link to a directory already walked, or to a parent of one (a link back up the tree), is not walked again.
+    if (seen.has(real) || [...seen].some((known) => known.startsWith(`${real}/`))) return;
+    seen.add(real);
+    stack.push(directory);
+  };
+
+  enter(root);
 
   while (stack.length > 0) {
     const directory = stack.pop()!;
 
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        if (!SKIPPED_DIRECTORIES.has(entry.name)) stack.push(join(directory, entry.name));
-      } else if (entry.isFile()) {
-        found.push(toPosix(relative(root, join(directory, entry.name))));
+    // Real entries before links, so a directory is walked under its own path and a link to it is the duplicate left out.
+    const entries = readdirSync(directory, { withFileTypes: true }).sort((a, b) => Number(a.isSymbolicLink()) - Number(b.isSymbolicLink()) || (a.name < b.name ? -1 : 1));
+
+    for (const entry of entries) {
+      const full = join(directory, entry.name);
+      let kind: "directory" | "file" | null = entry.isDirectory() ? "directory" : entry.isFile() ? "file" : null;
+
+      if (entry.isSymbolicLink()) {
+        try {
+          const stat = statSync(full);
+          kind = stat.isDirectory() ? "directory" : stat.isFile() ? "file" : null;
+        } catch {
+          kind = null;
+        }
+      }
+
+      if (kind === "directory") {
+        if (!SKIPPED_DIRECTORIES.has(entry.name)) enter(full);
+      } else if (kind === "file") {
+        found.push(toPosix(relative(root, full)));
       }
     }
   }

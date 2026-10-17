@@ -25,6 +25,7 @@ import { review, withTimeline } from "./diff.ts";
 import { mergeBase, revisionStamp } from "./git.ts";
 import { watch as watchFs } from "node:fs";
 import { AgentRunner, type AgentSpec } from "./agent.ts";
+import { allowedToolsFor, checkEvents, runChecks } from "./checks.ts";
 import { readPictureOptions, type PictureOptions } from "./options.ts";
 import type { Result } from "./result.ts";
 import { problem, send, type RouteContext } from "./routes/context.ts";
@@ -104,8 +105,11 @@ const PORT_TRIES = 50;
 export async function serve(root: string, options: ServeOptions): Promise<void> {
   const web = await webDirectory();
   let current: Promise<Analysis> | null = null;
-  // The agent: --agent wins, else archdiff.json; the runner is made once the first run is asked for.
-  const agentSpec = options.agent ?? (await analyze(root)).config.agent;
+  // The agent: --agent wins, else archdiff.json; the runner is made once the first run is asked for. Claude Code may run
+  // the checks of archdiff.json (and archdiff) on its own; every agent's run ends with archdiff running them.
+  const config = (await analyze(root)).config;
+  const chosen = options.agent ?? config.agent;
+  const agentSpec: AgentSpec | null = chosen && chosen.name === "claude" ? { ...chosen, allowedTools: allowedToolsFor(config.checks) } : chosen;
   let runner: AgentRunner | null = null;
   // Who waits for a change of the sources (`/api/changes`), and the watcher that tells them.
   const changeListeners = new Set<ServerResponse>();
@@ -193,7 +197,12 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     runner: () => {
       if (!agentSpec) throw new Error("no agent");
 
-      return (runner ??= new AgentRunner(root, agentSpec));
+      // After a run: the repository changed, so a fresh analysis, then the contract and the configured checks.
+      return (runner ??= new AgentRunner(root, agentSpec, async () => {
+        current = null;
+
+        return checkEvents(await runChecks(await fresh()));
+      }));
     },
     activeRunner: () => runner,
     changeListeners,

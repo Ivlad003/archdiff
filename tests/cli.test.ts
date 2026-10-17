@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -420,7 +420,7 @@ test("layouts lists the drawings and --prune deletes the orphans", () => {
 test("Python, Rust and PHP are read with the same graph: imports resolve and calls are followed", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");
   const stats = JSON.parse(archdiff(["analyze", polyglot, "--json", "--no-cache"]).stdout) as { files: number; unresolvedImports: number; calls: number };
-  assert.equal(stats.files, 10);
+  assert.equal(stats.files, 12);
   assert.equal(stats.unresolvedImports, 0);
   const python = archdiff(["diagram", "calls:app/services/orders.py#place_order", polyglot, "--format", "mermaid"]).stdout;
   assert.ok(python.includes("app_services_orders_py_place_order ==> app_store_py_save_order"), python);
@@ -941,4 +941,79 @@ test("state machines: the implicit ones written with literals, the explicit ones
   assert.ok(sequence.includes("- _loop [const order of orders]_ — messages 1–3"), sequence);
   const json = JSON.parse(archdiff(["diagram", "sequence:src/checkout.ts#checkout", machines, "--format", "json"]).stdout) as { nodes: { kind: string; label: string }[] };
   assert.deepEqual(json.nodes.filter((node) => node.kind === "fragment").map((node) => node.label), ["loop [const order of orders]", "opt [rush]", "opt [not rush]", "opt [try]", "opt [catch]"]);
+});
+
+test("Rust integration tests are crates of their own: `mod util;` and `use <crate>::` resolve from tests/", () => {
+  const polyglot = join(root, "tests/fixtures/polyglot");
+  // The test functions themselves carry no architecture (#[test] is left out); the imports of the test crate resolve.
+  const edges = (key: string): [string, string][] => (JSON.parse(archdiff(["diagram", key, polyglot, "--format", "json"]).stdout) as { edges: { from: string; to: string }[] }).edges.map((edge) => [edge.from, edge.to]);
+  assert.ok(edges("module:crate/tests/integration.rs").some(([from, to]) => from === "crate/tests/integration.rs" && to === "crate/src/orders.rs"), "use sample::orders resolves to the library");
+  assert.ok(edges("module:crate/tests/util.rs").some(([from, to]) => from === "crate/tests/util.rs" && to === "crate/src/orders.rs"), "the helper's use resolves too");
+  // `util::sample_order()` from the test file: `mod util;` makes tests/util.rs a child of this crate root.
+  const calls = archdiff(["diagram", "calls:crate/tests/integration.rs#setup", polyglot, "--format", "mermaid"]).stdout;
+  assert.ok(calls.includes("crate_tests_integration_rs_setup ==> crate_tests_util_rs_sample_order"), calls);
+});
+
+test("a symbolic link to a file or a directory inside the root is read, once, under its own path", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-links-"));
+
+  try {
+    mkdirSync(join(dir, "src/real"), { recursive: true });
+    writeFileSync(join(dir, "src/real/a.ts"), "export function a(): number { return 1; }\n");
+    writeFileSync(join(dir, "src/b.ts"), "import { a } from \"./real/a.ts\";\nexport function b(): number { return a(); }\n");
+    symlinkSync(join(dir, "src/real"), join(dir, "src/linked"), "dir");
+    symlinkSync(join(dir, "src/b.ts"), join(dir, "src/c.ts"), "file");
+    // A link back up the tree is not walked again; a link to a directory already walked under its own path is left out.
+    symlinkSync(dir, join(dir, "src/loop"), "dir");
+    const views = archdiff(["views", dir]).stdout;
+    assert.ok(views.includes("module:src/real/a.ts") && views.includes("module:src/c.ts") && views.includes("module:src/b.ts"), views);
+    assert.ok(!views.includes("src/loop/") && !views.includes("src/linked/"), views);
+    const calls = archdiff(["diagram", "calls:src/c.ts#b", dir, "--format", "mermaid"]).stdout;
+    assert.ok(calls.includes("src_c_ts_b ==> src_real_a_ts_a"), calls);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the mix puts a class's methods in a lane of the class; lanes lie as columns on request and on a map of many layers", () => {
+  const mixed = JSON.parse(archdiff(["diagram", "layer:lib", fixture, "--expand", "src/lib/orders.ts", "--format", "json"]).stdout) as { groups: { id: string; label: string }[]; nodes: { id: string; group?: string }[] };
+  assert.ok(mixed.groups.some((group) => group.id === "inside:src/lib/orders.ts#OrderService" && group.label === "OrderService (class of orders.ts)"), JSON.stringify(mixed.groups));
+  assert.equal(mixed.nodes.find((node) => node.id === "src/lib/orders.ts#OrderService.place")?.group, "inside:src/lib/orders.ts#OrderService");
+  assert.equal(mixed.nodes.find((node) => node.id === "src/lib/orders.ts#placeOrder")?.group, "inside:src/lib/orders.ts");
+  const columns = JSON.parse(archdiff(["diagram", "modules", fixture, "--lanes", "columns", "--format", "json"]).stdout) as { lanes?: string; groups: { id: string; x: number; y: number; w: number; h: number }[]; nodes: { id: string; group?: string; x: number; y: number; w: number; h: number }[] };
+  assert.equal(columns.lanes, "columns");
+  const sorted = [...columns.groups].sort((a, b) => a.x - b.x);
+
+  for (let i = 1; i < sorted.length; i++) assert.ok(sorted[i]!.x >= sorted[i - 1]!.x + sorted[i - 1]!.w, "lanes side by side");
+
+  for (const node of columns.nodes) {
+    const lane = columns.groups.find((group) => group.id === node.group);
+
+    if (lane) assert.ok(node.x >= lane.x && node.x + node.w <= lane.x + lane.w && node.y >= lane.y && node.y + node.h <= lane.y + lane.h, `${node.id} inside its lane`);
+  }
+
+  // The lines flow forward: the routes lane (which imports) sits left of the lib lane (which it imports).
+  const at = (id: string): number => columns.groups.find((group) => group.id === id)!.x;
+  assert.ok(at("routes") < at("lib"), sorted.map((group) => `${group.id}@${group.x}`).join(" "));
+  assert.equal(JSON.parse(archdiff(["diagram", "modules", fixture, "--format", "json"]).stdout).lanes, undefined, "four lanes stay rows by default");
+});
+
+test("run executes an entry for real with the storages mocked, traced function by function, writes and the network refused", () => {
+  const placed = archdiff(["run", "calls:src/lib/orders.ts#placeOrder", fixture, "--input", '{"id":"o1","total":5}']);
+  assert.equal(placed.status, 0, placed.stdout + placed.stderr);
+  assert.ok(placed.stdout.includes("## Steps, as they happened\n\n1. `src/lib/orders.ts#placeOrder`\n2. `src/lib/orders.ts#validate`\n3. `src/db/store.ts#saveOrder`\n4. `src/lib/log.ts#log`"), placed.stdout);
+  assert.ok(placed.stdout.includes('"id": "o1"') && placed.stdout.includes("0 predicted steps not entered"), placed.stdout);
+  // The file system is a mock: the read is recorded and answered from the mock, nothing on disk is touched.
+  const found = JSON.parse(archdiff(["run", "calls:src/lib/orders.ts#findOrder", fixture, "--input", '{"id":"o1"}', "--storages", '{"node:fs": {"readFileSync": "nothing"}}', "--json"]).stdout) as { steps: { id: string }[]; storageCalls: { module: string; member: string; args: unknown[] }[]; result: unknown; error: string | null };
+  assert.deepEqual(found.steps.map((step) => step.id), ["src/lib/orders.ts#findOrder", "src/db/store.ts#readOrder"]);
+  assert.deepEqual(found.storageCalls, [{ module: "node:fs", member: "readFileSync", args: ["/dev/null"] }]);
+  assert.equal(found.error, null);
+  // A thrown error is the run's error, exit 1; a method and an unknown function are refused with a reason.
+  const negative = archdiff(["run", "calls:src/lib/orders.ts#placeOrder", fixture, "--input", '{"id":"o2","total":-1}']);
+  assert.equal(negative.status, 1);
+  assert.ok(negative.stdout.includes("**Error:** Error: negative"), negative.stdout);
+  assert.ok(archdiff(["run", "calls:src/lib/orders.ts#OrderService.place", fixture]).stdout.includes("a method cannot be run on its own"));
+  assert.equal(archdiff(["run", "calls:src/lib/orders.ts#nope", fixture]).status, 1);
+  assert.equal(archdiff(["run", "layers", fixture]).status, 2);
+  assert.ok(!existsSync(join(fixture, ".archdiff")) || !readdirSync(join(fixture, ".archdiff")).some((name) => name.startsWith("run-")), "the plan file is removed after the run");
 });

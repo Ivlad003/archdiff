@@ -51,8 +51,8 @@ export interface DataFlow {
   input?: string;
 }
 
-/** Packages whose import makes a module a storage. */
-const STORAGE_PACKAGES: Record<string, string> = {
+/** Packages whose import makes a module a storage (and which a run mocks). */
+export const STORAGE_PACKAGES: Record<string, string> = {
   pg: "PostgreSQL (pg)",
   postgres: "PostgreSQL (postgres)",
   mysql: "MySQL",

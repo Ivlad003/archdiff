@@ -630,11 +630,15 @@ function renderCanvasTools(state: State): void {
 let currentGroups: { id: string; label: string }[] = [];
 
 /** Opens or closes the second picture beside the canvas: the same page, embedded, starting from the current link. */
+/** Two canvases side by side need the room Excalidraw's desktop layout wants; below it the split stacks. */
+const SPLIT_SIDE_BY_SIDE = 1520;
+
 function toggleSplit(force?: boolean): void {
   const on = document.body.classList.toggle("split", force);
   const pane = element<HTMLDivElement>("split");
   const frame = element<HTMLIFrameElement>("split-frame");
   pane.hidden = !on;
+  document.body.classList.toggle("stacked", on && window.innerWidth < SPLIT_SIDE_BY_SIDE);
 
   if (on && !frame.src) frame.src = `${location.pathname}?embed=1${location.hash}`;
   element<HTMLButtonElement>("tool-split").classList.toggle("active", on);
@@ -1137,6 +1141,41 @@ async function playFlow(): Promise<void> {
 element<HTMLButtonElement>("mock-generate").addEventListener("click", () => void generateMocks());
 element<HTMLButtonElement>("flow-play").addEventListener("click", () => void playFlow());
 
+/** The entry run for real: the functions it entered light up green, the predicted ones it missed dim; the report goes under the steps. */
+async function runFlowNow(): Promise<void> {
+  const state = stateFromHash();
+
+  if (!state.view.startsWith("calls:")) return;
+  const button = element<HTMLButtonElement>("flow-run");
+  const panel = element<HTMLDivElement>("flow-run-result");
+  button.disabled = true;
+  panel.textContent = "running…";
+  showTab("flow");
+
+  try {
+    const { run, markdown } = await api.runFlow(state.view);
+    flowMarkdown = `${flowMarkdown}\n\n${markdown}`;
+    renderMarkdown(panel, markdown);
+    const entered = run.steps.map((step) => step.id);
+
+    if (canvas) {
+      canvas.highlight(entered, "#66bb6a");
+      canvas.dim(entered.length > 0 ? [...entered, ...run.unexpected] : null);
+    }
+
+    for (const row of flowSteps.querySelectorAll<HTMLElement>(".step")) {
+      row.classList.toggle("entered", entered.includes(row.dataset["id"] ?? ""));
+      row.classList.toggle("missed", run.missed.includes(row.dataset["id"] ?? ""));
+    }
+  } catch (error) {
+    panel.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+element<HTMLButtonElement>("flow-run").addEventListener("click", () => void runFlowNow());
+
 // ── The Chat tab: the task drawn on the view, and the agent that does it ─────
 
 const taskField = element<HTMLTextAreaElement>("task");
@@ -1150,11 +1189,32 @@ let currentRun: { id: string; close: () => void; sessionId: string | null } | nu
 
 function appendEvent(kind: string, text: string): void {
   const row = document.createElement("div");
-  row.className = `ev ${kind}`;
+  row.className = `ev ${kind}${kind === "check" && text.startsWith("✘") ? " failed" : ""}`;
   row.textContent = text;
   transcript.append(row);
   transcript.scrollTop = transcript.scrollHeight;
 }
+
+/** The contract and the configured checks, run now and shown in the transcript. */
+async function runChecksNow(): Promise<void> {
+  const button = element<HTMLButtonElement>("checks");
+  button.disabled = true;
+  runState.textContent = "running the checks…";
+
+  try {
+    const { events } = await api.runChecks();
+
+    for (const event of events) appendEvent(event.kind, event.text);
+    runState.textContent = events.length === 0 ? "no checks: no ARCHITECTURE.md and no \"checks\" in archdiff.json" : events.every((event) => event.text.startsWith("✔")) ? "every check passed" : "a check failed; see the transcript";
+    showTab("chat");
+  } catch (error) {
+    runState.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+element<HTMLButtonElement>("checks").addEventListener("click", () => void runChecksNow());
 
 /** The shapes of the current diagram that stand for `files` (a path, or its end), to light while the agent works on them. */
 function shapesOfFiles(files: readonly string[]): string[] {
@@ -1718,6 +1778,15 @@ element<HTMLButtonElement>("tool-focus").addEventListener("click", () => {
 });
 element<HTMLButtonElement>("mix-clear").addEventListener("click", () => setHash({ ...stateFromHash(), expand: [] }));
 element<HTMLButtonElement>("tool-split").addEventListener("click", () => toggleSplit());
+window.addEventListener("resize", () => {
+  if (document.body.classList.contains("split")) document.body.classList.toggle("stacked", window.innerWidth < SPLIT_SIDE_BY_SIDE);
+});
+element<HTMLButtonElement>("tool-lanes").addEventListener("click", () => {
+  // Rows ↔ columns; auto (the layout's own choice) counts as whatever the picture shows, so the first press flips it.
+  const now = stateFromHash();
+  const rows = now.lanes === "rows" || (now.lanes === "auto" && !(currentGroups.length > 6 && (now.view === "modules" || now.view.startsWith("layer:") || now.view.startsWith("dir:"))));
+  setHash({ ...now, lanes: rows ? "columns" : "rows" });
+});
 element<HTMLButtonElement>("tool-map").addEventListener("click", () => {
   minimapWanted = minimapWanted === null ? !(nodes.size > 60) : !minimapWanted;
   updateMinimap();

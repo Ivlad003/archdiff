@@ -203,7 +203,15 @@ export function expandInPlace(diagram: Diagram, graph: Graph, expand: readonly s
     fnsOf.set(module, own);
     groups.push({ id: laneId, label: `${module} (inside)`, kind: "lane", x: 0, y: 0, w: 0, h: 0 });
 
-    for (const id of own) nodes.push({ ...fnNode(graph, id), group: laneId });
+    // The methods of a class sit in a lane of the class, under the module's lane of plain functions.
+    for (const id of own) {
+      const fn = graph.nodes.get(id)!;
+      const owner = fn.parent ? `${laneId}#${fn.parent}` : laneId;
+
+      if (fn.parent && !groups.some((group) => group.id === owner)) groups.push({ id: owner, label: `${fn.parent} (class of ${module.slice(module.lastIndexOf("/") + 1)})`, kind: "lane", x: 0, y: 0, w: 0, h: 0 });
+      nodes.push({ ...fnNode(graph, id), group: owner });
+    }
+
     nodes.push({ id: restOf(module), kind: "module", label: `${module.slice(module.lastIndexOf("/") + 1)}\n(rest of the module)`, ref: { id: module, file: module, line: 1 }, group: laneId, x: 0, y: 0, w: 0, h: 0 });
   }
 

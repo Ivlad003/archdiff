@@ -19,3 +19,25 @@ jobs:
       - run: npm test
       - run: npm run test:web
       - run: npm pack --dry-run
+      # The action on this repository itself: the review of the push against its parent, as a pull request would get it.
+      - name: Review the architecture of this change
+        if: github.event_name == 'push'
+        run: node bin/archdiff.js review --base HEAD~1 || test $? -eq 1
+  review:
+    # The GitHub Action (action.yml) as a user's workflow runs it: the architectural diff of the pull request as a comment and a check.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./
+        with:
+          fail-on-layer-coupling: "true"
+          comment: "true"

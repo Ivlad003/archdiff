@@ -33,6 +33,8 @@ export interface Config {
   storages: Record<string, string>;
   /** Package name → what a module importing it holds (`"my-orm": "MyORM"`), beside the built-in table. */
   storagePackages: Record<string, string>;
+  /** Shell commands run after every agent run and on request (`npm test`, `npm run typecheck`); Claude Code may run exactly these. */
+  checks: string[];
 }
 
 export interface HubThresholds {
@@ -44,7 +46,7 @@ export interface HubThresholds {
 /** A quarter of a picture marks the logger and the shared types, not a busy neighbour; at least 6 importers, and 40 on a big map whatever its size. */
 export const DEFAULT_HUBS: HubThresholds = { min: 6, share: 0.25, max: 40 };
 
-export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null, hubs: DEFAULT_HUBS, storages: {}, storagePackages: {} };
+export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null, hubs: DEFAULT_HUBS, storages: {}, storagePackages: {}, checks: [] };
 
 /** `"storages": { "<glob>": "<what it holds>" }`: an object of strings. */
 function stringMap(value: JsonValue | undefined, file: string, field: string): Record<string, string> {
@@ -89,7 +91,7 @@ export function loadConfig(root: string): Config {
 
   if (other !== undefined && !isJsonString(other)) throw new Error(`${CONFIG_FILE}: "other" must be a string`);
 
-  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: agentFromConfig(parsed["agent"]), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages") };
+  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: agentFromConfig(parsed["agent"]), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages"), checks: stringList(parsed["checks"], CONFIG_FILE, "checks") };
 }
 
 /** `"hubs": { "min": 6, "share": 0.25, "max": 40 }`, each field optional; a wrong field names itself. */

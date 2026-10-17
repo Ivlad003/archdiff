@@ -333,3 +333,86 @@ test("code this folds the drawing into the contract and writes the task; the int
   assert.equal(fromDocument.source, "document");
   assert.equal(fromDocument.modules, 2);
 });
+
+test("after a run the contract and the configured checks run, their results in the run's events; /api/checks runs them on request", async () => {
+  // A second server on a copy of the fixture with checks: one that passes, one that fails with output.
+  const checked = mkdtempSync(join(tmpdir(), "archdiff-checks-"));
+  cpSync(fixture, checked, { recursive: true });
+  writeFileSync(join(checked, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"], cartridge: ["cartridges/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" }, checks: [`${JSON.stringify(process.execPath)} -e "process.exit(0)"`, `${JSON.stringify(process.execPath)} -e "process.stderr.write('boom'); process.exit(3)"`] }));
+  writeFileSync(join(checked, "ARCHITECTURE.md"), "# Architecture\n\n```mermaid\nflowchart LR\n  subgraph lib\n    o[src/lib/orders.ts]\n  end\n  subgraph db\n    s[src/db/store.ts]\n  end\n  o --> s\n```\n");
+  const second = spawn(process.execPath, [join(root, "bin/archdiff.js"), "web", checked, "--port", "0", "--no-watch"], { stdio: ["ignore", "ignore", "pipe"] });
+
+  try {
+    const origin = await new Promise<string>((resolve, reject) => {
+      let text = "";
+      second.stderr!.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+        const match = text.match(/archdiff web: (http:\/\/[^/]+)\//);
+
+        if (match) resolve(match[1]!);
+      });
+      second.on("exit", (code) => reject(new Error(`server exited with ${code}: ${text}`)));
+      setTimeout(() => reject(new Error(`server did not start: ${text}`)), 60_000);
+    });
+    const started = await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "do nothing", resume: null }) });
+    const run = JSON.parse(await started.text()) as { id: string };
+    const events = (await (await fetch(`${origin}/api/agent/events?id=${run.id}`)).text()).split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => JSON.parse(chunk.slice(6)) as { kind: string; text: string });
+    const checks = events.filter((event) => event.kind === "check").map((event) => event.text);
+    assert.equal(checks.length, 3, JSON.stringify(events));
+    assert.equal(checks[0], "✔ archdiff check: the code follows ARCHITECTURE.md");
+    assert.ok(checks[1]!.startsWith("✔ ") && checks[1]!.includes("process.exit(0)"), checks[1]);
+    assert.ok(checks[2]!.startsWith("✘ ") && checks[2]!.includes("(exit 3)") && checks[2]!.endsWith("\nboom"), checks[2]);
+    assert.equal(events[events.length - 1]?.kind, "exit");
+    // On request, without a run.
+    const onRequest = (await (await fetch(`${origin}/api/checks`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json()) as { results: { command: string; ok: boolean; code?: number | null }[] };
+    assert.deepEqual(onRequest.results.map((result) => [result.ok, result.code ?? null]), [[true, null], [true, 0], [false, 3]]);
+  } finally {
+    second.kill();
+    rmSync(checked, { recursive: true, force: true });
+  }
+});
+
+test("Cursor's stream-json (chat_id, --resume) is read like Claude's: the question protocol and the resumed answer work", async () => {
+  const cursored = mkdtempSync(join(tmpdir(), "archdiff-cursor-"));
+  cpSync(fixture, cursored, { recursive: true });
+  writeFileSync(join(cursored, "archdiff.json"), JSON.stringify({ agent: { name: "cursor-fake", command: [process.execPath, join(root, "tests/fixtures/fake-cursor.mjs")], resume: "--resume" } }));
+  const second = spawn(process.execPath, [join(root, "bin/archdiff.js"), "web", cursored, "--port", "0", "--no-watch"], { stdio: ["ignore", "ignore", "pipe"] });
+
+  try {
+    const origin = await new Promise<string>((resolve, reject) => {
+      let text = "";
+      second.stderr!.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+        const match = text.match(/archdiff web: (http:\/\/[^/]+)\//);
+
+        if (match) resolve(match[1]!);
+      });
+      second.on("exit", (code) => reject(new Error(`server exited with ${code}: ${text}`)));
+      setTimeout(() => reject(new Error(`server did not start: ${text}`)), 60_000);
+    });
+    const started = JSON.parse(await (await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "pick a store; ask the user", resume: null }) })).text()) as { id: string; agent: string };
+    assert.equal(started.agent, "cursor-fake");
+    const events = (await (await fetch(`${origin}/api/agent/events?id=${started.id}`)).text()).split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => JSON.parse(chunk.slice(6)) as { kind: string; text: string; sessionId?: string });
+    assert.equal(events[0]?.sessionId, "chat-7");
+    assert.ok(events.some((event) => event.kind === "text" && event.text.includes("```archdiff-question")), JSON.stringify(events));
+    const answered = JSON.parse(await (await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "SQLite", resume: "chat-7" }) })).text()) as { id: string };
+    const more = await (await fetch(`${origin}/api/agent/events?id=${answered.id}`)).text();
+    assert.ok(more.includes("Cursor resumed: SQLite"), more);
+  } finally {
+    second.kill();
+    rmSync(cursored, { recursive: true, force: true });
+  }
+});
+
+test("the Flow tab's run: POST /api/flow/run executes the entry with the saved mocks and reports the steps against the prediction", async () => {
+  const view = "calls:src/lib/orders.ts#placeOrder";
+  await fetch(`${base}/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: [], mocks: [{ id: "src/lib/orders.ts#placeOrder", kind: "input", value: '{"id": "web-1", "total": 7}' }] }) });
+  const answer = await fetch(`${base}/api/flow/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view }) });
+  assert.equal(answer.status, 200);
+  const { run, markdown } = (await answer.json()) as { run: { steps: { id: string }[]; result: { id: string; total: number }; missed: string[] }; markdown: string };
+  assert.deepEqual(run.steps.map((step) => step.id), ["src/lib/orders.ts#placeOrder", "src/lib/orders.ts#validate", "src/db/store.ts#saveOrder", "src/lib/log.ts#log"]);
+  assert.deepEqual(run.result, { id: "web-1", total: 7 });
+  assert.deepEqual(run.missed, []);
+  assert.ok(markdown.startsWith("<!-- archdiff:generated — run "), markdown);
+  assert.equal((await fetch(`${base}/api/flow/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers" }) })).status, 400);
+});

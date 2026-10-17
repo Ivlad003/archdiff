@@ -197,3 +197,52 @@ test("archdiff.json's layers follow the intent: a directory as the glob, the fil
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** A small deterministic generator, so a failing placement can be reproduced from its seed. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test("shapes placed anywhere by hand: the grid router runs no line through a shape, on 150 random placements", async () => {
+  const { routeFree } = await import("../src/export/route-free.ts");
+
+  for (let seed = 1; seed <= 150; seed++) {
+    const random = mulberry32(seed);
+    const count = 6 + Math.floor(random() * 16);
+    const nodes: DiagramNode[] = [];
+
+    // Shapes on a jittered grid, so none overlaps another; some cells left empty.
+    for (let i = 0; i < count; i++) {
+      const column = i % 5;
+      const row = Math.floor(i / 5);
+      const w = 120 + Math.floor(random() * 90);
+      const h = 40 + Math.floor(random() * 40);
+      nodes.push({ id: `n${i}`, kind: "module", label: `n${i}`, x: 40 + column * 260 + Math.floor(random() * 50), y: 40 + row * 140 + Math.floor(random() * 60), w, h });
+    }
+
+    const edges = [];
+
+    for (let i = 0; i < count + 4; i++) {
+      const from = nodes[Math.floor(random() * count)]!.id;
+      const to = nodes[Math.floor(random() * count)]!.id;
+
+      if (from !== to) edges.push({ from, to, kind: "dependency" as const });
+    }
+
+    const diagram: Diagram = { view: `random-${seed}`, title: "random", nodes, edges, groups: [], freeform: true };
+    assert.deepEqual(crossings(diagram), [], `seed ${seed}`);
+    // Every route is orthogonal and starts and ends on its shapes' sides.
+    for (const [edge, points] of routeFree(diagram)) {
+      for (let i = 1; i < points.length; i++) assert.ok(points[i]!.x === points[i - 1]!.x || points[i]!.y === points[i - 1]!.y, `seed ${seed}: ${edge.from} → ${edge.to} bends diagonally`);
+    }
+  }
+});

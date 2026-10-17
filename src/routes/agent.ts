@@ -14,6 +14,8 @@ import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE
 import { readLayout } from "../layouts.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView } from "../views.ts";
+import { checkEvents, runChecks } from "../checks.ts";
+import { runFlow, runMarkdown } from "../run.ts";
 import { json, problem, type RouteContext, type RouteRequest } from "./context.ts";
 
 /** Where the prompts sent to the agent are kept, beside the drawings. */
@@ -154,6 +156,40 @@ export async function postFlowMocks(ctx: RouteContext, { body, response }: Route
   return json(response, { source: agentSpec.name, input: answer.input ?? typed.input, storages: answer.storages ?? typed.storages });
 }
 
+export async function postFlowRun(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
+  const { root } = ctx;
+  // A real run of a calls view's entry with the saved mocks (and any given here), for the Flow tab's ▶ run.
+  let parsed;
+
+  try {
+    parsed = parseJson(body);
+  } catch {
+    return problem(response, 400, "the body must be JSON");
+  }
+
+  const key = isJsonObject(parsed) && isJsonString(parsed["view"]) ? parsed["view"] : "";
+  const view = parseView(key);
+
+  if (!view || view.kind !== "calls") return problem(response, 400, "the run needs a calls: view");
+  const analysis = await ctx.fresh();
+  const options: Parameters<typeof runFlow>[2] = { mocks: readLayout(root, key)?.mocks ?? [] };
+
+  if (isJsonObject(parsed) && isJsonObject(parsed["input"])) options.input = parsed["input"];
+
+  if (isJsonObject(parsed) && isJsonObject(parsed["storages"])) options.storages = parsed["storages"];
+  const result = await runFlow(analysis, view.id, options);
+
+  return json(response, { run: result, markdown: runMarkdown(result) });
+}
+
+export async function postChecks(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
+  // The checks on request: the contract, then archdiff.json's commands, as the run's events would carry them.
+  ctx.invalidate();
+  const results = await runChecks(await ctx.fresh());
+
+  return json(response, { results, events: checkEvents(results) });
+}
+
 export async function postAgentStop(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
   const id = url.searchParams.get("id") ?? "";
   const run = ctx.activeRunner()?.runs.get(id);
@@ -232,6 +268,8 @@ export const routes: Record<string, (ctx: RouteContext, request: RouteRequest) =
   "POST /api/intent/document": postIntentDocument,
   "POST /api/flow/mocks": postFlowMocks,
   "POST /api/agent/stop": postAgentStop,
+  "POST /api/checks": postChecks,
+  "POST /api/flow/run": postFlowRun,
   "GET /api/flow": getFlow,
   "GET /api/intent": getIntent,
   "GET /api/check": getCheck,

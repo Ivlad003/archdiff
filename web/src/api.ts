@@ -87,7 +87,7 @@ export interface FlowResponse {
 
 export interface AgentEvent {
   seq: number;
-  kind: "text" | "tool" | "result" | "init" | "raw" | "stderr" | "exit";
+  kind: "text" | "tool" | "result" | "init" | "raw" | "stderr" | "exit" | "check";
   text: string;
   sessionId?: string;
   /** The files a tool event touched: the page lights their shapes. */
@@ -172,6 +172,8 @@ export const api = {
     return body;
   },
   stopAgent: (id: string) => fetch(`/api/agent/stop?id=${encodeURIComponent(id)}`, { method: "POST" }),
+  /** The contract and the checks of archdiff.json, run now; the events as the transcript shows them. */
+  runChecks: () => post<{ results: { command: string; ok: boolean; output: string }[]; events: { kind: string; text: string }[] }>("/api/checks", {}),
   /** Streams the events of a run; returns the closer. */
   agentEvents: (id: string, onEvent: (event: AgentEvent) => void, onEnd: () => void): (() => void) => {
     const source = new EventSource(`/api/agent/events?id=${encodeURIComponent(id)}`);
@@ -192,6 +194,8 @@ export const api = {
     return () => source.close();
   },
   flow: (view: string, depth: number | null) => get<FlowResponse>(`/api/flow?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
+  /** A real run of the entry with the saved mocks: the functions entered, the storage calls, the result, against the prediction. */
+  runFlow: (view: string) => post<{ run: { steps: { id: string; order: number }[]; storageCalls: { module: string; member: string; args: unknown[] }[]; result: unknown; error: string | null; ms: number; predicted: string[]; missed: string[]; unexpected: string[] }; markdown: string }>("/api/flow/run", { view }),
   scene: (view: string, options: PictureOptions, base: string | null, head: string | null) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${pictureQueryText(options)}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}`),
   saveLayout: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
     const response = await fetch(`/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });

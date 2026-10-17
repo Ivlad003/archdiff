@@ -24,6 +24,8 @@ export interface AgentSpec {
   command: string[];
   /** The flag that resumes a session, followed by the session ID; null when the agent cannot. */
   resumeFlag: string | null;
+  /** Claude Code: the tools it may use without asking, appended as `--allowedTools` (the checks of archdiff.json, archdiff itself). */
+  allowedTools?: string[];
 }
 
 /** The built-in agents: print mode, streamed JSON, edits allowed without a prompt (shell commands still follow the agent's own rules). */
@@ -53,7 +55,7 @@ export function agentFromConfig(value: JsonValue | undefined): AgentSpec | null 
 /** One event of a run, as the page shows it. */
 export interface AgentEvent {
   seq: number;
-  kind: "text" | "tool" | "result" | "init" | "raw" | "stderr" | "exit";
+  kind: "text" | "tool" | "result" | "init" | "raw" | "stderr" | "exit" | "check";
   text: string;
   sessionId?: string;
   /** The files a tool event names (file_path, path, notebook_path of a tool_use), repository-relative when they are under it: the page lights their shapes. */
@@ -121,7 +123,7 @@ export class AgentRun {
   private readonly listeners = new Set<(event: AgentEvent) => void>();
   private readonly child: ChildProcess;
 
-  constructor(id: string, child: ChildProcess, sessionId: string | null) {
+  constructor(id: string, child: ChildProcess, sessionId: string | null, afterRun: (() => Promise<Omit<AgentEvent, "seq">[]>) | null = null) {
     this.id = id;
     this.child = child;
     this.sessionId = sessionId;
@@ -138,8 +140,12 @@ export class AgentRun {
     child.on("error", (error) => this.push({ kind: "stderr", text: error.message }));
     child.on("close", (code) => {
       this.exitCode = code;
-      this.done = true;
-      this.push({ kind: "exit", text: `exited with ${code ?? "signal"}` });
+      // The checks run after the agent, before the run is over: their events reach whoever listens, then the exit.
+      void (afterRun ? afterRun() : Promise.resolve([])).catch((error: unknown): Omit<AgentEvent, "seq">[] => [{ kind: "stderr", text: `checks: ${error instanceof Error ? error.message : String(error)}` }]).then((events) => {
+        for (const event of events) this.push(event);
+        this.done = true;
+        this.push({ kind: "exit", text: `exited with ${code ?? "signal"}` });
+      });
     });
   }
 
@@ -169,22 +175,27 @@ export class AgentRunner {
   readonly runs = new Map<string, AgentRun>();
   readonly spec: AgentSpec;
   private readonly root: string;
+  private readonly afterRun: (() => Promise<Omit<AgentEvent, "seq">[]>) | null;
   private next = 1;
 
-  constructor(root: string, spec: AgentSpec) {
+  /** `afterRun`: what runs once the agent exits (the checks), its events appended to the run before the exit. */
+  constructor(root: string, spec: AgentSpec, afterRun: (() => Promise<Omit<AgentEvent, "seq">[]>) | null = null) {
     this.root = root;
     this.spec = spec;
+    this.afterRun = afterRun;
   }
 
   /** Starts the agent on `prompt`; `resume` continues that session when the agent can. */
-  start(prompt: string, resume: string | null): AgentRun {
+  start(prompt: string, resume: string | null, checks = true): AgentRun {
     const args = [...this.spec.command.slice(1)];
 
     if (resume && this.spec.resumeFlag) args.push(this.spec.resumeFlag, resume);
+
+    if (this.spec.allowedTools && this.spec.allowedTools.length > 0) args.push("--allowedTools", ...this.spec.allowedTools);
     args.push(prompt);
     const child = spawn(this.spec.command[0]!, args, { cwd: this.root, stdio: ["ignore", "pipe", "pipe"], env: process.env });
     const id = `run-${this.next++}`;
-    const run = new AgentRun(id, child, resume);
+    const run = new AgentRun(id, child, resume, checks ? this.afterRun : null);
     this.runs.set(id, run);
 
     return run;
@@ -192,7 +203,8 @@ export class AgentRunner {
 
   /** Runs `prompt` to its end and gives the result text (the agent's final answer), or the texts joined when there is no result event. */
   runToResult(prompt: string, timeoutMs = 180_000): Promise<string> {
-    const run = this.start(prompt, null);
+    // A question to the agent (mocks, a document): no checks after it.
+    const run = this.start(prompt, null, false);
 
     return new Promise((resolve) => {
       const timer = setTimeout(() => run.stop(), timeoutMs);
