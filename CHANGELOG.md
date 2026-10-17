@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Six more tools of the canvas: the shortest path between two shapes (Shift+tap), lanes ticked in and out (`--hide-lanes`), find with centring (`/`), a split pane with a second embedded picture (`s`), only the changed shapes and their neighbours in a review picture (`--only-changes`), and a minimap (by itself above 60 shapes).
 - The canvas toolbar: a picture select (this subject's pictures, then the overviews), detail presets minimal / normal / full and depth −/+, **mix** (a tapped module opens in place as a lane of its functions, the lines landing on the functions they concern; `--expand` in the terminal) and **focus** (everything but a tapped shape and its neighbours dims).
 
 ## 0.3.0 — 2026-10-17

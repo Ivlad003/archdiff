@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
 import { coverageReport } from "./coverage.ts";
 import { layout, type DiagramNode } from "./diagram.ts";
-import { commitsBetween, compareBranches, comparisonMarkdown, defaultBase, fileHistory, history, listBranches, mergeBase, overlayDiff, review, reviewMarkdown, revisionStamp } from "./diff.ts";
+import { commitsBetween, compareBranches, comparisonMarkdown, defaultBase, fileHistory, history, listBranches, mergeBase, onlyChanged, overlayDiff, review, reviewMarkdown, revisionStamp } from "./diff.ts";
 import { timelineDiagram } from "./views-more.ts";
 import { watch as watchFs } from "node:fs";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "./export/index.ts";
@@ -163,11 +163,12 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
   // The placed diagram of a view, at the saved places when the view was drawn by hand.
   /** The options of a picture as the query names them: depth, limit, packages, changes, overlays. */
-  const optionsOf = (url: URL): { depth?: number; limit?: number; weight?: number; hubs: boolean; packages: boolean; changes: boolean; overlays: Overlay[]; expand: string[] } => {
+  const optionsOf = (url: URL): { depth?: number; limit?: number; weight?: number; hubs: boolean; packages: boolean; changes: boolean; onlyChanges: boolean; overlays: Overlay[]; expand: string[]; hide: string[] } => {
     const depthText = url.searchParams.get("depth");
     const limitText = url.searchParams.get("limit");
     const weightText = url.searchParams.get("weight");
-    const out: { depth?: number; limit?: number; weight?: number; hubs: boolean; packages: boolean; changes: boolean; overlays: Overlay[]; expand: string[] } = { hubs: url.searchParams.get("hubs") !== "0", packages: url.searchParams.get("packages") === "1", changes: url.searchParams.get("changes") === "1", overlays: parseOverlays(url.searchParams.get("overlay")), expand: (url.searchParams.get("expand") ?? "").split(",").filter((id) => id !== "") };
+    const list = (name: string): string[] => (url.searchParams.get(name) ?? "").split(",").filter((item) => item !== "");
+    const out: { depth?: number; limit?: number; weight?: number; hubs: boolean; packages: boolean; changes: boolean; onlyChanges: boolean; overlays: Overlay[]; expand: string[]; hide: string[] } = { hubs: url.searchParams.get("hubs") !== "0", packages: url.searchParams.get("packages") === "1", changes: url.searchParams.get("changes") === "1", onlyChanges: url.searchParams.get("only") === "changes", overlays: parseOverlays(url.searchParams.get("overlay")), expand: list("expand"), hide: list("hide") };
 
     if (depthText !== null && depthText !== "" && Number.isInteger(Number(depthText)) && Number(depthText) >= 0) out.depth = Number(depthText);
 
@@ -183,7 +184,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     const view = parseView(key);
 
     if (!view) return null;
-    const viewOptions: ViewOptions = { packages: picked.packages, hubs: picked.hubs, expand: picked.expand };
+    const viewOptions: ViewOptions = { packages: picked.packages, hubs: picked.hubs, expand: picked.expand, hideLanes: picked.hide };
 
     if (picked.depth !== undefined) viewOptions.depth = picked.depth;
 
@@ -196,7 +197,8 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     if (picked.changes && view.kind !== "timeline") {
       // `changes`: the review's marks laid over the view, so the structure and what the change did to it are one picture.
       const result = await review(root, base || options.base, head);
-      diagram = layout(applyOverlays(overlayDiff(viewOf(analysis, view, viewOptions), result.diff), analysis, picked.overlays), positions);
+      const marked = overlayDiff(viewOf(analysis, view, viewOptions), result.diff);
+      diagram = layout(applyOverlays(picked.onlyChanges ? onlyChanged(marked) : marked, analysis, picked.overlays), positions);
     } else if (view.kind === "timeline") {
       // The timeline is built from the commits of a range, not from one analysis.
       const from = base || options.base || mergeBase(root);

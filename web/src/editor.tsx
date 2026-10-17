@@ -22,7 +22,7 @@ export interface CanvasEvents {
    * generated lines within reach of the tap, the nearest first (several where arrows run close together); `follow` is a
    * tap with Shift held: trace the chain onward from the line.
    */
-  pick(id: string | null, lines?: PickedLine[], follow?: boolean): void;
+  pick(id: string | null, lines?: PickedLine[], shift?: boolean): void;
   /** A double tap on a shape, or its link: open the view the link names (`archdiff://view/<key>`). */
   open(id: string, link: string | null): void;
   /** The scene changed by hand (edit mode). */
@@ -44,6 +44,10 @@ export interface CanvasHandle {
   hover(id: string | null): void;
   /** Dims every generated shape and line not in `keep` (and the labels of the dimmed); null clears the dimming. */
   dim(keep: readonly string[] | null): void;
+  /** Scrolls so the element is at the centre of the canvas, at the current zoom. */
+  centreOn(id: string): void;
+  /** The size of the canvas on screen, for the minimap's viewport box. */
+  size(): { width: number; height: number };
   /** Where the viewport is, to remember per view. */
   viewport(): { scrollX: number; scrollY: number; zoom: number } | null;
   setViewport(viewport: { scrollX: number; scrollY: number; zoom: number }): void;
@@ -220,7 +224,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         }
 
         lastTap = hit ? { id: hit.id, at: now } : null;
-        events.pick(hit?.id ?? null);
+        events.pick(hit?.id ?? null, undefined, event.shiftKey);
       },
       true,
     );
@@ -417,6 +421,15 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       highlight,
       hover,
       dim,
+      centreOn: (id) => {
+        if (!api) return;
+        const target = (api.getSceneElements() as unknown as SceneElement[]).find((element) => element.id === id);
+
+        if (!target) return;
+        const zoom = api.getAppState().zoom.value;
+        api.updateScene({ appState: { scrollX: container.clientWidth / zoom / 2 - (target.x + target.width / 2), scrollY: container.clientHeight / zoom / 2 - (target.y + target.height / 2) } });
+      },
+      size: () => ({ width: container.clientWidth, height: container.clientHeight }),
       viewport: () => {
         if (!api) return null;
         const state = api.getAppState();

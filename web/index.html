@@ -35,6 +35,7 @@
           <fieldset>
             <legend>overlays</legend>
             <label title="Lay the review's marks (base → head) over this view: what the change touched, in colour"><input id="changes" type="checkbox" /> changes since base</label>
+            <label title="With the changes: keep only the marked shapes and their neighbours"><input id="only-changes" type="checkbox" /> only the changed and their neighbours</label>
             <label title="Mark the modules no test file imports"><input type="checkbox" class="overlay" value="tests" /> untested modules</label>
             <label title="Label the modules that hold data: stores, databases, caches"><input type="checkbox" class="overlay" value="storages" /> storages</label>
             <label title="Shade every shape by the calls into it from other modules"><input type="checkbox" class="overlay" value="heat" /> heat: calls in</label>
@@ -114,7 +115,16 @@
             <button id="tool-mix" title="Mix: tap a module to open it in place as a lane of its functions, with the lines landing on the functions they concern; tap it again to close it (m)">mix</button>
             <button id="tool-focus" title="Focus: tap a shape to dim everything but it and its neighbours; tap nothing to clear (f)">focus</button>
             <button id="mix-clear" hidden title="Close every module opened in place">close opened</button>
+            <details id="lanes-menu" title="Which lanes the picture shows">
+              <summary>lanes</summary>
+              <div id="lanes"></div>
+            </details>
+            <input id="find" type="search" placeholder="find shape (/)" title="Type to light the matching shapes; Enter centres the first and opens it; Esc clears" />
+            <button id="tool-split" title="A second picture beside this one, with its own view and options (s)">split</button>
+            <button id="tool-map" title="The minimap: the whole picture small, the viewport as a box; shown by itself above 60 shapes">map</button>
           </div>
+          <div id="split" hidden><iframe id="split-frame" title="The second picture"></iframe></div>
+          <canvas id="minimap" width="220" height="150" hidden title="Tap to move there"></canvas>
           <div id="reason" class="muted"></div>
         </div>
         <div id="legend">

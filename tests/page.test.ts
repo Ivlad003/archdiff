@@ -179,6 +179,64 @@ test("a tap on a line lights it with its ends and shows where it leads", { skip:
   await page!.waitForFunction(`![...document.querySelectorAll("#markdown h2")].some((h) => h.textContent?.startsWith("Chain onward"))`);
 });
 
+/** Where the scene element sits on screen after the page's own fit (bounds centred, zoom at most 1, 32 px margin). */
+async function screenPointOf(view: string, elementId: string, extra = ""): Promise<{ x: number; y: number }> {
+  const scene = (await (await fetch(`${base}/api/scene?view=${encodeURIComponent(view)}${extra}`)).json()) as { elements: { id: string; x: number; y: number; width: number; height: number; isDeleted?: boolean }[] };
+  const all = scene.elements.filter((element) => !element.isDeleted);
+  const minX = Math.min(...all.map((element) => element.x));
+  const minY = Math.min(...all.map((element) => element.y));
+  const maxX = Math.max(...all.map((element) => element.x + element.width));
+  const maxY = Math.max(...all.map((element) => element.y + element.height));
+  const box = (await page!.evaluate(`document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect().toJSON()`)) as { left: number; top: number; width: number; height: number };
+  const zoom = Math.max(0.1, Math.min(1, (box.width - 64) / (maxX - minX), (box.height - 64) / (maxY - minY)));
+  const scrollX = box.width / zoom / 2 - (minX + (maxX - minX) / 2);
+  const scrollY = box.height / zoom / 2 - (minY + (maxY - minY) / 2);
+  const target = all.find((element) => element.id === elementId)!;
+  assert.ok(target, `no element ${elementId}`);
+
+  return { x: box.left + (target.x + target.width / 2 + scrollX) * zoom, y: box.top + (target.y + target.height / 2 + scrollY) * zoom };
+}
+
+test("find, lanes, split, the path between two shapes and the minimap", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.evaluate("localStorage.clear()");
+  await page!.goto(`${base}/?fresh=7#view=layer%3Alib`);
+  await page!.waitForSelector(".excalidraw canvas");
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.includes("lib")`);
+  await page!.waitForTimeout(1000);
+  // The path: a tap on orders.ts, then Shift+tap on log.ts.
+  const orders = await screenPointOf("layer:lib", "src/lib/orders.ts");
+  const log = await screenPointOf("layer:lib", "src/lib/log.ts");
+  await page!.mouse.click(orders.x, orders.y);
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/lib/orders.ts"`, undefined, { timeout: 8000 });
+  await page!.keyboard.down("Shift");
+  await page!.mouse.click(log.x, log.y);
+  await page!.keyboard.up("Shift");
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "Path: src/lib/orders.ts → src/lib/log.ts"`, undefined, { timeout: 8000 });
+  assert.ok((await page!.textContent("#markdown"))?.includes("src/lib/orders.ts → src/lib/log.ts"));
+  // Find: typing counts the matches, Enter centres the first and opens it (the viewport moves: taps by position come before this).
+  await page!.fill("#find", "store");
+  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("1 shape matches")`);
+  await page!.press("#find", "Enter");
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/db/store.ts"`, undefined, { timeout: 8000 });
+  await page!.press("#find", "Escape");
+  // Lanes: unticking routes hides it through the link.
+  await page!.click("#lanes-menu summary");
+  const routesBox = page!.locator("#lanes label", { hasText: "routes" }).locator("input");
+  await routesBox.uncheck();
+  await page!.waitForFunction(`location.hash.includes("hide=routes")`);
+  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("lanes hidden: routes")`);
+  // The minimap by the button, the split pane with the embedded page.
+  await page!.click("#tool-map");
+  await page!.waitForFunction(`!document.querySelector("#minimap").hidden`);
+  await page!.click("#tool-split");
+  await page!.waitForFunction(`document.body.classList.contains("split") && document.querySelector("#split-frame").src.includes("embed=1")`);
+  const frame = page!.frameLocator("#split-frame");
+  await frame.locator(".excalidraw canvas").first().waitFor({ timeout: 15_000 });
+  assert.equal(await frame.locator("#top").isVisible(), false, "the embedded page shows its header");
+  await page!.click("#tool-split");
+  await page!.waitForFunction(`!document.body.classList.contains("split")`);
+});
+
 test("the canvas toolbar switches the picture, sets the detail and opens a module in place with the mix tool", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.evaluate("localStorage.clear()");
   await page!.goto(`${base}/?fresh=5#view=layer%3Alib`);

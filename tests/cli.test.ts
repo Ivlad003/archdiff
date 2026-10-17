@@ -697,6 +697,10 @@ test("--changes lays the review's marks over any view", () => {
     const layer = JSON.parse(archdiff(["diagram", "layer:lib", dir, "--changes", "--base", "HEAD", "--format", "json", "--depth", "0"]).stdout) as { nodes: { id: string; diff?: string }[] };
     assert.equal(layer.nodes.find((node) => node.id === "src/lib/log.ts")?.diff, "changed");
     assert.equal(layer.nodes.find((node) => node.id === "src/lib/orders.ts")?.diff, undefined);
+    // --only-changes: the changed module, its importer, nothing else.
+    const only = JSON.parse(archdiff(["diagram", "layer:lib", dir, "--changes", "--base", "HEAD", "--only-changes", "--format", "json"]).stdout) as { nodes: { id: string }[]; reason?: string };
+    assert.deepEqual(only.nodes.map((node) => node.id).sort(), ["src/lib/log.ts", "src/lib/orders.ts"]);
+    assert.ok(only.reason?.includes("only the 1 changed shapes and their neighbours"), only.reason);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -708,6 +712,14 @@ test("--mermaid picks a Mermaid type that fits the view", () => {
   assert.ok(archdiff(["diagram", "layers", fixture, "--format", "mermaid", "--mermaid", "pie"]).stdout.includes('"lib" : 2'));
   assert.ok(archdiff(["diagram", "layer:lib", fixture, "--mermaid", "mindmap"]).stdout.includes("mindmap"));
   assert.equal(archdiff(["diagram", "layers", fixture, "--mermaid", "venn"]).status, 2);
+});
+
+test("--hide-lanes leaves lanes and their shapes out of the picture", () => {
+  const json = JSON.parse(archdiff(["diagram", "layer:lib", fixture, "--hide-lanes", "routes,nowhere", "--format", "json"]).stdout) as { groups: { id: string }[]; nodes: { id: string }[]; reason?: string };
+  assert.ok(!json.groups.some((group) => group.id === "routes"));
+  assert.ok(!json.nodes.some((node) => node.id === "src/routes/checkout.tsx"));
+  assert.ok(json.nodes.some((node) => node.id === "src/lib/orders.ts"));
+  assert.ok(json.reason?.includes("lanes hidden: routes (1 shapes)"), json.reason);
 });
 
 test("--expand opens a module in place: a lane of its functions, the lines landing on the functions they concern", () => {

@@ -771,3 +771,28 @@ export function revisionStamp(root: string): { commit: string; date: string } | 
 
   return commit && date ? { commit, date } : null;
 }
+
+/**
+ * Only the change: of a diagram with the review's marks, the marked shapes
+ * and their neighbours (the shapes at the other ends of their lines) stay,
+ * with the lines among them; the rest of the picture goes, lanes included.
+ */
+export function onlyChanged(diagram: Diagram): Diagram {
+  const marked = new Set(diagram.nodes.filter((node) => node.diff).map((node) => node.id));
+
+  if (marked.size === 0) return { ...diagram, nodes: [], edges: [], groups: [], reason: [diagram.reason, "nothing changed in this picture"].filter(Boolean).join("; ") };
+  const keep = new Set(marked);
+
+  for (const edge of diagram.edges) {
+    if (marked.has(edge.from)) keep.add(edge.to);
+
+    if (marked.has(edge.to)) keep.add(edge.from);
+  }
+
+  const nodes = diagram.nodes.filter((node) => keep.has(node.id));
+  const edges = diagram.edges.filter((edge) => keep.has(edge.from) && keep.has(edge.to));
+  const groups = diagram.groups.filter((group) => nodes.some((node) => node.group === group.id));
+  const gone = diagram.nodes.length - nodes.length;
+
+  return { ...diagram, nodes, edges, groups, reason: [diagram.reason, `only the ${marked.size} changed shapes and their neighbours; ${gone} others left out`].filter(Boolean).join("; ") };
+}

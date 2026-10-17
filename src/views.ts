@@ -58,6 +58,8 @@ export interface ViewOptions {
   weight?: number;
   /** Modules most of a picture imports (a logger, the types) become a badge on their importers instead of a tangle of lines. Default on. */
   hubs?: boolean;
+  /** Lanes (layers, or modules of an inside view) left out of the picture with their shapes. */
+  hideLanes?: readonly string[];
   /** Modules opened in place: each becomes a lane of its functions, and the lines into and out of it land on the functions they concern (the mix of a module view and an inside view). */
   expand?: readonly string[];
 }
@@ -781,7 +783,8 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
 
   // Hubs leave before the fold (they would eat its budget); the weight filter runs after it, on the merged lines.
   const subject = "id" in view ? view.id : null;
-  const mixed = options.expand && options.expand.length > 0 && MODULE_VIEWS.has(view.kind) ? expandInPlace(diagram, graph, options.expand) : diagram;
+  const shown = options.hideLanes && options.hideLanes.length > 0 ? hideLanes(diagram, options.hideLanes) : diagram;
+  const mixed = options.expand && options.expand.length > 0 && MODULE_VIEWS.has(view.kind) ? expandInPlace(shown, graph, options.expand) : shown;
   const slimmed = options.hubs === false || !MODULE_VIEWS.has(view.kind) ? mixed : hubsAsBadges(mixed, subject);
   const answered = slimmed.question ? slimmed : { ...slimmed, question: QUESTION[view.kind] };
 
@@ -921,4 +924,17 @@ export function expandInPlace(diagram: Diagram, graph: Graph, expand: readonly s
   const note = `opened in place: ${opened.join(", ")}`;
 
   return { ...diagram, nodes, edges, groups, reason: [diagram.reason, note].filter(Boolean).join("; ") };
+}
+
+/** The picture without the lanes named: their shapes and every line touching them go; a lane the picture lacks is ignored. */
+export function hideLanes(diagram: Diagram, lanes: readonly string[]): Diagram {
+  const hidden = new Set(lanes.filter((lane) => diagram.groups.some((group) => group.id === lane)));
+
+  if (hidden.size === 0) return diagram;
+  const gone = new Set(diagram.nodes.filter((node) => node.group !== undefined && hidden.has(node.group)).map((node) => node.id));
+  const nodes = diagram.nodes.filter((node) => !gone.has(node.id));
+  const edges = diagram.edges.filter((edge) => !gone.has(edge.from) && !gone.has(edge.to));
+  const groups = diagram.groups.filter((group) => !hidden.has(group.id));
+
+  return { ...diagram, nodes, edges, groups, reason: [diagram.reason, `lanes hidden: ${[...hidden].join(", ")} (${gone.size} shapes)`].filter(Boolean).join("; ") };
 }

@@ -56,6 +56,10 @@ interface State {
   hubs: boolean;
   /** Modules opened in place as lanes of their functions (the mix tool). */
   expand: string[];
+  /** Lanes left out of the picture. */
+  hide: string[];
+  /** With the changes: only the marked shapes and their neighbours. */
+  onlyChanges: boolean;
 }
 
 /** The options a link may leave out, remembered in this browser as defaults ("remember as defaults"). */
@@ -122,6 +126,8 @@ function stateFromHash(): State {
     weight: params.get("weight") === null ? (defaults.weight ?? null) : params.get("weight") === "" ? null : Number(params.get("weight")),
     hubs: params.has("hubs") ? params.get("hubs") !== "0" : (defaults.hubs ?? true),
     expand: (params.get("expand") ?? "").split(",").filter((id) => id !== ""),
+    hide: (params.get("hide") ?? "").split(",").filter((id) => id !== ""),
+    onlyChanges: params.get("only") === "changes",
   };
 }
 
@@ -159,6 +165,10 @@ function setHash(state: State): void {
   if (state.hubs !== (defaults.hubs ?? true)) params.set("hubs", state.hubs ? "1" : "0");
 
   if (state.expand.length > 0) params.set("expand", state.expand.join(","));
+
+  if (state.hide.length > 0) params.set("hide", state.hide.join(","));
+
+  if (state.onlyChanges && state.changes) params.set("only", "changes");
   location.hash = params.toString();
 }
 
@@ -467,6 +477,176 @@ async function showNode(id: string | null): Promise<void> {
 /** The tools of the canvas that change what a tap does. */
 const tools = { mix: false, focus: false };
 
+/** The shape picked last, the start of a path when the next tap holds Shift. */
+let lastPicked: string | null = null;
+
+/** The shortest chain of lines from `from` to `to` along the arrows (else against them), breadth first; null when none. */
+function pathBetween(from: string, to: string, directed: boolean): { edge: DiagramEdge; index: number }[] | null {
+  const previous = new Map<string, { edge: DiagramEdge; index: number; node: string }>();
+  const seen = new Set([from]);
+  let frontier = [from];
+
+  while (frontier.length > 0 && !seen.has(to)) {
+    const next: string[] = [];
+
+    for (const id of frontier) {
+      edges.forEach((edge, index) => {
+        if (edge.kind === "lifeline") return;
+        const other = edge.from === id ? edge.to : !directed && edge.to === id ? edge.from : null;
+
+        if (other === null || seen.has(other)) return;
+        seen.add(other);
+        previous.set(other, { edge, index, node: id });
+        next.push(other);
+      });
+    }
+
+    frontier = next;
+  }
+
+  if (!seen.has(to)) return null;
+  const chain: { edge: DiagramEdge; index: number }[] = [];
+
+  for (let at = to; at !== from; ) {
+    const step = previous.get(at)!;
+    chain.unshift({ edge: step.edge, index: step.index });
+    at = step.node;
+  }
+
+  return chain;
+}
+
+/** Lights the shortest path between two shapes and writes it to the Markdown panel. */
+function showPath(from: string, to: string): void {
+  const directed = pathBetween(from, to, true);
+  const chain = directed ?? pathBetween(from, to, false);
+  const title = `# Path: ${labelOf(from)} → ${labelOf(to)}`;
+
+  if (!chain) {
+    canvas?.highlight([from, to]);
+    setMarkdown(markdownPanel, `${title}\n\nNo chain of lines joins them in this picture, in either direction.\n`);
+    showTab("markdown");
+
+    return;
+  }
+
+  const ids = new Set([from, to]);
+
+  for (const step of chain) {
+    ids.add(lineElementId(step.edge, step.index));
+    ids.add(step.edge.from);
+    ids.add(step.edge.to);
+  }
+
+  canvas?.highlight([...ids]);
+  const lines = [title, "", `${chain.length} ${chain.length === 1 ? "line" : "lines"}${directed ? "" : ", read against the arrows where needed"}:`, ""];
+
+  for (const [i, step] of chain.entries()) lines.push(`${i + 1}. ${labelOf(step.edge.from)} → **${labelOf(step.edge.to)}**${step.edge.kind === "dependency" ? "" : ` (${step.edge.kind})`}`);
+  setMarkdown(markdownPanel, `${lines.join("\n")}\n`);
+  showTab("markdown");
+}
+
+/** The lanes menu: a box per lane of the picture (and per hidden lane, to bring it back). */
+function renderLanes(state: State, groups: readonly { id: string; label: string }[]): void {
+  const list = element<HTMLDivElement>("lanes");
+  list.replaceChildren();
+  const all = [...groups.map((group) => ({ id: group.id, label: group.label })), ...state.hide.filter((id) => !groups.some((group) => group.id === id)).map((id) => ({ id, label: id }))];
+  element<HTMLDetailsElement>("lanes-menu").hidden = all.length === 0;
+
+  for (const lane of all) {
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = !state.hide.includes(lane.id);
+    box.addEventListener("change", () => {
+      const now = stateFromHash();
+      setHash({ ...now, hide: box.checked ? now.hide.filter((id) => id !== lane.id) : [...now.hide, lane.id] });
+    });
+    label.append(box, lane.label);
+    list.append(label);
+  }
+}
+
+/** The shapes whose label or ID holds the text, case-insensitively; the first is the best match (a label that starts with it). */
+function findShapes(text: string): DiagramNode[] {
+  const needle = text.trim().toLowerCase();
+
+  if (needle === "") return [];
+  const hits = [...nodes.values()].filter((node) => node.kind !== "anchor" && (node.label.toLowerCase().includes(needle) || node.id.toLowerCase().includes(needle)));
+
+  return hits.sort((a, b) => Number(b.label.toLowerCase().startsWith(needle)) - Number(a.label.toLowerCase().startsWith(needle)));
+}
+
+// ── The minimap ───────────────────────────────────────────────────────────────
+
+const minimap = element<HTMLCanvasElement>("minimap");
+let minimapWanted: boolean | null = null;
+let minimapTimer: ReturnType<typeof setInterval> | null = null;
+let minimapFrame: { scale: number; minX: number; minY: number } | null = null;
+
+/** Draws the whole scene small, with the viewport as a box; the frame it drew in is kept for taps. */
+function drawMinimap(): void {
+  if (!canvas || minimap.hidden) return;
+  const elements = canvas.scene().filter((element) => !element.isDeleted && (element.customData?.["archdiff"] === "node" || element.customData?.["archdiff"] === "lane"));
+
+  if (elements.length === 0) return;
+  const minX = Math.min(...elements.map((element) => element.x));
+  const minY = Math.min(...elements.map((element) => element.y));
+  const maxX = Math.max(...elements.map((element) => element.x + element.width));
+  const maxY = Math.max(...elements.map((element) => element.y + element.height));
+  const pad = 6;
+  const scale = Math.min((minimap.width - 2 * pad) / Math.max(1, maxX - minX), (minimap.height - 2 * pad) / Math.max(1, maxY - minY));
+  minimapFrame = { scale, minX: minX - pad / scale, minY: minY - pad / scale };
+  const context = minimap.getContext("2d")!;
+  context.clearRect(0, 0, minimap.width, minimap.height);
+  const dark = document.body.classList.contains("dark");
+
+  for (const element of elements) {
+    const role = element.customData?.["archdiff"];
+    const kind = String(element.customData?.["kind"] ?? "");
+    context.fillStyle = role === "lane" ? (dark ? "#2a2a2a" : "#f1f1f1") : kind === "fn" ? "#90caf9" : kind === "more" ? "#bdbdbd" : dark ? "#9e9e9e" : "#616161";
+    context.fillRect((element.x - minimapFrame.minX) * scale, (element.y - minimapFrame.minY) * scale, Math.max(1, element.width * scale), Math.max(1, element.height * scale));
+  }
+
+  // The viewport: what the canvas shows, in scene coordinates.
+  const viewport = canvas.viewport();
+  const size = canvas.size();
+
+  if (viewport && size.width > 0) {
+    context.strokeStyle = "#ff6f00";
+    context.lineWidth = 1.5;
+    context.strokeRect((-viewport.scrollX - minimapFrame.minX) * scale, (-viewport.scrollY - minimapFrame.minY) * scale, (size.width / viewport.zoom) * scale, (size.height / viewport.zoom) * scale);
+  }
+}
+
+/** Shows the minimap when wanted (by the button, or by a picture over 60 shapes) and keeps it drawn while the viewport moves. */
+function updateMinimap(): void {
+  const shown = minimapWanted ?? nodes.size > 60;
+  minimap.hidden = !shown || document.body.classList.contains("editing");
+  element<HTMLButtonElement>("tool-map").classList.toggle("active", shown);
+
+  if (minimapTimer) clearInterval(minimapTimer);
+  minimapTimer = null;
+
+  if (!minimap.hidden) {
+    drawMinimap();
+    minimapTimer = setInterval(drawMinimap, 300);
+  }
+}
+
+minimap.addEventListener("click", (event) => {
+  if (!canvas || !minimapFrame) return;
+  const viewport = canvas.viewport();
+  const size = canvas.size();
+
+  if (!viewport) return;
+  const box = minimap.getBoundingClientRect();
+  const sceneX = minimapFrame.minX + (event.clientX - box.left) / minimapFrame.scale;
+  const sceneY = minimapFrame.minY + (event.clientY - box.top) / minimapFrame.scale;
+  canvas.setViewport({ scrollX: size.width / viewport.zoom / 2 - sceneX, scrollY: size.height / viewport.zoom / 2 - sceneY, zoom: viewport.zoom });
+  drawMinimap();
+});
+
 /** A shape, its lines and the shapes at their other ends: what stays lit under the focus tool. */
 function neighbourhoodOf(id: string): string[] {
   const keep = new Set([id]);
@@ -519,6 +699,24 @@ function renderCanvasTools(state: State): void {
   element<HTMLButtonElement>("tool-focus").classList.toggle("active", tools.focus);
   element<HTMLButtonElement>("mix-clear").hidden = state.expand.length === 0;
   element<HTMLButtonElement>("mix-clear").textContent = `close opened (${state.expand.length})`;
+  element<HTMLButtonElement>("tool-split").classList.toggle("active", document.body.classList.contains("split"));
+  renderLanes(state, currentGroups);
+  updateMinimap();
+}
+
+/** The lanes of the current picture, for the lanes menu. */
+let currentGroups: { id: string; label: string }[] = [];
+
+/** Opens or closes the second picture beside the canvas: the same page, embedded, starting from the current link. */
+function toggleSplit(force?: boolean): void {
+  const on = document.body.classList.toggle("split", force);
+  const pane = element<HTMLDivElement>("split");
+  const frame = element<HTMLIFrameElement>("split-frame");
+  pane.hidden = !on;
+
+  if (on && !frame.src) frame.src = `${location.pathname}?embed=1${location.hash}`;
+  element<HTMLButtonElement>("tool-split").classList.toggle("active", on);
+  canvas?.scrollToContent();
 }
 
 /** The page of a tapped line: what it joins and the imports and calls behind it. */
@@ -717,16 +915,25 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
   }
 
   canvas = await mountCanvas(element("canvas"), elements, {
-    pick: (id, lines, follow) => {
+    pick: (id, lines, shift) => {
       // A tap on lines lights them with their ends (or the chain onward, with Shift); a shape or nothing puts the light out.
       if (lines && lines.length > 0) {
-        void showEdge(lines, follow === true);
+        void showEdge(lines, shift === true);
 
         return;
       }
 
       canvas?.highlight([]);
       const node = id === null ? null : nodes.get(id);
+
+      // Shift+tap on a second shape: the shortest path from the one picked before, along the arrows.
+      if (shift && node && lastPicked && lastPicked !== node.id && nodes.has(lastPicked)) {
+        showPath(lastPicked, node.id);
+
+        return;
+      }
+
+      if (node) lastPicked = node.id;
 
       // The mix tool: a module opens in place, an opened module's "rest" shape closes it.
       if (tools.mix && node && (node.kind === "module" || node.kind === "participant")) {
@@ -791,7 +998,7 @@ async function relayout(): Promise<void> {
   if (!canvas) return;
   await saveDrawing();
   const now = stateFromHash();
-  const scene = await api.scene(now.view, { depth: now.depth, limit: now.limit, weight: now.weight, hubs: now.hubs, expand: now.expand, packages: now.packages, changes: false, overlays: now.overlays, mermaid: now.mermaid, base: null, head: null });
+  const scene = await api.scene(now.view, { depth: now.depth, limit: now.limit, weight: now.weight, hubs: now.hubs, expand: now.expand, hide: now.hide, onlyChanges: false, packages: now.packages, changes: false, overlays: now.overlays, mermaid: now.mermaid, base: null, head: null });
   canvas.replace(scene.elements);
 }
 
@@ -808,6 +1015,7 @@ async function load(): Promise<void> {
   element<HTMLInputElement>("limit").value = state.limit === null ? "" : String(state.limit);
   element<HTMLInputElement>("weight").value = state.weight === null ? "" : String(state.weight);
   element<HTMLInputElement>("hubs").checked = state.hubs;
+  element<HTMLInputElement>("only-changes").checked = state.onlyChanges;
   renderCanvasTools(state);
   element<HTMLSelectElement>("mermaid").value = state.mermaid;
 
@@ -832,6 +1040,9 @@ async function load(): Promise<void> {
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
       edges = result.diagram.edges;
+      currentGroups = result.diagram.groups.map((group) => ({ id: group.id, label: group.label }));
+      renderLanes(state, currentGroups);
+      updateMinimap();
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
       reason.title = reason.textContent;
@@ -845,6 +1056,9 @@ async function load(): Promise<void> {
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
       edges = result.diagram.edges;
+      currentGroups = result.diagram.groups.map((group) => ({ id: group.id, label: group.label }));
+      renderLanes(state, currentGroups);
+      updateMinimap();
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
       reason.title = reason.textContent;
@@ -853,11 +1067,14 @@ async function load(): Promise<void> {
       void loadCommits(state);
       void loadBranches(state);
     } else {
-      const result = await api.scene(state.view, { depth: state.depth, limit: state.limit, weight: state.weight, hubs: state.hubs, expand: state.expand, packages: state.packages, changes: state.changes, overlays: state.overlays, mermaid: state.mermaid, base: state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, head: state.view === "timeline" || state.changes ? state.head : null });
+      const result = await api.scene(state.view, { depth: state.depth, limit: state.limit, weight: state.weight, hubs: state.hubs, expand: state.expand, hide: state.hide, onlyChanges: state.onlyChanges, packages: state.packages, changes: state.changes, overlays: state.overlays, mermaid: state.mermaid, base: state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, head: state.view === "timeline" || state.changes ? state.head : null });
       title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
       edges = result.diagram.edges;
+      currentGroups = result.diagram.groups.map((group) => ({ id: group.id, label: group.label }));
+      renderLanes(state, currentGroups);
+      updateMinimap();
       mocks = result.mocks;
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
@@ -1472,6 +1689,41 @@ element<HTMLButtonElement>("tool-focus").addEventListener("click", () => {
   reason.textContent = tools.focus ? "focus: tap a shape to dim all but its neighbours; tap nothing to clear" : (reason.title || "");
 });
 element<HTMLButtonElement>("mix-clear").addEventListener("click", () => setHash({ ...stateFromHash(), expand: [] }));
+element<HTMLButtonElement>("tool-split").addEventListener("click", () => toggleSplit());
+element<HTMLButtonElement>("tool-map").addEventListener("click", () => {
+  minimapWanted = minimapWanted === null ? !(nodes.size > 60) : !minimapWanted;
+  updateMinimap();
+});
+element<HTMLInputElement>("only-changes").addEventListener("change", () => setHash({ ...stateFromHash(), onlyChanges: element<HTMLInputElement>("only-changes").checked, changes: element<HTMLInputElement>("only-changes").checked ? true : stateFromHash().changes }));
+
+const findInput = element<HTMLInputElement>("find");
+findInput.addEventListener("input", () => {
+  const hits = findShapes(findInput.value);
+  canvas?.highlight(hits.slice(0, 20).map((node) => node.id));
+  reason.textContent = findInput.value.trim() === "" ? (reason.title || "") : `${hits.length} ${hits.length === 1 ? "shape matches" : "shapes match"}`;
+});
+findInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    const first = findShapes(findInput.value)[0];
+
+    if (first) {
+      canvas?.centreOn(first.id);
+      canvas?.highlight([first.id]);
+      lastPicked = first.id;
+      void showNode(first.id);
+    }
+  } else if (event.key === "Escape") {
+    findInput.value = "";
+    canvas?.highlight([]);
+    reason.textContent = reason.title || "";
+    findInput.blur();
+  }
+
+  event.stopPropagation();
+});
+
+// Embedded in a split pane: no header, no side panels, just the picture and its toolbar.
+if (new URLSearchParams(location.search).get("embed") === "1") document.body.classList.add("embed");
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 element<HTMLButtonElement>("review").addEventListener("click", () => {
   if (leaveEdit()) setHash({ ...stateFromHash(), review: true, head: headInput.value.trim() || null });
@@ -1614,6 +1866,11 @@ window.addEventListener("keydown", (event) => {
     search.focus();
   } else if (event.key === "o") {
     element<HTMLDetailsElement>("options-menu").toggleAttribute("open");
+  } else if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) {
+    event.preventDefault();
+    element<HTMLInputElement>("find").focus();
+  } else if (event.key === "s" && !stateFromHash().review && !document.body.classList.contains("embed")) {
+    toggleSplit();
   } else if (event.key === "m" && !stateFromHash().review) {
     element<HTMLButtonElement>("tool-mix").click();
   } else if (event.key === "f" && !stateFromHash().review) {

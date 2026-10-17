@@ -12,7 +12,7 @@ import { planFromScene, planMarkdown } from "./plan.ts";
 import { agentFromConfig } from "./agent.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "./export/index.ts";
-import { compareBranches, comparisonMarkdown, defaultBase, history, historyMarkdown, listBranches, mergeBase, overlayDiff, reviewMarkdown, review, revisionStamp } from "./diff.ts";
+import { compareBranches, comparisonMarkdown, defaultBase, history, historyMarkdown, listBranches, mergeBase, onlyChanged, overlayDiff, reviewMarkdown, review, revisionStamp } from "./diff.ts";
 import { timelineDiagram } from "./views-more.ts";
 import { applyOverlays, parseOverlays } from "./overlays.ts";
 import { serve } from "./server.ts";
@@ -29,7 +29,7 @@ Commands:
                      resolved calls and gaps. --json: the stats as JSON
   views [dir]        List the views that can be drawn: layers, every module, every entry point
   diagram <view> [dir] [--format F] [--depth N] [--packages] [--limit N] [--weight N] [--no-hubs]
-                 [--expand a.ts,b.ts] [--out FILE]
+                 [--expand a.ts,b.ts] [--hide-lanes a,b] [--only-changes] [--out FILE]
                      Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,
                      drawio, excalidraw, archimate. Views: layers | layer:<name> | dir:<path> |
                      module:<path> | inside:<path> | contract:<path> | calls:<path>#<fn> |
@@ -48,8 +48,9 @@ Commands:
                      the types) is a badge "+ log.ts" on its importers, not a tangle of lines;
                      --no-hubs draws it. --expand opens modules in place: each becomes a lane
                      of its functions, with the lines landing on the functions they concern (the
-                     mix of a module view and an inside view). Every export names the commit it
-                     was drawn from.
+                     mix of a module view and an inside view). --hide-lanes leaves lanes out.
+                     --only-changes (with --changes) keeps the marked shapes and their
+                     neighbours only. Every export names the commit it was drawn from.
   layouts [dir] [--prune]
                      List the saved drawings (.archdiff/layouts/); --prune deletes those
                      whose view the code no longer has (a renamed module, a removed function)
@@ -109,7 +110,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid", "overlay", "weight", "expand"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid", "overlay", "weight", "expand", "hide-lanes"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -223,7 +224,8 @@ export async function main(argv: readonly string[]): Promise<number> {
         const weight = flags.has("weight") ? Number(flags.get("weight")) : undefined;
 
         if (weight !== undefined && !(Number.isInteger(weight) && weight >= 1)) return fail("diagram: --weight must be a whole number above 0");
-        const options: ViewOptions = { packages: flags.has("packages"), hubs: !flags.has("no-hubs"), expand: typeof flags.get("expand") === "string" ? (flags.get("expand") as string).split(",").filter((id) => id !== "") : [] };
+        const listFlag = (name: string): string[] => (typeof flags.get(name) === "string" ? (flags.get(name) as string).split(",").filter((item) => item !== "") : []);
+        const options: ViewOptions = { packages: flags.has("packages"), hubs: !flags.has("no-hubs"), expand: listFlag("expand"), hideLanes: listFlag("hide-lanes") };
 
         if (depth !== undefined) options.depth = depth;
 
@@ -239,7 +241,8 @@ export async function main(argv: readonly string[]): Promise<number> {
           diagram = layout(timelineDiagram(await history(analysis.root, from, to), from, to));
         } else if (flags.has("changes")) {
           const result = await review(analysis.root, typeof flags.get("base") === "string" ? (flags.get("base") as string) : null, typeof flags.get("head") === "string" ? (flags.get("head") as string) : null);
-          diagram = layout(applyOverlays(overlayDiff(viewOf(analysis, view, options), result.diff), analysis, parseOverlays(flags.get("overlay") as string | undefined)));
+          const marked = overlayDiff(viewOf(analysis, view, options), result.diff);
+          diagram = layout(applyOverlays(flags.has("only-changes") ? onlyChanged(marked) : marked, analysis, parseOverlays(flags.get("overlay") as string | undefined)));
         } else diagram = layout(applyOverlays(viewOf(analysis, view, options), analysis, parseOverlays(flags.get("overlay") as string | undefined)));
 
         if (diagram.missing) return fail(`diagram: ${diagram.reason} (archdiff views lists them)`);

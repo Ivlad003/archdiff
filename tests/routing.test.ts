@@ -11,7 +11,8 @@ import { analyze } from "../src/analyze.ts";
 import type { Diagram, DiagramNode } from "../src/diagram.ts";
 import { layout } from "../src/diagram.ts";
 import { routeEdges } from "../src/export/excalidraw.ts";
-import { hubsAsBadges, parseView, viewList, viewOf } from "../src/views.ts";
+import { hideLanes, hubsAsBadges, parseView, viewList, viewOf } from "../src/views.ts";
+import { onlyChanged } from "../src/diff.ts";
 
 const fixture = join(import.meta.dirname, "fixtures", "sample");
 
@@ -141,4 +142,20 @@ test("a module most of a picture imports becomes a badge on its importers, not a
   // The view's own subject is never a hub; a small picture keeps every line.
   assert.equal(hubsAsBadges(diagram, "log").nodes.length, 9);
   assert.equal(hubsAsBadges({ ...diagram, nodes: nodes.slice(0, 5) }, null).nodes.length, 5);
+});
+
+test("only the changed shapes and their neighbours stay; hidden lanes take their shapes and lines with them", () => {
+  const nodes: DiagramNode[] = ["a", "b", "c", "d"].map((id) => ({ id, kind: "module", label: id, group: id === "d" ? "other" : "main", x: 0, y: 0, w: 0, h: 0 }));
+  nodes[1]!.diff = "changed";
+  const diagram: Diagram = { view: "layer:x", title: "x", nodes, edges: [{ from: "a", to: "b", kind: "dependency" }, { from: "c", to: "d", kind: "dependency" }], groups: [{ id: "main", label: "main", kind: "lane", x: 0, y: 0, w: 0, h: 0 }, { id: "other", label: "other", kind: "lane", x: 0, y: 0, w: 0, h: 0 }] };
+  const only = onlyChanged(diagram);
+  assert.deepEqual(only.nodes.map((node) => node.id), ["a", "b"]);
+  assert.equal(only.edges.length, 1);
+  assert.deepEqual(only.groups.map((group) => group.id), ["main"]);
+  assert.equal(onlyChanged({ ...diagram, nodes: nodes.map(({ diff: _diff, ...node }) => node) }).nodes.length, 0);
+  const hidden = hideLanes(diagram, ["other", "nowhere"]);
+  assert.deepEqual(hidden.nodes.map((node) => node.id), ["a", "b", "c"]);
+  assert.equal(hidden.edges.length, 1);
+  assert.ok(hidden.reason?.includes("lanes hidden: other (1 shapes)"));
+  assert.equal(hideLanes(diagram, ["nowhere"]), diagram);
 });

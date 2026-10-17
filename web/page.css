@@ -1017,3 +1017,109 @@ body.editing #reason {
 body.editing #canvas-tools {
   display: none;
 }
+
+#canvas-tools #lanes-menu {
+  position: relative;
+}
+
+#canvas-tools #lanes-menu summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+#canvas-tools #lanes-menu[open] summary {
+  border-color: var(--accent);
+}
+
+#lanes {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+}
+
+#lanes label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+#canvas-tools #find {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: inherit;
+  width: 150px;
+}
+
+body.split #canvas {
+  right: 50%;
+}
+
+body.split #canvas-tools {
+  max-width: calc(50% - 64px);
+}
+
+#split {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  border-left: 2px solid var(--accent);
+  background: var(--bg);
+}
+
+#split iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+#minimap {
+  position: absolute;
+  right: 12px;
+  bottom: 52px;
+  z-index: 3;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+}
+
+body.split #minimap {
+  right: calc(50% + 12px);
+}
+
+body.embed #top,
+body.embed #left,
+body.embed #right,
+body.embed #legend,
+body.embed #tool-split {
+  display: none;
+}
+
+body.embed main {
+  grid-template-columns: 1fr;
+}
