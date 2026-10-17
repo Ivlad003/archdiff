@@ -438,6 +438,20 @@ async function showNode(id: string | null): Promise<void> {
   await showCode(node);
 }
 
+/** The page of a tapped line: what it joins and the imports and calls behind it. */
+async function showEdge(edge: { from: string; to: string; kind: string }): Promise<void> {
+  const state = stateFromHash();
+
+  try {
+    const { markdown } = await api.edge(state.view, edge.from, edge.to, edge.kind);
+    setMarkdown(markdownPanel, markdown);
+  } catch (error) {
+    setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
+  }
+
+  showTab("markdown");
+}
+
 // ── The left panel ───────────────────────────────────────────────────────────
 
 function renderViews(filter: string): void {
@@ -532,7 +546,13 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
   }
 
   canvas = await mountCanvas(element("canvas"), elements, {
-    pick: (id) => void showNode(id),
+    pick: (id, edge) => {
+      // A tap lights what it picked: a line with its two ends; a shape or nothing puts the light out.
+      canvas?.highlight(edge && id ? [id, edge.from, edge.to] : []);
+
+      if (edge) void showEdge(edge);
+      else void showNode(id);
+    },
     open: (id, link) => {
       const key = link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : nodes.has(id) ? ownView(nodes.get(id)!) : null;
 

@@ -8,7 +8,7 @@
 // Entry points: `diagramMarkdown`, `nodeMarkdown`.
 
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, DiagramNode } from "./diagram.ts";
+import type { Diagram, DiagramEdge, DiagramNode } from "./diagram.ts";
 import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
 import { moduleOf } from "./graph.ts";
 
@@ -225,6 +225,88 @@ export function nodeMarkdown(node: DiagramNode, analysis: Analysis, readSource: 
     for (const member of members) lines.push(`- ${member}`);
     lines.push("");
   }
+
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/** The modules a shape stands for: a module itself, a layer's modules, a folded directory's, a function's own module; none for an external. */
+function modulesBehind(node: DiagramNode, analysis: Analysis): string[] {
+  const { graph } = analysis;
+  const id = node.ref?.id ?? node.id;
+
+  if (node.kind === "layer") return [...graph.modules.values()].filter((module) => module.layer === node.id).map((module) => module.id);
+
+  if (node.kind === "more" || node.kind === "package") {
+    const members = (node as DiagramNode & { members?: string[] }).members;
+
+    if (members && members.length > 0) return members.map(moduleOf);
+    const directory = id.startsWith("dir:") ? `${id.slice(4)}/` : null;
+
+    return directory ? [...graph.modules.keys()].filter((module) => module.startsWith(directory)) : [];
+  }
+
+  if (node.kind === "external" || node.kind === "hole" || node.kind === "start" || node.kind === "event") return [];
+
+  return [moduleOf(id)];
+}
+
+/** The label of a shape for prose: its first line. */
+function nameOf(node: DiagramNode): string {
+  return node.label.split("\n")[0]!;
+}
+
+/**
+ * The page of a line: what it joins, what it stands for and every import or
+ * call behind it with its `file:line`, so a tap on an arrow says where it
+ * leads and why it is there.
+ */
+export function edgeMarkdown(edge: DiagramEdge, diagram: Diagram, analysis: Analysis): string {
+  const { graph } = analysis;
+  const from = diagram.nodes.find((node) => node.id === edge.from);
+  const to = diagram.nodes.find((node) => node.id === edge.to);
+
+  if (!from || !to) return `# ${edge.from} → ${edge.to}\n\nThe line's ends are not in this view.\n`;
+  const lines = [`# ${nameOf(from)} → ${nameOf(to)}`, ""];
+  const what = edge.kind === "dependency" ? "imports" : edge.kind === "call" ? "calls" : edge.kind === "ref" ? "passes as a value (may call)" : edge.kind === "message" ? `message${edge.label ? ` ${edge.label}` : ""}` : "lifeline";
+  lines.push(`${nameOf(from)} ${what} ${nameOf(to)}${edge.count !== undefined && edge.count > 1 ? ` — ${edge.count} lines behind this one` : ""}${edge.diff ? ` (${edge.diff})` : ""}.`, "");
+  const whereFrom = position(from);
+  const whereTo = position(to);
+  lines.push("## Ends", "", `- from: **${nameOf(from)}** (${from.kind})${whereFrom ? ` — ${whereFrom}` : ""}`, `- to: **${nameOf(to)}** (${to.kind})${whereTo ? ` — ${whereTo}` : ""}`, "");
+
+  // Imports behind the line: every dependency from the source's modules to the target's modules (or to its package).
+  const sources = new Set(modulesBehind(from, analysis));
+  const targets = new Set(modulesBehind(to, analysis));
+  const targetIds = to.kind === "external" ? new Set([to.id]) : targets;
+  const imports = graph.deps.filter((dep) => sources.has(dep.from) && targetIds.has(dep.to));
+
+  if (imports.length > 0 && (edge.kind === "dependency" || from.kind !== "fn")) {
+    lines.push(`## Imports (${imports.length})`, "");
+
+    for (const dep of imports.slice(0, 60)) lines.push(`- \`${dep.from}:${dep.line}\` → ${dep.to}${dep.typeOnly ? " (types only)" : ""}${dep.reexport ? " (re-export)" : ""}`);
+
+    if (imports.length > 60) lines.push(`- … ${imports.length - 60} more`);
+    lines.push("");
+  }
+
+  // Calls behind the line: between the two functions, or between the modules behind the two shapes.
+  const fromId = from.ref?.id ?? from.id;
+  const toId = to.ref?.id ?? to.id;
+  const calls = graph.calls.filter((call) =>
+    from.kind === "fn" || from.kind === "class" || to.kind === "fn" || to.kind === "class"
+      ? (from.kind === "fn" || from.kind === "class" ? call.from === fromId : sources.has(moduleOf(call.from))) && (to.kind === "fn" || to.kind === "class" ? call.to === toId : targets.has(moduleOf(call.to)))
+      : sources.has(moduleOf(call.from)) && targets.has(moduleOf(call.to)) && moduleOf(call.from) !== moduleOf(call.to),
+  );
+
+  if (calls.length > 0) {
+    lines.push(`## Calls (${calls.length})`, "");
+
+    for (const call of calls.slice(0, 60)) lines.push(`- ${call.kind === "ref" ? "(as a value) " : ""}${call.from} → ${call.to} — \`${moduleOf(call.from)}:${call.line}\``);
+
+    if (calls.length > 60) lines.push(`- … ${calls.length - 60} more`);
+    lines.push("");
+  }
+
+  if (imports.length === 0 && calls.length === 0) lines.push("Nothing in the graph lies behind this line by name: the view drew it from its own data (a sequence, a matrix cell, a declared dependency).", "");
 
   return `${lines.join("\n").trimEnd()}\n`;
 }

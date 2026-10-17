@@ -35,7 +35,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { CACHE_DIRECTORY } from "./cache.ts";
 import { layoutSlug } from "./layouts.ts";
 import { mergeScene, parseLayout, positionsOf, readLayout, writeLayout, type SceneElement } from "./layouts.ts";
-import { diagramMarkdown, nodeMarkdown } from "./markdown.ts";
+import { diagramMarkdown, edgeMarkdown, nodeMarkdown } from "./markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "./json.ts";
 import { parseView, viewList, viewOf } from "./views.ts";
 
@@ -447,6 +447,22 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           const readSource = (file: string): string | null => (analysis.facts.has(file) ? readFileSync(join(root, file), "utf8") : null);
 
           return json(response, { markdown: nodeMarkdown(node, analysis, readSource) });
+        }
+
+        case "/api/edge": {
+          const view = parseView(url.searchParams.get("view") ?? "");
+          const from = url.searchParams.get("from") ?? "";
+          const to = url.searchParams.get("to") ?? "";
+          const kind = url.searchParams.get("kind");
+
+          if (!view) return problem(response, 400, "unknown view");
+          const analysis = await fresh();
+          const diagram = view.kind === "timeline" ? { view: "timeline", title: "", nodes: [], edges: [], groups: [] } : viewOf(analysis, view);
+          const edge = diagram.edges.find((candidate) => candidate.from === from && candidate.to === to && (kind === null || candidate.kind === kind));
+
+          if (!edge) return problem(response, 404, "no such line in the view");
+
+          return json(response, { markdown: edgeMarkdown(edge, diagram, analysis) });
         }
 
         case "/api/file": {

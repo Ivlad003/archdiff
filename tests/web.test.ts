@@ -108,6 +108,16 @@ test("a drawing saved by the editor places the shapes of the live diagram and me
   assert.equal(bad.status, 400);
 });
 
+test("a line's page names its ends and the imports and calls behind it", async () => {
+  const edge = await getJson<{ markdown: string }>(`/api/edge?view=${encodeURIComponent("layer:lib")}&from=${encodeURIComponent("src/lib/orders.ts")}&to=${encodeURIComponent("src/db/store.ts")}&kind=dependency`);
+  assert.ok(edge.markdown.startsWith("# src/lib/orders.ts → src/db/store.ts"), edge.markdown.slice(0, 80));
+  assert.ok(edge.markdown.includes("- to: **src/db/store.ts** (module)"), edge.markdown);
+  assert.ok(edge.markdown.includes("`src/lib/orders.ts:2` → src/db/store.ts") && edge.markdown.includes("placeOrder → src/db/store.ts#saveOrder"), edge.markdown);
+  const layers = await getJson<{ markdown: string }>(`/api/edge?view=layers&from=routes&to=lib`);
+  assert.ok(layers.markdown.includes("routes imports lib") && layers.markdown.includes("src/routes/checkout.tsx:1"), layers.markdown);
+  assert.equal((await fetch(`${base}/api/edge?view=layers&from=lib&to=nowhere`)).status, 404);
+});
+
 test("the scene takes the options of the page: limit, overlays, the Mermaid type", async () => {
   const view = "layer:lib";
   const scene = await getJson<{ diagram: { nodes: { id: string; label: string; kind: string }[]; reason?: string }; markdown: string }>(`/api/scene?view=${encodeURIComponent(view)}&limit=1&overlay=storages&mermaid=mindmap`);

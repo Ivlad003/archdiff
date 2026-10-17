@@ -384,7 +384,7 @@ export function toExcalidraw(diagram: Diagram): string {
       elbowed: false,
       roundness: null,
       boundElements: edge.label ? [{ id: `${id}:text`, type: "text" }] : null,
-      customData: { archdiff: "edge", kind: edge.kind },
+      customData: { archdiff: "edge", kind: edge.kind, from: edge.from, to: edge.to },
     });
 
     // A message's label sits just above its line (beside the loop of a self-call); another edge's label at the middle of the line.

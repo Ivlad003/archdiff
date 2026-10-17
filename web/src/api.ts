@@ -181,6 +181,7 @@ export const api = {
   },
   views: () => get<ViewsResponse>("/api/views"),
   diagram: (view: string, depth: number | null) => get<DiagramResponse>(`/api/diagram?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
+  edge: (view: string, from: string, to: string, kind: string) => get<{ markdown: string }>(`/api/edge?view=${encodeURIComponent(view)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&kind=${encodeURIComponent(kind)}`),
   node: (view: string, id: string) => get<{ markdown: string }>(`/api/node?view=${encodeURIComponent(view)}&id=${encodeURIComponent(id)}`),
   file: async (path: string): Promise<string> => {
     const response = await fetch(`/api/file?path=${encodeURIComponent(path)}`);

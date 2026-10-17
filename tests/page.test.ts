@@ -134,3 +134,41 @@ test("the options panel sets the overlays and the fold limit, writes them to the
   await page!.waitForFunction(`document.querySelector("#limit").value === "" && !document.querySelector("#options .overlay[value='storages']").checked`);
   assert.equal(await page!.evaluate("localStorage.getItem('archdiff.defaults')"), null);
 });
+
+test("a tap on a line lights it with its ends and shows where it leads", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.evaluate("localStorage.clear()");
+  await page!.goto(`${base}/?fresh=4#view=layer%3Alib`);
+  await page!.waitForSelector(".excalidraw canvas");
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.includes("lib")`);
+  await page!.waitForTimeout(1200);
+  // Where the page put the scene: the fit centres the bounds of every element at a zoom of at most 1 with a 32 px margin.
+  const scene = (await (await fetch(`${base}/api/scene?view=${encodeURIComponent("layer:lib")}`)).json()) as { elements: { x: number; y: number; width: number; height: number; isDeleted?: boolean; points?: [number, number][]; customData?: Record<string, unknown> }[] };
+  const all = scene.elements.filter((element) => !element.isDeleted);
+  const minX = Math.min(...all.map((element) => element.x));
+  const minY = Math.min(...all.map((element) => element.y));
+  const maxX = Math.max(...all.map((element) => element.x + element.width));
+  const maxY = Math.max(...all.map((element) => element.y + element.height));
+  const canvasBox = (await page!.evaluate(`document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect().toJSON()`)) as { left: number; top: number; width: number; height: number };
+  const zoom = Math.max(0.1, Math.min(1, (canvasBox.width - 64) / (maxX - minX), (canvasBox.height - 64) / (maxY - minY)));
+  const scrollX = canvasBox.width / zoom / 2 - (minX + (maxX - minX) / 2);
+  const scrollY = canvasBox.height / zoom / 2 - (minY + (maxY - minY) / 2);
+  // The line orders.ts → store.ts: the middle of its longest segment is in a gap, on no shape.
+  const arrow = all.find((element) => element.customData?.["archdiff"] === "edge" && element.customData["from"] === "src/lib/orders.ts" && element.customData["to"] === "src/db/store.ts")!;
+  assert.ok(arrow, "no arrow orders → store in the scene");
+  let longest: { x: number; y: number; length: number } | null = null;
+
+  for (let i = 1; i < arrow.points!.length; i++) {
+    const [ax, ay] = arrow.points![i - 1]!;
+    const [bx, by] = arrow.points![i]!;
+    const length = Math.hypot(bx - ax, by - ay);
+
+    if (!longest || length > longest.length) longest = { x: arrow.x + (ax + bx) / 2, y: arrow.y + (ay + by) / 2, length };
+  }
+
+  const screen = { x: canvasBox.left + (longest!.x + scrollX) * zoom, y: canvasBox.top + (longest!.y + scrollY) * zoom };
+  await page!.mouse.move(screen.x, screen.y);
+  await page!.mouse.down();
+  await page!.mouse.up();
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/lib/orders.ts → src/db/store.ts"`, undefined, { timeout: 8000 });
+  assert.ok((await page!.textContent("#markdown"))?.includes("to: src/db/store.ts (module)"));
+});

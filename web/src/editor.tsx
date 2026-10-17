@@ -17,8 +17,8 @@ import { createRoot, type Root } from "react-dom/client";
 import type { SceneElement } from "../../src/scene.ts";
 
 export interface CanvasEvents {
-  /** A tap on a generated shape (its element ID is the node ID), or on nothing. */
-  pick(id: string | null): void;
+  /** A tap on a generated shape (its element ID is the node ID), on a generated line (`edge` names its ends), or on nothing. */
+  pick(id: string | null, edge?: { from: string; to: string; kind: string }): void;
   /** A double tap on a shape, or its link: open the view the link names (`archdiff://view/<key>`). */
   open(id: string, link: string | null): void;
   /** The scene changed by hand (edit mode). */
@@ -65,6 +65,36 @@ function shapeAt(elements: readonly SceneElement[], x: number, y: number): Scene
   }
 
   return best;
+}
+
+/** The distance from a point to a segment. */
+function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const length = dx * dx + dy * dy;
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / length));
+
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+/** A generated line within `tolerance` of the scene point, the nearest first. */
+function arrowAt(elements: readonly SceneElement[], x: number, y: number, tolerance: number): SceneElement | null {
+  let best: { element: SceneElement; distance: number } | null = null;
+
+  for (const element of elements) {
+    if (element.isDeleted || element.customData?.["archdiff"] !== "edge") continue;
+    const points = (element as SceneElement & { points?: [number, number][] }).points ?? [];
+
+    for (let i = 1; i < points.length; i++) {
+      const [ax, ay] = points[i - 1]!;
+      const [bx, by] = points[i]!;
+      const distance = distanceToSegment(x, y, element.x + ax, element.y + ay, element.x + bx, element.y + by);
+
+      if (distance <= tolerance && (!best || distance < best.distance)) best = { element, distance };
+    }
+  }
+
+  return best?.element ?? null;
 }
 
 function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
@@ -146,8 +176,22 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
 
         // A drag is a pan, not a tap.
         if (Math.hypot(at.x - from.x, at.y - from.y) > 6 / api.getAppState().zoom.value) return;
-        const hit = shapeAt(api.getSceneElements() as unknown as SceneElement[], at.x, at.y);
+        const scene = api.getSceneElements() as unknown as SceneElement[];
+        const hit = shapeAt(scene, at.x, at.y);
         const now = Date.now();
+
+        // No shape under the tap: a line, when one runs within a few screen pixels.
+        if (!hit) {
+          const arrow = arrowAt(scene, at.x, at.y, 8 / api.getAppState().zoom.value);
+          lastTap = null;
+
+          if (arrow) {
+            const data = arrow.customData ?? {};
+            events.pick(arrow.id, { from: String(data["from"] ?? ""), to: String(data["to"] ?? ""), kind: String(data["kind"] ?? "") });
+
+            return;
+          }
+        }
 
         if (hit && lastTap && lastTap.id === hit.id && now - lastTap.at < 500) {
           lastTap = null;
@@ -195,11 +239,12 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       const next = elements.map((element) => {
         const original = lit.get(element.id);
 
-        if (wanted.has(element.id) && element.customData?.["archdiff"] === "node") {
+        if (wanted.has(element.id) && (element.customData?.["archdiff"] === "node" || element.customData?.["archdiff"] === "edge")) {
           if (!original) lit.set(element.id, { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth, backgroundColor: element.backgroundColor });
           changed = true;
 
-          return { ...element, strokeColor: colour, strokeWidth: 4, backgroundColor: "#ffe0b2" };
+          // A line keeps its fill (none) and gets the colour and a thick stroke; a shape also gets a warm fill.
+          return element.customData?.["archdiff"] === "edge" ? { ...element, strokeColor: colour, strokeWidth: 4 } : { ...element, strokeColor: colour, strokeWidth: 4, backgroundColor: "#ffe0b2" };
         }
 
         if (original) {
