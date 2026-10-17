@@ -9,7 +9,7 @@
 - The extractor records the event name of listeners (`on`, `subscribe`, `addEventListener`…) beside emitters.
 - `--changes` (and the "changes" box on the page) lays the review's marks over any view: structure and change in one picture.
 - `--mermaid c4|quadrant|pie|gitgraph|mindmap` writes the Mermaid type that fits a view; `classes` and `sequence:` have their own; the README says which fits where.
-- A tap on a line lights it with its two ends and shows what it joins: the imports and calls behind it with their `file:line` (`/api/edge`).
+- A tap on a line lights it with its two ends and shows what it joins: the imports and calls behind it with their `file:line` (`/api/edge`). Several lines under one tap are listed to pick from; *follow* (Shift+tap) lights the chain onward and lists what it reaches; the line under the pointer lights on hover.
 - Arrows never run through a shape: a route over several columns takes a corridor between the rows of the columns in between, a backward route runs through the gaps beside the columns, and a test keeps the invariant on every view of the fixture and on grids that force each case.
 - Overlays over any view, in any mix: `--overlay tests,storages,heat` marks the modules no test imports, labels the storages and shades every shape by the calls into it; with `--changes` the review's marks lie over the same picture.
 - The page's ⚙ options panel (`o`) sets the depth, the fold limit, the packages, the overlays and the Mermaid type; every option travels in the link, "remember as defaults" keeps them in the browser, "reset" forgets them.

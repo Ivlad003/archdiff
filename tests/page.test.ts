@@ -171,4 +171,10 @@ test("a tap on a line lights it with its ends and shows where it leads", { skip:
   await page!.mouse.up();
   await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/lib/orders.ts → src/db/store.ts"`, undefined, { timeout: 8000 });
   assert.ok((await page!.textContent("#markdown"))?.includes("to: src/db/store.ts (module)"));
+  // "follow" lights the chain onward from the line and lists what it reaches; store.ts imports orders.ts back, so the chain is not empty.
+  await page!.click(".line-strip button:has-text('follow')");
+  await page!.waitForFunction(`[...document.querySelectorAll("#markdown h2")].some((h) => h.textContent?.startsWith("Chain onward"))`, undefined, { timeout: 8000 });
+  assert.ok((await page!.textContent("#markdown"))?.includes("src/db/store.ts → src/lib/orders.ts"));
+  await page!.click(".line-strip button:has-text('stop following')");
+  await page!.waitForFunction(`![...document.querySelectorAll("#markdown h2")].some((h) => h.textContent?.startsWith("Chain onward"))`);
 });

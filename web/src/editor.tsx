@@ -17,8 +17,12 @@ import { createRoot, type Root } from "react-dom/client";
 import type { SceneElement } from "../../src/scene.ts";
 
 export interface CanvasEvents {
-  /** A tap on a generated shape (its element ID is the node ID), on a generated line (`edge` names its ends), or on nothing. */
-  pick(id: string | null, edge?: { from: string; to: string; kind: string }): void;
+  /**
+   * A tap on a generated shape (its element ID is the node ID), on a generated line, or on nothing. `lines` are the
+   * generated lines within reach of the tap, the nearest first (several where arrows run close together); `follow` is a
+   * tap with Shift held: trace the chain onward from the line.
+   */
+  pick(id: string | null, lines?: PickedLine[], follow?: boolean): void;
   /** A double tap on a shape, or its link: open the view the link names (`archdiff://view/<key>`). */
   open(id: string, link: string | null): void;
   /** The scene changed by hand (edit mode). */
@@ -36,10 +40,20 @@ export interface CanvasHandle {
   scrollToContent(): void;
   /** Lights the shapes of `ids` (a run passing through them); an empty list clears every light. */
   highlight(ids: readonly string[], colour?: string): void;
+  /** Lights the line under the pointer, under the tap's own light; null puts it out. */
+  hover(id: string | null): void;
   /** Where the viewport is, to remember per view. */
   viewport(): { scrollX: number; scrollY: number; zoom: number } | null;
   setViewport(viewport: { scrollX: number; scrollY: number; zoom: number }): void;
   unmount(): void;
+}
+
+/** A generated line under a tap or the pointer: its element ID and the ends it joins. */
+export interface PickedLine {
+  id: string;
+  from: string;
+  to: string;
+  kind: string;
 }
 
 /** The prefix of the view a shape opens (`customData.view` of a generated shape). */
@@ -77,24 +91,28 @@ function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: n
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-/** A generated line within `tolerance` of the scene point, the nearest first. */
-function arrowAt(elements: readonly SceneElement[], x: number, y: number, tolerance: number): SceneElement | null {
-  let best: { element: SceneElement; distance: number } | null = null;
+/** The generated lines within `tolerance` of the scene point, the nearest first: a bundle where arrows run close together. */
+function arrowsAt(elements: readonly SceneElement[], x: number, y: number, tolerance: number): PickedLine[] {
+  const near: { line: PickedLine; distance: number }[] = [];
 
   for (const element of elements) {
     if (element.isDeleted || element.customData?.["archdiff"] !== "edge") continue;
     const points = (element as SceneElement & { points?: [number, number][] }).points ?? [];
+    let closest = Infinity;
 
     for (let i = 1; i < points.length; i++) {
       const [ax, ay] = points[i - 1]!;
       const [bx, by] = points[i]!;
-      const distance = distanceToSegment(x, y, element.x + ax, element.y + ay, element.x + bx, element.y + by);
+      closest = Math.min(closest, distanceToSegment(x, y, element.x + ax, element.y + ay, element.x + bx, element.y + by));
+    }
 
-      if (distance <= tolerance && (!best || distance < best.distance)) best = { element, distance };
+    if (closest <= tolerance) {
+      const data = element.customData;
+      near.push({ line: { id: element.id, from: String(data["from"] ?? ""), to: String(data["to"] ?? ""), kind: String(data["kind"] ?? "") }, distance: closest });
     }
   }
 
-  return best?.element ?? null;
+  return near.sort((a, b) => a.distance - b.distance).map((entry) => entry.line);
 }
 
 function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
@@ -180,14 +198,13 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         const hit = shapeAt(scene, at.x, at.y);
         const now = Date.now();
 
-        // No shape under the tap: a line, when one runs within a few screen pixels.
+        // No shape under the tap: the lines within a few screen pixels, when any; Shift follows the chain from the nearest.
         if (!hit) {
-          const arrow = arrowAt(scene, at.x, at.y, 8 / api.getAppState().zoom.value);
+          const lines = arrowsAt(scene, at.x, at.y, 8 / api.getAppState().zoom.value);
           lastTap = null;
 
-          if (arrow) {
-            const data = arrow.customData ?? {};
-            events.pick(arrow.id, { from: String(data["from"] ?? ""), to: String(data["to"] ?? ""), kind: String(data["kind"] ?? "") });
+          if (lines.length > 0) {
+            events.pick(lines[0]!.id, lines, event.shiftKey);
 
             return;
           }
@@ -228,6 +245,41 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       api.updateScene({ appState: { scrollX, scrollY, zoom: { value: zoom as never } } });
     };
 
+    // Hover: the line under the pointer, lit lightly; checked at most once a frame, and never over a lit shape or line.
+    let hovered: string | null = null;
+    let pending: PointerEvent | null = null;
+    container.addEventListener("pointermove", (event) => {
+      if (mode !== "view" || !api || pending) {
+        pending = pending ?? (mode === "view" ? event : null);
+
+        return;
+      }
+
+      pending = event;
+      requestAnimationFrame(() => {
+        const last = pending;
+        pending = null;
+
+        if (!last || !api || mode !== "view") return;
+        const at = scenePoint(last);
+        const scene = api.getSceneElements() as unknown as SceneElement[];
+        const line = at && !shapeAt(scene, at.x, at.y) ? (arrowsAt(scene, at.x, at.y, 8 / api.getAppState().zoom.value)[0] ?? null) : null;
+        const id = line?.id ?? null;
+
+        if (id === hovered) return;
+        hovered = id;
+        container.style.cursor = id ? "pointer" : "";
+        hover(id);
+      });
+    });
+    container.addEventListener("pointerleave", () => {
+      if (hovered) {
+        hovered = null;
+        container.style.cursor = "";
+        hover(null);
+      }
+    });
+
     // Highlight: the original look of every lit shape, to put back when the light goes.
     const lit = new Map<string, { strokeColor: string; strokeWidth: number; backgroundColor: string }>();
 
@@ -249,6 +301,36 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
 
         if (original) {
           lit.delete(element.id);
+          changed = true;
+
+          return { ...element, ...original };
+        }
+
+        return element;
+      });
+
+      if (changed) api.updateScene({ elements: next as never });
+    };
+
+    // The hover light sits under the tap light: a line the tap lit keeps its look; one line at a time.
+    const hoverLit = new Map<string, { strokeColor: string; strokeWidth: number }>();
+
+    const hover = (id: string | null): void => {
+      if (!api) return;
+      const elements = api.getSceneElementsIncludingDeleted() as unknown as (SceneElement & { strokeColor: string; strokeWidth: number })[];
+      let changed = false;
+      const next = elements.map((element) => {
+        const original = hoverLit.get(element.id);
+
+        if (element.id === id && !lit.has(element.id) && !original) {
+          hoverLit.set(element.id, { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth });
+          changed = true;
+
+          return { ...element, strokeColor: "#ffa726", strokeWidth: 3 };
+        }
+
+        if (original && element.id !== id) {
+          hoverLit.delete(element.id);
           changed = true;
 
           return { ...element, ...original };
@@ -295,6 +377,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       },
       scrollToContent: fit,
       highlight,
+      hover,
       viewport: () => {
         if (!api) return null;
         const state = api.getAppState();

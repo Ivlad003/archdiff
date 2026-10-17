@@ -8,8 +8,8 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { api, type DiagramNode, type ViewEntry } from "./api.ts";
-import { mountCanvas, VIEW_LINK, type CanvasHandle } from "./editor.tsx";
+import { api, type DiagramEdge, type DiagramNode, type ViewEntry } from "./api.ts";
+import { mountCanvas, VIEW_LINK, type CanvasHandle, type PickedLine } from "./editor.tsx";
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -76,6 +76,8 @@ function readDefaults(): Defaults {
 let views: ViewEntry[] = [];
 let diagramMarkdown = "";
 let nodes = new Map<string, DiagramNode>();
+/** The lines of the current view, in the diagram's order (the order the canvas names them by). */
+let edges: DiagramEdge[] = [];
 let canvas: CanvasHandle | null = null;
 let mode: "view" | "edit" = "view";
 let dirty = false;
@@ -439,16 +441,104 @@ async function showNode(id: string | null): Promise<void> {
 }
 
 /** The page of a tapped line: what it joins and the imports and calls behind it. */
-async function showEdge(edge: { from: string; to: string; kind: string }): Promise<void> {
-  const state = stateFromHash();
+/** The canvas element ID of a line, as the export names it (a message by its index, since one pair may exchange several). */
+function lineElementId(edge: DiagramEdge, index: number): string {
+  return `edge:${edge.from}->${edge.to}${edge.kind === "message" ? `:${index}` : ""}`;
+}
 
-  try {
-    const { markdown } = await api.edge(state.view, edge.from, edge.to, edge.kind);
-    setMarkdown(markdownPanel, markdown);
-  } catch (error) {
-    setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
+/** The first line of a shape's label, or its ID when the shape is not in the view. */
+function labelOf(id: string): string {
+  return nodes.get(id)?.label.split("\n")[0] ?? id;
+}
+
+/** The chain onward from a line: every line reachable from its target along the arrows, with the shapes on the way, breadth first, capped. */
+function chainFrom(line: PickedLine, cap = 300): { lineIds: string[]; nodeIds: string[]; hops: { edge: DiagramEdge; depth: number }[] } {
+  const lineIds = [line.id];
+  const nodeIds = [line.from, line.to];
+  const seen = new Set([line.from, line.to]);
+  const hops: { edge: DiagramEdge; depth: number }[] = [];
+  let frontier = [line.to];
+  let depth = 1;
+
+  while (frontier.length > 0 && lineIds.length < cap) {
+    const next: string[] = [];
+
+    for (const id of frontier) {
+      edges.forEach((edge, index) => {
+        if (edge.from !== id || edge.kind === "lifeline" || lineIds.length >= cap) return;
+        lineIds.push(lineElementId(edge, index));
+        hops.push({ edge, depth });
+
+        if (!seen.has(edge.to)) {
+          seen.add(edge.to);
+          nodeIds.push(edge.to);
+          next.push(edge.to);
+        }
+      });
+    }
+
+    frontier = next;
+    depth++;
   }
 
+  return { lineIds, nodeIds, hops };
+}
+
+/**
+ * The page of tapped lines: the nearest line's page, a strip to pick another of the bundle when several ran under
+ * the tap, and `follow` to light the chain onward from the line (Shift+tap does the same) with the shapes it reaches.
+ */
+async function showEdge(lines: PickedLine[], follow: boolean): Promise<void> {
+  const state = stateFromHash();
+  const line = lines[0]!;
+  const chain = follow ? chainFrom(line) : null;
+  canvas?.highlight(chain ? [...chain.lineIds, ...chain.nodeIds] : [...new Set(lines.flatMap((each) => [each.id, each.from, each.to]))]);
+  let markdown: string;
+
+  try {
+    markdown = (await api.edge(state.view, line.from, line.to, line.kind)).markdown;
+  } catch (error) {
+    markdown = error instanceof Error ? error.message : String(error);
+  }
+
+  if (chain) {
+    const reached = chain.nodeIds.slice(2);
+    markdown += `\n## Chain onward (${chain.hops.length} lines, ${reached.length} shapes)\n\n`;
+    markdown += chain.hops.length === 0 ? "Nothing leads on from here in this view.\n" : chain.hops.map((hop) => `- ${"  ".repeat(hop.depth - 1)}${labelOf(hop.edge.from)} → **${labelOf(hop.edge.to)}**${hop.edge.kind === "dependency" ? "" : ` (${hop.edge.kind})`}${nodes.get(hop.edge.to)?.ref?.file ? ` — \`${nodes.get(hop.edge.to)!.ref!.file}${nodes.get(hop.edge.to)!.ref!.line ? `:${nodes.get(hop.edge.to)!.ref!.line}` : ""}\`` : ""}`).join("\n");
+
+    if (chain.lineIds.length >= 300) markdown += "\n- … cut at 300 lines";
+    markdown += "\n";
+  }
+
+  setMarkdown(markdownPanel, markdown);
+
+  // The strip above the page: the bundle under the tap and the follow switch.
+  const strip = document.createElement("div");
+  strip.className = "line-strip";
+
+  if (lines.length > 1) {
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = `${lines.length} lines under the tap:`;
+    strip.append(label);
+
+    for (const each of lines) {
+      const button = document.createElement("button");
+      button.textContent = `${labelOf(each.from)} → ${labelOf(each.to)}`;
+      button.title = `Show this line (${each.kind})`;
+      button.classList.toggle("active", each.id === line.id);
+      button.addEventListener("click", () => void showEdge([each, ...lines.filter((other) => other.id !== each.id)], false));
+      strip.append(button);
+    }
+  }
+
+  const followButton = document.createElement("button");
+  followButton.textContent = follow ? "stop following" : "follow →";
+  followButton.title = follow ? "Light only this line again" : "Light every line and shape the arrows lead on to from here (Shift+tap does the same)";
+  followButton.classList.toggle("active", follow);
+  followButton.addEventListener("click", () => void showEdge(lines, !follow));
+  strip.append(followButton);
+  markdownPanel.prepend(strip);
   showTab("markdown");
 }
 
@@ -546,12 +636,14 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
   }
 
   canvas = await mountCanvas(element("canvas"), elements, {
-    pick: (id, edge) => {
-      // A tap lights what it picked: a line with its two ends; a shape or nothing puts the light out.
-      canvas?.highlight(edge && id ? [id, edge.from, edge.to] : []);
-
-      if (edge) void showEdge(edge);
-      else void showNode(id);
+    pick: (id, lines, follow) => {
+      // A tap on lines lights them with their ends (or the chain onward, with Shift); a shape or nothing puts the light out.
+      if (lines && lines.length > 0) {
+        void showEdge(lines, follow === true);
+      } else {
+        canvas?.highlight([]);
+        void showNode(id);
+      }
     },
     open: (id, link) => {
       const key = link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : nodes.has(id) ? ownView(nodes.get(id)!) : null;
@@ -640,6 +732,7 @@ async function load(): Promise<void> {
       title.textContent = `${result.diagram.title}${warnings > 0 ? ` — ⚠ ${warnings} head${warnings === 1 ? "" : "s"} add a layer dependency` : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
+      edges = result.diagram.edges;
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
       reason.title = reason.textContent;
@@ -651,6 +744,7 @@ async function load(): Promise<void> {
       title.textContent = `${result.diagram.title} — ${result.diff.changedFiles.length} source files changed${result.diff.layerEdgesAdded.length > 0 ? ` — ⚠ ${result.diff.layerEdgesAdded.length} new layer dependencies` : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
+      edges = result.diagram.edges;
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
       reason.title = reason.textContent;
@@ -662,6 +756,7 @@ async function load(): Promise<void> {
       title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
+      edges = result.diagram.edges;
       mocks = result.mocks;
       await ensureCanvas(result.elements);
       reason.textContent = result.diagram.reason ?? "";
