@@ -1,6 +1,6 @@
 # Publishing
 
-The package publishes from a git tag through `.github/workflows/release.yml`; the tag must equal `v<version>` of package.json. Locally, the same can be done by hand.
+The package is published by hand with `npm publish` (the account has two-factor auth, so the publish asks for a one-time code in the browser). The tag `v<version>` marks the release in git; no workflow publishes from it (removed 2026-10-17; bring it back when an automation token is set up).
 
 ## Once
 
