@@ -23,9 +23,10 @@ export interface DiagramNode {
    * a module at the top of a sequence view; `anchor`: an invisible point
    * (the foot of a lifeline); `event`: an event name (emitted, listened
    * to); `cell`: a box of a table or a bar of a chart, sized by the view;
-   * `package`: a package of a monorepo.
+   * `package`: a package of a monorepo; `class`: a class or interface box
+   * of the class diagram, its label the fields and methods line by line.
    */
-  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package";
+  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package" | "class";
   /** How hot the shape is, 0–1 (a hotspot's calls in, a matrix cell's count): the fill darkens with it. */
   heat?: number;
   label: string;
@@ -95,6 +96,8 @@ export interface Diagram {
   placed?: true;
   /** A sequence view: the Mermaid export is a sequenceDiagram and the Markdown lists the messages in order. */
   sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number }[] };
+  /** A class view: the Mermaid export is a classDiagram. */
+  classes?: { boxes: { id: string; name: string; kind: "class" | "interface" | "type"; fields: string[]; methods: string[] }[]; relations: { from: string; to: string; kind: "extends" | "implements" }[] };
 }
 
 /** Manual places that win over the computed ones, by node ID. */
@@ -114,6 +117,7 @@ export const SIZE: Record<DiagramNode["kind"], { w: number; h: number }> = {
   event: { w: 150, h: 44 },
   cell: { w: 70, h: 34 },
   package: { w: 180, h: 60 },
+  class: { w: 230, h: 80 },
 };
 
 /** One cell of the grid: the largest shape and the gaps around it. */
@@ -250,13 +254,17 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
     columns.set(r, Math.max(columns.get(r) ?? 1, Math.ceil(n / MAX_ROWS)));
   }
 
+  // Cells grow to the tallest and widest shape of the diagram (class boxes carry their own size).
+  const sized = (node: DiagramNode): { w: number; h: number } => (node.w > 0 && node.h > 0 ? { w: node.w, h: node.h } : SIZE[node.kind]);
+  const gridW = Math.max(CELL_W, ...diagram.nodes.map((node) => sized(node).w + 40));
+  const gridH = Math.max(CELL_H, ...diagram.nodes.map((node) => sized(node).h + 24));
   const left = new Map<number, number>();
   let x = LANE_PAD;
 
   // The left edge of every rank, columns side by side.
   for (let r = 0; r <= Math.max(0, ...columns.keys()); r++) {
     left.set(r, x);
-    x += (columns.get(r) ?? 1) * CELL_W;
+    x += (columns.get(r) ?? 1) * gridW;
   }
 
   // Each lane is as tall as its fullest rank.
@@ -275,12 +283,12 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
   for (const lane of laneSeq) {
     if (!rows.has(lane)) continue;
     top.set(lane, y);
-    y += rows.get(lane)! * CELL_H + 2 * LANE_PAD;
+    y += rows.get(lane)! * gridH + 2 * LANE_PAD;
   }
 
   // Place each shape centred in its grid cell; a manual position wins.
   const nodes = diagram.nodes.map((node): DiagramNode => {
-    const size = SIZE[node.kind];
+    const size = sized(node);
     const lane = laneOf(node);
     const r = rank.get(node.id)!;
     const height = rowsOf(`${lane}:${r}`);
@@ -289,11 +297,11 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
     // A stack: one row per shape, in the diagram's order; the canvas draws its edges as arcs beside it.
     const placed =
       diagram.direction === "down"
-        ? { ...node, x: LANE_PAD + (CELL_W - size.w) / 2, y: LANE_PAD + index.get(node.id)! * CELL_H + (CELL_H - size.h) / 2, w: size.w, h: size.h }
+        ? { ...node, x: LANE_PAD + (gridW - size.w) / 2, y: LANE_PAD + index.get(node.id)! * gridH + (gridH - size.h) / 2, w: size.w, h: size.h }
         : {
             ...node,
-            x: left.get(r)! + Math.floor(n / height) * CELL_W + (CELL_W - size.w) / 2,
-            y: top.get(lane)! + LANE_PAD + (n % height) * CELL_H + (CELL_H - size.h) / 2,
+            x: left.get(r)! + Math.floor(n / height) * gridW + (gridW - size.w) / 2,
+            y: top.get(lane)! + LANE_PAD + (n % height) * gridH + (gridH - size.h) / 2,
             w: size.w,
             h: size.h,
           };
@@ -309,7 +317,7 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
   const groups = diagram.groups.map((group, lane): DiagramGroup => {
     const members = nodes.filter((node) => laneOf(node) === lane);
     const from = Math.min(top.get(lane) ?? 0, ...members.map((node) => node.y - LANE_PAD));
-    const to = Math.max((top.get(lane) ?? 0) + (rows.get(lane) ?? 0) * CELL_H + 2 * LANE_PAD, ...members.map((node) => node.y + node.h + LANE_PAD));
+    const to = Math.max((top.get(lane) ?? 0) + (rows.get(lane) ?? 0) * gridH + 2 * LANE_PAD, ...members.map((node) => node.y + node.h + LANE_PAD));
 
     return { ...group, x: 0, y: from, w: right, h: to - from };
   });

@@ -42,6 +42,8 @@ interface State {
   head: string | null;
   /** The heads of a comparison (two or more branches, `WORKTREE` the working tree); empty: a plain review. */
   heads: string[];
+  /** Lay the review's marks over the view. */
+  changes: boolean;
 }
 
 let views: ViewEntry[] = [];
@@ -57,7 +59,7 @@ function stateFromHash(): State {
   const params = new URLSearchParams(location.hash.slice(1));
   const depth = params.get("depth");
 
-  return { view: params.get("view") ?? "layers", depth: depth === null || depth === "" ? null : Number(depth), review: params.get("review") === "1", packages: params.get("packages") === "1", head: params.get("head") || null, heads: (params.get("heads") ?? "").split(",").filter((head) => head !== "") };
+  return { view: params.get("view") ?? "layers", depth: depth === null || depth === "" ? null : Number(depth), review: params.get("review") === "1", packages: params.get("packages") === "1", head: params.get("head") || null, heads: (params.get("heads") ?? "").split(",").filter((head) => head !== ""), changes: params.get("changes") === "1" };
 }
 
 function setHash(state: State): void {
@@ -76,8 +78,12 @@ function setHash(state: State): void {
   if (state.head) params.set("head", state.head);
 
   if (state.heads.length > 0) params.set("heads", state.heads.join(","));
+
+  if (state.changes) params.set("changes", "1");
   location.hash = params.toString();
 }
+
+const changesInput = element<HTMLInputElement>("changes");
 
 const headInput = element<HTMLInputElement>("head");
 
@@ -106,7 +112,9 @@ function siblingViews(view: string): { label: string; key: string }[] {
   const kind = view.slice(0, at);
   const rest = view.slice(at + 1);
 
-  if (kind === "module" || kind === "inside" || kind === "contract" || kind === "cycle") return [{ label: "dependencies", key: `module:${rest}` }, { label: "inside: functions and calls", key: `inside:${rest}` }, { label: "contract: exports and their users", key: `contract:${rest}` }, { label: "its import cycle", key: `cycle:${rest}` }];
+  if (kind === "module" || kind === "inside" || kind === "contract" || kind === "cycle" || (kind === "classes" && rest !== "" && !rest.endsWith("/") && /\.[a-z]+$/.test(rest))) return [{ label: "dependencies", key: `module:${rest}` }, { label: "inside: functions and calls", key: `inside:${rest}` }, { label: "classes: fields and methods", key: `classes:${rest}` }, { label: "contract: exports and their users", key: `contract:${rest}` }, { label: "its import cycle", key: `cycle:${rest}` }];
+
+  if (kind === "dir" || kind === "classes") return [{ label: "modules of the directory", key: `dir:${rest}` }, { label: "classes of the directory", key: `classes:${rest}` }];
 
   if (kind === "calls" || kind === "sequence" || kind === "path") return [{ label: "call tree", key: `calls:${rest}` }, { label: "sequence of calls", key: `sequence:${rest}` }, { label: "path to the storages", key: `path:${rest}` }];
 
@@ -136,6 +144,14 @@ function crumbsOf(view: string): { label: string; key: string }[] {
     const parts = rest.split("/");
 
     for (let depth = 1; depth <= parts.length; depth++) crumbs.push({ label: `${parts[depth - 1]}/`, key: `dir:${parts.slice(0, depth).join("/")}` });
+  } else if (kind === "classes" && rest !== "") {
+    const module = rest;
+    const layer = layerOf(module);
+
+    if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
+    directories(module);
+    crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: /\.[a-z]+$/.test(module) ? `module:${module}` : `dir:${module}` });
+    crumbs.push({ label: "classes", key: view });
   } else if (["module", "inside", "contract", "cycle", "calls", "sequence", "path", "type"].includes(kind)) {
     const hash = rest.indexOf("#");
     const module = hash === -1 ? rest : rest.slice(0, hash);
@@ -376,7 +392,7 @@ function renderViews(filter: string): void {
   viewsList.replaceChildren();
   const needle = filter.trim().toLowerCase();
   const groups: [string, ViewEntry["kind"][]][] = [
-    ["Overview", ["layers", "coverage", "matrix", "cycles", "events", "tests", "hotspots", "packages", "timeline"]],
+    ["Overview", ["layers", "coverage", "classes", "matrix", "cycles", "events", "tests", "hotspots", "packages", "timeline"]],
     ["Layers", ["layer"]],
     ["Directories", ["dir"]],
     ["Entry points (call flows)", ["calls"]],
@@ -422,6 +438,17 @@ function renderExports(view: string, base: string | null, head: string | null = 
     link.href = api.exportUrl(view, format, base, head, heads);
     link.textContent = format;
     link.title = `Download the diagram as ${format}`;
+    exportLinks.append(link);
+  }
+
+  // The Mermaid types that read better for some views.
+  const kind = view.slice(0, view.indexOf(":") === -1 ? view.length : view.indexOf(":"));
+  const styles: [string, string][] = kind === "hotspots" ? [["quadrant", "mermaid: quadrant chart"]] : kind === "layers" || kind === "packages" ? [["c4", "mermaid: C4 context"], ["pie", "mermaid: pie of modules"]] : kind === "dir" || kind === "layer" ? [["mindmap", "mermaid: mindmap"]] : [];
+
+  for (const [style, label] of styles) {
+    const link = document.createElement("a");
+    link.href = `${api.exportUrl(view, "mermaid", base, head, heads)}&mermaid=${style}`;
+    link.textContent = label;
     exportLinks.append(link);
   }
 }
@@ -512,6 +539,7 @@ async function load(): Promise<void> {
   if (base !== null) baseInput.value = base;
   depthInput.value = state.depth === null ? "" : String(state.depth);
   packagesInput.checked = state.packages;
+  changesInput.checked = state.changes;
   renderViews(search.value);
   reason.textContent = "";
   element<HTMLButtonElement>("edit").disabled = state.review;
@@ -547,7 +575,7 @@ async function load(): Promise<void> {
       void loadCommits(state);
       void loadBranches(state);
     } else {
-      const result = await api.scene(state.view, state.depth, state.packages, state.view === "timeline" ? baseInput.value.trim() || null : null, state.view === "timeline" ? state.head : null);
+      const result = await api.scene(state.view, state.depth, state.packages, state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, state.view === "timeline" || state.changes ? state.head : null, state.changes);
       title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
       diagramMarkdown = result.markdown;
       nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
@@ -1144,6 +1172,7 @@ element<HTMLButtonElement>("shot-svg").addEventListener("click", () => void canv
 element<HTMLDivElement>("export").addEventListener("click", () => element<HTMLDetailsElement>("export-menu").removeAttribute("open"));
 depthInput.addEventListener("change", () => setHash({ ...stateFromHash(), depth: depthInput.value === "" ? null : Number(depthInput.value) }));
 packagesInput.addEventListener("change", () => setHash({ ...stateFromHash(), packages: packagesInput.checked }));
+changesInput.addEventListener("change", () => setHash({ ...stateFromHash(), changes: changesInput.checked }));
 baseInput.addEventListener("change", () => {
   if (stateFromHash().review) setHash(stateFromHash());
 });

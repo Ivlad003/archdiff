@@ -41,6 +41,8 @@ function elementType(node: DiagramNode): string {
       return "ApplicationEvent";
     case "cell":
       return "Grouping";
+    case "class":
+      return "DataObject";
   }
 }
 

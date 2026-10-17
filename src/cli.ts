@@ -11,8 +11,8 @@ import { LAYOUTS_DIRECTORY, readLayout, readLayoutFile } from "./layouts.ts";
 import { planFromScene, planMarkdown } from "./plan.ts";
 import { agentFromConfig } from "./agent.ts";
 import { diagramMarkdown } from "./markdown.ts";
-import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
-import { compareBranches, comparisonMarkdown, defaultBase, history, historyMarkdown, listBranches, mergeBase, reviewMarkdown, review } from "./diff.ts";
+import { exportDiagram, EXPORT_FORMATS, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "./export/index.ts";
+import { compareBranches, comparisonMarkdown, defaultBase, history, historyMarkdown, listBranches, mergeBase, overlayDiff, reviewMarkdown, review } from "./diff.ts";
 import { timelineDiagram } from "./views-more.ts";
 import { serve } from "./server.ts";
 import { layout } from "./diagram.ts";
@@ -32,8 +32,12 @@ Commands:
                      drawio, excalidraw, archimate. Views: layers | layer:<name> | dir:<path> |
                      module:<path> | inside:<path> | contract:<path> | calls:<path>#<fn> |
                      sequence:<path>#<fn> | path:<path>#<fn> | type:<path>#<Type> | cycles |
-                     cycle:<path> | matrix | events | tests | hotspots | packages |
-                     timeline [--base --head] | coverage. --packages draws the
+                     cycle:<path> | classes | classes:<path|dir> | matrix | events | tests |
+                     hotspots | packages |
+                     timeline [--base --head] | coverage. --mermaid auto|flowchart|c4|quadrant|
+                     pie|gitgraph|mindmap picks the Mermaid type (auto: a sequence, class or
+                     gitGraph where the view has one, else a flowchart). --changes lays the review's marks
+                     (--base, --head) over the view: structure and change in one picture. --packages draws the
                      packages a module imports; --limit folds a bigger picture into
                      "… N more" (default 80)
   layouts [dir] [--prune]
@@ -94,7 +98,7 @@ function parseArgs(argv: readonly string[]): Parsed {
 
       if (at !== -1) {
         flags.set(arg.slice(2, at), arg.slice(at + 1));
-      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent"].includes(arg.slice(2)) && i + 1 < argv.length) {
+      } else if (["format", "depth", "out", "base", "head", "heads", "port", "host", "limit", "agent", "mermaid"].includes(arg.slice(2)) && i + 1 < argv.length) {
         flags.set(arg.slice(2), argv[++i]!);
       } else {
         flags.set(arg.slice(2), true);
@@ -217,11 +221,17 @@ export async function main(argv: readonly string[]): Promise<number> {
           const from = typeof flags.get("base") === "string" ? (flags.get("base") as string) : mergeBase(analysis.root);
           const to = typeof flags.get("head") === "string" ? (flags.get("head") as string) : "HEAD";
           diagram = layout(timelineDiagram(await history(analysis.root, from, to), from, to));
+        } else if (flags.has("changes")) {
+          const result = await review(analysis.root, typeof flags.get("base") === "string" ? (flags.get("base") as string) : null, typeof flags.get("head") === "string" ? (flags.get("head") as string) : null);
+          diagram = layout(overlayDiff(viewOf(analysis, view, options), result.diff));
         } else diagram = layout(viewOf(analysis, view, options));
 
         if (diagram.missing) return fail(`diagram: ${diagram.reason} (archdiff views lists them)`);
+        const mermaid = (flags.get("mermaid") ?? "auto") as string;
 
-        return writeOut(format === "md" ? diagramMarkdown(diagram, analysis) : exportDiagram(diagram, format as Exclude<ExportFormat, "md">), flags.get("out"));
+        if (!MERMAID_STYLES.includes(mermaid as MermaidStyle)) return fail(`diagram: --mermaid must be one of ${MERMAID_STYLES.join(", ")}`);
+
+        return writeOut(format === "md" ? diagramMarkdown(diagram, analysis, mermaid as MermaidStyle) : exportDiagram(diagram, format as Exclude<ExportFormat, "md">, mermaid as MermaidStyle), flags.get("out"));
       }
 
       case "layouts": {

@@ -9,7 +9,7 @@
 
 import type { Analysis } from "./analyze.ts";
 import type { Diagram, DiagramNode } from "./diagram.ts";
-import { toMermaid } from "./export/mermaid.ts";
+import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
 import { moduleOf } from "./graph.ts";
 
 function position(node: DiagramNode): string {
@@ -19,11 +19,11 @@ function position(node: DiagramNode): string {
 }
 
 /** The page of a diagram: title, Mermaid, the shapes by lane. */
-export function diagramMarkdown(diagram: Diagram, analysis: Analysis): string {
+export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: MermaidStyle = "auto"): string {
   const lines = [`<!-- archdiff:generated — view ${diagram.view} -->`, `# ${diagram.title}`, ""];
 
   if (diagram.reason) lines.push(`_${diagram.reason}_`, "");
-  lines.push(`${diagram.nodes.length} shapes, ${diagram.edges.length} lines; ${analysis.files.length} files analysed.`, "", "```mermaid", toMermaid(diagram).trimEnd(), "```", "");
+  lines.push(`${diagram.nodes.length} shapes, ${diagram.edges.length} lines; ${analysis.files.length} files analysed.`, "", "```mermaid", toMermaid(diagram, mermaid).trimEnd(), "```", "");
 
   // The matrix reads as a table: rows import columns.
   if (diagram.view === "matrix") {
@@ -33,6 +33,25 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis): string {
 
     for (const from of layers) lines.push(`| **${from}** | ${layers.map((to) => (from === to ? "·" : cell.get(`${from}>${to}`)?.diff === "removed" ? `**${cell.get(`${from}>${to}`)!.label}** ⚠` : cell.get(`${from}>${to}`)?.label || "")).join(" | ")} |`);
     lines.push("", "A cell in bold with ⚠ is an import against the layer order (a lower layer importing a higher one).");
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
+  // Classes read box by box: fields, methods, what each extends or implements.
+  if (diagram.classes) {
+    for (const box of diagram.classes.boxes) {
+      const node = diagram.nodes.find((candidate) => candidate.id === box.id);
+      lines.push(`## ${box.kind === "class" ? "" : `«${box.kind}» `}${box.name}${node?.ref?.file ? ` — ${node.ref.file}:${node.ref.line}` : ""}`, "");
+
+      for (const relation of diagram.classes.relations.filter((candidate) => candidate.from === box.id)) lines.push(`- ${relation.kind} \`${relation.to}\``);
+
+      for (const field of box.fields) lines.push(`- field \`${field}\``);
+
+      for (const method of box.methods) lines.push(`- method \`${method}\``);
+
+      if (box.fields.length + box.methods.length === 0) lines.push("- (empty)");
+      lines.push("");
+    }
 
     return `${lines.join("\n").trimEnd()}\n`;
   }

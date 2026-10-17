@@ -721,3 +721,43 @@ export function comparisonMarkdown(result: ComparisonResult): string {
 
   return `${lines.join("\n").trimEnd()}\n`;
 }
+
+/**
+ * The marks of a review laid over any diagram: a module or function the
+ * change added, removed or changed keeps the view's own picture and gets
+ * the mark's colour, so the structure and the change are seen together.
+ * Removed things are not in the head's graph, so they cannot be drawn;
+ * they are counted in the reason.
+ */
+export function overlayDiff(diagram: Diagram, diff: GraphDiff): Diagram {
+  const marks = new Map<string, DiffMark>();
+
+  for (const id of diff.modulesAdded) marks.set(id, "added");
+
+  for (const change of diff.nodesAdded) marks.set(change.id, "added");
+
+  for (const change of diff.nodesChanged) marks.set(change.id, "changed");
+
+  for (const change of [...diff.nodesChanged, ...diff.nodesAdded]) if (!marks.has(change.module)) marks.set(change.module, "changed");
+  const added = new Set(diff.depsAdded.map((edge) => `${edge.from}\u0000${edge.to}`));
+  const calls = new Set(diff.callsAdded.map((edge) => `${edge.from}\u0000${edge.to}`));
+  let marked = 0;
+  const nodes = diagram.nodes.map((node) => {
+    const id = node.ref?.id ?? node.id;
+    const mark = marks.get(id) ?? (node.kind === "layer" ? undefined : marks.get(node.id));
+
+    if (!mark) return node;
+    marked++;
+
+    return { ...node, diff: mark };
+  });
+  const edges = diagram.edges.map((edge) => {
+    const key = `${edge.from}\u0000${edge.to}`;
+
+    return added.has(key) || calls.has(key) ? { ...edge, diff: "added" as const } : edge;
+  });
+  const removed = diff.modulesRemoved.length + diff.nodesRemoved.length;
+  const reason = `${marked} shapes changed since ${diff.base}${removed > 0 ? `; ${removed} removed (not drawn)` : ""}${diagram.reason ? `; ${diagram.reason}` : ""}`;
+
+  return { ...diagram, nodes, edges, reason, title: `${diagram.title} — changes since ${diff.base}` };
+}

@@ -8,7 +8,7 @@ import type { Diagram } from "../../src/diagram.ts";
 export interface ViewEntry {
   key: string;
   title: string;
-  kind: "layers" | "layer" | "dir" | "module" | "inside" | "contract" | "calls" | "sequence" | "path" | "type" | "cycles" | "cycle" | "matrix" | "events" | "tests" | "hotspots" | "packages" | "timeline" | "coverage";
+  kind: "layers" | "layer" | "dir" | "module" | "inside" | "contract" | "calls" | "sequence" | "path" | "type" | "cycles" | "cycle" | "classes" | "matrix" | "events" | "tests" | "hotspots" | "packages" | "timeline" | "coverage";
   layer?: string;
 }
 
@@ -169,7 +169,7 @@ export const api = {
     return () => source.close();
   },
   flow: (view: string, depth: number | null) => get<FlowResponse>(`/api/flow?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
-  scene: (view: string, depth: number | null, packages: boolean, base: string | null = null, head: string | null = null) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}${packages ? "&packages=1" : ""}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}`),
+  scene: (view: string, depth: number | null, packages: boolean, base: string | null = null, head: string | null = null, changes = false) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}${packages ? "&packages=1" : ""}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}${changes ? "&changes=1" : ""}`),
   saveLayout: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
     const response = await fetch(`/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
     const body = (await response.json()) as { saved: string } | { error: string };

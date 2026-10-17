@@ -544,6 +544,167 @@ export function packagesView(analysis: Analysis): Diagram {
   return unplaced("packages", `Packages (${packages.length})`, nodes, edges, []);
 }
 
+/** One box of the class diagram. */
+interface ClassBox {
+  id: string;
+  name: string;
+  module: string;
+  kind: "class" | "interface" | "type";
+  fields: string[];
+  methods: string[];
+  extends: string[];
+  implements: string[];
+  line: number;
+  endLine: number;
+}
+
+/** The `implements A, B` names written on a class, from the extractor's list or from its signature text. */
+function implementsOf(decl: { implements?: string[]; signature: string | null }): string[] {
+  if (decl.implements && decl.implements.length > 0) return decl.implements;
+  const match = decl.signature?.match(/implements\s+([^{]+)/);
+
+  return match ? match[1]!.split(",").map((name) => name.trim().replace(/<.*$/, "")).filter((name) => name !== "") : [];
+}
+
+/** The boxes of a module: its classes (methods, constructor-parameter fields, extends, implements) and its interfaces and object types (fields). */
+function classBoxes(analysis: Analysis, module: string): ClassBox[] {
+  const file = analysis.facts.get(module);
+
+  if (!file) return [];
+  const boxes: ClassBox[] = [];
+
+  for (const decl of file.decls) {
+    if (decl.kind === "class") {
+      const fields: string[] = [];
+      const methods: string[] = [];
+
+      for (const member of decl.members) {
+        if (member.name === "constructor" || member.name === "__construct" || member.name === "__init__") {
+          // Parameter properties (`private readonly repo: Repo`) are fields.
+          for (const param of (member.signature ?? "").replace(/^\(|\).*$/g, "").split(/,(?![^<([{]*[>)\]}])/)) {
+            const match = param.trim().match(/^(private|protected|public|readonly)[\s\w]*?\s(\w+)(\?)?(?::\s*(.+))?$/);
+
+            if (match) fields.push(`${match[1] === "private" ? "-" : match[1] === "protected" ? "#" : "+"}${match[2]}${match[3] ?? ""}${match[4] ? `: ${match[4].trim()}` : ""}`);
+          }
+
+          continue;
+        }
+
+        if (member.kind !== "fn") continue;
+        const signature = member.signature ?? "()";
+        methods.push(`${member.static ? "$" : "+"}${member.name}${member.accessor ? " ⟨get⟩" : ""}${signature.startsWith("(") ? signature : `(${signature})`}`);
+      }
+
+      for (const property of decl.properties ?? []) fields.push(`+${property.name}`);
+
+      for (const field of decl.fields ?? []) fields.push(`+${field.name}: ${field.class}`);
+      boxes.push({ id: `${module}#${decl.name}`, name: decl.name, module, kind: "class", fields, methods, extends: decl.base ? [decl.base.replace(/<.*$/, "")] : [], implements: implementsOf(decl), line: decl.line, endLine: decl.endLine });
+    } else if (decl.kind === "type" && decl.shape && decl.shape.length > 0) {
+      const fields = decl.shape.filter((field) => !field.type.startsWith("(")).map((field) => `+${field.name}${field.optional ? "?" : ""}: ${field.type}`);
+      const methods = decl.shape.filter((field) => field.type.startsWith("(")).map((field) => `+${field.name}${field.type.replace(/\s*=>\s*/, " → ")}`);
+      const isInterface = decl.signature === null || !decl.signature.startsWith("=");
+      boxes.push({ id: `${module}#${decl.name}`, name: decl.name, module, kind: isInterface ? "interface" : "type", fields, methods, extends: decl.base ? [decl.base.replace(/<.*$/, "")] : [], implements: [], line: decl.line, endLine: decl.endLine });
+    }
+  }
+
+  return boxes;
+}
+
+/**
+ * The class diagram: every class, interface and object type of the scope
+ * (the whole repository, a module, or a directory) as a box with its
+ * fields and methods, `extends` and `implements` as lines to the boxes
+ * they name — in the scope, or brought in from the modules the scope
+ * imports. Lanes are modules; the Markdown carries a Mermaid classDiagram.
+ */
+export function classesView(analysis: Analysis, scope: string | null, limit: number): Diagram {
+  const { graph } = analysis;
+  const key = scope === null ? "classes" : `classes:${scope}`;
+  let modules: string[];
+
+  if (scope === null) modules = [...graph.modules.keys()].sort();
+  else if (graph.modules.has(scope)) modules = [scope];
+  else {
+    modules = [...graph.modules.keys()].filter((id) => id.startsWith(`${scope.replace(/\/+$/, "")}/`)).sort();
+
+    if (modules.length === 0) return unplaced(key, scope, [], [], [], { reason: `no module or directory "${scope}"`, missing: true });
+  }
+
+  const boxes = new Map<string, ClassBox>();
+
+  for (const module of modules) for (const box of classBoxes(analysis, module)) boxes.set(box.id, box);
+
+  if (boxes.size === 0) return unplaced(key, scope === null ? "Classes" : `Classes of ${scope}`, [], [], [], { reason: "no class, interface or object type here" });
+  // A name written on `extends`/`implements` → the box it means: the same module first, then the modules this one imports.
+  const resolveName = (from: string, name: string): string | null => {
+    const own = `${from}#${name}`;
+
+    if (boxes.has(own) || graph.nodes.has(own)) return own;
+
+    for (const dep of graph.deps) {
+      if (dep.from !== from || !graph.modules.has(dep.to)) continue;
+      const id = `${dep.to}#${name}`;
+
+      if (graph.nodes.has(id)) return id;
+    }
+
+    return null;
+  };
+
+  // Targets outside the scope are brought in as boxes of their own, so a line never points at nothing.
+  const related = new Set<string>();
+
+  for (const box of boxes.values()) {
+    for (const name of [...box.extends, ...box.implements]) {
+      const target = resolveName(box.module, name);
+
+      if (target && !boxes.has(target)) related.add(target);
+    }
+  }
+
+  for (const id of related) {
+    const module = moduleOf(id);
+    const found = classBoxes(analysis, module).find((box) => box.id === id);
+
+    if (found) boxes.set(id, found);
+  }
+
+  const all = [...boxes.values()].sort((a, b) => (modules.includes(a.module) === modules.includes(b.module) ? (a.id < b.id ? -1 : 1) : modules.includes(a.module) ? -1 : 1)).slice(0, limit);
+  const kept = new Set(all.map((box) => box.id));
+  const nodes: DiagramNode[] = all.map((box) => {
+    const head = box.kind === "class" ? box.name : `«${box.kind}» ${box.name}`;
+    const lines = [head, "────────", ...box.fields, ...(box.fields.length > 0 && box.methods.length > 0 ? ["────────"] : []), ...box.methods];
+    const shown = lines.slice(0, 18);
+
+    if (lines.length > 18) shown.push(`… ${lines.length - 18} more`);
+    const width = Math.min(360, Math.max(230, 14 + 7 * Math.max(...shown.map((line) => line.length))));
+
+    return { id: box.id, kind: "class", label: shown.join("\n"), ref: { id: box.id, file: box.module, line: box.line, endLine: box.endLine }, group: box.module, x: 0, y: 0, w: width, h: 24 + 15 * shown.length };
+  });
+  const edges: DiagramEdge[] = [];
+
+  for (const box of all) {
+    for (const name of box.extends) {
+      const target = resolveName(box.module, name);
+
+      if (target && kept.has(target)) edges.push({ from: box.id, to: target, kind: "dependency", label: "extends" });
+    }
+
+    for (const name of box.implements) {
+      const target = resolveName(box.module, name);
+
+      if (target && kept.has(target)) edges.push({ from: box.id, to: target, kind: "ref", label: "implements" });
+    }
+  }
+
+  const classes = { boxes: all.map((box) => ({ id: box.id, name: box.name, kind: box.kind, fields: box.fields, methods: box.methods })), relations: edges.map((edge) => ({ from: edge.from, to: edge.to, kind: edge.label as "extends" | "implements" })) };
+  const diagram = unplaced(key, scope === null ? `Classes (${all.length})` : `Classes of ${scope}`, nodes, edges, [...new Set(all.map((box) => box.module))].map(lane), { classes });
+
+  if (boxes.size > limit) diagram.reason = `${boxes.size - limit} of ${boxes.size} classes cut; --limit raises it, classes:<dir> narrows`;
+
+  return diagram;
+}
+
 /** The drift of the architecture as a bar per commit: height by the imports and functions that moved, red when a coupling between layers appeared, green when one went. */
 export function timelineDiagram(rows: readonly HistoryRow[], base: string, head: string): Diagram {
   const key = "timeline";

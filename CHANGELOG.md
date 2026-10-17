@@ -2,11 +2,14 @@
 
 ## 0.2.0 — 2026-10-17
 
-- Ten views that each answer one architectural question: `cycles`/`cycle:`, `matrix`, `type:`, `path:`, `contract:`, `events`, `tests`, `hotspots`, `packages`, `timeline`.
+- Eleven views that each answer one architectural question: `classes` (the class diagram, Mermaid classDiagram), `cycles`/`cycle:`, `matrix`, `type:`, `path:`, `contract:`, `events`, `tests`, `hotspots`, `packages`, `timeline`.
 - Branches: a branch bar with the base (develop, main or master by default) and any number of heads; `compare` draws several heads against one base, every module labelled with what each head did; `archdiff branches` and `archdiff compare --heads a,b,WORKTREE` in the terminal.
 - Flow: mocks generated from the types or by the agent from a description; ▶ play lights the steps on the diagram.
 - Chat: `@module:` / `@fn:` / `@layer:` / `@dir:` / `@flow:` / `@type:` tags with suggestions, expanded into context for the agent; the shapes of files the agent touches light up while it works.
 - The extractor records the event name of listeners (`on`, `subscribe`, `addEventListener`…) beside emitters.
+- `--changes` (and the "changes" box on the page) lays the review's marks over any view: structure and change in one picture.
+- `--mermaid c4|quadrant|pie|gitgraph|mindmap` writes the Mermaid type that fits a view; `classes` and `sequence:` have their own; the README says which fits where.
+- docs/media: screenshots of every view and a walkthrough video.
 
 ## 0.1.1 — 2026-10-17
 

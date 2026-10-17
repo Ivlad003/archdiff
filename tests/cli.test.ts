@@ -648,3 +648,64 @@ test("agent events name the files a tool touches, for the page to light their sh
   assert.equal(mockFromType("'a' | 'b'"), "a");
   assert.deepEqual(mockFromType("Order[]"), []);
 });
+
+test("classes draws the class diagram with fields, methods, extends and implements, as boxes and as Mermaid", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-classes-"));
+
+  try {
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/repo.ts"), "export interface Repo {\n  save(o: Order): void;\n  readonly name: string;\n}\nexport type Order = { id: string; total: number };\n");
+    writeFileSync(join(dir, "src/service.ts"), 'import type { Repo, Order } from "./repo.ts";\n\nexport abstract class Base {\n  abstract go(): void;\n  stop(): void {}\n}\n\nexport class Service extends Base implements Repo {\n  readonly name = "svc";\n  constructor(private readonly repo: Repo, public label?: string) {\n    super();\n  }\n  go(): void {\n    this.save({ id: "1", total: 1 });\n  }\n  save(o: Order): void {\n    this.repo.save(o);\n  }\n  get size(): number {\n    return 1;\n  }\n}\n');
+    const md = archdiff(["diagram", "classes", dir]).stdout;
+    assert.ok(md.includes("classDiagram"), md);
+    assert.ok(md.includes("<<interface>>"), md);
+    assert.ok(md.includes("-repo: Repo") && md.includes("+label?: string"), md);
+    assert.ok(md.includes("+save(o: Order) → void") || md.includes("+save(o: Order) returns void"), md);
+    assert.ok(md.includes("src_service_ts_Base <|-- src_service_ts_Service"), md);
+    assert.ok(md.includes("src_repo_ts_Repo <|.. src_service_ts_Service"), md);
+    assert.ok(md.includes("## «interface» Repo — src/repo.ts:1") && md.includes("- field `+name: string`"), md);
+    const json = JSON.parse(archdiff(["diagram", "classes:src/service.ts", dir, "--format", "json"]).stdout) as { nodes: { id: string; kind: string; h: number; label: string }[]; edges: { label?: string }[]; groups: { id: string }[] };
+    // The scope is one module; the interface it implements comes along from repo.ts, in its own lane.
+    assert.deepEqual(json.groups.map((group) => group.id).sort(), ["src/repo.ts", "src/service.ts"]);
+    const service = json.nodes.find((node) => node.id === "src/service.ts#Service")!;
+    assert.equal(service.kind, "class");
+    assert.ok(service.h > 100 && service.label.startsWith("Service\n"), service.label);
+    assert.deepEqual(json.edges.map((edge) => edge.label).sort(), ["extends", "implements"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--changes lays the review's marks over any view", () => {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-overlay-"));
+
+  try {
+    cpSync(fixture, dir, { recursive: true });
+    const git = (...args: string[]): void => {
+      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git("init", "-q", "-b", "main");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    writeFileSync(join(dir, "src/lib/log.ts"), "export function log(message: string): void {\n  console.error(message);\n}\nexport function debug(): void {}\n");
+    const inside = JSON.parse(archdiff(["diagram", "inside:src/lib/log.ts", dir, "--changes", "--base", "HEAD", "--format", "json"]).stdout) as { title: string; reason?: string; nodes: { id: string; diff?: string }[] };
+    assert.ok(inside.title.endsWith("— changes since HEAD"), inside.title);
+    assert.equal(inside.nodes.find((node) => node.id === "src/lib/log.ts#log")?.diff, "changed");
+    assert.equal(inside.nodes.find((node) => node.id === "src/lib/log.ts#debug")?.diff, "added");
+    const layer = JSON.parse(archdiff(["diagram", "layer:lib", dir, "--changes", "--base", "HEAD", "--format", "json", "--depth", "0"]).stdout) as { nodes: { id: string; diff?: string }[] };
+    assert.equal(layer.nodes.find((node) => node.id === "src/lib/log.ts")?.diff, "changed");
+    assert.equal(layer.nodes.find((node) => node.id === "src/lib/orders.ts")?.diff, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--mermaid picks a Mermaid type that fits the view", () => {
+  assert.ok(archdiff(["diagram", "layers", fixture, "--format", "mermaid", "--mermaid", "c4"]).stdout.includes("C4Context"));
+  assert.ok(archdiff(["diagram", "hotspots", fixture, "--format", "mermaid", "--mermaid", "quadrant"]).stdout.includes("quadrantChart"));
+  assert.ok(archdiff(["diagram", "layers", fixture, "--format", "mermaid", "--mermaid", "pie"]).stdout.includes('"lib" : 2'));
+  assert.ok(archdiff(["diagram", "layer:lib", fixture, "--mermaid", "mindmap"]).stdout.includes("mindmap"));
+  assert.equal(archdiff(["diagram", "layers", fixture, "--mermaid", "venn"]).status, 2);
+});

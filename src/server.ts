@@ -22,10 +22,10 @@ import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
 import { coverageReport } from "./coverage.ts";
 import { layout, type DiagramNode } from "./diagram.ts";
-import { commitsBetween, compareBranches, comparisonMarkdown, defaultBase, fileHistory, history, listBranches, mergeBase, review, reviewMarkdown } from "./diff.ts";
+import { commitsBetween, compareBranches, comparisonMarkdown, defaultBase, fileHistory, history, listBranches, mergeBase, overlayDiff, review, reviewMarkdown } from "./diff.ts";
 import { timelineDiagram } from "./views-more.ts";
 import { watch as watchFs } from "node:fs";
-import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, type ExportFormat } from "./export/index.ts";
+import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "./export/index.ts";
 import { toExcalidraw } from "./export/excalidraw.ts";
 import { AgentRunner, agentFromConfig, type AgentSpec } from "./agent.ts";
 import { dataFlow, flowMarkdown, jsonInAnswer, mockPrompt, mocksFromTypes } from "./flow.ts";
@@ -154,10 +154,18 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   };
 
   // The placed diagram of a view, at the saved places when the view was drawn by hand.
-  const placed = async (analysis: Analysis, key: string, depth?: number, packages = false, base: string | null = null, head: string | null = null): Promise<ReturnType<typeof layout> | null> => {
+  const placed = async (analysis: Analysis, key: string, depth?: number, packages = false, base: string | null = null, head: string | null = null, changes = false): Promise<ReturnType<typeof layout> | null> => {
     const view = parseView(key);
 
     if (!view) return null;
+
+    // `changes`: the review's marks laid over the view, so the structure and what the change did to it are one picture.
+    if (changes && view.kind !== "timeline") {
+      const result = await review(root, base || options.base, head);
+      const viewOptions = depth === undefined ? { packages } : { depth, packages };
+
+      return layout(overlayDiff(viewOf(analysis, view, viewOptions), result.diff), positionsOf(readLayout(root, key)?.elements ?? null));
+    }
 
     // The timeline is built from the commits of a range, not from one analysis.
     if (view.kind === "timeline") {
@@ -337,7 +345,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
           const key = url.searchParams.get("view") ?? "";
           const analysis = await fresh();
           const depthText = url.searchParams.get("depth");
-          const diagram = await placed(analysis, key, depthText === null || depthText === "" ? undefined : Number(depthText), url.searchParams.get("packages") === "1", url.searchParams.get("base"), url.searchParams.get("head"));
+          const diagram = await placed(analysis, key, depthText === null || depthText === "" ? undefined : Number(depthText), url.searchParams.get("packages") === "1", url.searchParams.get("base"), url.searchParams.get("head"), url.searchParams.get("changes") === "1");
 
           if (!diagram) return problem(response, 400, "unknown view");
           // The code's picture at the saved places, then the saved drawing's own elements (pencil, notes) on top.
@@ -394,7 +402,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
           if (depth !== undefined && !(Number.isInteger(depth) && depth >= 0)) return problem(response, 400, "depth must be a whole number");
           const analysis = await fresh();
-          const diagram = (await placed(analysis, url.searchParams.get("view") ?? "", depth, url.searchParams.get("packages") === "1", url.searchParams.get("base"), url.searchParams.get("head")))!;
+          const diagram = (await placed(analysis, url.searchParams.get("view") ?? "", depth, url.searchParams.get("packages") === "1", url.searchParams.get("base"), url.searchParams.get("head"), url.searchParams.get("changes") === "1"))!;
 
           return json(response, { diagram, markdown: diagramMarkdown(diagram, analysis), drawn: readLayout(root, url.searchParams.get("view") ?? "") !== null });
         }
@@ -545,15 +553,16 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
             const result = await compareBranches(root, url.searchParams.get("base") || null, (url.searchParams.get("heads") ?? "WORKTREE").split(",").filter((head) => head !== ""));
             diagram = result.diagram;
           } else {
-            diagram = await placed(analysis, key, undefined, false, url.searchParams.get("base"), url.searchParams.get("head"));
+            diagram = await placed(analysis, key, undefined, false, url.searchParams.get("base"), url.searchParams.get("head"), url.searchParams.get("changes") === "1");
 
             if (!diagram) return problem(response, 400, "unknown view");
           }
 
           const name = `${key.replace(/[^A-Za-z0-9._-]+/g, "_")}${EXPORT_EXTENSION[format as ExportFormat]}`;
+          const mermaid = (url.searchParams.get("mermaid") ?? "auto") as MermaidStyle;
           response.writeHead(200, { "content-type": EXPORT_MEDIA_TYPE[format as ExportFormat], "content-disposition": `attachment; filename="${name}"` });
 
-          return void response.end(exportDiagram(diagram, format as Exclude<ExportFormat, "md">));
+          return void response.end(exportDiagram(diagram, format as Exclude<ExportFormat, "md">, MERMAID_STYLES.includes(mermaid) ? mermaid : "auto"));
         }
 
         default:

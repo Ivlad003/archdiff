@@ -17,7 +17,7 @@ import type { Analysis } from "./analyze.ts";
 import { SIZE, type Diagram, type DiagramEdge, type DiagramGroup, type DiagramNode } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
-import { contractView, cyclesView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
+import { classesView, contractView, cyclesView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 
 export type View =
   | { kind: "layers" }
@@ -32,6 +32,7 @@ export type View =
   | { kind: "type"; id: string }
   | { kind: "cycles" }
   | { kind: "cycle"; id: string }
+  | { kind: "classes"; scope: string | null }
   | { kind: "matrix" }
   | { kind: "events" }
   | { kind: "tests" }
@@ -41,10 +42,10 @@ export type View =
   | { kind: "coverage" };
 
 /** The views without a subject. */
-const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "matrix", "events", "tests", "hotspots", "packages", "timeline"]);
+const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "events", "tests", "hotspots", "packages", "timeline"]);
 
 /** The views with a subject (`kind:<subject>`). */
-const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle"]);
+const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "classes"]);
 
 export interface ViewOptions {
   /** How far from the subject the picture goes; each view has its default. */
@@ -68,6 +69,8 @@ export interface ViewEntry {
 
 /** `layers`, `layer:<name>`, `module:<path>`, `calls:<path>#<fn>`, `coverage` → the view, or null. */
 export function parseView(key: string): View | null {
+  if (key === "classes") return { kind: "classes", scope: null };
+
   if (PLAIN_VIEWS.has(key)) return { kind: key } as View;
   const at = key.indexOf(":");
 
@@ -81,10 +84,14 @@ export function parseView(key: string): View | null {
 
   if (kind === "dir") return { kind, path: rest.replace(/\/+$/, "") };
 
+  if (kind === "classes") return { kind, scope: rest.replace(/\/+$/, "") };
+
   return { kind, id: rest } as View;
 }
 
 export function viewKey(view: View): string {
+  if (view.kind === "classes") return view.scope === null ? "classes" : `classes:${view.scope}`;
+
   if ("name" in view) return `${view.kind}:${view.name}`;
 
   if ("path" in view) return `${view.kind}:${view.path}`;
@@ -181,6 +188,7 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   // The types with a declaration of their own, for the type flow view.
   for (const node of [...graph.nodes.values()].filter((candidate) => candidate.kind === "type" && !candidate.parent && candidate.exported).sort((a, b) => (a.id < b.id ? -1 : 1))) list.push({ key: `type:${node.id}`, title: `${node.name} (${node.module})`, kind: "type", layer: graph.modules.get(node.module)!.layer });
   list.push({ key: "coverage", title: "Coverage: what the diagrams cannot show", kind: "coverage" });
+  list.push({ key: "classes", title: "Classes: every class and interface, fields and methods", kind: "classes" });
   list.push({ key: "matrix", title: "Matrix: who imports whom, layer by layer", kind: "matrix" });
   list.push({ key: "cycles", title: "Cycles: modules importing each other", kind: "cycles" });
   list.push({ key: "events", title: "Events: emitters and listeners", kind: "events" });
@@ -670,6 +678,8 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
         return cyclesView(graph, null);
       case "cycle":
         return cyclesView(graph, view.id);
+      case "classes":
+        return classesView(analysis, view.scope, options.limit ?? MAX_SHAPES);
       case "matrix":
         return matrixView(graph);
       case "events":
@@ -690,5 +700,5 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
 
   const diagram = full();
 
-  return diagram.placed ? diagram : fold(diagram, options.limit ?? MAX_SHAPES);
+  return diagram.placed || diagram.classes ? diagram : fold(diagram, options.limit ?? MAX_SHAPES);
 }

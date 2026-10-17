@@ -37,6 +37,7 @@ Exit code `2` is a wrong invocation or an I/O error.
 - **path:path#fn** — from an entry point to the storages only: every branch that leads to no store, database or cache is pruned.
 - **type:path#Type** — where a type flows: the functions that produce it, consume it or transform it, storages marked.
 - **contract:path** — the exports of a module and who uses each from outside; an export nothing uses says so.
+- **classes**, **classes:path**, **classes:dir** — the class diagram: every class, interface and object type as a box with its fields (`+`, `-`, `#`) and methods, `extends` and `implements` as lines, modules as lanes; Mermaid `classDiagram` in the Markdown. A box's second tap opens the module's inside.
 - **cycles** / **cycle:path** — modules importing each other, one lane per strongly connected component.
 - **matrix** — the dependency structure matrix of the layers: rows import columns, counts in the cells, imports against the layer order in red.
 - **events** — emitters → event names → listeners (`emit`/`publish`/`dispatch` and `on`/`subscribe`/`addEventListener` with a literal name).
@@ -86,6 +87,23 @@ Imports resolve per language: TypeScript/JavaScript like the compiler (relative 
 ## What the diagrams cannot show
 
 A call is followed when its callee is a declaration of the same file, an import of a repository file, a member of a class the file declares or imports, or `this.m` inside a class. Everything else is a gap with a reason: `dynamic` (a computed callee) and `unknown-member` (a known class without that member) are blind spots inside the repository; `member-of-value` (`list.map`, `req.on`, `expect(x).toBe`), `global` and `external` are calls out of it. `archdiff coverage` and the Coverage tab of the page list them by module, so an empty diagram is never read as proof.
+
+## Which Mermaid type where
+
+Every view exports as a Mermaid flowchart; some views read better as another Mermaid type, chosen with `--mermaid` (or the export menu on the page):
+
+| View | Mermaid type | Why |
+| --- | --- | --- |
+| `calls:`, `sequence:` | `sequenceDiagram` (automatic for `sequence:`) | the order of calls across modules |
+| `classes` | `classDiagram` (automatic) | fields, methods, inheritance in UML's own notation |
+| `layers`, `packages` | `C4Context` (`--mermaid c4`) | boundaries and containers, the architect's vocabulary |
+| `hotspots` | `quadrantChart` (`--mermaid quadrant`) | size against calls in, the big and central modules top right |
+| `layers`, any lanes | `pie` (`--mermaid pie`) | the share of modules per layer |
+| `timeline` | `gitGraph` (automatic) | commits in order, tagged where a coupling appeared |
+| `dir:`, `layer:` | `mindmap` (`--mermaid mindmap`) | a tree of what lives where |
+| `matrix` | a Markdown table | a matrix is a table |
+
+Not used, and why: a state diagram needs states the code does not declare; an ER diagram needs a schema (a later step with Prisma or SQL files); Gantt, Kanban, journey, Sankey, XY and the rest describe work or data, not code.
 
 ## Exports
 

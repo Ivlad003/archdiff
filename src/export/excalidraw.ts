@@ -89,8 +89,8 @@ function text(id: string, container: string | null, x: number, y: number, width:
 }
 
 function shapeOf(node: DiagramNode): { type: string; fill: string; stroke: string; style: ExcalidrawElement["strokeStyle"]; width: number } {
-  const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
-  const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : "#ffffff";
+  const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "class" ? "#4e342e" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
+  const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : node.kind === "class" ? "#fff8e1" : "#ffffff";
   // Heat darkens the fill; a diff mark keeps its own colour.
   const fill = node.heat !== undefined && node.heat > 0 && !node.diff ? heatColour(node.heat) : plain;
 
@@ -110,6 +110,8 @@ function viewLink(node: DiagramNode): string | null {
       return `archdiff://view/${encodeURIComponent(`module:${id}`)}`;
     case "fn":
       return `archdiff://view/${encodeURIComponent(`calls:${id}`)}`;
+    case "class":
+      return `archdiff://view/${encodeURIComponent(`inside:${id.slice(0, id.indexOf("#"))}`)}`;
     case "participant":
       return `archdiff://view/${encodeURIComponent(`inside:${id}`)}`;
     default:
@@ -249,11 +251,13 @@ export function toExcalidraw(diagram: Diagram): string {
 
     if (node.ref?.line !== undefined) customData["line"] = node.ref.line;
     elements.push({ ...base(node.id, look.type, node.x, node.y, node.w, node.h), backgroundColor: look.fill, strokeColor: look.stroke, strokeStyle: look.style, strokeWidth: look.width, roundness: look.type === "rectangle" && node.kind !== "layer" ? { type: 3 } : null, boundElements: bound, link: null, customData: { ...customData, view: viewLink(node) ?? "" } });
-    const label = wrapLabel(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
-    const fontSize = node.kind === "layer" ? 15 : node.kind === "cell" ? 10 : 12;
+    // A class box keeps its lines as written (fields and methods), left-aligned in a monospace face; everything else is wrapped and centred.
+    const label = node.kind === "class" ? node.label : wrapLabel(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
+    const fontSize = node.kind === "layer" ? 15 : node.kind === "cell" ? 10 : node.kind === "class" ? 11 : 12;
     const lines = label.split("\n").length;
     const dark = node.heat !== undefined && node.heat > 0.55 && !node.diff;
-    elements.push({ ...text(`${node.id}:text`, node.id, node.x + 6, node.y + node.h / 2 - (lines * fontSize * 1.25) / 2, node.w - 12, lines * fontSize * 1.25, label, fontSize), ...(dark ? { strokeColor: "#ffffff" } : {}), customData: { archdiff: "label" } });
+    const classText = node.kind === "class" ? { textAlign: "left", verticalAlign: "top", fontFamily: 3 } : {};
+    elements.push({ ...text(`${node.id}:text`, node.id, node.x + 8, node.kind === "class" ? node.y + 8 : node.y + node.h / 2 - (lines * fontSize * 1.25) / 2, node.w - 16, lines * fontSize * 1.25, label, fontSize), ...classText, ...(dark ? { strokeColor: "#ffffff" } : {}), customData: { archdiff: "label" } });
     centre.set(node.id, { x: node.x + node.w / 2, y: node.y + node.h / 2 });
   }
 

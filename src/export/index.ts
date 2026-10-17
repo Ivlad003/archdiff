@@ -5,7 +5,9 @@ import type { Diagram } from "../diagram.ts";
 import { toArchimate } from "./archimate.ts";
 import { toDrawio } from "./drawio.ts";
 import { toExcalidraw } from "./excalidraw.ts";
-import { toMermaid } from "./mermaid.ts";
+import { toMermaid, type MermaidStyle } from "./mermaid.ts";
+
+export { MERMAID_STYLES, type MermaidStyle } from "./mermaid.ts";
 
 export const EXPORT_FORMATS = ["md", "mermaid", "json", "drawio", "excalidraw", "archimate"] as const;
 
@@ -17,10 +19,10 @@ export const EXPORT_EXTENSION: Record<ExportFormat, string> = { md: ".md", merma
 export const EXPORT_MEDIA_TYPE: Record<ExportFormat, string> = { md: "text/markdown; charset=utf-8", mermaid: "text/plain; charset=utf-8", json: "application/json", drawio: "application/xml", excalidraw: "application/json", archimate: "application/xml" };
 
 /** The text of a placed diagram in `format`; `md` is the Markdown page (markdown.ts), which needs the analysis, so it is not here. */
-export function exportDiagram(diagram: Diagram, format: Exclude<ExportFormat, "md">): string {
+export function exportDiagram(diagram: Diagram, format: Exclude<ExportFormat, "md">, mermaid: MermaidStyle = "auto"): string {
   switch (format) {
     case "mermaid":
-      return toMermaid(diagram);
+      return toMermaid(diagram, mermaid);
     case "json":
       return `${JSON.stringify({ generator: "archdiff", ...diagram }, null, 2)}\n`;
     case "drawio":
