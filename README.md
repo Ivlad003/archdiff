@@ -128,6 +128,10 @@ Every view (and the review) exports to draw.io / diagrams.net (`.drawio`, uncomp
 
 Facts are cached by file content in `.archdiff/facts.json.gz` (add `.archdiff/` to `.gitignore`); a second run parses only what changed. Cold start parses in worker threads: about 6 s for 500 files, 9 s for 2300. In CI, persist `.archdiff/` between runs and fetch enough history for the merge-base (`fetch-depth: 0`), or pass `--base origin/main`. Files over 1.5 MB are skipped and listed by `coverage`. `--out` only writes a new file or one archdiff wrote before. `web` binds to localhost and refuses requests whose Host header is not its own; `--host 0.0.0.0` exposes the sources to the network. The analysis of what can go wrong on real repositories is in [docs/production.md](docs/production.md); the test pass over eight kinds of user and four real repositories (requests, ripgrep, Slim, express) is in [docs/qa-2026-10-16.md](docs/qa-2026-10-16.md).
 
+## Specification
+
+The behaviour is specified twice, for tools and for people: `openspec/specs/<capability>/spec.md` in the [OpenSpec](https://github.com/Fission-AI/OpenSpec) format (requirements with SHALL, scenarios with WHEN and THEN; `npx @fission-ai/openspec validate --specs` checks them, `openspec view` browses them) and `features/*.feature` in Gherkin (the scenarios the end-to-end tests run, readable by Cucumber and IDE plugins). `openspec/project.md` holds the context: the stack, the pipelines, the conventions. When a behaviour changes, its requirement and its scenario change with it.
+
 ## Development
 
 ```bash

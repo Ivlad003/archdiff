@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The specification: `openspec/specs/*/spec.md` (OpenSpec: requirements and scenarios for analysis, views, page, intent, agent, exports, review, cli; all validate) and `features/*.feature` (Gherkin, the scenarios the tests run).
+- Simpler code, same behaviour: git plumbing in `git.ts`, shape builders in `nodes.ts`, the steps after a view in `shape.ts`, the server's routes in `routes/pictures.ts`, `routes/agent.ts`, `routes/git.ts` over a context; the page's state, navigation and graph helpers in their own modules. The duplicate view select beside the title is gone (the canvas toolbar has it).
+
 - A hub is a module a quarter of the picture's modules import, or forty of them, whichever is less (a quarter of a 500-module map was never reached).
 - The `modules` view: the whole map, every module in its layer and every import. A picked shape's neighbours as chips above its page (click: pick here; Shift+click: its own view), the arrow keys walk them (→ ← along the arrows, ↑ ↓ along the lane) and Enter goes in: sideways navigation beside the deeper one.
 - A project from scratch: `archdiff new <dir> --lang ts|js --template blank|lib|cli|api|web` writes the skeleton, `archdiff.json`, `ARCHITECTURE.md` (the intent) and the first commit.

@@ -10,14 +10,21 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { api, type DiagramEdge, type DiagramNode, type ViewEntry } from "./api.ts";
 import { mountCanvas, VIEW_LINK, type CanvasHandle, type PickedLine } from "./editor.tsx";
+import { element } from "./dom.ts";
+import { chainFrom, findShapes, lineElementId, neighbourhoodOf, pathBetween } from "./graph.ts";
+import { crumbsOf, ownView, siblingViews } from "./navigation.ts";
+import { DETAIL, OVERVIEWS, PRESETS, readDefaults, setHash, stateFromHash, type Defaults, type State } from "./state.ts";
 
-function element<T extends HTMLElement>(id: string): T {
-  const found = document.getElementById(id);
-
-  if (!found) throw new Error(`no #${id}`);
-
-  return found as T;
-}
+let views: ViewEntry[] = [];
+let diagramMarkdown = "";
+let nodes = new Map<string, DiagramNode>();
+/** The lines of the current view, in the diagram's order (the order the canvas names them by). */
+let edges: DiagramEdge[] = [];
+let canvas: CanvasHandle | null = null;
+let mode: "view" | "edit" = "view";
+let dirty = false;
+let mocks: unknown[] = [];
+let rawMarkdown = false;
 
 const viewsList = element<HTMLUListElement>("views");
 const search = element<HTMLInputElement>("search");
@@ -32,253 +39,12 @@ const packagesInput = element<HTMLInputElement>("packages");
 const exportLinks = element<HTMLDivElement>("export");
 const saveButton = element<HTMLButtonElement>("save");
 
-interface State {
-  view: string;
-  depth: number | null;
-  review: boolean;
-  /** Draw packages and built-ins in the module views. */
-  packages: boolean;
-  /** The head of a review: a ref, or null for the working tree. */
-  head: string | null;
-  /** The heads of a comparison (two or more branches, `WORKTREE` the working tree); empty: a plain review. */
-  heads: string[];
-  /** Lay the review's marks over the view. */
-  changes: boolean;
-  /** More shapes than this fold; null: the built-in limit. */
-  limit: number | null;
-  /** Overlays laid over the view, in order: tests, storages, heat. */
-  overlays: string[];
-  /** The Mermaid type of the Markdown and the export; `auto` picks per view. */
-  mermaid: string;
-  /** Lines lighter than this are left out; null: every line. */
-  weight: number | null;
-  /** Hubs (modules most of the picture imports) as badges rather than lines. */
-  hubs: boolean;
-  /** Modules opened in place as lanes of their functions (the mix tool). */
-  expand: string[];
-  /** Lanes left out of the picture. */
-  hide: string[];
-  /** With the changes: only the marked shapes and their neighbours. */
-  onlyChanges: boolean;
-}
-
-/** The options a link may leave out, remembered in this browser as defaults ("remember as defaults"). */
-interface Defaults {
-  depth: number | null;
-  limit: number | null;
-  packages: boolean;
-  overlays: string[];
-  mermaid: string;
-  weight?: number | null;
-  hubs?: boolean;
-}
-
-/** The option sets of the presets: who is reading, and what they want to see at once. */
-const PRESETS: Record<string, Partial<State>> = {
-  reviewer: { changes: true, overlays: ["tests"], depth: null, limit: null, weight: null, hubs: true },
-  newcomer: { changes: false, overlays: [], depth: 1, limit: 30, weight: null, hubs: true, packages: false },
-  architect: { changes: false, overlays: ["heat"], depth: null, limit: 60, weight: 2, hubs: true },
-};
-
-function readDefaults(): Defaults {
-  try {
-    const saved = localStorage.getItem("archdiff.defaults");
-
-    if (saved) return JSON.parse(saved) as Defaults;
-  } catch {
-    // No storage: the built-in defaults.
-  }
-
-  return { depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", weight: null, hubs: true };
-}
-
-let views: ViewEntry[] = [];
-let diagramMarkdown = "";
-let nodes = new Map<string, DiagramNode>();
-/** The lines of the current view, in the diagram's order (the order the canvas names them by). */
-let edges: DiagramEdge[] = [];
-let canvas: CanvasHandle | null = null;
-let mode: "view" | "edit" = "view";
-let dirty = false;
-let mocks: unknown[] = [];
-let rawMarkdown = false;
-
-function stateFromHash(): State {
-  const params = new URLSearchParams(location.hash.slice(1));
-  const depth = params.get("depth");
-
-  const defaults = readDefaults();
-  const limit = params.get("limit");
-  // A link without an option takes the remembered default; `packages=0`, `overlay=none`, `mermaid=auto` say "none" explicitly.
-  const overlay = params.get("overlay");
-
-  return {
-    view: params.get("view") ?? "layers",
-    depth: depth === null ? defaults.depth : depth === "" ? null : Number(depth),
-    review: params.get("review") === "1",
-    packages: params.has("packages") ? params.get("packages") === "1" : defaults.packages,
-    head: params.get("head") || null,
-    heads: (params.get("heads") ?? "").split(",").filter((head) => head !== ""),
-    changes: params.get("changes") === "1",
-    limit: limit === null ? defaults.limit : limit === "" ? null : Number(limit),
-    overlays: overlay === null ? defaults.overlays : overlay.split(",").filter((name) => name !== "" && name !== "none"),
-    mermaid: params.get("mermaid") ?? defaults.mermaid,
-    weight: params.get("weight") === null ? (defaults.weight ?? null) : params.get("weight") === "" ? null : Number(params.get("weight")),
-    hubs: params.has("hubs") ? params.get("hubs") !== "0" : (defaults.hubs ?? true),
-    expand: (params.get("expand") ?? "").split(",").filter((id) => id !== ""),
-    hide: (params.get("hide") ?? "").split(",").filter((id) => id !== ""),
-    onlyChanges: params.get("only") === "changes",
-  };
-}
-
-function setHash(state: State): void {
-  const params = new URLSearchParams();
-  params.set("view", state.view);
-
-  if (state.depth !== null) params.set("depth", String(state.depth));
-
-  if (state.review) params.set("review", "1");
-
-  if (state.packages) params.set("packages", "1");
-  const base = baseInput.value.trim();
-
-  if (base) params.set("base", base);
-
-  if (state.head) params.set("head", state.head);
-
-  if (state.heads.length > 0) params.set("heads", state.heads.join(","));
-
-  if (state.changes) params.set("changes", "1");
-  const defaults = readDefaults();
-
-  // Written only when they differ from the defaults, so a plain link stays short; an explicit "none" when a default is turned off.
-  if (state.limit !== defaults.limit) params.set("limit", state.limit === null ? "" : String(state.limit));
-
-  if (state.packages !== defaults.packages) params.set("packages", state.packages ? "1" : "0");
-
-  if (state.overlays.join(",") !== defaults.overlays.join(",")) params.set("overlay", state.overlays.length > 0 ? state.overlays.join(",") : "none");
-
-  if (state.mermaid !== defaults.mermaid) params.set("mermaid", state.mermaid);
-
-  if (state.weight !== (defaults.weight ?? null)) params.set("weight", state.weight === null ? "" : String(state.weight));
-
-  if (state.hubs !== (defaults.hubs ?? true)) params.set("hubs", state.hubs ? "1" : "0");
-
-  if (state.expand.length > 0) params.set("expand", state.expand.join(","));
-
-  if (state.hide.length > 0) params.set("hide", state.hide.join(","));
-
-  if (state.onlyChanges && state.changes) params.set("only", "changes");
-  location.hash = params.toString();
-}
-
 const changesInput = element<HTMLInputElement>("changes");
 
 const headInput = element<HTMLInputElement>("head");
 
-/** The view a shape opens: a layer its modules, a module its imports, a function its calls. */
-function ownView(node: DiagramNode): string | null {
-  const id = node.ref?.id ?? node.id;
-
-  switch (node.kind) {
-    case "layer":
-      return `layer:${id}`;
-    case "module":
-    case "participant":
-      return `inside:${id}`;
-    case "fn":
-      return `calls:${id}`;
-    case "more":
-      return node.ref?.id ?? null;
-    default:
-      return null;
-  }
-}
-
-/** The other pictures of the same subject: a module's dependencies or its inside, a function's call tree or its sequence. */
-function siblingViews(view: string): { label: string; key: string }[] {
-  const at = view.indexOf(":");
-  const kind = view.slice(0, at);
-  const rest = view.slice(at + 1);
-
-  if (kind === "module" || kind === "inside" || kind === "contract" || kind === "cycle" || (kind === "classes" && rest !== "" && !rest.endsWith("/") && /\.[a-z]+$/.test(rest))) return [{ label: "dependencies", key: `module:${rest}` }, { label: "inside: functions and calls", key: `inside:${rest}` }, { label: "classes: fields and methods", key: `classes:${rest}` }, { label: "contract: exports and their users", key: `contract:${rest}` }, { label: "its import cycle", key: `cycle:${rest}` }];
-
-  if (kind === "dir" || kind === "classes") return [{ label: "modules of the directory", key: `dir:${rest}` }, { label: "classes of the directory", key: `classes:${rest}` }];
-
-  if (kind === "calls" || kind === "sequence" || kind === "path") return [{ label: "call tree", key: `calls:${rest}` }, { label: "sequence of calls", key: `sequence:${rest}` }, { label: "path to the storages", key: `path:${rest}` }];
-
-  return [];
-}
-
-/** The path above a view, for the breadcrumbs: layers › layer › directories › module › function. */
-function crumbsOf(view: string): { label: string; key: string }[] {
-  const crumbs: { label: string; key: string }[] = [{ label: "layers", key: "layers" }];
-  const at = view.indexOf(":");
-  const kind = at === -1 ? view : view.slice(0, at);
-  const rest = at === -1 ? "" : view.slice(at + 1);
-  const layerOf = (module: string): string | null => views.find((entry) => entry.key === `module:${module}`)?.layer ?? null;
-
-  const directories = (module: string): void => {
-    const parts = module.split("/");
-
-    for (let depth = 1; depth < parts.length; depth++) {
-      const key = `dir:${parts.slice(0, depth).join("/")}`;
-
-      if (views.some((entry) => entry.key === key)) crumbs.push({ label: `${parts[depth - 1]}/`, key });
-    }
-  };
-
-  if (kind === "layer") crumbs.push({ label: rest, key: view });
-  else if (kind === "dir") {
-    const parts = rest.split("/");
-
-    for (let depth = 1; depth <= parts.length; depth++) crumbs.push({ label: `${parts[depth - 1]}/`, key: `dir:${parts.slice(0, depth).join("/")}` });
-  } else if (kind === "classes" && rest !== "") {
-    const module = rest;
-    const layer = layerOf(module);
-
-    if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
-    directories(module);
-    crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: /\.[a-z]+$/.test(module) ? `module:${module}` : `dir:${module}` });
-    crumbs.push({ label: "classes", key: view });
-  } else if (["module", "inside", "contract", "cycle", "calls", "sequence", "path", "type"].includes(kind)) {
-    const hash = rest.indexOf("#");
-    const module = hash === -1 ? rest : rest.slice(0, hash);
-    const layer = layerOf(module);
-
-    if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
-    directories(module);
-    crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: `module:${module}` });
-
-    if (kind === "inside" || kind === "contract" || kind === "cycle") crumbs.push({ label: kind, key: view });
-
-    if (kind === "calls" || kind === "sequence" || kind === "path") crumbs.push({ label: rest.slice(hash + 1), key: `calls:${rest}` });
-
-    if (kind === "sequence" || kind === "path") crumbs.push({ label: kind, key: view });
-
-    if (kind === "type") crumbs.push({ label: `type ${rest.slice(hash + 1)}`, key: view });
-  } else if (kind !== "layers") crumbs.push({ label: kind, key: view });
-
-  return crumbs;
-}
-
-function renderTypeSelect(state: State): void {
-  const select = element<HTMLSelectElement>("view-type");
-  const siblings = state.review ? [] : siblingViews(state.view);
-  select.replaceChildren();
-  select.hidden = siblings.length === 0;
-
-  for (const sibling of siblings) {
-    const option = document.createElement("option");
-    option.value = sibling.key;
-    option.textContent = sibling.label;
-    option.selected = sibling.key === state.view;
-    select.append(option);
-  }
-}
 
 function renderCrumbs(state: State): void {
-  renderTypeSelect(state);
   const box = element<HTMLSpanElement>("crumbs");
   box.replaceChildren();
 
@@ -288,7 +54,7 @@ function renderCrumbs(state: State): void {
     return;
   }
 
-  const crumbs = crumbsOf(state.view);
+  const crumbs = crumbsOf(views, state.view);
 
   for (const [i, crumb] of crumbs.entries()) {
     if (i > 0) box.append(" › ");
@@ -564,46 +330,10 @@ const tools = { mix: false, focus: false };
 /** The shape picked last, the start of a path when the next tap holds Shift. */
 let lastPicked: string | null = null;
 
-/** The shortest chain of lines from `from` to `to` along the arrows (else against them), breadth first; null when none. */
-function pathBetween(from: string, to: string, directed: boolean): { edge: DiagramEdge; index: number }[] | null {
-  const previous = new Map<string, { edge: DiagramEdge; index: number; node: string }>();
-  const seen = new Set([from]);
-  let frontier = [from];
-
-  while (frontier.length > 0 && !seen.has(to)) {
-    const next: string[] = [];
-
-    for (const id of frontier) {
-      edges.forEach((edge, index) => {
-        if (edge.kind === "lifeline") return;
-        const other = edge.from === id ? edge.to : !directed && edge.to === id ? edge.from : null;
-
-        if (other === null || seen.has(other)) return;
-        seen.add(other);
-        previous.set(other, { edge, index, node: id });
-        next.push(other);
-      });
-    }
-
-    frontier = next;
-  }
-
-  if (!seen.has(to)) return null;
-  const chain: { edge: DiagramEdge; index: number }[] = [];
-
-  for (let at = to; at !== from; ) {
-    const step = previous.get(at)!;
-    chain.unshift({ edge: step.edge, index: step.index });
-    at = step.node;
-  }
-
-  return chain;
-}
-
 /** Lights the shortest path between two shapes and writes it to the Markdown panel. */
 function showPath(from: string, to: string): void {
-  const directed = pathBetween(from, to, true);
-  const chain = directed ?? pathBetween(from, to, false);
+  const directed = pathBetween(edges, from, to, true);
+  const chain = directed ?? pathBetween(edges, from, to, false);
   const title = `# Path: ${labelOf(from)} → ${labelOf(to)}`;
 
   if (!chain) {
@@ -650,18 +380,6 @@ function renderLanes(state: State, groups: readonly { id: string; label: string 
     list.append(label);
   }
 }
-
-/** The shapes whose label or ID holds the text, case-insensitively; the first is the best match (a label that starts with it). */
-function findShapes(text: string): DiagramNode[] {
-  const needle = text.trim().toLowerCase();
-
-  if (needle === "") return [];
-  const hits = [...nodes.values()].filter((node) => node.kind !== "anchor" && (node.label.toLowerCase().includes(needle) || node.id.toLowerCase().includes(needle)));
-
-  return hits.sort((a, b) => Number(b.label.toLowerCase().startsWith(needle)) - Number(a.label.toLowerCase().startsWith(needle)));
-}
-
-// ── The minimap ───────────────────────────────────────────────────────────────
 
 const minimap = element<HTMLCanvasElement>("minimap");
 let minimapWanted: boolean | null = null;
@@ -731,30 +449,6 @@ minimap.addEventListener("click", (event) => {
   drawMinimap();
 });
 
-/** A shape, its lines and the shapes at their other ends: what stays lit under the focus tool. */
-function neighbourhoodOf(id: string): string[] {
-  const keep = new Set([id]);
-  edges.forEach((edge, index) => {
-    if (edge.from === id || edge.to === id) {
-      keep.add(lineElementId(edge, index));
-      keep.add(edge.from);
-      keep.add(edge.to);
-    }
-  });
-
-  return [...keep];
-}
-
-/** The detail presets of the canvas toolbar: how much a picture shows at once. */
-const DETAIL: Record<string, Partial<State>> = {
-  minimal: { depth: 1, limit: 20, weight: 2, hubs: true },
-  normal: { depth: null, limit: null, weight: null, hubs: true },
-  full: { depth: null, limit: 200, weight: null, hubs: false },
-};
-
-/** The overview pictures of the picture select, after those of the current subject. */
-const OVERVIEWS: [string, string][] = [["layers", "layers"], ["modules", "every module and import"], ["intent", "the intent against the code"], ["matrix", "matrix of the layers"], ["cycles", "import cycles"], ["classes", "class diagram"], ["hotspots", "hotspots"], ["tests", "test coverage"], ["events", "events"], ["packages", "packages"], ["coverage", "blind spots"], ["timeline", "timeline"]];
-
 /** The canvas toolbar: the picture select (this subject's pictures, then the overviews), the detail buttons and the tool states. */
 function renderCanvasTools(state: State): void {
   const select = element<HTMLSelectElement>("picture");
@@ -804,48 +498,9 @@ function toggleSplit(force?: boolean): void {
   setTimeout(() => canvas?.scrollToContent(), 200);
 }
 
-/** The page of a tapped line: what it joins and the imports and calls behind it. */
-/** The canvas element ID of a line, as the export names it (a message by its index, since one pair may exchange several). */
-function lineElementId(edge: DiagramEdge, index: number): string {
-  return `edge:${edge.from}->${edge.to}${edge.kind === "message" ? `:${index}` : ""}`;
-}
-
 /** The first line of a shape's label, or its ID when the shape is not in the view. */
 function labelOf(id: string): string {
   return nodes.get(id)?.label.split("\n")[0] ?? id;
-}
-
-/** The chain onward from a line: every line reachable from its target along the arrows, with the shapes on the way, breadth first, capped. */
-function chainFrom(line: PickedLine, cap = 300): { lineIds: string[]; nodeIds: string[]; hops: { edge: DiagramEdge; depth: number }[] } {
-  const lineIds = [line.id];
-  const nodeIds = [line.from, line.to];
-  const seen = new Set([line.from, line.to]);
-  const hops: { edge: DiagramEdge; depth: number }[] = [];
-  let frontier = [line.to];
-  let depth = 1;
-
-  while (frontier.length > 0 && lineIds.length < cap) {
-    const next: string[] = [];
-
-    for (const id of frontier) {
-      edges.forEach((edge, index) => {
-        if (edge.from !== id || edge.kind === "lifeline" || lineIds.length >= cap) return;
-        lineIds.push(lineElementId(edge, index));
-        hops.push({ edge, depth });
-
-        if (!seen.has(edge.to)) {
-          seen.add(edge.to);
-          nodeIds.push(edge.to);
-          next.push(edge.to);
-        }
-      });
-    }
-
-    frontier = next;
-    depth++;
-  }
-
-  return { lineIds, nodeIds, hops };
 }
 
 /**
@@ -855,7 +510,7 @@ function chainFrom(line: PickedLine, cap = 300): { lineIds: string[]; nodeIds: s
 async function showEdge(lines: PickedLine[], follow: boolean): Promise<void> {
   const state = stateFromHash();
   const line = lines[0]!;
-  const chain = follow ? chainFrom(line) : null;
+  const chain = follow ? chainFrom(edges, line) : null;
   canvas?.highlight(chain ? [...chain.lineIds, ...chain.nodeIds] : [...new Set(lines.flatMap((each) => [each.id, each.from, each.to]))]);
   let markdown: string;
 
@@ -1030,7 +685,7 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
       }
 
       // The focus tool: everything but the shape and its neighbours dims; a tap on nothing clears it.
-      if (tools.focus) canvas?.dim(node ? neighbourhoodOf(node.id) : null);
+      if (tools.focus) canvas?.dim(node ? neighbourhoodOf(edges, node.id) : null);
       void showNode(id);
     },
     open: (id, link) => {
@@ -1882,7 +1537,6 @@ api.changes((path) => {
 // ── Controls ─────────────────────────────────────────────────────────────────
 
 element<HTMLButtonElement>("fit").addEventListener("click", () => canvas?.scrollToContent());
-element<HTMLSelectElement>("view-type").addEventListener("change", () => setHash({ ...stateFromHash(), view: element<HTMLSelectElement>("view-type").value, review: false }));
 element<HTMLSelectElement>("picture").addEventListener("change", () => setHash({ ...stateFromHash(), view: element<HTMLSelectElement>("picture").value, review: false, expand: [] }));
 
 for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) {
@@ -1924,13 +1578,13 @@ element<HTMLInputElement>("only-changes").addEventListener("change", () => setHa
 
 const findInput = element<HTMLInputElement>("find");
 findInput.addEventListener("input", () => {
-  const hits = findShapes(findInput.value);
+  const hits = findShapes(nodes, findInput.value);
   canvas?.highlight(hits.slice(0, 20).map((node) => node.id));
   reason.textContent = findInput.value.trim() === "" ? (reason.title || "") : `${hits.length} ${hits.length === 1 ? "shape matches" : "shapes match"}`;
 });
 findInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
-    const first = findShapes(findInput.value)[0];
+    const first = findShapes(nodes, findInput.value)[0];
 
     if (first) {
       canvas?.centreOn(first.id);
