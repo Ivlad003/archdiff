@@ -34,6 +34,8 @@ npm publish --access public      # runs prepack: tsc, the grammars, the page bun
 
 ## After
 
+The registry answers 404 for a minute or two after the first publish of a scope, then shows a placeholder version `0.0.0-stage` while it processes the upload, then the real version (seen on 2026-10-17: about two minutes in all). `npm view @ivlad003/archdiff versions` shows where it is.
+
 ```bash
 npx @ivlad003/archdiff@latest --version
 npx @ivlad003/archdiff@latest web .
