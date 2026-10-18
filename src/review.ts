@@ -10,8 +10,8 @@
 // Entry points: `review`, `compareBranches`, `history`, `analysisAt`,
 // `ReviewResult`, `ComparisonResult`.
 
-import { analyze, prepareRevisions, type Analysis } from "./analyze.ts";
-import { loadConfig } from "./config.ts";
+import { analyze, analyzeRevisions, type Analysis } from "./analyze.ts";
+import { loadConfig, type Config } from "./config.ts";
 import { graphDiff, historyRow, markContract, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
 import { changedFiles, commitOf, commitsBetween, defaultBase, forkPoint, mergeBase, treeAt as filesAt } from "./git.ts";
 import { INTENT_FILE, judgesLayers } from "./intent.ts";
@@ -20,6 +20,15 @@ import type { Graph } from "./graph.ts";
 /** A revision as overrides of the working tree: its source files, and its contract, which its analysis is held to. */
 function treeAt(root: string, ref: string): Map<string, string | null> {
   return filesAt(root, ref, [INTENT_FILE]);
+}
+
+/** The analyses of the revisions, their files parsed in one batch. */
+async function analysesAt(root: string, refs: readonly string[], config: Config): Promise<Analysis[]> {
+  const analyses: Analysis[] = [];
+
+  for await (const analysis of analyzeRevisions(root, refs.map((ref) => treeAt(root, ref)), config)) analyses.push(analysis);
+
+  return analyses;
 }
 
 /** The analysis of a revision (a branch, a tag, a commit) without a checkout: the working tree with the revision's files laid over it; a ref git does not know is refused by name. */
@@ -56,8 +65,10 @@ export interface ComparisonResult {
 export async function review(root: string, base: string | null, headRef: string | null = null, current: Analysis | null = null): Promise<ReviewResult> {
   const ref = base ?? mergeBase(root, headRef ?? "HEAD");
   const config = loadConfig(root);
-  const head = headRef === null ? (current ?? (await analyze(root, { config }))) : await analyze(root, { overrides: treeAt(root, headRef), config });
-  const baseAnalysis = await analyze(root, { overrides: treeAt(root, ref), config });
+  // The head's and the base's files are parsed in one batch; the working tree is the analysis already made.
+  const analyses = await analysesAt(root, headRef === null ? [ref] : [headRef, ref], config);
+  const head = headRef === null ? (current ?? (await analyze(root, { config }))) : analyses[0]!;
+  const baseAnalysis = analyses[analyses.length - 1]!;
   const changed = changedFiles(root, ref, headRef);
   // A contract that names no layer judges nothing: the review is as without one.
   const contract = judgesLayers(head.intent) ? head.intent : null;
@@ -80,46 +91,55 @@ export async function compareBranches(root: string, base: string | null, heads: 
   const baseRef = base ?? defaultBase(root) ?? mergeBase(root);
   const unique = [...new Set(heads)];
 
-  for (const ref of [baseRef, ...unique]) if (ref !== "WORKTREE" && commitOf(root, ref) === null) throw new Error(`no branch, tag or commit "${ref}" (archdiff branches lists the branches)`);
+  /** The commit of every ref: a ref git does not know is refused; heads and fork points at one commit share its analysis. */
+  const commitOfRef = new Map<string, string>();
+
+  for (const ref of [baseRef, ...unique]) {
+    const commit = ref === "WORKTREE" ? "WORKTREE" : commitOf(root, ref);
+
+    if (commit === null) throw new Error(`no branch, tag or commit "${ref}" (archdiff branches lists the branches)`);
+    commitOfRef.set(ref, commit);
+  }
+
   const config = loadConfig(root);
-  const baseGraph = (await analyze(root, { overrides: treeAt(root, baseRef), config })).graph;
+  // Where each head left the base; the base itself when the two share no commit.
+  const since = new Map(unique.map((head) => [head, forkPoint(root, baseRef, head === "WORKTREE" ? "HEAD" : head) ?? commitOfRef.get(baseRef)!]));
+  // Every commit analysed once — the base, the fork points, the heads — their files parsed in one batch.
+  const commits = [...new Set([...commitOfRef.values(), ...since.values()])].filter((commit) => commit !== "WORKTREE");
+  const analyses = await analysesAt(root, commits, config);
+  const at = new Map(commits.map((commit, i) => [commit, analyses[i]!]));
+  const worktree = commitOfRef.has("WORKTREE") ? await analyze(root, { config }) : null;
   const compared: Compared[] = [];
   const graphs = new Map<string, Graph>();
   const forks = new Map<string, Graph>();
-  /** The graphs of the fork points, by commit: heads that left the base at one commit share its analysis. */
-  const atCommit = new Map<string, Graph>();
 
   for (const head of unique) {
-    // Where the head left the base; the base itself when the two share no commit.
-    const since = forkPoint(root, baseRef, head === "WORKTREE" ? "HEAD" : head) ?? commitOf(root, baseRef)!;
-    const from = atCommit.get(since) ?? (await analyze(root, { overrides: treeAt(root, since), config })).graph;
-    atCommit.set(since, from);
+    const left = since.get(head)!;
+    const from = at.get(left)!.graph;
     forks.set(head, from);
-    const analysis = head === "WORKTREE" ? await analyze(root, { config }) : await analyze(root, { overrides: treeAt(root, head), config });
+    const analysis = head === "WORKTREE" ? worktree! : at.get(commitOfRef.get(head)!)!;
     const { graph } = analysis;
     graphs.set(head, graph);
-    const changed = head === "WORKTREE" ? [...changedFiles(root, since).base.keys()] : [...changedFiles(root, since, head).base.keys()];
+    const changed = head === "WORKTREE" ? [...changedFiles(root, left).base.keys()] : [...changedFiles(root, left, head).base.keys()];
     const contract = judgesLayers(analysis.intent) ? analysis.intent : null;
-    compared.push({ head, since, diff: markContract(graphDiff(from, graph, `${since}..${head}`, changed), contract, graph), contract: contract !== null });
+    compared.push({ head, since: left, diff: markContract(graphDiff(from, graph, `${left}..${head}`, changed), contract, graph), contract: contract !== null });
   }
 
-  return { base: baseRef, heads: compared, baseGraph, graphs, forks };
+  return { base: baseRef, heads: compared, baseGraph: at.get(commitOfRef.get(baseRef)!)!.graph, graphs, forks };
 }
 
 /** The architectural diff of every commit from `base` to `head`, one analysis per commit (the fact cache makes each cheap). */
 export async function history(root: string, base: string, head: string): Promise<HistoryRow[]> {
   const commits = commitsBetween(root, base, head);
   const config = loadConfig(root);
-  // Every commit's tree first, their files parsed together; then one analysis per commit, from the cache.
+  // The base's and every commit's tree, their files parsed together; then one analysis per commit, each against the one before.
   const trees = [treeAt(root, base), ...commits.map((commit) => treeAt(root, commit.sha))];
-  await prepareRevisions(root, trees);
-  let previous = (await analyze(root, { overrides: trees[0]!, config })).graph;
   const rows: HistoryRow[] = [];
+  let previous: Graph | null = null;
 
-  for (const [i, commit] of commits.entries()) {
-    const current = (await analyze(root, { overrides: trees[i + 1]!, config })).graph;
-    rows.push(historyRow(commit, graphDiff(previous, current, commit.sha, [])));
-    previous = current;
+  for await (const { graph } of analyzeRevisions(root, trees, config)) {
+    if (previous) rows.push(historyRow(commits[rows.length]!, graphDiff(previous, graph, commits[rows.length]!.sha, [])));
+    previous = graph;
   }
 
   return rows;

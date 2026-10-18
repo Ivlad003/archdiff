@@ -1,16 +1,17 @@
 // The fact cache: the extracted facts of every file, keyed by the SHA-256
 // of its content and the extractor version, so a second run parses only
 // what changed. Two gzipped JSON files under `.archdiff/`: `facts.json.gz`
-// holds the working tree's files, one version each, read once per process
-// and written (atomically) after an analysis that changed it;
+// holds the working tree's files, one version each, read once per process;
 // `revisions.json.gz` the files of other revisions a review, a history or
 // a comparison read — many versions of one file, the most recently used
-// kept — read when a revision is first analysed, written when the process
-// ends. Sets in the facts are stored as arrays and revived on read.
+// kept — read when a revision is first asked for. Each is written
+// (atomically) after the batch of files that changed it. Sets in the facts
+// are stored as arrays and revived on read.
 //
-// Sits around extraction: analyze.ts asks `lookup` before extracting and
-// `store` after, of the one cache of its root (`FactCache.of`). Entry
-// points: `FactCache`, `contentHash`, `CACHE_FILE`, `REVISIONS_FILE`.
+// Sits around extraction: analyze.ts hands the one cache of its root
+// (`FactCache.of`) the files to read and the parser for the ones it lacks
+// (`factsOf`). Entry points: `FactCache`, `FileToRead`, `contentHash`,
+// `CACHE_FILE`, `REVISIONS_FILE`.
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -110,9 +111,17 @@ function writeCacheFile(file: string, content: unknown): void {
   renameSync(temporary, file);
 }
 
+/** A file to read the facts of: its content, and whether it is another revision's (cached apart from the working tree's). */
+export interface FileToRead {
+  path: string;
+  content: string;
+  revision: boolean;
+}
+
 /**
  * The cache of one repository, one per process (`FactCache.of`): what was read at the start, what the analyses add.
- * The working tree's facts are written after each analysis that changed them; the revisions' when the process ends.
+ * `factsOf` is the one way through it: the facts of a batch of files, parsed where the cache has none, the cache's
+ * files written when the batch changed them.
  */
 export class FactCache {
   private static readonly open = new Map<string, FactCache>();
@@ -130,10 +139,14 @@ export class FactCache {
 
   private readonly root: string;
   private readonly file: string;
+  /** The working tree's version of each path. */
   private readonly entries = new Map<string, CacheEntry>();
+  /** The paths the working tree's analyses asked for: an entry of another path is of a file that is gone. */
   private readonly used = new Set<string>();
   private dirty = false;
-  /** Other revisions' versions by path and hash; read on the first lookup of one. */
+  /** A batch was the whole working tree: the entries it did not ask for are dropped at the next write. */
+  private complete = false;
+  /** Other revisions' versions by path and hash; read from their file when the first one is asked for. */
   private revisions: Map<string, RevisionEntry> | null = null;
   private revisionsDirty = false;
 
@@ -147,9 +160,48 @@ export class FactCache {
     for (const [path, entry] of Object.entries(parsed.entries)) this.entries.set(path, { hash: entry.hash, facts: reviveFacts(entry.facts) });
   }
 
-  /** The cached facts of `path` for this exact content, or null; `revision`: the content is another revision's. */
-  lookup(path: string, hash: string, revision = false): FileFacts | null {
-    // The working tree's version serves a revision whose file is the same; only a revision reads the revisions' file.
+  /**
+   * The facts of the files, in their order: from the cache where the content is known (the working tree's version
+   * serves a revision whose file is the same), else parsed by `parse` in one batch — a file named twice with one
+   * content once — and kept. The cache's files are written after, when the batch changed them; `parsed` counts the
+   * files parsed. A batch without a revision file in it is an analysis of the whole working tree: the files it does
+   * not name are gone, and the next write drops them.
+   */
+  async factsOf(files: readonly FileToRead[], parse: (files: readonly FileToRead[]) => Promise<FileFacts[]>): Promise<{ facts: FileFacts[]; parsed: number }> {
+    const hashes = files.map((file) => contentHash(file.content));
+    const known = files.map((file, i) => this.lookup(file.path, hashes[i]!, file.revision));
+    /** The files to parse, by path and hash, with the position of each in `files`. */
+    const missing = new Map<string, number[]>();
+
+    for (const [i, file] of files.entries()) {
+      if (known[i] === null) missing.set(`${file.path}\0${hashes[i]}`, [...(missing.get(`${file.path}\0${hashes[i]}`) ?? []), i]);
+    }
+
+    const batch = [...missing.values()];
+    const fresh = await parse(batch.map((at) => files[at[0]!]!));
+    const parsed = new Map<number, FileFacts>();
+
+    for (const [k, at] of batch.entries()) {
+      for (const i of at) {
+        parsed.set(i, fresh[k]!);
+        this.store(files[i]!.path, hashes[i]!, fresh[k]!, files[i]!.revision);
+      }
+    }
+
+    if (files.every((file) => !file.revision)) {
+      this.complete = true;
+      this.used.clear();
+
+      for (const file of files) this.used.add(file.path);
+    }
+
+    this.save();
+
+    return { facts: files.map((_, i) => known[i] ?? parsed.get(i)!), parsed: batch.length };
+  }
+
+  /** The cached facts of `path` for this content, or null; `revision`: the content is another revision's. */
+  private lookup(path: string, hash: string, revision: boolean): FileFacts | null {
     const entry = this.entries.get(path);
 
     if (entry && entry.hash === hash) {
@@ -162,14 +214,14 @@ export class FactCache {
     const version = this.revisionsRead().get(`${path}\0${hash}`);
 
     if (!version) return null;
+    // Used now: kept before older versions whenever the revisions' file is written next.
     version.used = Date.now();
-    this.revisionsDirty = true;
 
     return version.facts;
   }
 
   /** Keeps the facts of `path` at this content: the working tree's version, or (`revision`) one of another revision. */
-  store(path: string, hash: string, facts: FileFacts, revision = false): void {
+  private store(path: string, hash: string, facts: FileFacts, revision: boolean): void {
     if (!revision) {
       this.entries.set(path, { hash, facts });
       this.used.add(path);
@@ -182,51 +234,47 @@ export class FactCache {
     this.revisionsDirty = true;
   }
 
-  /**
-   * Writes the working tree's cache when an analysis changed it; `prune` (after an analysis of the working tree, which
-   * looked every file up) drops the files the process never looked up — deleted ones.
-   */
-  save(prune: boolean): void {
-    const stale = prune && [...this.entries.keys()].some((path) => !this.used.has(path));
-
-    if (!this.dirty && !stale) return;
-    const entries: Record<string, CacheEntry> = {};
-
-    for (const path of (prune ? [...this.used] : [...this.entries.keys()]).sort()) {
-      const entry = this.entries.get(path);
-
-      if (entry) entries[path] = entry;
-    }
-
-    writeCacheFile(this.file, { version: EXTRACTOR_VERSION, entries } satisfies CacheFile);
-    this.dirty = false;
-    // The uncompressed cache of an earlier version, when it is still there.
-    const old = this.file.replace(/\.gz$/, "");
-
-    if (existsSync(old)) rmSync(old, { force: true });
-  }
-
-  /** The revisions' versions, read from their file the first time; their writing is arranged for the end of the process. */
+  /** The revisions' versions, read from their file the first time. */
   private revisionsRead(): Map<string, RevisionEntry> {
     if (this.revisions) return this.revisions;
     this.revisions = new Map();
     const parsed = readCacheFile<RevisionsFile>(join(this.root, REVISIONS_FILE));
 
     for (const entry of Array.isArray(parsed?.entries) ? parsed.entries : []) this.revisions.set(`${entry.path}\0${entry.hash}`, { ...entry, facts: reviveFacts(entry.facts) });
-    // Written once, when the process ends: a history's tens of analyses add to it in turn.
-    process.once("exit", () => this.saveRevisions());
 
     return this.revisions;
   }
 
-  /** Writes the revisions' versions when they changed, the most recently used first, `MAX_REVISIONS` at most. */
-  saveRevisions(): void {
-    // A repository gone (a test's temporary directory) gets no cache back.
-    if (!this.revisions || !this.revisionsDirty || !existsSync(this.root)) return;
-    const entries = [...this.revisions.values()].sort((a, b) => b.used - a.used).slice(0, MAX_REVISIONS);
+  /**
+   * Writes the working tree's file when a batch changed it, or when a whole-tree batch left entries of files that
+   * are gone (dropped); and the revisions' file when a version was added, the most recently used first,
+   * `MAX_REVISIONS` at most.
+   */
+  private save(): void {
+    const stale = this.complete && [...this.entries.keys()].some((path) => !this.used.has(path));
+
+    if (this.dirty || stale) {
+      const entries: Record<string, CacheEntry> = {};
+
+      for (const path of (this.complete ? [...this.used] : [...this.entries.keys()]).sort()) {
+        const entry = this.entries.get(path);
+
+        if (entry) entries[path] = entry;
+      }
+
+      writeCacheFile(this.file, { version: EXTRACTOR_VERSION, entries } satisfies CacheFile);
+      this.dirty = false;
+      // The uncompressed cache of an earlier version, when it is still there.
+      const old = this.file.replace(/\.gz$/, "");
+
+      if (existsSync(old)) rmSync(old, { force: true });
+    }
+
+    if (!this.revisions || !this.revisionsDirty) return;
+    const versions = [...this.revisions.values()].sort((a, b) => b.used - a.used).slice(0, MAX_REVISIONS);
 
     try {
-      writeCacheFile(join(this.root, REVISIONS_FILE), { version: EXTRACTOR_VERSION, entries } satisfies RevisionsFile);
+      writeCacheFile(join(this.root, REVISIONS_FILE), { version: EXTRACTOR_VERSION, entries: versions } satisfies RevisionsFile);
       this.revisionsDirty = false;
     } catch {
       // A cache that cannot be written (a read-only checkout) is only a slower next run.
