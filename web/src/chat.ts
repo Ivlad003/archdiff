@@ -84,7 +84,7 @@ async function runChecksNow(): Promise<void> {
     runState.textContent = events.length === 0 ? "no checks: no ARCHITECTURE.md and no \"checks\" in archdiff.json" : events.every((event) => event.text.startsWith("✔")) ? "every check passed" : "a check failed; see the transcript";
     page.showTab("chat");
   } catch (error) {
-    runState.textContent = error instanceof Error ? error.message : String(error);
+    showRunError(error);
   } finally {
     button.disabled = false;
   }
@@ -373,6 +373,19 @@ async function runCommand(command: "code" | "diagram" | "doc", argument: string)
 }
 
 /** Runs `written` on the agent; `shown` is what the transcript's own row says when the prompt wraps a shorter question. */
+/** The buttons of a run: while the agent works, run is off and stop on; after it, the follow-up opens once its session can be resumed. */
+function setRunning(running: boolean, resumable = false): void {
+  runButton.disabled = running;
+  runButton.classList.toggle("running", running);
+  stopButton.disabled = !running;
+  followup.disabled = running || !resumable;
+}
+
+/** A failure of the run or of a command, on the run's line. */
+function showRunError(error: unknown): void {
+  runState.textContent = error instanceof Error ? error.message : String(error);
+}
+
 export function runTask(written: string, resume: string | null, shown: string = written): void {
   if (!agentName || written.trim() === "") return;
   element<HTMLDivElement>("question").hidden = true;
@@ -381,15 +394,12 @@ export function runTask(written: string, resume: string | null, shown: string = 
   const slash = written.trim().match(/^\/(code|diagram|doc)\b\s*([\s\S]*)$/);
 
   if (slash) {
-    void runCommand(slash[1] as "code" | "diagram" | "doc", slash[2] ?? "").catch((error: unknown) => (runState.textContent = error instanceof Error ? error.message : String(error)));
+    void runCommand(slash[1] as "code" | "diagram" | "doc", slash[2] ?? "").catch(showRunError);
 
     return;
   }
   const state = currentLink();
-  runButton.disabled = true;
-  runButton.classList.add("running");
-  stopButton.disabled = false;
-  followup.disabled = true;
+  setRunning(true);
   runState.textContent = `running ${agentName}…`;
 
   if (!resume) {
@@ -430,10 +440,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
           }
         },
         () => {
-          runButton.disabled = false;
-          runButton.classList.remove("running");
-          stopButton.disabled = true;
-          followup.disabled = run.sessionId === null;
+          setRunning(false, run.sessionId !== null);
           runState.textContent = element<HTMLDivElement>("question").hidden ? `${agentName} finished; the diagram is reloaded — compare with review, check against the contract` : `${agentName} asks a question`;
           page.canvas()?.highlight([]);
           // The agent changed the code: the live diagram and the page.views() follow.
@@ -443,16 +450,14 @@ export function runTask(written: string, resume: string | null, shown: string = 
       );
     })
     .catch((error: unknown) => {
-      runState.textContent = error instanceof Error ? error.message : String(error);
-      runButton.disabled = false;
-      runButton.classList.remove("running");
-      stopButton.disabled = true;
+      showRunError(error);
+      setRunning(false);
     });
 }
 
-element<HTMLButtonElement>("plan").addEventListener("click", () => void readTask().catch((error: unknown) => (runState.textContent = error instanceof Error ? error.message : String(error))));
-element<HTMLButtonElement>("code-this").addEventListener("click", () => void runCommand("code", "").catch((error: unknown) => (runState.textContent = error instanceof Error ? error.message : String(error))));
-element<HTMLButtonElement>("improve-diagram").addEventListener("click", () => void runCommand("diagram", "").catch((error: unknown) => (runState.textContent = error instanceof Error ? error.message : String(error))));
+element<HTMLButtonElement>("plan").addEventListener("click", () => void readTask().catch(showRunError));
+element<HTMLButtonElement>("code-this").addEventListener("click", () => void runCommand("code", "").catch(showRunError));
+element<HTMLButtonElement>("improve-diagram").addEventListener("click", () => void runCommand("diagram", "").catch(showRunError));
 element<HTMLButtonElement>("from-document").addEventListener("click", () => void runCommand("doc", ""));
 
 const documentGo = async (): Promise<void> => {
