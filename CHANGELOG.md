@@ -31,6 +31,7 @@ Switching between the pictures, walked on a browser extension's repository (scri
 The code of any branch, and the branches as a picture.
 
 - Every picture can be of another branch, a tag or a commit, without a checkout: the header's head field (the branches offered as it is typed, `[` and `]` stepping through them) draws the same view from that revision's code — the views list, the shape's page, the Code tab, the coverage and the project map too — and the title ends with "@ branch". `diagram <view> --head REF` does the same in the terminal, stamped with REF's commit. A review keeps reading its head as the change's.
+- A lane's label was cut at 120 pixels ("main (base, checke"); it is as wide as it reads, within its lane. The strip of a picked shape's neighbours stayed after the picture changed; a new picture clears it.
 
 Comparing branches, tested on a repository whose main moved on after the branches left it.
 

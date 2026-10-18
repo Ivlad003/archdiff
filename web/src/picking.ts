@@ -216,10 +216,11 @@ export function select(ids: string[], centre = false): void {
   }
 }
 
-/** A new picture: nothing selected in it yet (the picture's page is the load's to show). */
+/** A new picture, or a new pick: nothing selected yet, and no neighbours of a shape shown (the page is the caller's to show). */
 export function resetSelection(): void {
   selected = [];
   renderSelection();
+  renderNeighbours(null);
 }
 
 export function toggleSelected(id: string): void {

@@ -487,7 +487,9 @@ export function toExcalidraw(diagram: Diagram): string {
   for (const group of diagram.groups) {
     const id = `lane:${group.id}`;
     elements.push({ ...base(id, "rectangle", group), backgroundColor: "#fafafa", strokeColor: "#bdbdbd", customData: { archdiff: "lane" } });
-    elements.push({ ...text(`${id}:text`, null, { x: group.x + LANE_LABEL.dx, y: group.y + LANE_LABEL.dy, w: LANE_LABEL.w, h: LANE_LABEL.h }, group.label, LANE_LABEL.fontSize), textAlign: "left", verticalAlign: "top", customData: { archdiff: "label" } });
+    // As wide as the label reads (a branch's state, a module's path), within the lane.
+    const labelWidth = Math.max(LANE_LABEL.w, Math.min(group.w - 2 * LANE_LABEL.dx, Math.ceil(group.label.length * LANE_LABEL.fontSize * 0.62)));
+    elements.push({ ...text(`${id}:text`, null, { x: group.x + LANE_LABEL.dx, y: group.y + LANE_LABEL.dy, w: labelWidth, h: LANE_LABEL.h }, group.label, LANE_LABEL.fontSize), textAlign: "left", verticalAlign: "top", customData: { archdiff: "label" } });
   }
 
   // A fragment is a frame like a lane: a dashed box with its label top left, not a shape to pick.
