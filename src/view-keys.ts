@@ -30,6 +30,8 @@ interface KindSpec {
   path?: true;
   /** The only subjects the kind takes (`cycles:fns`). */
   subjects?: readonly string[];
+  /** A change: the view reads its own revisions, and the link's head is the change's, not the code the page shows. */
+  change?: true;
 }
 
 export const VIEW_KINDS = {
@@ -56,13 +58,13 @@ export const VIEW_KINDS = {
   tests: { subject: "none", question: "which modules the tests import, and which none does", modules: true },
   hotspots: { subject: "none", question: "which modules are big, and which are called from everywhere" },
   packages: { subject: "none", question: "which packages depend on which, declared or not" },
-  timeline: { subject: "none", question: "how the coupling between layers drifted, commit by commit" },
+  timeline: { subject: "none", question: "how the coupling between layers drifted, commit by commit", change: true },
   coverage: { subject: "none", question: "where the diagrams are blind: calls and imports archdiff could not follow" },
   intent: { subject: "none", question: "what was intended, what is built, and where the code went beyond the intent", modules: true },
   // The whole map shows every module of all but a big repository (the fold of `full`); the project map has the rest.
   modules: { subject: "none", question: "every module of the repository in its layer, and every import between them", modules: true, map: true, fold: 200 },
-  review: { subject: "none", question: "what a change did to the architecture: the modules, imports and calls it added, removed or changed, and the new couplings between layers", modules: true },
-  compare: { subject: "none", question: "what each of several branches did to the architecture against one base, side by side", modules: true },
+  review: { subject: "none", question: "what a change did to the architecture: the modules, imports and calls it added, removed or changed, and the new couplings between layers", modules: true, change: true },
+  compare: { subject: "none", question: "what each of several branches did to the architecture against one base, side by side", modules: true, change: true },
 } as const satisfies Record<string, KindSpec>;
 
 export type ViewKind = keyof typeof VIEW_KINDS;
@@ -114,6 +116,14 @@ export function questionOf(kind: ViewKind): string {
  * tap.
  */
 export const FOLD = 40;
+
+/** Whether a picture of the kind is the code at the link's head (a branch, a commit; the working tree without one): every view but a change. */
+export function drawnAtHead(kind: ViewKind | undefined): boolean {
+  if (kind === undefined) return false;
+  const spec: KindSpec = VIEW_KINDS[kind];
+
+  return spec.change !== true;
+}
 
 /** How many shapes a picture of the kind keeps before its tail folds, without `--limit`. */
 export function foldLimit(kind: ViewKind): number {

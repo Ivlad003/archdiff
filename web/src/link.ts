@@ -8,7 +8,7 @@
 // (how much at once). Pure functions of `location` and `localStorage`;
 // the page renders from `currentLink()` and navigates with `setLink()`.
 //
-// Entry points: `Link`, `currentLink`, `setLink`, `wrongInLink`, `refsOf`,
+// Entry points: `Link`, `currentLink`, `setLink`, `wrongInLink`, `refsOf`, `codeHead`,
 // `reviewing`, `readDefaults`, `rememberDefaults`, `forgetDefaults`,
 // `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`.
 
@@ -31,6 +31,16 @@ export function reviewing(view: string): boolean {
   const kind = parseView(view)?.kind;
 
   return kind === "review" || kind === "compare";
+}
+
+/**
+ * The revision whose code the page shows: the link's head for a picture of the code and for a review (the change's
+ * result); the working tree (null) for a comparison of several heads and for the timeline.
+ */
+export function codeHead(link: Link): string | null {
+  const kind = parseView(link.view)?.kind;
+
+  return kind === "compare" || kind === "timeline" ? null : link.head;
 }
 
 /** The refs of the link: the base (the base field), the head, the heads. */

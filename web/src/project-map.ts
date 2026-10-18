@@ -17,7 +17,7 @@
 import { api, type ProjectMap } from "./api.ts";
 import { element, h } from "./dom.ts";
 import { page } from "./page.ts";
-import { setLink, currentLink } from "./link.ts";
+import { codeHead, setLink, currentLink } from "./link.ts";
 
 interface Dot {
   id: string;
@@ -389,10 +389,14 @@ function renderLayers(): void {
   element<HTMLSpanElement>("map-note").textContent = `${counted} ${data.directoryDepth === null ? "modules" : "directories"}, ${data.edges.length} imports${data.directoryDepth === null ? "" : " (folded: the repository is big)"}`;
 }
 
+/** The head whose code the map holds (the link's, or the working tree's). */
+let mapHead: string | null = null;
+
 async function loadMap(): Promise<void> {
   try {
-    data = await api.graph();
-    loadedFor = JSON.stringify([data.nodes.length, data.edges.length]);
+    mapHead = codeHead(currentLink());
+    data = await api.graph(mapHead);
+    loadedFor = JSON.stringify([mapHead, data.nodes.length, data.edges.length]);
     seed(data);
     renderLayers();
     fit();
@@ -421,7 +425,8 @@ export function toggleProjectMap(force?: boolean): void {
 
   if (!show) return;
 
-  if (!data) void loadMap();
+  // The map of the code the page shows: loaded on the first opening, and again for another head.
+  if (!data || mapHead !== codeHead(currentLink())) void loadMap();
   else {
     fit();
     schedule();
@@ -438,10 +443,12 @@ export function projectMapOpen(): boolean {
 export function refreshProjectMap(): void {
   if (overlay().hidden) return;
   // The current picture's modules changed: redraw; a changed repository (the page reloaded its views) reloads the data.
-  void api.graph().then((fresh) => {
-    if (JSON.stringify([fresh.nodes.length, fresh.edges.length]) !== loadedFor) {
+  const head = codeHead(currentLink());
+  void api.graph(head).then((fresh) => {
+    if (JSON.stringify([head, fresh.nodes.length, fresh.edges.length]) !== loadedFor) {
       data = fresh;
-      loadedFor = JSON.stringify([fresh.nodes.length, fresh.edges.length]);
+      mapHead = head;
+      loadedFor = JSON.stringify([head, fresh.nodes.length, fresh.edges.length]);
       seed(fresh);
       renderLayers();
       fit();

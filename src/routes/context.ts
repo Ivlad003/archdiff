@@ -35,9 +35,16 @@ export interface RouteContext {
   changeListeners: Set<ServerResponse>;
   /** Whether the server follows the code (`--no-watch` turns it off), and the problem when it could not. */
   watching: { on: boolean; problem: string | null };
-  /** The picture the query names (`requestOf`), drawn on the current analysis; the problem with the request, or git's when it refuses. */
+  /** The picture the query names (`requestOf`), drawn on the code it is of (`analysisFor`); the problem with the request, or git's when it refuses. */
   picture(query: URLSearchParams): Promise<Result<Picture>>;
+  /**
+   * The analysis a query's picture is drawn on: the code at its `head` (a branch, a tag, a commit), the working tree
+   * without one; a change (a review, a comparison, a commit, the timeline, the branches) reads its own revisions
+   * against the working tree's. Rejects naming an unknown head.
+   */
+  analysisFor(query: URLSearchParams): Promise<Analysis>;
 }
+
 
 /**
  * The picture a query names: `view=<key>`, the picture's options as

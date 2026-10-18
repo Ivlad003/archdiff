@@ -25,6 +25,15 @@ The system SHALL offer `analyze`, `views`, `diagram`, `metrics`, `run`, `drawing
 - **WHEN** `archdiff layouts` runs
 - **THEN** it lists the saved drawings as `archdiff drawings` does
 
+### Requirement: A picture can be of another revision
+
+The system SHALL draw `diagram <view> --head REF`, for a view that is no change, from the code at REF (a branch, a tag, a commit) without a checkout, stamped with REF's commit; a REF git does not know SHALL exit 2 naming it.
+
+#### Scenario: A branch's map from main
+
+- **WHEN** `archdiff diagram modules --head gone` runs on main, where branch `gone` removed `log.ts`
+- **THEN** the map has no `log.ts`, and the stamp names `gone`'s commit
+
 ### Requirement: Exit codes mean one thing
 
 The system SHALL exit 0 on success, 1 when a check found something (a new layer dependency in `review` or `compare`, an import against the contract in `check`, a run that threw in `run`), and 2 on a wrong call or an I/O error — a view of a subject the code does not have, an entry `run` cannot run (unknown, a method, another language, not exported), a repository that is not one when git is needed.

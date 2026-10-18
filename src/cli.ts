@@ -22,10 +22,10 @@ import { metricsMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
 import { historyMarkdown, reviewFindings } from "./diff.ts";
 import { drawPicture, type Picture, type Refs } from "./picture.ts";
-import { history } from "./review.ts";
+import { analysisAt, history } from "./review.ts";
 import { defaultBase, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { serve } from "./server.ts";
-import { usesDepth } from "./view-keys.ts";
+import { drawnAtHead, usesDepth } from "./view-keys.ts";
 import { parseView, viewList, type View } from "./views.ts";
 import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
@@ -90,7 +90,10 @@ async function writePicture(call: Call, command: string, root: string, view: Vie
   const deep = usesDepth(view.kind) ? depthWarning(options.depth) : null;
 
   if (deep) process.stderr.write(`archdiff: ⚠ ${deep}\n`);
-  const picture = await drawPicture(await analyze(root), { view, options, refs: refsOf(call) });
+  const refs = refsOf(call);
+  // `--head` on a view that is no change draws the code at that revision, read from git without a checkout.
+  const analysis = drawnAtHead(view.kind) && refs.head ? await analysisAt(root, refs.head) : await analyze(root);
+  const picture = await drawPicture(analysis, { view, options, refs });
 
   // A missing subject: the reason, and where the subjects are listed, unless the reason says so already (a machine's).
   if (picture.diagram.missing) {

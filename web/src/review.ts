@@ -1,9 +1,13 @@
 // The review: the base and head fields of the header with the review
 // button, and the bars under the title — the commits of the branch to
 // step through, and the branches (a base and any number of heads to
-// compare). The base field is the link's base (link.ts reads it).
+// compare). The base field is the link's base (link.ts reads it). The
+// head field is the code the page shows, for every picture: a branch, a
+// tag or a commit (the branches offered as it is typed, [ and ] step
+// through them), the working tree when empty.
 //
-// Entry points: `showReviewBars`, `loadCommits`, `loadBranches`.
+// Entry points: `showReviewBars`, `loadCommits`, `loadBranches`,
+// `loadHeadRefs`, `stepHead`.
 
 import { api, type Commit } from "./api.ts";
 import { leaveEdit } from "./canvas.ts";
@@ -83,9 +87,31 @@ element<HTMLButtonElement>("commit-next").addEventListener("click", () => {
   const index = commits.findIndex((commit) => commit.sha === commitList.value);
   reviewCommit(index === -1 ? 0 : Math.min(commits.length - 1, index + 1));
 });
-headInput.addEventListener("change", () => {
-  if (reviewing(currentLink().view)) setLink({ ...currentLink(), head: headInput.value.trim() || null });
-});
+// The head is the code of every picture: a change of it draws the same view at the other revision.
+headInput.addEventListener("change", () => setLink({ ...currentLink(), head: headInput.value.trim() || null }));
+
+/** The branches the head field offers, the working tree first (an empty head), local before remote. */
+let headRefs: string[] = [""];
+
+/** Offers the branches in the head field; outside git, none (the field still takes a ref typed). */
+export async function loadHeadRefs(): Promise<void> {
+  try {
+    const { branches, current } = await api.branches();
+    headRefs = ["", ...branches.map((branch) => branch.name)];
+    element("head-refs").replaceChildren(...branches.map((branch) => Object.assign(document.createElement("option"), { value: branch.name, label: `${branch.name}${branch.name === current ? " (checked out)" : ""}${branch.remote ? " (remote)" : ""} — ${branch.subject}` })));
+  } catch {
+    headRefs = [""];
+  }
+}
+
+/** The next or the previous branch as the head ([ and ]), the working tree among them; the same view drawn at it. */
+export function stepHead(step: 1 | -1): void {
+  if (headRefs.length < 2) return;
+  const now = currentLink();
+  const at = Math.max(0, headRefs.indexOf(now.head ?? ""));
+  const next = headRefs[(at + step + headRefs.length) % headRefs.length]!;
+  setLink({ ...now, head: next || null });
+}
 
 // ── The branches: a base and any number of heads to compare ────────────────
 

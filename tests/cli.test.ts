@@ -842,6 +842,14 @@ test("a comparison says what each head did: apart where they differ, every funct
     // Both heads touched log.ts (the one removed it, the other changed it): touched by every head.
     assert.ok(markdown.includes("## Touched by every head\n\n- src/lib/log.ts"), markdown);
     assert.ok(archdiff(["compare", dir, "--heads", "loud"]).stdout.includes("# 1 head against main"));
+    // Any picture at --head is that branch's code, read from git without a checkout, stamped with its commit.
+    const at = JSON.parse(archdiff(["diagram", "modules", dir, "--head", "gone", "--format", "json"]).stdout) as { nodes: { id: string }[]; stamp?: { commit: string } };
+    assert.ok(!at.nodes.some((node) => node.id === "src/lib/log.ts"), JSON.stringify(at.nodes.map((node) => node.id)));
+    assert.equal(at.stamp?.commit, git("rev-parse", "--short=7", "gone"));
+    assert.ok((JSON.parse(archdiff(["diagram", "modules", dir, "--format", "json"]).stdout) as { nodes: { id: string }[] }).nodes.some((node) => node.id === "src/lib/log.ts"));
+    const nope = archdiff(["diagram", "modules", dir, "--head", "nope"]);
+    assert.equal(nope.status, 2);
+    assert.equal(nope.stderr, 'archdiff: no branch, tag or commit "nope" (archdiff branches lists the branches)\n');
   }));
 
 test("a head of a review or a comparison is held to its own ARCHITECTURE.md, not the checkout's", () =>

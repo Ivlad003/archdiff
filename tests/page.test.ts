@@ -400,6 +400,19 @@ test("the branch bar compares two heads: the title, the table from where each le
       await page!.waitForFunction(`window.archdiff.drawn() === "review" && location.hash.includes("head=b")`, undefined, { timeout: 20_000 });
       assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#head-list input:checked")].map((box) => box.value)`), ["b"]);
       assert.match((await page!.textContent("#title-text")) ?? "", /^Changes since [0-9a-f]{7}\.\.b — 1 source file changed$/);
+      // The head field is the code of every picture: the layers of a, then ] steps to the next branch.
+      await page!.evaluate(`location.hash = "view=modules"`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "modules"`, undefined, { timeout: 20_000 });
+      await page!.fill("#head", "a");
+      await page!.dispatchEvent("#head", "change");
+      await page!.waitForFunction(`location.hash.includes("head=a") && document.querySelector("#title-text")?.textContent?.endsWith("@ a")`, undefined, { timeout: 20_000 });
+      assert.ok((await page!.evaluate(`[...document.querySelectorAll("#views li")].map((li) => li.title)`) as string[]).includes("module:src/db/report.ts"));
+      assert.ok(((await page!.textContent("#stats")) ?? "").startsWith("at a · "));
+      const before = (await page!.evaluate("location.hash")) as string;
+      await page!.mouse.click(10, 300);
+      await page!.keyboard.press("]");
+      await page!.waitForFunction(`location.hash !== ${JSON.stringify(before)}`, undefined, { timeout: 10_000 });
+      assert.ok(!(((await page!.evaluate("location.hash")) as string).includes("head=a&") || ((await page!.evaluate("location.hash")) as string).endsWith("head=a")));
     },
   ));
 

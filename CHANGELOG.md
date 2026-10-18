@@ -28,6 +28,10 @@ Switching between the pictures, walked on a browser extension's repository (scri
 - The project map scattered: every dot pushed every other however far, against a weak pull to the middle, so the modules nothing imports (an extension's scripts, a repository's build scripts) flew thousands of pixels off and the rest shrank to a blob — a map of 48 modules needed a zoom of 0.06 to fit and the fit stopped at 0.15, leaving 19 dots off the canvas. A dot now pushes only the dots within three ideal distances, every dot is pulled to the middle of the map, overlapping dots move apart, and the fit goes down to 0.05: the same map fits at 0.4, a folded map of 268 directories at 0.77.
 - A double click on a dot of the project map never went inside: the first click had already closed the map.
 
+The code of any branch, and the branches as a picture.
+
+- Every picture can be of another branch, a tag or a commit, without a checkout: the header's head field (the branches offered as it is typed, `[` and `]` stepping through them) draws the same view from that revision's code — the views list, the shape's page, the Code tab, the coverage and the project map too — and the title ends with "@ branch". `diagram <view> --head REF` does the same in the terminal, stamped with REF's commit. A review keeps reading its head as the change's.
+
 Comparing branches, tested on a repository whose main moved on after the branches left it.
 
 - `compare` measured every head from the tip of the base, so a branch "removed" everything the base gained after the branch left it: a module added on main showed as removed by every older branch, a tag behind main as a branch that deleted its work, a comment-only branch as one that removed a module. Each head is now measured from where it left the base — their merge-base, as its pull request would show it (the base itself when they share no commit) — and the table names that commit (*since*). A head named twice is compared once; an unknown ref is refused by name (`no branch, tag or commit "x"`), not with git's "fatal: bad revision".

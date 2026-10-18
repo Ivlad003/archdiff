@@ -1,16 +1,18 @@
 // The list of views on the left: every picture the repository has, in
 // groups (the overviews, the machines, the layers, the directories, the
 // entry points, the types, the modules), filtered as you type (`v`); and
-// the header's line with the repository's root and its numbers.
-// `loadViews` asks the server again after every change of the code.
+// the header's line with the repository's root and its numbers. The list
+// is of the code the page shows: the link's head (a branch, a commit) or
+// the working tree. `loadViews` asks the server again after every change
+// of the code and of the head.
 //
 // Entry points: `loadViews`, `viewEntries`, `renderViews`,
-// `focusViewSearch`.
+// `focusViewSearch`, `listedHead`.
 
 import { api, type ViewEntry } from "./api.ts";
 import { setAgentName } from "./chat.ts";
 import { element } from "./dom.ts";
-import { currentLink, setLink } from "./link.ts";
+import { codeHead, currentLink, setLink } from "./link.ts";
 import { togglePanel } from "./panel.ts";
 
 const list = element<HTMLUListElement>("views");
@@ -30,6 +32,12 @@ const GROUPS: [label: string, overview: boolean, members: string[]][] = [
 const SHOWN = { all: 60, filtered: 400 };
 
 let views: ViewEntry[] = [];
+/** The head whose views the list holds (null: the working tree's); undefined before the first load. */
+let listed: string | null | undefined;
+
+export function listedHead(): string | null | undefined {
+  return listed;
+}
 
 export function viewEntries(): ViewEntry[] {
   return views;
@@ -68,16 +76,18 @@ export function renderViews(): void {
   }
 }
 
-/** The views and the numbers of the repository, the agent the server may run; the list drawn again. */
+/** The views and the numbers of the code the page shows (the link's head, or the working tree), the agent the server may run; the list drawn again. */
 export async function loadViews(): Promise<void> {
-  const response = await api.views();
+  const head = codeHead(currentLink());
+  const response = await api.views(head);
+  listed = head;
   views = response.views;
   setAgentName(response.agent);
   element("root").textContent = response.root;
   const s = response.stats;
   // A server that cannot follow the code says so here: the pictures stay as they were until a reload.
   const notFollowing = response.watching.problem ? ` · ⚠ not following the code: ${response.watching.problem}` : "";
-  element("stats").textContent = `${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms${notFollowing}`;
+  element("stats").textContent = `${head ? `at ${head} · ` : ""}${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms${notFollowing}`;
   renderViews();
 }
 

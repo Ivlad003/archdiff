@@ -62,6 +62,15 @@ The system SHALL, on a tap on a line, light it with its two ends and show its pa
 - **WHEN** five lines run within eight pixels of the tap
 - **THEN** the panel says "5 lines under the tap" with each as a button, the nearest shown
 
+### Requirement: The page shows the code at any head
+
+The system SHALL draw every picture that is no change (a review, a comparison, the timeline read revisions of their own) from the code at the link's head — a branch, a tag or a commit, read from git without a checkout — and the views list, the shape's and the line's pages, the Code tab, the coverage and the project map from it too; an empty head is the working tree. The header's head field SHALL offer the branches as it is typed, `[` and `]` SHALL step through them with the same view, and the title SHALL end with "@ head". A head git does not know SHALL be refused by name.
+
+#### Scenario: Another branch's modules
+
+- **WHEN** the head field is set to `a`, a branch that added `src/db/report.ts`, on the whole map
+- **THEN** the title reads "… @ a", the views list holds `module:src/db/report.ts`, and the Code tab of it shows the branch's file
+
 ### Requirement: The canvas shows the picture the link names
 
 The system SHALL draw the picture of the link on one canvas, however fast the link changes: a view opened while the first picture is still mounting the canvas waits for that canvas, and a picture that comes after a newer link is dropped. A picture with nothing to draw SHALL say why in the middle of the canvas, without the minimap; a picture that cannot be drawn SHALL clear the canvas and say why there, never leave the last picture standing for it.
@@ -199,7 +208,7 @@ The system SHALL keep the page's parts in modules of their own — the title and
 
 ### Requirement: The keys
 
-The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or Cmd held: `/` focuses find, `v` the filter of the views (showing the left panel), `o` opens the options, `p` the project map, `0` fits, Backspace goes back, the arrows walk from the picked shape, Enter goes into it, `s` splits, `m` and `d` turn mix and dim on and off, `l` flips the lanes, `e` edits, Escape clears the selection (or closes the menu and the project map first); Ctrl+B and Ctrl+] SHALL fold the left and the right panel, Ctrl+S save a drawing. In a review or a comparison the keys of the tools (`p`, `s`, `m`, `d`, `e`) SHALL do nothing.
+The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or Cmd held: `/` focuses find, `v` the filter of the views (showing the left panel), `o` opens the options, `p` the project map, `0` fits, Backspace goes back, the arrows walk from the picked shape, Enter goes into it, `s` splits, `m` and `d` turn mix and dim on and off, `l` flips the lanes, `[` and `]` step the head through the branches, `e` edits, Escape clears the selection (or closes the menu and the project map first); Ctrl+B and Ctrl+] SHALL fold the left and the right panel, Ctrl+S save a drawing. In a review or a comparison the keys of the tools (`p`, `s`, `m`, `d`, `e`) SHALL do nothing.
 
 #### Scenario: Find and filter
 

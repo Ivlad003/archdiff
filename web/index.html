@@ -61,7 +61,8 @@
       </details>
       <button id="fit" title="Fit the diagram to the window (0)">fit</button>
       <label>base <input id="base" type="text" placeholder="merge-base" size="10" /></label>
-      <label>head <input id="head" type="text" placeholder="working tree" size="10" /></label>
+      <label title="The code the page shows: a branch, a tag or a commit, read from git without a checkout; empty: the working tree. [ and ] step through the branches; review compares it against the base">head <input id="head" type="text" list="head-refs" placeholder="working tree" size="12" /></label>
+      <datalist id="head-refs"></datalist>
       <button id="review" title="The architectural diff of head (the working tree, or a ref) against the base; opens the branch bar">review</button>
       <button id="theme" class="icon" title="Light or dark">◐</button>
       <button id="edit" title="Move shapes, draw with the pencil, write notes; saved to .archdiff/layouts/ (e)">✎ edit</button>

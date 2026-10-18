@@ -46,9 +46,9 @@ function changeTitle(change: ChangeSummary | null): string {
   return ` — ${diff.changedFiles.length === 1 ? "1 source file" : `${diff.changedFiles.length} source files`} changed${findings.length > 0 ? ` — ⚠ ${dependencies(findings.length)}${contract ? " against ARCHITECTURE.md" : ""}` : diff.layerEdgesAdded.length > 0 ? ` — ${dependencies(diff.layerEdgesAdded.length)}, allowed by ARCHITECTURE.md` : ""}`;
 }
 
-/** The picture's title with what its change found and whether it was drawn by hand; the question it answers as the tooltip. */
-export function showTitle(picture: { title: string; question?: string }, change: ChangeSummary | null, drawn: boolean): void {
-  title.textContent = `${picture.title}${changeTitle(change)}${drawn ? " (drawn by hand)" : ""}`;
+/** The picture's title with the head whose code it is of, what its change found and whether it was drawn by hand; the question it answers as the tooltip. */
+export function showTitle(picture: { title: string; question?: string }, change: ChangeSummary | null, drawn: boolean, head: string | null = null): void {
+  title.textContent = `${picture.title}${head ? ` @ ${head}` : ""}${changeTitle(change)}${drawn ? " (drawn by hand)" : ""}`;
   title.title = picture.question ? `${picture.question[0]!.toUpperCase()}${picture.question.slice(1)}.` : "";
 }
 

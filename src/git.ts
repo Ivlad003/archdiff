@@ -9,7 +9,7 @@
 // Sits at the I/O edge below review.ts (which reads a change), files.ts
 // (which lists the sources) and the server. Entry points: `listedFiles`,
 // `changedFiles`, `treeAt`, `mergeBase`, `forkPoint`, `commitOf`,
-// `defaultBase`, `listBranches`, `commitsBetween`, `fileHistory`,
+// `defaultBase`, `listBranches`, `commitsBetween`, `fileHistory`, `fileAt`,
 // `revisionStamp`, `commitFirst`.
 
 import { spawnSync } from "node:child_process";
@@ -93,6 +93,13 @@ export function commitOf(root: string, ref: string): string | null {
   if (!result.ok && /is not a git repository|has no commits yet/.test(result.error)) throw new Error(result.error);
 
   return result.ok ? result.out.trim() : null;
+}
+
+/** A file as a revision has it (a branch's, a commit's code for the page); null when the revision lacks it. */
+export function fileAt(root: string, ref: string, path: string): string | null {
+  assertRef(ref);
+
+  return contentAt(root, ref, path);
 }
 
 /** A revision's content of a file, as `analyze` overrides: null when the revision lacks it. */
@@ -276,9 +283,10 @@ export function defaultBase(root: string): string | null {
   return null;
 }
 
-/** The short commit and its date, for the stamp of an export; null outside git or before the first commit. */
-export function revisionStamp(root: string): { commit: string; date: string } | null {
-  const result = git(root, ["log", "-1", "--format=%h %cs"]);
+/** The short commit and its date of a revision (the checkout's by default), for the stamp of an export; null outside git or before the first commit. */
+export function revisionStamp(root: string, ref = "HEAD"): { commit: string; date: string } | null {
+  assertRef(ref);
+  const result = git(root, ["log", "-1", "--format=%h %cs", ref]);
 
   if (!result.ok) return null;
   const [commit, date] = result.out.trim().split(" ");

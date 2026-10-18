@@ -22,7 +22,10 @@ import type { Config } from "./config.ts";
 import { isSourceFile } from "./files.ts";
 import { drawPicture, type Picture } from "./picture.ts";
 import { ok, wrong, type Result } from "./result.ts";
+import { commitOf } from "./git.ts";
+import { analysisAt } from "./review.ts";
 import { problem, requestOf, send, type RouteContext } from "./routes/context.ts";
+import { drawnAtHead, parseView } from "./view-keys.ts";
 import { routes as pictureRoutes } from "./routes/pictures.ts";
 import { routes as agentRoutes } from "./routes/agent.ts";
 import { routes as gitRoutes } from "./routes/git.ts";
@@ -113,6 +116,35 @@ function analysisPerBurst(root: string): { fresh(): Promise<Analysis>; invalidat
   };
 }
 
+/** How many revisions' analyses the server keeps (the branches the page switched between), the oldest dropped first. */
+const KEPT_REVISIONS = 6;
+
+/**
+ * The analysis of the code at a head — a branch, a tag, a commit, read from git without a checkout — kept by commit,
+ * a few at a time; the working tree's (per burst) without a head. A head git does not know is refused by name.
+ */
+function analysesAt(root: string, fresh: () => Promise<Analysis>): (head: string | null) => Promise<Analysis> {
+  const byCommit = new Map<string, Promise<Analysis>>();
+
+  return async (head) => {
+    if (head === null || head === "WORKTREE") return fresh();
+    const commit = commitOf(root, head);
+
+    if (commit === null) throw new Error(`no branch, tag or commit "${head}" (archdiff branches lists the branches)`);
+    let analysis = byCommit.get(commit);
+
+    if (!analysis) {
+      analysis = analysisAt(root, commit);
+      byCommit.set(commit, analysis);
+      analysis.catch(() => byCommit.delete(commit));
+
+      if (byCommit.size > KEPT_REVISIONS) byCommit.delete(byCommit.keys().next().value!);
+    }
+
+    return analysis;
+  };
+}
+
 /** The responses waiting on `/api/changes`, and how they hear of a changed file: once per burst of changes, the analysis dropped first. */
 function changeChannel(invalidate: () => void): { listeners: Set<ServerResponse>; notify(path: string): void } {
   const listeners = new Set<ServerResponse>();
@@ -164,14 +196,14 @@ function agentSpecOf(config: Config, given: AgentSpec | null): AgentSpec | null 
   return chosen && chosen.name === "claude" ? { ...chosen, allowedTools: allowedToolsFor(config.checks) } : chosen;
 }
 
-/** The picture a query names, drawn on the current analysis; git's refusal (outside a repository, a bad ref) is the request's problem. */
-async function pictureOf(query: URLSearchParams, defaultBase: string | null, fresh: () => Promise<Analysis>): Promise<Result<Picture>> {
+/** The picture a query names, drawn on the code it is of; git's refusal (outside a repository, a bad ref) is the request's problem. */
+async function pictureOf(query: URLSearchParams, defaultBase: string | null, analysisFor: (query: URLSearchParams) => Promise<Analysis>): Promise<Result<Picture>> {
   const request = requestOf(query, defaultBase);
 
   if (!request.ok) return request;
 
   try {
-    return ok(await drawPicture(await fresh(), request.value));
+    return ok(await drawPicture(await analysisFor(query), request.value));
   } catch (error) {
     return wrong(error instanceof Error ? error.message : String(error));
   }
@@ -261,6 +293,8 @@ async function listen(server: Server, options: ServeOptions): Promise<number | n
 export async function serve(root: string, options: ServeOptions): Promise<void> {
   const web = await webDirectory();
   const analyses = analysisPerBurst(root);
+  const at = analysesAt(root, analyses.fresh);
+  const analysisFor = (query: URLSearchParams): Promise<Analysis> => (drawnAtHead(parseView(query.get("view") ?? "layers")?.kind) ? at(query.get("head") || null) : analyses.fresh());
   const changes = changeChannel(analyses.invalidate);
 
   // Whether the page follows the code, and why not when it was asked to (`--no-watch` is no problem).
@@ -287,7 +321,8 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     activeRunner: () => runner,
     changeListeners: changes.listeners,
     watching: { on: options.watch && watching === null, problem: watching },
-    picture: (query) => pictureOf(query, options.base, analyses.fresh),
+    picture: (query) => pictureOf(query, options.base, analysisFor),
+    analysisFor,
   };
 
   const server = createServer((request, response) => {

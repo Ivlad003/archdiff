@@ -62,6 +62,11 @@ export interface Refs {
 /** What a review or a comparison found, as the page reads it for the title (the server sends the whole diff). */
 export type ChangeSummary = { kind: "review"; diff: { base: string; changedFiles: string[]; layerEdgesAdded: { from: string; to: string; against?: true }[] }; contract: boolean } | { kind: "compare"; base: string; heads: { head: string; diff: { layerEdgesAdded: { from: string; to: string }[] } }[] };
 
+/** The head of the code as a query parameter after `joint` (`?` or `&`), empty for the working tree. */
+function headQuery(joint: string, head: string | null): string {
+  return head ? `${joint}head=${encodeURIComponent(head)}` : "";
+}
+
 /** The refs as query parameters, empty when there are none. */
 function refsQuery(refs: Refs): string {
   return `${refs.base ? `&base=${encodeURIComponent(refs.base)}` : ""}${refs.head ? `&head=${encodeURIComponent(refs.head)}` : ""}${refs.heads.length > 0 ? `&heads=${encodeURIComponent(refs.heads.join(","))}` : ""}`;
@@ -208,21 +213,23 @@ export const api = {
 
     return body;
   },
-  views: () => get<ViewsResponse>("/api/views"),
-  /** The whole repository for the project map: every module (or directory, folded) with its layer, every import between them. */
-  graph: () => get<ProjectMap>("/api/graph"),
+  /** The views of the code at `head` (a branch, a tag, a commit; null: the working tree). */
+  views: (head: string | null = null) => get<ViewsResponse>(`/api/views${headQuery("?", head)}`),
+  /** The whole repository at `head` for the project map: every module (or directory, folded) with its layer, every import between them. */
+  graph: (head: string | null = null) => get<ProjectMap>(`/api/graph${headQuery("?", head)}`),
   /** The page of a line of the picture the link shows. */
   line: (view: string, from: string, to: string, kind: string, options: PictureOptions, refs: Refs) => get<{ markdown: string }>(`/api/line?view=${encodeURIComponent(view)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&kind=${encodeURIComponent(kind)}${pictureQueryText(options)}${refsQuery(refs)}`),
   /** The page of a shape of the picture the link shows. */
   shape: (view: string, id: string, options: PictureOptions, refs: Refs) => get<{ markdown: string }>(`/api/shape?view=${encodeURIComponent(view)}&id=${encodeURIComponent(id)}${pictureQueryText(options)}${refsQuery(refs)}`),
-  file: async (path: string): Promise<string> => {
-    const response = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+  /** A file of the code at `head` (null: the working tree's). */
+  file: async (path: string, head: string | null = null): Promise<string> => {
+    const response = await fetch(`/api/file?path=${encodeURIComponent(path)}${headQuery("&", head)}`);
 
     if (!response.ok) throw new Error(`cannot read ${path}`);
 
     return response.text();
   },
-  coverage: () => get<{ markdown: string; ratio: number; gaps: number; calls: number }>("/api/coverage"),
+  coverage: (head: string | null = null) => get<{ markdown: string; ratio: number; gaps: number; calls: number }>(`/api/coverage${headQuery("?", head)}`),
   /** The download of a picture in `format`, with the link's options and refs (the Mermaid type among the options). */
   exportUrl: (view: string, format: string, options: PictureOptions, refs: Refs) => `/api/export?view=${encodeURIComponent(view)}&format=${format}${pictureQueryText(options)}${refsQuery(refs)}`,
 };

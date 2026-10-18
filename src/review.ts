@@ -7,8 +7,8 @@
 // pure; here is only the reading.
 //
 // Sits at the edge, between the commands (and picture.ts) and diff.ts.
-// Entry points: `review`, `compareBranches`, `history`, `ReviewResult`,
-// `ComparisonResult`.
+// Entry points: `review`, `compareBranches`, `history`, `analysisAt`,
+// `ReviewResult`, `ComparisonResult`.
 
 import { analyze, type Analysis } from "./analyze.ts";
 import { loadConfig } from "./config.ts";
@@ -20,6 +20,13 @@ import type { Graph } from "./graph.ts";
 /** A revision as overrides of the working tree: its source files, and its contract, which its analysis is held to. */
 function treeAt(root: string, ref: string): Map<string, string | null> {
   return filesAt(root, ref, [INTENT_FILE]);
+}
+
+/** The analysis of a revision (a branch, a tag, a commit) without a checkout: the working tree with the revision's files laid over it; a ref git does not know is refused by name. */
+export async function analysisAt(root: string, ref: string): Promise<Analysis> {
+  if (commitOf(root, ref) === null) throw new Error(`no branch, tag or commit "${ref}" (archdiff branches lists the branches)`);
+
+  return analyze(root, { overrides: treeAt(root, ref), config: loadConfig(root) });
 }
 
 export interface ReviewResult {

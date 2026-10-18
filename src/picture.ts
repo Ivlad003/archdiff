@@ -25,7 +25,7 @@ import { positionsOf, readDrawing, type DrawingFile } from "./drawings.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import type { PictureOptions } from "./options.ts";
 import { compareBranches, history, review } from "./review.ts";
-import { viewKey, type View } from "./view-keys.ts";
+import { drawnAtHead, viewKey, type View } from "./view-keys.ts";
 import { viewOf, type EdgeReads } from "./views.ts";
 
 /**
@@ -89,7 +89,8 @@ async function draw(analysis: Analysis, { view, options, refs }: PictureRequest,
   // What the edge could not read for the picture (the changes outside git) is said after what the picture says itself.
   const said = notes.length > 0 ? { ...content, reason: [content.reason, ...notes].filter(Boolean).join("; ") } : content;
   const placed = layout(said, positionsOf(drawing?.elements ?? null));
-  const stamp = revisionStamp(analysis.root);
+  // The revision the picture is of: its head's when it is the code at a branch or a commit, the checkout's otherwise.
+  const stamp = drawnAtHead(view.kind) && refs.head ? revisionStamp(analysis.root, refs.head) : revisionStamp(analysis.root);
   const diagram = stamp ? { ...placed, stamp } : placed;
   const markdown = change?.kind === "review" ? reviewMarkdown(change.diff, diagram, change.contract) : change?.kind === "compare" ? comparisonMarkdown(change.base, change.heads, diagram) : diagramMarkdown(diagram, analysis, options.mermaid);
 

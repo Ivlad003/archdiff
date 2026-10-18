@@ -16,6 +16,7 @@ import { api, type Shape } from "./api.ts";
 import { transcript } from "./chat.ts";
 import { element, remember, remembered } from "./dom.ts";
 import { flowText } from "./flow-tab.ts";
+import { codeHead, currentLink } from "./link.ts";
 import { page } from "./page.ts";
 import { loadSpecs, specTextOf } from "./spec-tab.ts";
 
@@ -175,7 +176,7 @@ export async function showCode(node: Shape): Promise<void> {
   let text: string;
 
   try {
-    text = await api.file(file);
+    text = await api.file(file, codeHead(currentLink()));
   } catch (error) {
     codePanel.textContent = error instanceof Error ? error.message : String(error);
 
@@ -210,7 +211,7 @@ export async function showCode(node: Shape): Promise<void> {
 /** The coverage report of the analysis: what it read, what it could not, and why. */
 export async function loadCoverage(): Promise<void> {
   try {
-    const report = await api.coverage();
+    const report = await api.coverage(codeHead(currentLink()));
     setMarkdown(coveragePanel, report.markdown);
   } catch (error) {
     setMarkdown(coveragePanel, error instanceof Error ? error.message : String(error));

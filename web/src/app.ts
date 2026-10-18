@@ -25,7 +25,7 @@ import { loadTasks } from "./chat.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
 import { loadFlow } from "./flow-tab.ts";
-import { currentLink, refsOf, reviewing, wrongInLink } from "./link.ts";
+import { codeHead, currentLink, refsOf, reviewing, wrongInLink } from "./link.ts";
 import { closeMenu, menuOpen, openMenu } from "./menu.ts";
 import { updateMinimap } from "./minimap.ts";
 import { showOptions } from "./options-panel.ts";
@@ -33,15 +33,15 @@ import { bindPage } from "./page.ts";
 import { loadCoverage, markdownPanel, renderMarkdown, setMarkdown, setPicturePage, showCode, showTab } from "./panel.ts";
 import { openShape, resetSelection, select, selection, tap } from "./picking.ts";
 import { mapDots, mapSettled, refreshProjectMap } from "./project-map.ts";
-import { loadBranches, loadCommits, showReviewBars } from "./review.ts";
+import { loadBranches, loadCommits, loadHeadRefs, showReviewBars } from "./review.ts";
 import { menuItems } from "./shape-menu.ts";
 import "./shortcuts.ts";
 import "./theme.ts";
 import { notice, renderCrumbs, setReason, showEmpty, showNoTitle, showPendingNotice, showTitle } from "./title.ts";
 import { renderCanvasTools, setPictureLanes } from "./toolbar.ts";
-import { loadViews, renderViews, viewEntries } from "./views-list.ts";
+import { listedHead, loadViews, renderViews, viewEntries } from "./views-list.ts";
 import { depthWarning } from "../../src/options.ts";
-import { parseView, usesDepth } from "../../src/view-keys.ts";
+import { drawnAtHead, parseView, usesDepth } from "../../src/view-keys.ts";
 
 /** The shapes of the current picture by ID. */
 let nodes = new Map<string, Shape>();
@@ -90,6 +90,19 @@ async function load(): Promise<void> {
   const generation = ++loads;
   const overtaken = (): boolean => generation !== loads;
   const state = currentLink();
+
+  // Another head (a branch, a commit picked in the header): the views, the coverage and the map of its code.
+  if (codeHead(state) !== listedHead()) {
+    try {
+      await loadViews();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : String(error));
+    }
+
+    if (overtaken()) return;
+    void loadCoverage();
+  }
+
   // A new picture: nothing selected in it yet.
   resetSelection();
   closeMenu();
@@ -113,7 +126,7 @@ async function load(): Promise<void> {
     const result = await api.scene(state.view, state, refsOf(state));
 
     if (overtaken()) return;
-    showTitle(result.diagram, result.change, result.drawn);
+    showTitle(result.diagram, result.change, result.drawn, drawnAtHead(kind) ? state.head : null);
     nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
     edges = result.diagram.edges;
     mocks = result.mocks;
@@ -189,4 +202,5 @@ void (async () => {
   await load();
   await loadCoverage();
   await loadTasks();
+  await loadHeadRefs();
 })();

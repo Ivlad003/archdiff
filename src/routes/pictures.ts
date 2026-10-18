@@ -12,17 +12,19 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { Analysis } from "../analyze.ts";
 import { coverageReport } from "../coverage.ts";
 import { dataFlow, flowMarkdown } from "../flow.ts";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, type ExportFormat } from "../export/index.ts";
 import { toExcalidraw } from "../export/excalidraw.ts";
 import { planFromScene, taskMarkdown } from "../plan.ts";
 import { mergeScene, parseDrawing, readDrawing, writeDrawing, type SceneElement } from "../drawings.ts";
+import { fileAt } from "../git.ts";
 import { moduleChangeMarkdown } from "../diff.ts";
 import { edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView, viewList } from "../views.ts";
-import type { ViewKind } from "../view-keys.ts";
+import { drawnAtHead, type ViewKind } from "../view-keys.ts";
 import { projectMap } from "../project-map.ts";
 import { standsFor } from "../shape-keys.ts";
 import { failed, json, optionsOf, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
@@ -93,11 +95,22 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
   return json(response, { context: sections.length > 0 ? `## Context from the diagrams\n\n${sections.join("\n\n")}` : "" });
 }
 
-export async function getGraph(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
-  // The whole repository for the project map: every module (or directory, folded) with its layer, every import between them.
-  const analysis = await ctx.fresh();
+/** The analysis a query's page reads (the code at its head), or the problem: an unknown head is the request's. */
+async function codeOf(ctx: RouteContext, query: URLSearchParams, response: RouteRequest["response"]): Promise<Analysis | null> {
+  try {
+    return await ctx.analysisFor(query);
+  } catch (error) {
+    problem(response, 400, error instanceof Error ? error.message : String(error));
 
-  return json(response, projectMap(analysis.graph));
+    return null;
+  }
+}
+
+export async function getGraph(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
+  // The whole repository for the project map, at the page's head: every module (or directory, folded) with its layer, every import between them.
+  const analysis = await codeOf(ctx, url.searchParams, response);
+
+  if (analysis) json(response, projectMap(analysis.graph));
 }
 
 export async function getScene(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
@@ -111,11 +124,12 @@ export async function getScene(ctx: RouteContext, { url, response }: RouteReques
   return json(response, { elements: drawing ? mergeScene(drawing.elements, generated) : generated, mocks: drawing?.mocks ?? [], diagram, markdown, drawn: drawing !== null, change: change ?? null });
 }
 
-export async function getViews(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
+export async function getViews(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
   const { root, agentSpec } = ctx;
-  const analysis = await ctx.fresh();
+  // The views of the code at the page's head (a branch has its own modules and entry points).
+  const analysis = await codeOf(ctx, url.searchParams, response);
 
-  return json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis), agent: agentSpec?.name ?? null, watching: ctx.watching });
+  if (analysis) json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis), agent: agentSpec?.name ?? null, watching: ctx.watching });
 }
 
 export async function getPlan(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
@@ -151,8 +165,12 @@ export async function getShape(ctx: RouteContext, { url, response }: RouteReques
   const node = picture.value.diagram.nodes.find((candidate) => candidate.id === id);
 
   if (!node) return problem(response, 404, "no such shape in the picture");
-  const analysis = await ctx.fresh();
-  const readSource = (file: string): string | null => (analysis.facts.has(file) ? readFileSync(join(root, file), "utf8") : null);
+  const analysis = await codeOf(ctx, url.searchParams, response);
+
+  if (!analysis) return;
+  // The code as the picture's head has it: a branch's file from git, the working tree's from the disk.
+  const head = drawnAtHead(parseView(url.searchParams.get("view") ?? "")?.kind) ? url.searchParams.get("head") || null : null;
+  const readSource = (file: string): string | null => (!analysis.facts.has(file) ? null : head ? fileAt(root, head, file) : readFileSync(join(root, file), "utf8"));
   // In a review or a comparison, a module's page says what the change, or each head, did to it.
   const { change } = picture.value;
   const changed = node.kind !== "module" || !change ? "" : change.kind === "review" ? moduleChangeMarkdown(node.id, [{ head: "", diff: change.diff }], false) : moduleChangeMarkdown(node.id, change.heads, true);
@@ -171,29 +189,39 @@ export async function getLine(ctx: RouteContext, { url, response }: RouteRequest
   const edge = diagram.edges.find((candidate) => candidate.from === from && candidate.to === to && (kind === null || candidate.kind === kind));
 
   if (!edge) return problem(response, 404, "no such line in the picture");
+  const analysis = await codeOf(ctx, url.searchParams, response);
 
-  return json(response, { markdown: edgeMarkdown(edge, diagram, await ctx.fresh()) });
+  if (analysis) json(response, { markdown: edgeMarkdown(edge, diagram, analysis) });
 }
 
 export async function getFile(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
   const { root } = ctx;
   const file = url.searchParams.get("path") ?? "";
-  const analysis = await ctx.fresh();
+  const head = url.searchParams.get("head") || null;
+  const analysis = await codeOf(ctx, url.searchParams, response);
 
+  if (!analysis) return;
   // An analysed file, or any other text file of the repository (a package.json a package shape points to); never a path out of it.
   const full = join(root, ...file.split("/"));
 
   if (file === "" || file.split("/").some((segment) => segment === "" || segment === "." || segment === "..") || file.startsWith(".git/") || file.includes("node_modules/")) return problem(response, 404, "not a file of the repository");
+
+  // At a head, the file as that revision has it.
+  if (head) {
+    const content = fileAt(root, head, file);
+
+    return content === null || content.length > 1_500_000 ? problem(response, 404, `not a file of ${head}`) : send(response, 200, "text/plain; charset=utf-8", content);
+  }
 
   if (!analysis.facts.has(file) && !(existsSync(full) && statSync(full).isFile() && statSync(full).size <= 1_500_000)) return problem(response, 404, "not a file of the repository");
 
   return send(response, 200, "text/plain; charset=utf-8", readFileSync(full, "utf8"));
 }
 
-export async function getCoverage(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
-  const analysis = await ctx.fresh();
+export async function getCoverage(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
+  const analysis = await codeOf(ctx, url.searchParams, response);
 
-  return json(response, coverageReport(analysis));
+  if (analysis) json(response, coverageReport(analysis));
 }
 
 export async function getChanges(ctx: RouteContext, { response, request }: RouteRequest): Promise<void> {

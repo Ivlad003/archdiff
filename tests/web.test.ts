@@ -275,6 +275,16 @@ test("a module's page in a comparison says what each head did to it", () =>
       const page = (await (await fetch(`${origin}/api/shape?view=compare&heads=gone,loud&id=${encodeURIComponent("src/lib/log.ts")}`)).json()) as { markdown: string; error?: string };
       assert.ok(page.markdown?.includes("## In this comparison\n\n### gone\n\n- the module removed\n- removed fn `log` — src/lib/log.ts:1\n- import removed: src/lib/orders.ts → src/lib/log.ts\n"), page.markdown ?? page.error);
       assert.ok(page.markdown.includes("### loud\n\n- changed fn `log` — src/lib/log.ts:1 (body)\n"), page.markdown);
+      // The code at a head: the views, a picture, a file of a branch, without a checkout; an unknown head is refused by name.
+      const views = (await (await fetch(`${origin}/api/views?head=gone`)).json()) as { views: { key: string }[] };
+      assert.ok(!views.views.some((view) => view.key === "module:src/lib/log.ts") && views.views.some((view) => view.key === "module:src/lib/orders.ts"));
+      const scene = (await (await fetch(`${origin}/api/scene?view=modules&head=gone`)).json()) as { diagram: { nodes: { id: string }[] } };
+      assert.ok(!scene.diagram.nodes.some((node) => node.id === "src/lib/log.ts"));
+      assert.ok((await (await fetch(`${origin}/api/file?path=${encodeURIComponent("src/lib/log.ts")}&head=loud`)).text()).includes("console.error"));
+      assert.equal((await fetch(`${origin}/api/file?path=${encodeURIComponent("src/lib/log.ts")}&head=gone`)).status, 404);
+      const unknown = await fetch(`${origin}/api/views?head=nope`);
+      assert.equal(unknown.status, 400);
+      assert.equal(((await unknown.json()) as { error: string }).error, 'no branch, tag or commit "nope" (archdiff branches lists the branches)');
     },
   ));
 

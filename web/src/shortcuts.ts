@@ -3,9 +3,10 @@
 // a drawing; `/` finds a shape, `v` filters the views, `o` the options,
 // `p` the project map, `0` fits, Backspace goes back, the arrows walk
 // from the picked shape and Enter goes into it, `s` splits, `m` mix, `d`
-// dim, `l` flips the lanes, `e` edits, Escape clears (or closes the menu
-// and the project map first). A review and a comparison are read, not
-// drawn on: the keys of the tools are off there.
+// dim, `l` flips the lanes, `[` and `]` step the head through the
+// branches, `e` edits, Escape clears (or closes the menu and the project
+// map first). A review and a comparison are read, not drawn on: the keys
+// of the tools are off there.
 //
 // Entry point: the module itself, imported by app.ts.
 
@@ -18,6 +19,7 @@ import { togglePanel } from "./panel.ts";
 import { lastPicked, openShape, select, walk } from "./picking.ts";
 import { projectMapOpen, toggleProjectMap } from "./project-map.ts";
 import { flipLanes, focusFind, toggleSplit, toggleTool } from "./toolbar.ts";
+import { stepHead } from "./review.ts";
 import { focusViewSearch } from "./views-list.ts";
 
 const ARROWS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"] as const;
@@ -54,6 +56,7 @@ function readingKey(event: KeyboardEvent): void {
   else if (event.key === "m" && drawable) toggleTool("mix");
   else if (event.key === "d" && drawable) toggleTool("dim");
   else if (event.key === "l") flipLanes();
+  else if (event.key === "[" || event.key === "]") stepHead(event.key === "]" ? 1 : -1);
   else if (event.key === "e" && drawable) setMode("edit");
   else if (event.key === "Escape") select([]);
 }
