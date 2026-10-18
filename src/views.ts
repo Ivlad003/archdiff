@@ -19,7 +19,7 @@ import { SIZE, type Diagram, type Line, type PictureContent, type Shape } from "
 import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
-import { moduleOf, type Graph, type Declaration } from "./graph.ts";
+import { isBlindSpot, moduleOf, type Graph, type Declaration } from "./graph.ts";
 import { classesView, usageView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
@@ -283,7 +283,7 @@ function callsView(graph: Graph, id: string, depth: number): PictureContent {
       // The calls archdiff could not follow from this function: one hole per callee.
       const reasons = new Map<string, string>();
 
-      for (const gap of gapsFrom.get(from) ?? []) if (gap.reason === "dynamic" || gap.reason === "unknown-member" || gap.reason === "interface") reasons.set(gap.callee, gap.reason);
+      for (const gap of gapsFrom.get(from) ?? []) if (isBlindSpot(gap)) reasons.set(gap.callee, gap.reason);
 
       for (const [callee, reason] of reasons) {
         const holeId = `hole:${from}:${callee}`;
@@ -305,7 +305,7 @@ function callsView(graph: Graph, id: string, depth: number): PictureContent {
 function coverageView(graph: Graph): PictureContent {
   const gapsOf = new Map<string, number>();
 
-  for (const gap of graph.gaps) if (gap.reason === "dynamic" || gap.reason === "unknown-member" || gap.reason === "interface") gapsOf.set(moduleOf(gap.from), (gapsOf.get(moduleOf(gap.from)) ?? 0) + 1);
+  for (const gap of graph.gaps) if (isBlindSpot(gap)) gapsOf.set(moduleOf(gap.from), (gapsOf.get(moduleOf(gap.from)) ?? 0) + 1);
 
   for (const unresolved of graph.unresolvedImports) gapsOf.set(unresolved.from, (gapsOf.get(unresolved.from) ?? 0) + 1);
   const callsOf = new Map<string, number>();

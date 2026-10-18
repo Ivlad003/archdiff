@@ -7,7 +7,7 @@
 // Entry points: `coverageReport`, `CoverageReport`.
 
 import type { Analysis } from "./analyze.ts";
-import { moduleOf, type Gap } from "./graph.ts";
+import { BLIND_SPOT_REASONS, isBlindSpot, moduleOf, type Gap } from "./graph.ts";
 
 export interface ModuleCoverage {
   module: string;
@@ -50,9 +50,7 @@ const REASON_TEXT: Record<Gap["reason"], string> = {
   "parse-error": "a syntax error in the file",
 };
 
-/** The reasons that hide a call into the repository's own code; the rest are calls out of it. */
-const BLIND: ReadonlySet<Gap["reason"]> = new Set(["dynamic", "unknown-member", "interface"]);
-
+/** What the diagrams cannot show, by module: the blind spots by reason with examples, the unresolved imports, the syntax errors, the files left out, and the share of calls into the repository that were followed. */
 export function coverageReport(analysis: Analysis): CoverageReport {
   const { graph } = analysis;
   const byModule = new Map<string, ModuleCoverage>();
@@ -82,14 +80,14 @@ export function coverageReport(analysis: Analysis): CoverageReport {
     row.gaps[gap.reason] = (row.gaps[gap.reason] ?? 0) + 1;
     byReason[gap.reason] = (byReason[gap.reason] ?? 0) + 1;
 
-    if (row.examples.length < 20 && BLIND.has(gap.reason)) row.examples.push({ callee: gap.callee, reason: gap.reason, line: gap.line });
+    if (row.examples.length < 20 && isBlindSpot(gap)) row.examples.push({ callee: gap.callee, reason: gap.reason, line: gap.line });
   }
 
   for (const unresolved of graph.unresolvedImports) entry(unresolved.from).unresolvedImports.push({ specifier: unresolved.specifier, reason: unresolved.reason, line: unresolved.line });
-  const gapCount = (row: ModuleCoverage): number => Object.entries(row.gaps).reduce((sum, [reason, n]) => sum + (BLIND.has(reason as Gap["reason"]) ? n : 0), 0) + row.unresolvedImports.length + (row.parseError ? 1 : 0);
+  const gapCount = (row: ModuleCoverage): number => Object.entries(row.gaps).reduce((sum, [reason, n]) => sum + (BLIND_SPOT_REASONS.has(reason as Gap["reason"]) ? n : 0), 0) + row.unresolvedImports.length + (row.parseError ? 1 : 0);
   const modules = [...byModule.values()].filter((row) => gapCount(row) > 0).sort((a, b) => gapCount(b) - gapCount(a) || (a.module < b.module ? -1 : 1));
   const gaps = graph.gaps.filter((gap) => gap.reason !== "parse-error").length;
-  const blind = graph.gaps.filter((gap) => BLIND.has(gap.reason)).length;
+  const blind = graph.gaps.filter(isBlindSpot).length;
   const calls = graph.calls.filter((call) => call.kind === "call").length;
   const parseErrors = graph.gaps.filter((gap) => gap.reason === "parse-error").map((gap) => moduleOf(gap.from)).sort();
   const ratio = calls + blind === 0 ? 1 : calls / (calls + blind);

@@ -131,6 +131,8 @@ export interface Diagram {
   machine?: MachineData;
   /** A metrics view: the numbers behind the table, for the Markdown and the quadrant chart. */
   metrics?: Metrics;
+  /** A matrix view: the rows (which are the columns too) in order and the counts, for the Markdown's table. */
+  matrix?: MatrixData;
   /** A logic view: the function, and every path from its start to an exit as a rule (the Markdown's table); the Mermaid is a flowchart TB. */
   logic?: LogicData;
   /** A class view: the Mermaid export is a classDiagram. */
@@ -159,6 +161,15 @@ export interface MachineData {
   states: { name: string; declared: boolean; assigned: boolean }[];
   /** `from` is `*` for a transition from any state; `event` names a library's event, `fn` the function that makes it. */
   transitions: { from: string; to: string; event?: string; fn?: string; line: number }[];
+}
+
+/** A dependency structure matrix (views-more.ts): the rows in order — layers, or the modules of a directory — and every non-empty cell. */
+export interface MatrixData {
+  /** null: the layers; else the directory whose modules are the rows. */
+  scope: string | null;
+  rows: { id: string; label: string }[];
+  /** `against`: the row imports a column placed above it — an import against the order. */
+  cells: { from: string; to: string; count: number; against: boolean }[];
 }
 
 /** A function's logic as a picture carries it (logic.ts): the paths from the start to every exit, each the conditions taken and what it ends in. */

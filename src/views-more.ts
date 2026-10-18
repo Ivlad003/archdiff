@@ -109,8 +109,16 @@ export function matrixView(graph: Graph, scope: string | null = null, types = fa
     });
   });
   const back = nodes.filter((node) => node.diff === "removed").length;
+  // The table behind the picture, for the Markdown: the rows in order and every import between them.
+  const index = new Map(order.map((item, row) => [item, row]));
+  const cells = [...counts].map(([key, count]) => {
+    const [from, to] = key.split("\u0000") as [string, string];
 
-  return unplaced(title, nodes, [], [], { placed: true, reason: back > 0 ? `${back} cells go against the ${scope === null ? "layer" : "import"} order (red)` : `every import follows the ${scope === null ? "layer" : "import"} order` });
+    return { from, to, count, against: (index.get(to) ?? 0) < (index.get(from) ?? 0) };
+  }).filter((cell) => index.has(cell.from) && index.has(cell.to)).sort((a, b) => index.get(a.from)! - index.get(b.from)! || index.get(a.to)! - index.get(b.to)!);
+  const matrix = { scope, rows: order.map((item) => ({ id: item, label: label(item) })), cells };
+
+  return unplaced(title, nodes, [], [], { placed: true, matrix, reason: back > 0 ? `${back} cells go against the ${scope === null ? "layer" : "import"} order (red)` : `every import follows the ${scope === null ? "layer" : "import"} order` });
 }
 
 /** The role a function has for a type by its signature: it returns it, takes it, or both. */

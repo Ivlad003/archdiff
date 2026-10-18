@@ -11,7 +11,7 @@ import type { Analysis } from "./analyze.ts";
 import type { Diagram, Line, Shape } from "./diagram.ts";
 import { farFromMainSequence, type Metrics } from "./diagram.ts";
 import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
-import { moduleOf } from "./graph.ts";
+import { isBlindSpot, moduleOf } from "./graph.ts";
 import { standsFor } from "./shape-keys.ts";
 import { parseView } from "./view-keys.ts";
 
@@ -31,15 +31,21 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
   lines.push(`${diagram.nodes.length} shapes, ${diagram.edges.length} lines; ${analysis.files.length} files analysed.`, "", "```mermaid", toMermaid(diagram, mermaid).trimEnd(), "```", "");
 
   // The matrix reads as a table: rows import columns.
-  if (diagram.view === "matrix" || diagram.view.startsWith("matrix:")) {
-    const rows = diagram.nodes.filter((node) => node.id.startsWith("row:"));
-    const ids = rows.map((node) => node.id.slice(4));
-    const name = new Map(rows.map((node) => [node.id.slice(4), node.label]));
-    const cell = new Map(diagram.nodes.filter((node) => node.id.startsWith("cell:")).map((node) => [node.id.slice(5), node]));
-    lines.push(`| imports → | ${ids.map((id) => name.get(id)).join(" | ")} |`, `| --- | ${ids.map(() => "---").join(" | ")} |`);
+  if (diagram.matrix) {
+    const { rows, cells, scope } = diagram.matrix;
+    const cell = new Map(cells.map((entry) => [`${entry.from}\u0000${entry.to}`, entry]));
+    lines.push(`| imports → | ${rows.map((row) => row.label).join(" | ")} |`, `| --- | ${rows.map(() => "---").join(" | ")} |`);
 
-    for (const from of ids) lines.push(`| **${name.get(from)}** | ${ids.map((to) => (from === to ? "·" : cell.get(`${from}>${to}`)?.diff === "removed" ? `**${cell.get(`${from}>${to}`)!.label}** ⚠` : cell.get(`${from}>${to}`)?.label || "")).join(" | ")} |`);
-    lines.push("", diagram.view === "matrix" ? "A cell in bold with ⚠ is an import against the layer order (a lower layer importing a higher one)." : "A cell in bold with ⚠ is an import against the order of the rows (a module importing one placed above it).");
+    for (const from of rows) {
+      const row = rows.map((to) => {
+        const entry = cell.get(`${from.id}\u0000${to.id}`);
+
+        return from.id === to.id ? "·" : !entry ? "" : entry.against ? `**${entry.count}** ⚠` : String(entry.count);
+      });
+      lines.push(`| **${from.label}** | ${row.join(" | ")} |`);
+    }
+
+    lines.push("", scope === null ? "A cell in bold with ⚠ is an import against the layer order (a lower layer importing a higher one)." : "A cell in bold with ⚠ is an import against the order of the rows (a module importing one placed above it).");
 
     return `${lines.join("\n").trimEnd()}\n`;
   }
@@ -170,7 +176,7 @@ function callLines(id: string, analysis: Analysis): string[] {
   const { graph } = analysis;
   const lines: string[] = [];
   const calls = graph.calls.filter((call) => call.from === id);
-  const gaps = graph.gaps.filter((gap) => gap.from === id && (gap.reason === "dynamic" || gap.reason === "unknown-member" || gap.reason === "interface"));
+  const gaps = graph.gaps.filter((gap) => gap.from === id && isBlindSpot(gap));
 
   for (const call of calls) lines.push(`- ${call.kind === "ref" ? "passes " : "calls "}\`${call.to}\` — line ${call.line}`);
 

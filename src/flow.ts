@@ -12,7 +12,7 @@
 
 import type { Analysis } from "./analyze.ts";
 import { matchesGlob } from "./glob.ts";
-import { moduleOf, type Declaration } from "./graph.ts";
+import { isBlindSpot, moduleOf, type Declaration } from "./graph.ts";
 import type { Mock } from "./scene.ts";
 
 export interface FlowParam {
@@ -215,7 +215,7 @@ export function dataFlow(analysis: Analysis, entry: string, mocks: readonly Mock
   for (const call of graph.calls) if (call.kind === "call") callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), { to: call.to, line: call.line }]);
   const gapsFrom = new Map<string, number>();
 
-  for (const gap of graph.gaps) if (gap.reason === "dynamic" || gap.reason === "unknown-member" || gap.reason === "interface") gapsFrom.set(gap.from, (gapsFrom.get(gap.from) ?? 0) + 1);
+  for (const gap of graph.gaps) if (isBlindSpot(gap)) gapsFrom.set(gap.from, (gapsFrom.get(gap.from) ?? 0) + 1);
   const seen = new Set<string>();
   const storageCache = new Map<string, string | null>();
   // The storage fields seen so far on the path: a parameter named like a field of a mocked storage reads it.

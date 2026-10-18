@@ -113,6 +113,14 @@ export interface Graph {
   readonly resolvedExports: ReadonlyMap<string, ReadonlyMap<string, string>>;
 }
 
+/** The reasons of a blind spot: a call into the repository archdiff could not follow — a computed callee, an unknown member, an interface. */
+export const BLIND_SPOT_REASONS: ReadonlySet<Gap["reason"]> = new Set(["dynamic", "unknown-member", "interface"]);
+
+/** A blind spot: a gap the diagrams count against the calls they follow (not a call into a package, not a syntax error). */
+export function isBlindSpot(gap: Gap): boolean {
+  return BLIND_SPOT_REASONS.has(gap.reason);
+}
+
 export function nodeId(module: string, name: string, parent?: string): string {
   return parent ? `${module}#${parent}.${name}` : `${module}#${name}`;
 }
