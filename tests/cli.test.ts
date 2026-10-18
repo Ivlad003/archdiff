@@ -1408,6 +1408,19 @@ test("new scaffolds a project with its intent and first commit; import, intent a
     assert.ok(seeded.modules.some((module) => module.id === "src/services/health.ts"));
   }));
 
+test("a browser extension's listeners are entry points, labelled with the role manifest.json gives the script", () => {
+  const extension = join(root, "tests/fixtures/extension");
+  const views = archdiff(["views", extension]).stdout;
+  assert.ok(views.includes("calls:background.js#onConnect\tonConnect (background.js) — listener chrome.runtime.onConnect of the background"), views);
+  assert.ok(views.includes("calls:background.js#openPanel\topenPanel (background.js) — listener chrome.action.onClicked of the background"), views);
+  assert.ok(views.includes("calls:content.js#onMessage\tonMessage (content.js) — listener chrome.runtime.onMessage of the content script"), views);
+  assert.ok(views.includes("calls:panel.js#onMessage\tonMessage (panel.js) — listener port.onMessage of the side panel"), views);
+  // The function a listener written in place calls is reached from the listener's own tree, no entry of its own.
+  assert.ok(!views.includes("calls:background.js#fromPanel"), views);
+  const tree = archdiff(["diagram", "calls:background.js#onConnect", extension, "--format", "mermaid"]).stdout;
+  assert.ok(tree.includes("background_js_onConnect ==> background_js_fromPanel"), tree);
+});
+
 test("a file named by a URL — a worker, a child process, a registered hook — is a dashed `loads` line, not an import", () =>
   withTempDir("archdiff-loads-", (dir) => {
     mkdirSync(join(dir, "src"), { recursive: true });

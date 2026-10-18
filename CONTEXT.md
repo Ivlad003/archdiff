@@ -41,7 +41,7 @@ A gap drawn in a picture: a dashed diamond where a call leads nowhere archdiff c
 _Avoid_: gap (for the shape)
 
 **Entry point**:
-A declaration execution starts from: a route, a hook, a `main`, an exported function nothing in the repository calls.
+A declaration execution starts from: a route, a hook, a `main`, a listener of a browser event, an exported function nothing in the repository calls.
 _Avoid_: entry, handler
 
 **Storage**:

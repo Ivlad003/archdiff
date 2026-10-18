@@ -2,25 +2,31 @@
 // files a package.json names (`main`, `bin`, `exports`), React Router
 // route modules (file-based routes under a `routes/` directory, whose
 // `loader`, `action`, `clientLoader`, `clientAction`, `default` and
-// `ErrorBoundary` exports the framework calls), and SFCC cartridge hooks
+// `ErrorBoundary` exports the framework calls), SFCC cartridge hooks
 // (`cartridges/<name>/hooks.json` names a script whose exports the
-// platform calls at the named extension point). Reading hooks.json is the
-// only I/O; the rest is a pure match over the file list.
+// platform calls at the named extension point), and the listeners a
+// browser extension registers (`chrome.runtime.onConnect.addListener(f)`,
+// a port's `onMessage`), labelled with the role its manifest.json gives
+// the script. Reading hooks.json, manifest.json and the pages it names is
+// the only I/O; the rest is a pure match over the file list and the facts.
 //
 // Sits beside the config at the start of the pipeline: root + files →
 // DeclaredEntry[], which views.ts turns into `calls:` views.
-// Entry points: `frameworkEntries`, `DeclaredEntry`.
+// Entry points: `frameworkEntries`, `extensionEntries`, `DeclaredEntry`.
 
 import { readFileSync } from "node:fs";
 import { join, posix } from "node:path";
+import type { CallFact, DeclFact, FileFacts } from "./extract/facts.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
 
 /** A function a framework calls: its module, its export name and how the framework names it. */
 export interface DeclaredEntry {
   module: string;
-  /** The export name (`default`, `loader`), or `*` for every exported function of the module. */
+  /** The export name (`default`, `loader`), or `*` for every exported function of the module; with `local`, a declaration's name, exported or not. */
   exportName: string;
-  /** `route cart.tsx: loader`, `hook dw.ocapi.shop.category.modifyGETResponse`. */
+  /** `exportName` names a declaration of the module rather than an export: a listener need not be exported. */
+  local?: true;
+  /** `route cart.tsx: loader`, `hook dw.ocapi.shop.category.modifyGETResponse`, `listener chrome.runtime.onConnect of the background`. */
   label: string;
 }
 
@@ -206,4 +212,115 @@ export function frameworkEntries(root: string, sourceFiles: readonly string[], a
   entries.push(...cartridgeHooks(root, sources, manifests));
 
   return entries.sort((a, b) => (a.module < b.module ? -1 : a.module > b.module ? 1 : a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+}
+
+/** A call that registers a listener of a browser event: `chrome.runtime.onConnect.addListener(f)`, `port.onMessage.addListener(f)`, `browser.tabs.onUpdated.addListener(f)`. */
+const BROWSER_LISTENER = /^([\w$.]+)\.(on[A-Z]\w*)\.addListener$/;
+
+/**
+ * The scripts a browser extension's `manifest.json` names, by the role they run in: the background script (a service
+ * worker, or MV2 scripts), the content scripts, and the scripts of the pages it names — the side panel, a popup, the
+ * options page, the devtools page — read from each page's `<script src>`.
+ */
+function extensionRoles(root: string, allFiles: readonly string[], sources: ReadonlySet<string>): Map<string, string> {
+  const roles = new Map<string, string>();
+  const every = new Set(allFiles);
+
+  for (const manifest of allFiles.filter((path) => posix.basename(path) === "manifest.json")) {
+    let parsed: JsonValue;
+
+    try {
+      parsed = parseJson(readFileSync(join(root, manifest), "utf8"));
+    } catch {
+      continue;
+    }
+
+    if (!isJsonObject(parsed) || typeof parsed["manifest_version"] !== "number") continue;
+    const dir = posix.dirname(manifest);
+    const at = (path: string, from: string): string => posix.normalize(posix.join(from, path));
+    const script = (path: JsonValue | undefined, role: string, from = dir): void => {
+      if (isJsonString(path) && sources.has(at(path, from))) roles.set(at(path, from), role);
+    };
+    // A page's scripts: `<script src="panel.js">`, relative to the page.
+    const page = (path: JsonValue | undefined, role: string): void => {
+      if (!isJsonString(path) || !every.has(at(path, dir))) return;
+      let html: string;
+
+      try {
+        html = readFileSync(join(root, at(path, dir)), "utf8");
+      } catch {
+        return;
+      }
+
+      for (const match of html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)) if (!/^[a-z]+:/i.test(match[1]!)) script(match[1], role, posix.dirname(at(path, dir)));
+    };
+    const background = parsed["background"];
+
+    if (isJsonObject(background)) {
+      script(background["service_worker"], "background");
+
+      for (const file of Array.isArray(background["scripts"]) ? background["scripts"] : []) script(file, "background");
+    }
+
+    for (const content of Array.isArray(parsed["content_scripts"]) ? parsed["content_scripts"] : []) {
+      if (!isJsonObject(content)) continue;
+
+      for (const file of Array.isArray(content["js"]) ? content["js"] : []) script(file, "content script");
+    }
+
+    const sidePanel = parsed["side_panel"];
+
+    if (isJsonObject(sidePanel)) page(sidePanel["default_path"], "side panel");
+
+    for (const key of ["action", "browser_action", "page_action"]) {
+      const action = parsed[key];
+
+      if (isJsonObject(action)) page(action["default_popup"], "popup");
+    }
+
+    page(parsed["options_page"], "options");
+    const optionsUi = parsed["options_ui"];
+
+    if (isJsonObject(optionsUi)) page(optionsUi["page"], "options");
+    page(parsed["devtools_page"], "devtools");
+  }
+
+  return roles;
+}
+
+/**
+ * The entries a browser extension has: every function a script hands to a browser event's `addListener` — the
+ * browser calls it when the event fires — labelled with the event and the role manifest.json gives the script. A
+ * listener written in place (an arrow) keeps its calls at the module's top level, which the `inside:` view draws.
+ */
+export function extensionEntries(root: string, allFiles: readonly string[], facts: ReadonlyMap<string, FileFacts>): DeclaredEntry[] {
+  const roles = extensionRoles(root, allFiles, new Set(facts.keys()));
+  const entries: DeclaredEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const file of facts.values()) {
+    const declared = new Set(file.decls.filter((decl) => decl.kind === "fn").map((decl) => decl.name));
+
+    const record = (call: CallFact): void => {
+      const event = BROWSER_LISTENER.exec(call.callee);
+      const handler = call.passes?.find((pass) => pass.form.kind === "name" && declared.has(pass.form.name));
+
+      if (!event || !handler || handler.form.kind !== "name" || seen.has(`${file.path}#${handler.form.name}`)) return;
+      seen.add(`${file.path}#${handler.form.name}`);
+      const role = roles.get(file.path);
+      entries.push({ module: file.path, exportName: handler.form.name, local: true, label: `listener ${event[1]}.${event[2]}${role ? ` of the ${role}` : ""}` });
+    };
+
+    const walk = (decl: DeclFact): void => {
+      for (const call of decl.calls) record(call);
+
+      for (const member of decl.members) walk(member);
+    };
+
+    for (const decl of file.decls) walk(decl);
+
+    for (const call of file.moduleCalls) record(call);
+  }
+
+  return entries;
 }

@@ -18,7 +18,7 @@ import type { FileFacts } from "./extract/facts.ts";
 import { INTENT_FILE, parseIntent, readIntent, withIntentLayers, type Intent } from "./intent.ts";
 import { extractAll } from "./extract/pool.ts";
 import { isSourceFile, listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
-import { frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
+import { extensionEntries, frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
 import { buildGraph, type Graph } from "./graph.ts";
 import { createResolver, tsconfigResolver } from "./resolve.ts";
 
@@ -127,7 +127,7 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
   // One reading of the tsconfigs for both: the paths to resolve, and whether `import { type A }` stays in the code.
   const tsconfigOf = tsconfigResolver(root, [...facts.keys()]);
   const graph = buildGraph([...facts.values()], config, createResolver(root, [...facts.keys()], [...facts.values()], tsconfigOf, packages), (file) => tsconfigOf(file)?.verbatimModuleSyntax === true);
-  const declaredEntries = frameworkEntries(root, files, allFiles);
+  const declaredEntries = [...frameworkEntries(root, files, allFiles), ...extensionEntries(root, allFiles, facts)];
   const built = performance.now();
   const kinds = [...graph.nodes.values()].reduce((counts, node) => ({ ...counts, [node.kind]: (counts[node.kind] ?? 0) + 1 }), {} as Record<string, number>);
   const stats: AnalysisStats = {

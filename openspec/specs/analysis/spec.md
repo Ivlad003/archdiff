@@ -83,7 +83,7 @@ The system SHALL place every module in a layer: with `layers` in `archdiff.json`
 
 ### Requirement: Entry points are known from the code and the frameworks
 
-The system SHALL treat as entry points exported functions under `bin/`, functions named `main`, React Router route exports, SFCC cartridge hooks, the files a `package.json` names, the files `archdiff.json` `entries` names, exported functions nothing in the repository calls, and the public methods of a class in a module a framework calls into (a controller, handler, command, job, listener, middleware, route or resolver, by its path) that nothing in the repository calls and that call something themselves.
+The system SHALL treat as entry points exported functions under `bin/`, the functions a browser extension's scripts hand to a browser event's `addListener` (`chrome.runtime.onConnect`, a port's `onMessage`), labelled with the role `manifest.json` gives the script (background, content script, side panel, popup, options, devtools), functions named `main`, React Router route exports, SFCC cartridge hooks, the files a `package.json` names, the files `archdiff.json` `entries` names, exported functions nothing in the repository calls, and the public methods of a class in a module a framework calls into (a controller, handler, command, job, listener, middleware, route or resolver, by its path) that nothing in the repository calls and that call something themselves.
 
 #### Scenario: A React Router route module
 

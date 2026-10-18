@@ -19,7 +19,7 @@ import { SIZE, type Diagram, type Line, type PictureContent, type SequenceFragme
 import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
-import { isBlindSpot, moduleOf, type Graph, type Declaration } from "./graph.ts";
+import { isBlindSpot, moduleOf, nodeId, type Graph, type Declaration } from "./graph.ts";
 import { classesView, usageView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
@@ -112,7 +112,9 @@ export function entryPoints(analysis: Analysis): EntryPoint[] {
         if (node && node.kind === "fn" && !entries.has(id)) entries.set(id, { node, label: declared.label });
       }
     } else {
-      const node = exportedNode(declared.module, declared.exportName);
+      // A listener need not be exported: `local` names a declaration of the module.
+      const local = declared.local ? graph.nodes.get(nodeId(declared.module, declared.exportName)) : undefined;
+      const node = declared.local ? (local?.kind === "fn" ? local : null) : exportedNode(declared.module, declared.exportName);
 
       if (node && !entries.has(node.id)) entries.set(node.id, { node, label: declared.label });
     }
