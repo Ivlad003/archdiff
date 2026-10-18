@@ -1,7 +1,8 @@
 // The logic of one function as a flowchart: its body read statement by
 // statement into a small control-flow graph — a decision per `if`, `switch`
-// or `match`, a loop per `for` or `while`, `try` as a decision between ok
-// and error, an action per run of plain statements (two at most, so the
+// or `match`, a loop per `for` or `while` (labelled jumps to their loop),
+// `try` as a decision between ok and error with its `finally` on every way
+// out, an action per run of plain statements (two at most, so the
 // shape stays readable), a terminal per `return` or `throw` — with the
 // condition texts as the code writes them and the calls each action makes.
 // Read on demand from the one file the view names (not at extraction: a
@@ -106,6 +107,10 @@ interface Frame {
   /** The loop's header, for `continue`; null for a switch. */
   head: string | null;
   breaks: Exit[];
+  /** `outer:` written before it: `break outer` and `continue outer` name it. */
+  label: string | null;
+  /** How many `finally` blocks were open around it: a jump out of a `try` inside it runs the ones opened since. */
+  finallies: number;
 }
 
 /** The callees a statement names, as written, without those inside a nested function. */
@@ -147,6 +152,12 @@ class Builder {
   truncated = false;
   private readonly frames: Frame[] = [];
   private readonly grammar: LogicGrammar;
+  /** The `finally` blocks of the `try` statements being read, outermost first: a path leaving through them runs them. */
+  private finallies: Node[] = [];
+  /** The paths that ran the `finally` blocks after a `return` or a `throw`: they end at the end of the body. */
+  readonly afterExits: Exit[] = [];
+  /** The label written before the statement being read (`outer: for …`), for the loop or switch it names. */
+  private label: string | null = null;
 
   constructor(grammar: LogicGrammar) {
     this.grammar = grammar;
@@ -194,52 +205,56 @@ class Builder {
     const { grammar } = this;
     const { control } = grammar;
 
+    if (node.type === "labeled_statement") {
+      const inner = node.childForFieldName("body") ?? node.namedChildren[node.namedChildren.length - 1];
+      // The loop or switch right under the label takes it; a labelled block has no frame (its `break` ends nothing drawn).
+      this.label = node.childForFieldName("label")?.text ?? null;
+      const exits = inner ? this.statement(inner, open) : open;
+      this.label = null;
+
+      return exits;
+    }
+
+    // A statement under a label is the one the label names; the statements inside it are not.
+    const label = this.label;
+    this.label = null;
+
     if (grammar.blocks.has(node.type)) return this.statements(node.namedChildren, open);
 
     if (grammar.silent.has(node.type)) return open;
 
-    if (node.type === "labeled_statement") {
-      const inner = node.childForFieldName("body") ?? node.namedChildren[node.namedChildren.length - 1];
-
-      return inner ? this.statement(inner, open) : open;
-    }
-
     if (control.ifs.has(node.type)) return this.branch(node, open);
 
-    if (node.type === "switch_statement") return this.switchOf(node, open);
+    if (node.type === "switch_statement") return this.switchOf(node, open, label);
 
     if (node.type === "match_statement") return this.matchOf(node, open);
 
-    if (control.loops.has(node.type)) return this.loop(node, open);
+    if (control.loops.has(node.type)) return this.loop(node, open, label);
 
     if (control.tries.has(node.type)) return this.tryOf(node, open);
 
-    if (grammar.returns.has(node.type)) {
-      const made = this.add("return", statementText(node), node, calleesIn(node, grammar));
+    // An exit; the `finally` blocks around it run after it, innermost first, on the way to the end of the body (a
+    // `finally` that returns on its own ends the path there).
+    if (grammar.returns.has(node.type) || grammar.throws.has(node.type)) {
+      const made = this.add(grammar.returns.has(node.type) ? "return" : "throw", statementText(node), node, calleesIn(node, grammar));
       this.link(open, made.id);
 
-      return [];
-    }
-
-    if (grammar.throws.has(node.type)) {
-      const made = this.add("throw", statementText(node), node, calleesIn(node, grammar));
-      this.link(open, made.id);
+      if (this.finallies.length > 0) this.afterExits.push(...this.throughFinally([{ from: made.id }], 0));
 
       return [];
     }
 
-    if (grammar.breaks.has(node.type)) {
-      const frame = this.frames[this.frames.length - 1];
+    // `break` and `continue` (`break outer` the loop so labelled) leave through the `finally` blocks opened inside the loop.
+    if (grammar.breaks.has(node.type) || grammar.continues.has(node.type)) {
+      const named = node.childForFieldName("label")?.text ?? null;
+      const isBreak = grammar.breaks.has(node.type);
+      const frame = [...this.frames].reverse().find((each) => (named !== null ? each.label === named : isBreak || each.kind === "loop"));
 
-      if (frame) frame.breaks.push(...open);
+      if (!frame) return [];
+      const through = this.throughFinally(open, frame.finallies);
 
-      return [];
-    }
-
-    if (grammar.continues.has(node.type)) {
-      const loop = [...this.frames].reverse().find((frame) => frame.kind === "loop");
-
-      if (loop?.head) this.link(open, loop.head);
+      if (isBreak) frame.breaks.push(...through);
+      else if (frame.head) this.link(through, frame.head);
 
       return [];
     }
@@ -255,6 +270,24 @@ class Builder {
     }
 
     return this.action(node, open);
+  }
+
+  /**
+   * The paths `open` once they ran the `finally` blocks opened since `from` (`0`: all of them), innermost first: each
+   * block is read again for these paths, outside its own `try`.
+   */
+  private throughFinally(open: Exit[], from: number): Exit[] {
+    const saved = this.finallies;
+    let current = open;
+
+    for (let at = saved.length - 1; at >= from && current.length > 0; at--) {
+      this.finallies = saved.slice(0, at);
+      current = this.statements(this.body(saved[at]!), current);
+    }
+
+    this.finallies = saved;
+
+    return current;
   }
 
   /** A plain statement: joined to the action box just before it when that box is the only way here and has room. */
@@ -293,8 +326,11 @@ class Builder {
       if (alternative.id === consequence?.id || alternative.id === node.childForFieldName("condition")?.id) continue;
 
       if (control.ifs.has(alternative.type)) {
-        exits.push(...this.branch(alternative, pending));
-        pending = [];
+        // Python's `elif`: a decision of its own, whose `no` goes on to the clauses after it (`else` among them: siblings).
+        const elif = this.add("decision", headerOf(alternative), alternative, calleesIn(alternative.childForFieldName("condition") ?? alternative, this.grammar));
+        this.link(pending, elif.id);
+        exits.push(...this.statements(this.body(alternative.childForFieldName(control.consequence)), [{ from: elif.id, label: "yes" }]));
+        pending = [{ from: elif.id, label: "no" }];
       } else if (control.elses.has(alternative.type)) {
         const inner = alternative.childForFieldName("body") ?? alternative.namedChildren[0] ?? null;
         exits.push(...(inner ? this.statement(inner, pending) : pending));
@@ -306,11 +342,11 @@ class Builder {
   }
 
   /** A `switch`: the value is the decision, every case a labelled arrow; a case without `break` falls into the next. */
-  private switchOf(node: Node, open: Exit[]): Exit[] {
+  private switchOf(node: Node, open: Exit[], label: string | null): Exit[] {
     const value = node.childForFieldName("value");
     const decision = this.add("decision", `switch ${short(value?.text.replace(/^\(|\)$/g, "") ?? "")}`, node, calleesIn(value ?? node, this.grammar));
     this.link(open, decision.id);
-    const frame: Frame = { kind: "switch", head: null, breaks: [] };
+    const frame: Frame = { kind: "switch", head: null, breaks: [], label, finallies: this.finallies.length };
     this.frames.push(frame);
     let fall: Exit[] = [];
     let hasDefault = false;
@@ -351,10 +387,10 @@ class Builder {
   }
 
   /** A loop: `each` (or `while`) into the body, whose end comes back; `done` carries on, as does every `break`. */
-  private loop(node: Node, open: Exit[]): Exit[] {
+  private loop(node: Node, open: Exit[], label: string | null): Exit[] {
     const head = this.add("loop", headerOf(node), node, calleesIn(node.childForFieldName("right") ?? node.childForFieldName("condition") ?? node.childForFieldName("value") ?? node, this.grammar));
     this.link(open, head.id);
-    const frame: Frame = { kind: "loop", head: head.id, breaks: [] };
+    const frame: Frame = { kind: "loop", head: head.id, breaks: [], label, finallies: this.finallies.length };
     this.frames.push(frame);
     const inside = node.type === "while_statement" || node.type === "do_statement" ? "while" : "each";
     const back = this.statements(this.body(node.childForFieldName("body")), [{ from: head.id, label: inside }]);
@@ -367,28 +403,34 @@ class Builder {
     return [...done, ...frame.breaks];
   }
 
-  /** A `try`: ok into the body, error into each handler, everything through `finally`. */
+  /**
+   * A `try`: ok into the body, error into each handler, everything through `finally` — the paths that go on after the
+   * `try`, and the ones that leave it inside by a `return`, a `throw`, a `break` or a `continue` (`throughFinally`).
+   */
   private tryOf(node: Node, open: Exit[]): Exit[] {
     const decision = this.add("decision", "try", node);
     this.link(open, decision.id);
+    const blockOf = (clause: Node): Node | null => clause.childForFieldName("body") ?? clause.namedChildren.find((child) => this.grammar.blocks.has(child.type)) ?? null;
+    const finallyClause = node.namedChildren.find((clause) => clause.type === "finally_clause");
+    const finallyBody = finallyClause ? blockOf(finallyClause) : null;
+
+    // The body, the handlers and Python's `else` run inside the `try`: a path leaving them runs `finally` on the way.
+    if (finallyBody) this.finallies = [...this.finallies, finallyBody];
     let bodyExits = this.statements(this.body(node.childForFieldName("body")), [{ from: decision.id, label: "ok" }]);
     const handlerExits: Exit[] = [];
-    let finallyBody: Node | null = null;
-    const blockOf = (clause: Node): Node | null => clause.childForFieldName("body") ?? clause.namedChildren.find((child) => this.grammar.blocks.has(child.type)) ?? null;
 
     for (const clause of node.namedChildren) {
       if (clause.type === "catch_clause" || clause.type === "except_clause") {
         // The error bound: TypeScript's parameter, Python's `ValueError as e`.
         const named = clause.childForFieldName("parameter") ?? clause.namedChildren.find((child) => !this.grammar.blocks.has(child.type) && child.type !== "comment");
         handlerExits.push(...this.statements(this.body(blockOf(clause)), [{ from: decision.id, label: short(`error${named ? ` ${named.text}` : ""}`) }]));
-      } else if (clause.type === "finally_clause") {
-        finallyBody = blockOf(clause);
       } else if (clause.type === "else_clause") {
         // Python: `else` runs when the body raised nothing, so it follows the body's exits only.
         bodyExits = this.statements(this.body(blockOf(clause)), bodyExits);
       }
     }
 
+    if (finallyBody) this.finallies = this.finallies.slice(0, -1);
     const exits = [...bodyExits, ...handlerExits];
 
     return finallyBody ? this.statements(this.body(finallyBody), exits) : exits;
@@ -460,9 +502,10 @@ export async function readLogic(path: string, source: string, name: string, line
       exits = [];
     }
 
-    if (exits.length > 0) {
+    // The paths that end the body, and the exits that ran a `finally` on the way out.
+    if (exits.length > 0 || builder.afterExits.length > 0) {
       const end = builder.add("end", "end", found.node);
-      builder.link(exits, end.id);
+      builder.link([...exits, ...builder.afterExits], end.id);
     }
 
     const fact: LogicFact = { nodes: builder.nodes, edges: builder.edges };

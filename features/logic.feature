@@ -14,6 +14,14 @@ Feature: The logic of a function
     When I run "archdiff diagram logic:src/door.py#Door.lock"
     Then one arrow per pattern leaves "match self.state" and "no match" carries on
 
+  Scenario: Every loop and every way out
+    Given a loop in a loop, a function returning inside a try with a finally, and loops labelled "outer"
+    When I run "archdiff diagram logic:src/grid.ts#grid"
+    Then a rule reads "const row of rows: each and const cell of row: each and cell > 0: no | | return 1"
+    And the rules of withLock end "acquire, work, release | return work(n)"
+    And "continue outer" leads back to the outer loop, "break outer" past it
+    And a Python elif leads on to its else, an except that returns runs the finally first
+
   Scenario: The list of branching functions
     When I run "archdiff diagram logic"
     Then the title is "Logic: 7 functions with branches"

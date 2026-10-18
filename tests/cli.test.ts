@@ -1607,3 +1607,25 @@ test("focus draws everything joined to a function or a module; logic draws a fun
   const excalidraw = archdiff(["diagram", "logic:src/checkout.ts#checkout", machines, "--format", "excalidraw"]).stdout;
   assert.equal((excalidraw.match(/"type": "diamond"/g) ?? []).length, 3, "three diamonds: the loop, the branch, the try");
 });
+
+test("logic walks every loop and every way out: a loop in a loop, a branch back into a loop, a labelled jump, a finally after a return, Python's elif and else", () =>
+  withTempDir("archdiff-logic-", (dir) => {
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src/grid.ts"), "export function grid(rows: number[][]): number {\n  for (const row of rows) {\n    for (const cell of row) {\n      if (cell > 0) work(cell);\n    }\n  }\n  return 1;\n}\nexport function withLock(n: number): number {\n  acquire();\n  try {\n    if (n > 0) return work(n);\n    return 0;\n  } finally {\n    release();\n  }\n}\nexport function labeled(rows: number[][]): number {\n  outer: for (const row of rows) {\n    for (const cell of row) {\n      if (cell === 0) continue outer;\n      if (cell < 0) break outer;\n      work(cell);\n    }\n  }\n  return 1;\n}\nfunction work(n: number): number { return n; }\nfunction acquire(): void {}\nfunction release(): void {}\n");
+    writeFileSync(join(dir, "src/conn.py"), 'def guarded(conn, mode):\n    if mode == "a":\n        conn.reset()\n    elif mode == "b":\n        conn.flush()\n    else:\n        conn.drain()\n    try:\n        conn.open()\n    except OSError:\n        return False\n    finally:\n        conn.close()\n    return True\n');
+    const rules = (view: string): string[] => archdiff(["diagram", view, dir]).stdout.split("\n").filter((line) => line.startsWith("| `") || line.startsWith("| |"));
+    // The inner loop's body is on a path of its own, and the branch that goes back into the loop keeps its condition.
+    assert.deepEqual(rules("logic:src/grid.ts#grid"), ["| `const row of rows: each` and `const cell of row: each` and `cell > 0: yes` | `work` | **return 1** |", "| `const row of rows: each` and `const cell of row: each` and `cell > 0: no` |  | **return 1** |", "| `const row of rows: each` and `const cell of row: done` |  | **return 1** |", "| `const row of rows: done` |  | **return 1** |"]);
+    // `finally` runs after the return, on every way out of the try.
+    assert.deepEqual(rules("logic:src/grid.ts#withLock"), ["| `try: ok` and `n > 0: yes` | `acquire`, `work`, `release` | **return work(n)** |", "| `try: ok` and `n > 0: no` | `acquire`, `release` | **return 0** |"]);
+    // `continue outer` goes back to the outer loop, `break outer` past it.
+    const picture = JSON.parse(archdiff(["diagram", "logic:src/grid.ts#labeled", dir, "--format", "json"]).stdout) as { nodes: { id: string; label: string }[]; edges: { from: string; to: string; label?: string }[] };
+    const labelOf = (id: string): string => picture.nodes.find((node) => node.id === id)?.label ?? id;
+    const yesOf = (label: string): string => labelOf(picture.edges.find((edge) => labelOf(edge.from) === label && edge.label === "yes")?.to ?? "");
+    assert.equal(yesOf("cell === 0"), "↻ const row of rows");
+    assert.equal(yesOf("cell < 0"), "return 1");
+    // Python: `elif` leads on to `else`; an `except` that returns runs `finally` first.
+    const python = archdiff(["diagram", "logic:src/conn.py#guarded", dir]).stdout;
+    assert.ok(python.includes('|"no"| ') && python.includes("conn.drain()"), python);
+    assert.ok(rules("logic:src/conn.py#guarded").includes('| `mode == "a": no` and `mode == "b": no` and `try: error OSError` | `conn.drain`, `conn.close` | **return False** |'), python);
+  }));

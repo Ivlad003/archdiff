@@ -36,8 +36,10 @@ function fnLabel(node: Declaration): string {
 /**
  * Every path from the start to an exit, the branches taken on the way as
  * conditions and the calls as a list: the rules of the function. A loop is
- * walked once (its body, then what follows), so a path through it says what
- * the body does; the list is cut at `MAX_RULES`.
+ * walked once (its body, then on out of it and out of the loops around it),
+ * so a path through it says what the body does, the branch back into the
+ * loop included; a path that runs a `finally` after a `return` or a `throw`
+ * ends with that exit. The list is cut at `MAX_RULES`.
  */
 function rulesOf(fact: LogicFact): { rules: LogicRule[]; more: number } {
   const byId = new Map(fact.nodes.map((node) => [node.id, node]));
@@ -48,36 +50,57 @@ function rulesOf(fact: LogicFact): { rules: LogicRule[]; more: number } {
   let more = 0;
   let steps = 0;
 
-  const walk = (id: string, onPath: Set<string>, conditions: string[], calls: string[]): void => {
+  // `exit`: the `return` or `throw` the path passed on its way to the end through a `finally`; it is the rule's outcome.
+  const walk = (id: string, onPath: Set<string>, conditions: string[], calls: string[], exit: LogicStep | null = null): void => {
     const node = byId.get(id);
 
     if (!node || steps++ > 20_000) return;
+    const out = edgesFrom.get(id) ?? [];
+    const isExit = node.kind === "return" || node.kind === "throw";
 
-    if (node.kind === "return" || node.kind === "throw" || node.kind === "end") {
+    if ((isExit && out.length === 0) || node.kind === "end") {
       const made = [...calls, ...(node.calls ?? []).filter((call) => !calls.includes(call))];
+      // The end after a `finally` is the exit the path left by.
+      const outcome = node.kind === "end" && exit ? exit : node;
+      const kind: LogicRule["kind"] = outcome.kind === "throw" ? "throw" : outcome.kind === "return" ? "return" : "end";
 
-      if (rules.length < MAX_RULES) rules.push({ conditions, calls: made, outcome: node.text, kind: node.kind });
+      if (rules.length < MAX_RULES) rules.push({ conditions, calls: made, outcome: outcome.text, kind });
       else more++;
 
       return;
     }
 
-    const made = node.kind === "action" || node.kind === "loop" ? [...calls, ...(node.calls ?? []).filter((call) => !calls.includes(call))] : calls;
+    const made = node.kind === "action" || node.kind === "loop" || isExit ? [...calls, ...(node.calls ?? []).filter((call) => !calls.includes(call))] : calls;
+    const leaving = isExit ? node : exit;
 
     for (const edge of edgesFrom.get(id) ?? []) {
       const target = byId.get(edge.to);
 
       if (!target) continue;
+      // The branch taken is a condition of the rule, the arrow back into a loop (`x > 0: no`, a `continue`) as much as any.
+      const taken = node.kind === "decision" || node.kind === "loop" ? [...conditions, `${node.text}: ${edge.label ?? "then"}`] : conditions;
 
       // A back edge into a loop already on the path: the loop is walked once, so carry on after it instead.
       if (onPath.has(edge.to)) {
-        if (target.kind === "loop") for (const after of edgesFrom.get(edge.to) ?? []) if (after.label !== "each" && after.label !== "while" && !onPath.has(after.to)) walk(after.to, new Set([...onPath, after.to]), conditions, made);
+        if (target.kind === "loop") leave(edge.to, onPath, taken, made, new Set(), leaving);
 
         continue;
       }
 
-      const condition = node.kind === "decision" || node.kind === "loop" ? [`${node.text}: ${edge.label ?? "then"}`] : [];
-      walk(edge.to, new Set([...onPath, edge.to]), [...conditions, ...condition], made);
+      walk(edge.to, new Set([...onPath, edge.to]), taken, made, leaving);
+    }
+  };
+
+  // Out of a loop walked once: on along its arrows that leave it (`done`, a `for … else`); an arrow that leads back into
+  // a loop around it (an inner loop's `done` as the last step of the outer one's body) leaves that loop in turn.
+  const leave = (loop: string, onPath: Set<string>, conditions: string[], calls: string[], left: Set<string>, exit: LogicStep | null): void => {
+    left.add(loop);
+
+    for (const after of edgesFrom.get(loop) ?? []) {
+      if (after.label === "each" || after.label === "while") continue;
+
+      if (!onPath.has(after.to)) walk(after.to, new Set([...onPath, after.to]), conditions, calls, exit);
+      else if (byId.get(after.to)?.kind === "loop" && !left.has(after.to)) leave(after.to, onPath, conditions, calls, left, exit);
     }
   };
 

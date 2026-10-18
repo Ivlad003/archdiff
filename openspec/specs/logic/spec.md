@@ -17,7 +17,7 @@ The system SHALL record on every function and method of a TypeScript, JavaScript
 
 ### Requirement: A function's body reads as a flowchart
 
-The system SHALL draw, as `logic:<path>#<fn>`, the body read from its file on demand: a start, a decision per `if` (yes and no, an `else if` its own decision), per `switch` or `match` (an arrow per case with its value, `default` or `no match`, a case without `break` falling into the next), per `try` (`ok` into the body, `error` into each handler, everything through `finally`), a loop per `for` or `while` (`each` or `while` into the body, whose end comes back, `done` carrying on, `break` leaving, `continue` returning), a box per run of at most two plain statements with the callees they name, an exit per `return` or `throw` (a `throw` in orange) and an end for the paths that fall off the body; a body longer than 160 boxes SHALL be cut and say so. An unknown function SHALL exit 2; a function of another language SHALL say the body could not be read.
+The system SHALL draw, as `logic:<path>#<fn>`, the body read from its file on demand: a start, a decision per `if` (yes and no, an `else if` or a Python `elif` its own decision, its `no` leading on to the next clause and the `else`), per `switch` or `match` (an arrow per case with its value, `default` or `no match`, a case without `break` falling into the next), per `try` (`ok` into the body, `error` into each handler, everything through `finally`: the paths that go on after it, and a `return`, `throw`, `break` or `continue` inside it, the `finally` drawn after the exit, on the way to the end), a loop per `for` or `while` (`each` or `while` into the body, whose end comes back, `done` carrying on, `break` leaving, `continue` returning; `break outer` and `continue outer` to the loop labelled `outer`), a box per run of at most two plain statements with the callees they name, an exit per `return` or `throw` (a `throw` in orange) and an end for the paths that fall off the body; a body longer than 160 boxes SHALL be cut and say so. An unknown function SHALL exit 2; a function of another language SHALL say the body could not be read.
 
 #### Scenario: The checkout's flowchart
 
@@ -31,12 +31,17 @@ The system SHALL draw, as `logic:<path>#<fn>`, the body read from its file on de
 
 ### Requirement: The paths are the rules
 
-The system SHALL list in the Markdown every path from the start to an exit (at most 64, a loop walked once) as a table row: the conditions taken in order (`condition: branch`), the calls made on the way (an error being built is not one), and how the path ends (the return, the throw, or the end of the body).
+The system SHALL list in the Markdown every path from the start to an exit (at most 64, a loop walked once: its body, then on out of it and out of every loop around it it leads back into) as a table row: the conditions taken in order (`condition: branch`, the branch leading back into a loop as well), the calls made on the way (an error being built is not one), and how the path ends (the return, the throw — the one a `finally` ran after — or the end of the body).
 
 #### Scenario: The rules of the checkout
 
 - **WHEN** the Markdown of `logic:src/checkout.ts#checkout` is read
 - **THEN** one row reads "`const order of orders: each` and `rush: yes` and `try: ok` | `pay`, `ship`, `audit` | **return shipped**" and another "`const order of orders: done` and `try: error` | `cancel` | **return shipped**"
+
+#### Scenario: A loop in a loop, and a finally
+
+- **WHEN** `for (const row of rows) for (const cell of row) if (cell > 0) work(cell); return 1` and `acquire(); try { if (n > 0) return work(n); return 0 } finally { release() }` are drawn
+- **THEN** a rule reads "`const row of rows: each` and `const cell of row: each` and `cell > 0: no` | | **return 1**", and the first path of the other "`try: ok` and `n > 0: yes` | `acquire`, `work`, `release` | **return work(n)**"
 
 ### Requirement: The branching functions are listed
 
