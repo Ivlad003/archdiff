@@ -366,6 +366,29 @@ test("review measures the change from the merge-base, not from the tip of main",
     const { status, stdout } = archdiff(["review", dir]);
     assert.equal(status, 0, stdout);
     assert.ok(stdout.includes("- fn `log` — src/lib/log.ts:1 (body)"), stdout);
+test("a review of a directory inside the repository reads the files of that directory from git", () =>
+  withTempDir("archdiff-subdir-", (dir) => {
+    // The sample lives in app/ of the repository, beside a README at the top.
+    cpSync(fixture, join(dir, "app"), { recursive: true });
+    writeFileSync(join(dir, "README.md"), "# top\n");
+    const git = gitIn(dir);
+    git("init", "-q", "-b", "main");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "report");
+    writeFileSync(join(dir, "app/src/db/report.ts"), 'import { action } from "../routes/checkout.tsx";\n\nexport function report(): unknown {\n  return action({ total: 1 });\n}\n');
+    git("add", ".");
+    git("commit", "-q", "-m", "a report");
+    git("checkout", "-q", "main");
+    const review = JSON.parse(archdiff(["review", join(dir, "app"), "--head", "report", "--format", "json"]).stdout) as { modulesAdded: string[]; depsAdded: { from: string; to: string }[]; changedFiles: string[]; layerEdgesAdded: { from: string; to: string }[] };
+    assert.deepEqual(review.modulesAdded, ["src/db/report.ts"]);
+    assert.deepEqual(review.depsAdded, [{ from: "src/db/report.ts", to: "src/routes/checkout.tsx" }]);
+    assert.deepEqual(review.changedFiles, ["src/db/report.ts"]);
+    assert.deepEqual(review.layerEdgesAdded.map((edge) => `${edge.from}→${edge.to}`), ["db→routes"]);
+    // The code of a branch, from the directory: the module is there.
+    assert.ok(archdiff(["diagram", "modules", join(dir, "app"), "--head", "report", "--format", "mermaid"]).stdout.includes("src_db_report_ts"));
+  }));
+
     assert.ok(!stdout.includes("extra"), stdout);
     // Reviewing the branch from main: its own start, not the checkout's (which is main's tip): extra is still not its doing.
     git("checkout", "-q", "main");

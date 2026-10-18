@@ -17,10 +17,15 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isSourceFile } from "./languages.ts";
-function git(root: string, args: string[]): { ok: true; out: string } | { ok: false; error: string } {
-  const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+/** How long one git command may take. */
+const GIT_TIMEOUT = 300_000;
 
-  if (result.error) return { ok: false, error: `git: ${result.error.message}` };
+function git(root: string, args: string[]): { ok: true; out: string } | { ok: false; error: string } {
+  // A git that never answers (a lock held by a hung process, a filesystem gone away) would hang the command and the
+  // server with it: five minutes, then a plain error.
+  const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: GIT_TIMEOUT });
+
+  if (result.error) return { ok: false, error: "code" in result.error && result.error.code === "ETIMEDOUT" ? `git ${args[0]} did not finish in ${GIT_TIMEOUT / 60_000} minutes` : `git: ${result.error.message}` };
 
   if (result.status !== 0) {
     // The first line of what git said, not its usage text; the usual causes named plainly.
@@ -140,9 +145,12 @@ export function fileAt(root: string, ref: string, path: string): string | null {
   return contentAt(root, ref, path);
 }
 
-/** A revision's content of a file, as `analyze` overrides: null when the revision lacks it. */
+/**
+ * A revision's content of a file, as `analyze` overrides: null when the revision lacks it. The path is the
+ * analysis's, relative to `root` — which may be a directory inside the repository (`./`: from there, not the top).
+ */
 function contentAt(root: string, ref: string, path: string): string | null {
-  const content = git(root, ["show", `${ref}:${path}`]);
+  const content = git(root, ["show", `${ref}:./${path}`]);
 
   return content.ok ? content.out : null;
 }
@@ -157,7 +165,8 @@ export function changedFiles(root: string, base: string, head: string | null = n
   assertRef(base);
 
   if (head !== null) assertRef(head);
-  const diff = git(root, head === null ? ["diff", "--name-status", "-z", "-M", base, "--"] : ["diff", "--name-status", "-z", "-M", base, head, "--"]);
+  // `--relative`: the paths of the analysis, from `root` down, when it is a directory of the repository.
+  const diff = git(root, head === null ? ["diff", "--relative", "--name-status", "-z", "-M", base, "--"] : ["diff", "--relative", "--name-status", "-z", "-M", base, head, "--"]);
 
   if (!diff.ok) throw new Error(diff.error);
   const changed = new Map<string, string | null>();
@@ -209,7 +218,7 @@ export function changedFiles(root: string, base: string, head: string | null = n
  */
 export function treeAt(root: string, ref: string, also: readonly string[] = []): Map<string, string | null> {
   assertRef(ref);
-  const diff = git(root, ["diff", "--name-status", "-z", "-M", ref, "--"]);
+  const diff = git(root, ["diff", "--relative", "--name-status", "-z", "-M", ref, "--"]);
 
   if (!diff.ok) throw new Error(diff.error);
   const overrides = new Map<string, string | null>();
