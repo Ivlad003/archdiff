@@ -33,6 +33,13 @@ Feature: The page
     When mix is on and I tap a module
     Then the link holds "expand=" with that module
 
+  Scenario: A peek with Alt held
+    Given the page open on "modules"
+    When I hold Alt and press orders.ts
+    Then only the lines from and to orders.ts show, lit, and the shapes at their ends stay
+    When I release the button
+    Then every line shows again and nothing is picked
+
   Scenario: Find, the keys, dim, lanes, split, the chain and the minimap
     Given the page open on "layer:lib"
     When I tap orders.ts and Shift+tap log.ts

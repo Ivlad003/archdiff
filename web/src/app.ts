@@ -210,7 +210,7 @@ if (new URLSearchParams(location.search).get("embed") === "1") document.body.cla
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 
 // A handle for the browser tests and for debugging in the console: the canvas and the state of the page.
-(window as unknown as { archdiff: unknown }).archdiff = { canvas: canvasHandle, state: currentLink, nodes: () => nodes, drawn: () => drawn, selected: selection, mapDots, mapSettled, menuOpen };
+(window as unknown as { archdiff: unknown }).archdiff = { canvas: canvasHandle, state: currentLink, nodes: () => nodes, drawn: () => drawn, selected: selection, peeked: () => canvasHandle()?.peeked() ?? null, mapDots, mapSettled, menuOpen };
 
 void (async () => {
   // A repository the server cannot read (a broken archdiff.json) is said in the middle of the page, not a blank one.

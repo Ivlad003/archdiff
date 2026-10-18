@@ -132,6 +132,15 @@ The system SHALL add a shape to the selection on a tap with Shift, Ctrl or Cmd h
 - **WHEN** a module shape is right-clicked and "Focus: everything joined to it" is chosen
 - **THEN** the link holds `focus:<module>` and the title starts "Everything joined to"
 
+
+### Requirement: A peek shows a shape's lines alone
+
+The system SHALL, on a press with Alt held on a shape or a line while reading, show the lines from or to that shape (the line itself for a line) alone and lit, keep the shapes at their ends, fade the other shapes and hide the other lines with their labels, and put everything back when the button or Alt is released or the window loses the keys; the press SHALL neither pick the shape nor pan the canvas.
+
+#### Scenario: Alt held on a module
+
+- **WHEN** Alt and the button are held on `src/lib/orders.ts` in the modules picture
+- **THEN** the lines from and to it are lit and whole, every other line is gone, and releasing the button puts every line back as it was, with nothing picked
 ### Requirement: The project map shows where the picture sits
 
 The system SHALL open, on **project** or `p`, a map of the whole repository over the canvas (`GET /api/graph`): a dot per module (per directory above 400 modules) coloured by layer and sized by lines, a line per import, laid out by forces that keep it together — a dot pushes away only the dots near it, every dot is pulled to the middle and to its layer's, dots do not overlap — and fitted whole into the canvas; hover SHALL name a dot and light its neighbours, the dots of the current picture SHALL wear a ring, a click SHALL open the module's view, Shift+click its focus view, a double click its inside (a click waits for a second one before it opens); layer chips SHALL hide layers and a search box SHALL find a module, empty when `p` opened the map; Escape SHALL close it.

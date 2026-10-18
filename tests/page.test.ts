@@ -50,6 +50,37 @@ after(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
+test("Alt held with the button on a shape shows its lines alone, lit, until either is released", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/#view=modules`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "modules"`);
+  await page!.waitForTimeout(600);
+  const lines = (): Promise<Record<string, { opacity: number; stroke: string }>> => page!.evaluate(`Object.fromEntries(window.archdiff.canvas().scene().filter((e) => !e.isDeleted && e.customData?.archdiff === "edge").map((e) => [e.customData.from + " -> " + e.customData.to, { opacity: e.opacity, stroke: e.strokeColor }]))`) as Promise<Record<string, { opacity: number; stroke: string }>>;
+  const before = await lines();
+  const title = await page!.textContent("#markdown h1");
+  assert.ok(Object.keys(before).length >= 3 && Object.values(before).every((line) => line.opacity === 100), JSON.stringify(before));
+  assert.ok(Object.keys(before).some((key) => !key.includes("src/db/store.ts")), "a line not touching store.ts, to go");
+  const store = await screenPointOf("src/db/store.ts");
+  await page!.keyboard.down("Alt");
+  await page!.mouse.move(store.x, store.y);
+  await page!.mouse.down();
+  await page!.waitForFunction(`window.archdiff.peeked() === "src/db/store.ts"`, undefined, { timeout: 5000 });
+  const during = await lines();
+
+  // Its lines lit and whole, every other line gone.
+  for (const [key, line] of Object.entries(during)) {
+    if (key.includes("src/db/store.ts")) assert.deepEqual(line, { opacity: 100, stroke: "#ff6f00" }, key);
+    else assert.equal(line.opacity, 0, key);
+  }
+
+  await page!.mouse.up();
+  await page!.keyboard.up("Alt");
+  await page!.waitForFunction(`window.archdiff.peeked() === null`, undefined, { timeout: 5000 });
+  assert.deepEqual(await lines(), before);
+  // A peek, not a tap: the panel still shows the picture's page, and nothing is selected.
+  assert.equal(await page!.textContent("#markdown h1"), title);
+  assert.deepEqual(await page!.evaluate("window.archdiff.selected()"), []);
+});
+
 test("the page lists the views, draws the layers and walks to a module and its code", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.goto(`${base}/#view=layers`);
   await page!.waitForSelector("#views li");

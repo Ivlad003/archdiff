@@ -76,6 +76,13 @@ export interface CanvasHandle {
   hover(id: string | null): void;
   /** Dims every generated shape and line not in `keep` (and the labels of the dimmed); null clears the dimming. */
   dim(keep: readonly string[] | null): void;
+  /**
+   * A peek: the lines of a shape (or one line) alone, lit, the shapes at their ends kept and every other shape and
+   * line faded or gone — held while Alt and the button are (`listenForTaps`); null puts everything back.
+   */
+  peek(id: string | null): void;
+  /** The shape or line a peek is held on; null when none is. */
+  peeked(): string | null;
   /** Scrolls so the element is at the centre of the canvas, at the current zoom. */
   centreOn(id: string): void;
   /** The size of the canvas on screen, for the minimap's viewport box. */
@@ -294,23 +301,59 @@ function sceneUnits(api: ExcalidrawImperativeAPI, pixels: number): number {
  * there): a tap picks the shape under it, or the lines within reach; a second tap on a shape opens its view; a right
  * click asks for the page's menu. A second tap is one whose press comes within half a second of the first tap's
  * release, by the events' own times: the page may still be busy with the first tap (a big file's code, a big scene
- * lit) when the second is handled, long after it happened.
+ * lit) when the second is handled, long after it happened. With Alt held, the press on a shape or a line is a peek
+ * (`peek`): its lines alone, lit, until the button or Alt is released — no tap, no pan.
  */
-function listenForTaps(mounted: Mounted, events: CanvasEvents): void {
+function listenForTaps(mounted: Mounted, events: CanvasEvents, peek: (id: string | null) => void): void {
   const { container } = mounted;
   let down: { x: number; y: number; at: number } | null = null;
   let lastTap: { id: string; at: number } | null = null;
+  /** The shape or line held with Alt, while the peek lasts. */
+  let held: string | null = null;
+
+  const release = (): void => {
+    if (held === null) return;
+    held = null;
+    peek(null);
+  };
 
   // Only the main button taps: a right click is the menu (below), and on Linux its press comes before its contextmenu.
   container.addEventListener(
     "pointerdown",
     (event) => {
+      const { api } = mounted;
       const point = mounted.mode === "view" && event.button === 0 ? scenePoint(mounted, event) : null;
+
+      // Alt and the button on a shape or a line: a peek at its lines, held; Excalidraw never sees the press, so it pans nothing.
+      if (point && api && event.altKey) {
+        const scene = elementsOf(api);
+        const target = shapeAt(scene, point.x, point.y) ?? arrowsAt(scene, point.x, point.y, sceneUnits(api, LINE_REACH))[0] ?? null;
+
+        if (target) {
+          event.preventDefault();
+          event.stopPropagation();
+          held = target.id;
+          down = null;
+          peek(target.id);
+
+          return;
+        }
+      }
 
       if (point) down = { ...point, at: event.timeStamp };
     },
     true,
   );
+  // The peek ends with the button, wherever it is released, with Alt, or with the window losing the keys.
+  window.addEventListener("pointerup", release, true);
+  window.addEventListener("pointercancel", release, true);
+  window.addEventListener("keyup", (event) => {
+    if (event.key !== "Alt" || held === null) return;
+    // Alt released alone would move the focus to the browser's menu bar on some systems.
+    event.preventDefault();
+    release();
+  });
+  window.addEventListener("blur", release);
   container.addEventListener(
     "pointerup",
     (event) => {
@@ -506,13 +549,31 @@ const HOVER_COLOUR = "#ffa726";
  * hover's (both kept a line orange after the reader tapped elsewhere). Lights are for reading: entering the editor
  * puts every one out (`clear`), as the editor marks its own selection and a light would overwrite a colour drawn there.
  */
-function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; dim: CanvasHandle["dim"]; hover: CanvasHandle["hover"]; clear(): void; forget(): void } {
+function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; dim: CanvasHandle["dim"]; hover: CanvasHandle["hover"]; peek: CanvasHandle["peek"]; peeked: CanvasHandle["peeked"]; clear(): void; forget(): void } {
   /** The look the scene drew each touched element with. */
   const drawn = new Map<string, Look>();
   let lit: { ids: ReadonlySet<string>; colour: string } = { ids: new Set(), colour: TAP_COLOUR };
   let hovered: string | null = null;
   /** The shapes and lines the dim keeps; null: nothing is dimmed. */
   let kept: ReadonlySet<string> | null = null;
+  /** The peek held: the shape or line, its lines (the line itself for a line), and the shapes at their ends; null: none. */
+  let peeked: { id: string; lines: ReadonlySet<string>; around: ReadonlySet<string> } | null = null;
+
+  /** The peek at `id` read from the scene: a shape's lines are the ones from or to it. */
+  const peekAt = (id: string | null): void => {
+    const { api } = mounted;
+
+    if (id === null || !api) {
+      peeked = null;
+
+      return;
+    }
+
+    const scene = elementsOf(api);
+    const self = scene.find((element) => element.id === id);
+    const lines = self?.customData?.["archdiff"] === "edge" ? [self] : scene.filter((element) => element.customData?.["archdiff"] === "edge" && (element.customData?.["from"] === id || element.customData?.["to"] === id));
+    peeked = { id, lines: new Set(lines.map((line) => line.id)), around: new Set([id, ...lines.flatMap((line) => [String(line.customData?.["from"]), String(line.customData?.["to"])])]) };
+  };
 
   /** An element's look under the lights on it now, from the look it was drawn with. */
   const litLook = (element: CanvasElement, look: Look, owner: CanvasElement | undefined): Look => {
@@ -533,6 +594,18 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
       next.strokeWidth = 3;
     }
 
+    // The peek, over every other light: the held shape's lines lit and whole, every other line (and its label) gone,
+    // the shapes at the lines' ends kept, the rest faded; the held shape itself lit.
+    if (peeked !== null && owner !== undefined) {
+      const of = owner.customData?.["archdiff"];
+
+      if (of === "edge") {
+        if (peeked.lines.has(owner.id)) Object.assign(next, { opacity: 100, strokeColor: TAP_COLOUR, strokeWidth: 4 });
+        else next.opacity = 0;
+      } else if (of === "node" && !peeked.around.has(owner.id)) next.opacity = DIMMED_OPACITY;
+      else if (of === "node" && owner.id === peeked.id && role === "node") Object.assign(next, { strokeColor: TAP_COLOUR, strokeWidth: 4 });
+    }
+
     return next;
   };
 
@@ -545,7 +618,7 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
     const byId = new Map(elements.map((element) => [element.id, element]));
     let changed = false;
     const next = elements.map((element) => {
-      if (!drawn.has(element.id) && !lit.ids.has(element.id) && hovered !== element.id && kept === null) return element;
+      if (!drawn.has(element.id) && !lit.ids.has(element.id) && hovered !== element.id && kept === null && peeked === null) return element;
       const look = drawn.get(element.id) ?? { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth, backgroundColor: element.backgroundColor, opacity: element.opacity };
       drawn.set(element.id, look);
       // A label follows its shape or line, and the counts under a shape their shape.
@@ -573,10 +646,13 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
     highlight: (ids, colour = TAP_COLOUR) => reading(() => (lit = { ids: new Set(ids), colour })),
     dim: (keep) => reading(() => (kept = keep === null ? null : new Set(keep))),
     hover: (id) => reading(() => (hovered = id)),
+    peek: (id) => reading(() => peekAt(id)),
+    peeked: () => peeked?.id ?? null,
     clear: () => {
       lit = { ids: new Set(), colour: TAP_COLOUR };
       hovered = null;
       kept = null;
+      peeked = null;
       apply();
       drawn.clear();
     },
@@ -585,6 +661,7 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
       lit = { ids: new Set(), colour: TAP_COLOUR };
       hovered = null;
       kept = null;
+      peeked = null;
       drawn.clear();
     },
   };
@@ -631,7 +708,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       if (!moved()) requestAnimationFrame(fit);
     });
     resizes.observe(container);
-    listenForTaps(mounted, events);
+    listenForTaps(mounted, events, lights.peek);
     listenForHover(mounted, lights.hover);
 
     const handle: CanvasHandle = {
@@ -675,6 +752,8 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       highlight: lights.highlight,
       hover: lights.hover,
       dim: lights.dim,
+      peek: lights.peek,
+      peeked: lights.peeked,
       centreOn: (id) => {
         const { api } = mounted;
         const target = api ? elementsOf(api).find((element) => element.id === id) : undefined;
