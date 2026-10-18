@@ -5,6 +5,9 @@
 // out, an action per run of plain statements (two at most, so the
 // shape stays readable), a terminal per `return` or `throw` — with the
 // condition texts as the code writes them and the calls each action makes.
+// The arrows into a loop's body and back into its header are marked as
+// such (`enters`, `back`), so whoever walks the paths needs no labels to
+// tell a loop's shape.
 // Read on demand from the one file the view names (not at extraction: a
 // graph per function would weigh more than the rest of the facts), for
 // the `logic:<path>#<fn>` view (logic.ts), which draws it and lists the
@@ -39,6 +42,10 @@ export interface LogicEdge {
   from: string;
   to: string;
   label?: string;
+  /** From a loop's header into its body (`each`, `while`); every other arrow out of the header leaves the loop. */
+  enters?: true;
+  /** Back into a loop's header: the end of its body, a `continue`, an inner loop's `done` as the last step of the body. */
+  back?: true;
 }
 
 export interface LogicFact {
@@ -99,6 +106,8 @@ const PY_LOGIC: LogicGrammar = {
 interface Exit {
   from: string;
   label?: string;
+  /** The arrow enters a loop's body (`LogicEdge.enters`). */
+  enters?: true;
 }
 
 /** The loop (or switch) a `break` leaves and a `continue` returns to. */
@@ -172,8 +181,18 @@ class Builder {
     return made;
   }
 
-  link(exits: readonly Exit[], to: string): void {
-    for (const exit of exits) this.edges.push(exit.label === undefined ? { from: exit.from, to } : { from: exit.from, to, label: exit.label });
+  /** The arrows from the open exits to `to`; `back`: `to` is the header of a loop the exits return into. */
+  link(exits: readonly Exit[], to: string, back = false): void {
+    for (const exit of exits) {
+      const edge: LogicEdge = { from: exit.from, to };
+
+      if (exit.label !== undefined) edge.label = exit.label;
+
+      if (exit.enters) edge.enters = true;
+
+      if (back) edge.back = true;
+      this.edges.push(edge);
+    }
   }
 
   /** The statements of a list in order; a list whose every path ended (a return) leaves nothing open. */
@@ -254,7 +273,7 @@ class Builder {
       const through = this.throughFinally(open, frame.finallies);
 
       if (isBreak) frame.breaks.push(...through);
-      else if (frame.head) this.link(through, frame.head);
+      else if (frame.head) this.link(through, frame.head, true);
 
       return [];
     }
@@ -393,8 +412,8 @@ class Builder {
     const frame: Frame = { kind: "loop", head: head.id, breaks: [], label, finallies: this.finallies.length };
     this.frames.push(frame);
     const inside = node.type === "while_statement" || node.type === "do_statement" ? "while" : "each";
-    const back = this.statements(this.body(node.childForFieldName("body")), [{ from: head.id, label: inside }]);
-    this.link(back, head.id);
+    const back = this.statements(this.body(node.childForFieldName("body")), [{ from: head.id, label: inside, enters: true }]);
+    this.link(back, head.id, true);
     this.frames.pop();
     // Python's `for … else:` runs its block when the loop ends without a break.
     const orElse = node.namedChildren.find((child) => this.grammar.control.elses.has(child.type));

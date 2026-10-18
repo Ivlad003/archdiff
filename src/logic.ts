@@ -12,7 +12,7 @@
 
 import type { Analysis } from "./analyze.ts";
 import type { PictureContent, Line, Shape, LogicData, LogicRule } from "./diagram.ts";
-import type { LogicFact, LogicStep } from "./extract/logic.ts";
+import type { LogicEdge, LogicFact, LogicStep } from "./extract/logic.ts";
 import { moduleOf, type Declaration } from "./graph.ts";
 import { lane, unplaced } from "./nodes.ts";
 import { counted } from "./words.ts";
@@ -43,7 +43,7 @@ function fnLabel(node: Declaration): string {
  */
 function rulesOf(fact: LogicFact): { rules: LogicRule[]; more: number } {
   const byId = new Map(fact.nodes.map((node) => [node.id, node]));
-  const edgesFrom = new Map<string, { to: string; label?: string }[]>();
+  const edgesFrom = new Map<string, LogicEdge[]>();
 
   for (const edge of fact.edges) edgesFrom.set(edge.from, [...(edgesFrom.get(edge.from) ?? []), edge]);
   const rules: LogicRule[] = [];
@@ -51,7 +51,7 @@ function rulesOf(fact: LogicFact): { rules: LogicRule[]; more: number } {
   let steps = 0;
 
   // `exit`: the `return` or `throw` the path passed on its way to the end through a `finally`; it is the rule's outcome.
-  const walk = (id: string, onPath: Set<string>, conditions: string[], calls: string[], exit: LogicStep | null = null): void => {
+  const walk = (id: string, conditions: string[], calls: string[], exit: LogicStep | null = null): void => {
     const node = byId.get(id);
 
     if (!node || steps++ > 20_000) return;
@@ -73,40 +73,34 @@ function rulesOf(fact: LogicFact): { rules: LogicRule[]; more: number } {
     const made = node.kind === "action" || node.kind === "loop" || isExit ? [...calls, ...(node.calls ?? []).filter((call) => !calls.includes(call))] : calls;
     const leaving = isExit ? node : exit;
 
-    for (const edge of edgesFrom.get(id) ?? []) {
-      const target = byId.get(edge.to);
-
-      if (!target) continue;
+    for (const edge of out) {
       // The branch taken is a condition of the rule, the arrow back into a loop (`x > 0: no`, a `continue`) as much as any.
       const taken = node.kind === "decision" || node.kind === "loop" ? [...conditions, `${node.text}: ${edge.label ?? "then"}`] : conditions;
 
-      // A back edge into a loop already on the path: the loop is walked once, so carry on after it instead.
-      if (onPath.has(edge.to)) {
-        if (target.kind === "loop") leave(edge.to, onPath, taken, made, new Set(), leaving);
-
-        continue;
-      }
-
-      walk(edge.to, new Set([...onPath, edge.to]), taken, made, leaving);
+      // The only arrows that lead back are the ones into a loop's header: the loop is walked once, so the path carries on
+      // after it instead.
+      if (edge.back) leave(edge.to, taken, made, new Set(), leaving);
+      else walk(edge.to, taken, made, leaving);
     }
   };
 
-  // Out of a loop walked once: on along its arrows that leave it (`done`, a `for … else`); an arrow that leads back into
-  // a loop around it (an inner loop's `done` as the last step of the outer one's body) leaves that loop in turn.
-  const leave = (loop: string, onPath: Set<string>, conditions: string[], calls: string[], left: Set<string>, exit: LogicStep | null): void => {
+  // Out of a loop walked once: on along the arrows that leave it (`done`, a `for … else`; not the one into its body); an
+  // arrow that leads back into a loop around it (an inner loop's `done` as the last step of the outer one's body) leaves
+  // that loop in turn.
+  const leave = (loop: string, conditions: string[], calls: string[], left: Set<string>, exit: LogicStep | null): void => {
     left.add(loop);
 
     for (const after of edgesFrom.get(loop) ?? []) {
-      if (after.label === "each" || after.label === "while") continue;
+      if (after.enters) continue;
 
-      if (!onPath.has(after.to)) walk(after.to, new Set([...onPath, after.to]), conditions, calls, exit);
-      else if (byId.get(after.to)?.kind === "loop" && !left.has(after.to)) leave(after.to, onPath, conditions, calls, left, exit);
+      if (!after.back) walk(after.to, conditions, calls, exit);
+      else if (!left.has(after.to)) leave(after.to, conditions, calls, left, exit);
     }
   };
 
   const start = fact.nodes.find((node) => node.kind === "start");
 
-  if (start) walk(start.id, new Set([start.id]), [], []);
+  if (start) walk(start.id, [], []);
 
   return { rules, more };
 }
