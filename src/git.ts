@@ -8,8 +8,9 @@
 //
 // Sits at the I/O edge below review.ts (which reads a change), files.ts
 // (which lists the sources) and the server. Entry points: `listedFiles`,
-// `changedFiles`, `treeAt`, `mergeBase`, `defaultBase`, `listBranches`,
-// `commitsBetween`, `fileHistory`, `revisionStamp`, `commitFirst`.
+// `changedFiles`, `treeAt`, `mergeBase`, `forkPoint`, `commitOf`,
+// `defaultBase`, `listBranches`, `commitsBetween`, `fileHistory`,
+// `revisionStamp`, `commitFirst`.
 
 import { spawnSync } from "node:child_process";
 import { isSourceFile } from "./languages.ts";
@@ -62,6 +63,30 @@ export function mergeBase(root: string): string {
   if (shallow.ok && shallow.out.trim() === "true") throw new Error("no merge-base with develop, main or master in a shallow clone: fetch more history (git fetch --unshallow, or fetch-depth: 0 in CI) or pass --base <ref>");
 
   return "HEAD";
+}
+
+/**
+ * Where `head` left `base`: their merge-base, the commit a pull request of `head` into `base` starts from, so what
+ * landed on `base` since is not read as `head`'s doing; null when the two share no commit (unrelated histories, a
+ * shallow clone that lacks it).
+ */
+export function forkPoint(root: string, base: string, head: string): string | null {
+  assertRef(base);
+  assertRef(head);
+  const result = git(root, ["merge-base", base, head]);
+
+  return result.ok ? result.out.trim() || null : null;
+}
+
+/** The commit a ref names (a branch, a tag, a commit), as its full hash; null when git knows none of that name. */
+export function commitOf(root: string, ref: string): string | null {
+  assertRef(ref);
+  const result = git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+
+  // Outside git, or before the first commit, no ref is known: said as such, not as an unknown ref.
+  if (!result.ok && /is not a git repository|has no commits yet/.test(result.error)) throw new Error(result.error);
+
+  return result.ok ? result.out.trim() : null;
 }
 
 /** A revision's content of a file, as `analyze` overrides: null when the revision lacks it. */

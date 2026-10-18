@@ -13,7 +13,7 @@
 import { analyze, type Analysis } from "./analyze.ts";
 import { loadConfig } from "./config.ts";
 import { graphDiff, markContract, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
-import { changedFiles, commitsBetween, defaultBase, mergeBase, treeAt } from "./git.ts";
+import { changedFiles, commitOf, commitsBetween, defaultBase, forkPoint, mergeBase, treeAt } from "./git.ts";
 import type { Graph } from "./graph.ts";
 
 export interface ReviewResult {
@@ -30,6 +30,8 @@ export interface ComparisonResult {
   /** The graph of the base and of every head, for the picture of the comparison. */
   baseGraph: Graph;
   graphs: Map<string, Graph>;
+  /** The graph of where each head left the base (its merge-base), by head: what a head removed was there. */
+  forks: Map<string, Graph>;
 }
 
 /**
@@ -52,25 +54,40 @@ export async function review(root: string, base: string | null, headRef: string 
 /**
  * Several heads (branches, tags, commits, or the working tree as
  * `WORKTREE`) against one base (`base` null: develop, main or master,
- * else the merge-base): each head's own diff, marked against its
- * contract, and the graphs a picture of them all is drawn from.
+ * else the merge-base): each head's own diff — from where it left the
+ * base (their merge-base) to the head, as its pull request would show it,
+ * so what landed on the base since is not read as the head's doing —
+ * marked against its contract, and the graphs a picture of them all is
+ * drawn from. A head named twice is compared once; a ref git does not
+ * know is refused by name.
  */
 export async function compareBranches(root: string, base: string | null, heads: readonly string[]): Promise<ComparisonResult> {
   const baseRef = base ?? defaultBase(root) ?? mergeBase(root);
+  const unique = [...new Set(heads)];
+
+  for (const ref of [baseRef, ...unique]) if (ref !== "WORKTREE" && commitOf(root, ref) === null) throw new Error(`no branch, tag or commit "${ref}" (archdiff branches lists the branches)`);
   const config = loadConfig(root);
   const baseGraph = (await analyze(root, { overrides: treeAt(root, baseRef), config })).graph;
   const compared: Compared[] = [];
   const graphs = new Map<string, Graph>();
+  const forks = new Map<string, Graph>();
+  /** The graphs of the fork points, by commit: heads that left the base at one commit share its analysis. */
+  const atCommit = new Map<string, Graph>();
 
-  for (const head of heads) {
+  for (const head of unique) {
+    // Where the head left the base; the base itself when the two share no commit.
+    const since = forkPoint(root, baseRef, head === "WORKTREE" ? "HEAD" : head) ?? commitOf(root, baseRef)!;
+    const from = atCommit.get(since) ?? (await analyze(root, { overrides: treeAt(root, since), config })).graph;
+    atCommit.set(since, from);
+    forks.set(head, from);
     const analysis = head === "WORKTREE" ? await analyze(root, { config }) : await analyze(root, { overrides: treeAt(root, head), config });
     const { graph } = analysis;
     graphs.set(head, graph);
-    const changed = head === "WORKTREE" ? [...changedFiles(root, baseRef).base.keys()] : [...changedFiles(root, baseRef, head).base.keys()];
-    compared.push({ head, diff: markContract(graphDiff(baseGraph, graph, `${baseRef}..${head}`, changed), analysis.intent, graph), contract: analysis.intent !== null });
+    const changed = head === "WORKTREE" ? [...changedFiles(root, since).base.keys()] : [...changedFiles(root, since, head).base.keys()];
+    compared.push({ head, since, diff: markContract(graphDiff(from, graph, `${since}..${head}`, changed), analysis.intent, graph), contract: analysis.intent !== null });
   }
 
-  return { base: baseRef, heads: compared, baseGraph, graphs };
+  return { base: baseRef, heads: compared, baseGraph, graphs, forks };
 }
 
 /** The architectural diff of every commit from `base` to `head`, one analysis per commit (the fact cache makes each cheap). */

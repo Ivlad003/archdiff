@@ -31,12 +31,17 @@ The system SHALL lay the review's marks over any view (`--changes`), keep only t
 
 ### Requirement: Branches are compared, several at once
 
-The system SHALL list the branches with the default base, and compare any number of heads against one base in one picture, every module labelled with what each head did.
+The system SHALL list the branches with the default base, and compare any number of heads against one base in one picture, every module labelled with what each head did: each head from where it left the base (their merge-base, the base itself when they share no commit), as its pull request would show it, so what landed on the base since is not read as the head's doing; the table SHALL name that commit for every head. A head named twice SHALL be compared once, and a ref git does not know SHALL be refused by name.
 
 #### Scenario: Three heads
 
 - **WHEN** `archdiff compare --heads a,b,WORKTREE` runs
 - **THEN** one picture holds the union of the changes with a glyph per head on every changed module
+
+#### Scenario: The base moved on
+
+- **WHEN** develop gains a module after `a` left it, and `archdiff compare --heads a` runs
+- **THEN** `a`'s row starts from the commit it left develop at, and the new module is not among what `a` removed
 
 ### Requirement: History shows the drift
 

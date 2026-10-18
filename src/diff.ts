@@ -314,16 +314,25 @@ export function reviewMarkdown(diff: GraphDiff, diagram: Diagram, contract: bool
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-/** One head of a comparison against the base: its diff and the graph it was computed on. */
+/** One head of a comparison against the base: where it left the base, its diff since, and whether it has a contract. */
 export interface Compared {
   /** The head has a contract: only the layer dependencies against it are findings. */
   contract: boolean;
   head: string;
+  /** The commit the head left the base at (their merge-base, the base's own commit when they share none): its diff starts there. */
+  since: string;
   diff: GraphDiff;
 }
 
-/** The picture of a comparison: the modules any head touched, in their layers, labelled with what each head did to them; the imports any head added or removed, labelled with the head. */
-export function compareDiagram(base: string, heads: readonly Compared[], baseGraph: Graph, graphs: ReadonlyMap<string, Graph>): PictureContent {
+/**
+ * The picture of a comparison: the modules any head touched, in their layers, labelled with what each head did to
+ * them; the imports any head added or removed, labelled with the head. A module is looked up in the base, then where
+ * each head left it (what a head removed was there), then in the heads.
+ */
+export function compareDiagram(base: string, heads: readonly Compared[], baseGraph: Graph, graphs: ReadonlyMap<string, Graph>, forks: ReadonlyMap<string, Graph> = new Map()): PictureContent {
+  const everyGraph = [baseGraph, ...forks.values(), ...graphs.values()];
+  const findModule = (id: string) => everyGraph.map((graph) => graph.modules.get(id)).find((candidate) => candidate !== undefined);
+  const findExternal = (id: string) => everyGraph.map((graph) => graph.externals.get(id)).find((candidate) => candidate !== undefined);
   const marks = new Map<string, Map<string, DiffMark>>();
 
   const mark = (module: string, head: string, what: DiffMark): void => {
@@ -347,7 +356,7 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
   const everyHead = heads.length;
 
   for (const [id, own] of [...marks].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    const module = baseGraph.modules.get(id) ?? [...graphs.values()].map((graph) => graph.modules.get(id)).find((candidate) => candidate !== undefined);
+    const module = findModule(id);
 
     if (!module) continue;
     const parts = [...own].map(([head, what]) => `${glyph[what]} ${head === "WORKTREE" ? "working tree" : head}`);
@@ -388,8 +397,8 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
   for (const edge of edges) {
     for (const end of [edge.from, edge.to]) {
       if (ids.has(end)) continue;
-      const module = baseGraph.modules.get(end) ?? [...graphs.values()].map((graph) => graph.modules.get(end)).find((candidate) => candidate !== undefined);
-      const external = baseGraph.externals.get(end) ?? [...graphs.values()].map((graph) => graph.externals.get(end)).find((candidate) => candidate !== undefined);
+      const module = findModule(end);
+      const external = findExternal(end);
 
       if (module) nodes.push({ id: end, kind: "module", label: end, ref: { id: end, file: end, line: 1 }, group: module.layer, x: 0, y: 0, w: 0, h: 0 });
       else if (external) nodes.push({ id: end, kind: "external", label: external.kind === "builtin" ? `node:${external.name}` : external.name, x: 0, y: 0, w: 0, h: 0 });
@@ -409,11 +418,11 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
 
 /** The comparison as Markdown: a table of the heads, the picture, and each head's own review. */
 export function comparisonMarkdown(base: string, heads: readonly Compared[], diagram: Diagram): string {
-  const lines = [`<!-- archdiff:generated — compare ${base} .. ${heads.map((head) => head.head).join(", ")} -->`, `# ${heads.length} heads against ${base}`, "", "| head | files | modules | functions | imports | calls | layer couplings |", "| --- | --- | --- | --- | --- | --- | --- |"];
+  const lines = [`<!-- archdiff:generated — compare ${base} .. ${heads.map((head) => head.head).join(", ")} -->`, `# ${heads.length} heads against ${base}`, "", `_Each head from where it left ${base} (their merge-base, the commit under "since"): what the head did, not what ${base} did since._`, "", "| head | since | files | modules | functions | imports | calls | layer couplings |", "| --- | --- | --- | --- | --- | --- | --- | --- |"];
 
-  for (const { head, diff, contract } of heads) {
+  for (const { head, since, diff, contract } of heads) {
     const couplings = diff.layerEdgesAdded.map((edge) => `${edge.against || !contract ? "⚠ " : ""}+${edge.from}→${edge.to}`).concat(diff.layerEdgesRemoved.map((edge) => `−${edge.from}→${edge.to}`)).join(" ");
-    lines.push(`| ${head === "WORKTREE" ? "working tree" : head} | ${diff.changedFiles.length} | +${diff.modulesAdded.length} −${diff.modulesRemoved.length} | +${diff.nodesAdded.length} −${diff.nodesRemoved.length} ~${diff.nodesChanged.length} | +${diff.depsAdded.length} −${diff.depsRemoved.length} | +${diff.callsAdded.length} −${diff.callsRemoved.length} | ${couplings} |`);
+    lines.push(`| ${head === "WORKTREE" ? "working tree" : head} | ${since.slice(0, 7)} | ${diff.changedFiles.length} | +${diff.modulesAdded.length} −${diff.modulesRemoved.length} | +${diff.nodesAdded.length} −${diff.nodesRemoved.length} ~${diff.nodesChanged.length} | +${diff.depsAdded.length} −${diff.depsRemoved.length} | +${diff.callsAdded.length} −${diff.callsRemoved.length} | ${couplings} |`);
   }
 
   lines.push("");

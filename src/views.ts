@@ -49,7 +49,7 @@ export interface EdgeReads {
   /** The flowchart of the function of a `logic:` view; null when its body could not be read. */
   logic?: LogicFact | null;
   review?: { diff: GraphDiff; base: Graph; head: Graph };
-  compare?: { base: string; heads: readonly Compared[]; baseGraph: Graph; graphs: ReadonlyMap<string, Graph> };
+  compare?: { base: string; heads: readonly Compared[]; baseGraph: Graph; graphs: ReadonlyMap<string, Graph>; forks: ReadonlyMap<string, Graph> };
 }
 
 export interface ViewEntry {
@@ -746,7 +746,7 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
         // The analyses of the base and the head, which picture.ts reads from git.
         return reads.review ? diffDiagram(reads.review.diff, reads.review.base, reads.review.head) : unplaced("Review", [], [], [], { reason: "a review is read from git (archdiff review, or the page's review)" });
       case "compare":
-        return reads.compare ? compareDiagram(reads.compare.base, reads.compare.heads, reads.compare.baseGraph, reads.compare.graphs) : unplaced("Compare", [], [], [], { reason: "a comparison is read from git (archdiff compare --heads a,b)" });
+        return reads.compare ? compareDiagram(reads.compare.base, reads.compare.heads, reads.compare.baseGraph, reads.compare.graphs, reads.compare.forks) : unplaced("Compare", [], [], [], { reason: "a comparison is read from git (archdiff compare --heads a,b)" });
       case "coverage":
         return coverageView(graph);
       case "intent":

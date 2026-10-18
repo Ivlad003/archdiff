@@ -396,7 +396,7 @@ const COMMANDS: readonly Command[] = [
   {
     name: "compare",
     usage: "[dir] [--base REF] [--heads A,B,C] [--format F] [--out FILE]",
-    help: ["The architectural diff of several heads (branches, tags, commits; WORKTREE", "for the working tree) against one base (default: develop, main or master):", "a table per head, one picture of what every head touched, marked by head"],
+    help: ["The architectural diff of several heads (branches, tags, commits; WORKTREE", "for the working tree) against one base (default: develop, main or master),", "each from where it left the base (their merge-base, as its pull request shows it):", "a table per head, one picture of what every head touched, marked by head"],
     arity: 1,
     flags: [flag("base", true), flag("heads", true), ...OUTPUT_FLAGS],
     async run(call) {

@@ -768,6 +768,12 @@ test("branches lists the branches with the default base, and compare puts severa
     writeFileSync(join(dir, "src/lib/log.ts"), "export function log(message: string): void {\n  console.error(message);\n}\n");
     git("commit", "-q", "-am", "b: route reads the store, log to stderr");
     git("checkout", "-q", "develop");
+    const forked = git("rev-parse", "--short=7", "HEAD").trim();
+    // develop moves on after the heads left it: an audit module neither head removed.
+    writeFileSync(join(dir, "src/lib/audit.ts"), "export function audit(): number {\n  return 1;\n}\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "develop: audit");
+    const tip = git("rev-parse", "--short=7", "HEAD").trim();
     // A third head: the working tree on develop with a change of its own.
     writeFileSync(join(dir, "src/lib/log.ts"), "export function log(message: string): void {\n  console.warn(message);\n}\n");
     const branches = archdiff(["branches", dir]);
@@ -777,8 +783,11 @@ test("branches lists the branches with the default base, and compare puts severa
     const compare = archdiff(["compare", dir, "--heads", "feature-a,feature-b,WORKTREE"]);
     assert.equal(compare.status, 1, compare.stdout);
     assert.ok(compare.stdout.includes("# 3 heads against develop"), compare.stdout);
-    assert.ok(compare.stdout.includes("| feature-a | 1 | +1 −0 |"), compare.stdout);
-    assert.ok(compare.stdout.includes("| feature-b | 2 |") && compare.stdout.includes("⚠ +routes→db"), compare.stdout);
+    // Each head from where it left develop: the audit module develop added since is no head's doing.
+    assert.ok(compare.stdout.includes(`| feature-a | ${forked} | 1 | +1 −0 |`), compare.stdout);
+    assert.ok(compare.stdout.includes(`| feature-b | ${forked} | 2 |`) && compare.stdout.includes("⚠ +routes→db"), compare.stdout);
+    assert.ok(compare.stdout.includes(`| working tree | ${tip} | 1 | +0 −0 |`), compare.stdout);
+    assert.ok(!compare.stdout.includes("audit"), compare.stdout);
     assert.ok(compare.stdout.includes("## Touched by every head\n\n- none"), compare.stdout);
     assert.ok(compare.stdout.includes("- src/lib/extra.ts — feature-a"), compare.stdout);
     const json = JSON.parse(archdiff(["compare", dir, "--heads", "feature-a,feature-b,WORKTREE", "--format", "json"]).stdout) as { base: string; heads: { head: string }[] };
@@ -789,6 +798,11 @@ test("branches lists the branches with the default base, and compare puts severa
     const excalidraw = archdiff(["compare", dir, "--heads", "feature-b,WORKTREE", "--format", "excalidraw"]).stdout;
     // log.ts changed in both heads: the shape says so.
     assert.ok(excalidraw.includes("every head") || excalidraw.includes("~ feature-b"), excalidraw.slice(0, 200));
+    // A head named twice is compared once; a ref git does not know is refused by name.
+    assert.equal(archdiff(["compare", dir, "--heads", "feature-a,feature-a", "--format", "json"]).stdout.match(/"head": "feature-a"/g)?.length, 1);
+    const unknown = archdiff(["compare", dir, "--heads", "feature-a,nope"]);
+    assert.equal(unknown.status, 2);
+    assert.equal(unknown.stderr, 'archdiff: no branch, tag or commit "nope" (archdiff branches lists the branches)\n');
   }));
 
 test("agent events name the files a tool touches, for the page to light their shapes", async () => {
