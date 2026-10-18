@@ -220,7 +220,15 @@ function moduleView(graph: Graph, id: string, depth: number, packages: boolean):
 
   for (const external of [...externals].sort()) nodes.push(externalNode(graph, external));
 
-  return unplaced(id, nodes, edges, lanesOf(graph, nodes));
+  return unplaced(id, nodes, edges, lanesOf(graph, nodes), depth > 0 && members.size === 1 ? { reason: aloneReason(graph, id, packages) } : {});
+}
+
+/** Why a module's picture holds the module alone: nothing of the repository imports it and it imports nothing of it (a script, a page's own script), and the packages it imports when they are not drawn. */
+function aloneReason(graph: Graph, id: string, packages: boolean): string {
+  const imported = new Set(graph.deps.filter((dep) => dep.from === id && graph.externals.has(dep.to)).map((dep) => dep.to)).size;
+  const undrawn = !packages && imported > 0 ? `; it imports ${imported === 1 ? "1 package or built-in" : `${imported} packages and built-ins`}, which --packages draws` : "";
+
+  return `no module of the repository imports ${id}, and it imports none of them${undrawn}`;
 }
 
 /** The modules of a directory (and below), with the imports among them; depth 1 (default) adds their neighbours outside it. */
@@ -297,8 +305,12 @@ function callsView(graph: Graph, id: string, depth: number): PictureContent {
 
   const nodes = [...members].map((member) => fnNode(graph, member));
   nodes[0] = { ...nodes[0]!, kind: "fn" };
+  const name = `${start.parent ? `${start.parent}.` : ""}${start.name}`;
+  // A tree of the function alone: it calls no function of the repository (no hole either), only what lies outside it.
+  const outside = (gapsFrom.get(id) ?? []).filter((gap) => !isBlindSpot(gap)).length;
+  const alone = members.size === 1 && holes.length === 0 ? { reason: `${name} calls no function of the repository${outside > 0 ? `; its ${outside === 1 ? "call goes" : `${outside} calls go`} to packages, the language or values archdiff does not track` : ""}` } : {};
 
-  return unplaced(`Calls from ${start.parent ? `${start.parent}.` : ""}${start.name}`, [...nodes, ...holes], edges, lanesOf(graph, [...nodes, ...holes]));
+  return unplaced(`Calls from ${name}`, [...nodes, ...holes], edges, lanesOf(graph, [...nodes, ...holes]), alone);
 }
 
 /** The modules with calls into the repository archdiff could not follow (blind spots) or imports it could not resolve, by layer, labelled with the counts. */
@@ -321,13 +333,18 @@ function coverageView(graph: Graph): PictureContent {
 /**
  * Inside a module: its functions, classes and methods, the calls among
  * them, and (depth 1, default) the functions of other modules they call,
- * each module a lane. The map of one file.
+ * each module a lane. The map of one file. A module that declares no
+ * function or class (a script) runs at its top level, where its calls
+ * come from the module itself: its inside is the top level and what it
+ * calls.
  */
 function insideView(graph: Graph, id: string, depth: number): PictureContent {
   const module = graph.modules.get(id);
 
   if (!module) return unplaced(id, [], [], [], { reason: `no module "${id}"`, missing: true });
-  const own = [...graph.nodes.values()].filter((node) => node.module === id && node.kind !== "type").map((node) => node.id);
+  const declared = [...graph.nodes.values()].filter((node) => node.module === id && node.kind !== "type").map((node) => node.id);
+  const topLevel = declared.length === 0 && graph.calls.some((call) => call.from === id && graph.nodes.get(call.to)?.kind !== "type");
+  const own = topLevel ? [id] : declared;
   const members = new Set(own);
   let frontier = new Set(own);
 
@@ -352,15 +369,20 @@ function insideView(graph: Graph, id: string, depth: number): PictureContent {
     edges.push({ from: call.from, to: call.to, kind: call.kind });
   }
 
-  // Lanes are modules here, the subject first; a function sits in its module's lane.
+  // Lanes are modules here, the subject first; a function sits in its module's lane, the top level of a script first in its own.
   const modules = [id, ...[...members].map((member) => moduleOf(member)).filter((other) => other !== id).sort()];
+  const lineOf = (member: string): number => graph.nodes.get(member)?.line ?? 0;
   const nodes = [...members]
-    .sort((a, b) => Number(moduleOf(b) === id) - Number(moduleOf(a) === id) || (graph.nodes.get(a)!.line - graph.nodes.get(b)!.line))
-    .map((member) => ({ ...fnNode(graph, member), group: moduleOf(member) }));
+    .sort((a, b) => Number(moduleOf(b) === id) - Number(moduleOf(a) === id) || lineOf(a) - lineOf(b))
+    .map((member): Shape => (member === id ? { ...moduleNode(graph, id), label: `${id}\n(top level)`, group: id } : { ...fnNode(graph, member), group: moduleOf(member) }));
 
-  if (nodes.length === 0) return unplaced(`Inside ${id}`, [], [], [], { reason: "the module declares no function or class" });
+  if (nodes.length === 0) {
+    const unfollowed = graph.gaps.filter((gap) => gap.from === id).length;
 
-  return unplaced(`Inside ${id}`, nodes, edges, [...new Set(modules)].map(lane));
+    return unplaced(`Inside ${id}`, [], [], [], { reason: `the module declares no function or class, and its top level calls none archdiff followed${unfollowed > 0 ? ` (${unfollowed} ${unfollowed === 1 ? "call" : "calls"} into packages, the platform or values it cannot see)` : ""}` });
+  }
+
+  return unplaced(`Inside ${id}`, nodes, edges, [...new Set(modules)].map(lane), topLevel ? { reason: "the module declares no function or class: its top level, and what it calls" } : {});
 }
 
 /**

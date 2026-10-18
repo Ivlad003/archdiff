@@ -560,6 +560,30 @@ test("inside shows a module's functions and their calls in module lanes; sequenc
   assert.equal(archdiff(["diagram", "inside:nope.ts", fixture]).status, 2);
 });
 
+test("a script without functions: inside draws its top level and what it calls; a module or a function alone says why", () =>
+  withTempDir("archdiff-script-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    writeFileSync(join(dir, "src/lib/seed.ts"), 'import { placeOrder } from "./orders";\n\nplaceOrder("1", 10);\n');
+    writeFileSync(join(dir, "src/lib/banner.js"), 'console.log("archdiff");\n');
+    const picture = (view: string, ...flags: string[]): { reason?: string; nodes: { id: string; kind: string; label: string }[]; edges: { from: string; to: string }[] } => JSON.parse(archdiff(["diagram", view, dir, "--format", "json", ...flags]).stdout);
+    // The script's calls come from its top level: the module stands for it, in its own lane, and calls on.
+    const seed = picture("inside:src/lib/seed.ts");
+    assert.deepEqual(seed.nodes.map((node) => [node.id, node.kind]), [["src/lib/seed.ts", "module"], ["src/lib/orders.ts#placeOrder", "fn"]]);
+    assert.equal(seed.nodes[0]!.label, "src/lib/seed.ts\n(top level)");
+    assert.ok(seed.edges.some((edge) => edge.from === "src/lib/seed.ts" && edge.to === "src/lib/orders.ts#placeOrder"), JSON.stringify(seed.edges));
+    assert.equal(seed.reason, "the module declares no function or class: its top level, and what it calls");
+    // A script whose top level calls only the platform: an empty picture that says so.
+    const banner = picture("inside:src/lib/banner.js");
+    assert.equal(banner.nodes.length, 0);
+    assert.equal(banner.reason, "the module declares no function or class, and its top level calls none archdiff followed (1 call into packages, the platform or values it cannot see)");
+    // Nothing imports the banner and it imports nothing: its module picture is the module alone, and says why.
+    assert.equal(picture("module:src/lib/banner.js").reason, "no module of the repository imports src/lib/banner.js, and it imports none of them");
+    // A function that calls no function of the repository: its call tree is itself, and says why.
+    assert.match(picture("calls:src/routes/checkout.tsx#Checkout").reason ?? "", /^Checkout calls no function of the repository/);
+    // The module alone on purpose (depth 0) needs no reason.
+    assert.equal(picture("module:src/lib/banner.js", "--depth", "0").reason, undefined);
+  }));
+
 test("matrix, usage, type flow, path to the storages and hotspots on the fixture", () => {
   const matrix = JSON.parse(archdiff(["diagram", "matrix", fixture, "--format", "json"]).stdout) as { placed?: boolean; nodes: { id: string; label: string; diff?: string }[]; reason?: string };
   assert.equal(matrix.placed, true);

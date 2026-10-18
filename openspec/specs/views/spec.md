@@ -8,12 +8,17 @@ Each view is one picture that answers one architectural question, computed from 
 
 ### Requirement: Every view answers one question
 
-The system SHALL offer these views, each with a one-sentence question it answers: `layers`, `modules`, `layer:<name>`, `dir:<path>`, `module:<path>`, `inside:<path>`, `usage:<path>` (also read as `contract:<path>`, its old name), `calls:<path>#<fn>`, `sequence:<path>#<fn>`, `path:<path>#<fn>`, `type:<path>#<Type>`, `cycles`, `cycles:fns`, `cycle:<path>`, `cycle:<path>#<fn>`, `classes`, `classes:<scope>`, `matrix`, `matrix:<dir>`, `metrics`, `metrics:<layer>`, `machines`, `machine:<path>#<name>`, `focus:<path>`, `focus:<path>#<fn>`, `logic`, `logic:<path>#<fn>`, `events`, `tests`, `hotspots`, `packages`, `timeline`, `coverage`, `intent`, `review` and `compare` (the revisions of the link: a base, a head, the heads). A view with a subject that does not exist SHALL be empty with a reason naming the subject. Every shape SHALL say what a second tap on it opens — its kind's own view, or the view it names (`opens`: a folded directory, a package, a machine, a header of a matrix) — the same for the page and every export.
+The system SHALL offer these views, each with a one-sentence question it answers: `layers`, `modules`, `layer:<name>`, `dir:<path>`, `module:<path>`, `inside:<path>`, `usage:<path>` (also read as `contract:<path>`, its old name), `calls:<path>#<fn>`, `sequence:<path>#<fn>`, `path:<path>#<fn>`, `type:<path>#<Type>`, `cycles`, `cycles:fns`, `cycle:<path>`, `cycle:<path>#<fn>`, `classes`, `classes:<scope>`, `matrix`, `matrix:<dir>`, `metrics`, `metrics:<layer>`, `machines`, `machine:<path>#<name>`, `focus:<path>`, `focus:<path>#<fn>`, `logic`, `logic:<path>#<fn>`, `events`, `tests`, `hotspots`, `packages`, `timeline`, `coverage`, `intent`, `review` and `compare` (the revisions of the link: a base, a head, the heads). A view with a subject that does not exist SHALL be empty with a reason naming the subject. A picture of its subject alone SHALL say why: a module no module of the repository imports and that imports none of them (with the packages `--packages` would draw), a function that calls no function of the repository. The inside of a module that declares no function or class (a script) SHALL draw its top level, where its calls come from the module itself, and the functions it calls; a script whose top level calls none archdiff followed SHALL be empty with a reason saying so. Every shape SHALL say what a second tap on it opens — its kind's own view, or the view it names (`opens`: a folded directory, a package, a machine, a header of a matrix) — the same for the page and every export.
 
 #### Scenario: A module view
 
 - **WHEN** `archdiff diagram module:src/lib/orders.ts` runs
 - **THEN** the picture shows the module, what it imports and what imports it, one lane per layer, and its question is "what the module imports and what imports it"
+
+#### Scenario: A script's inside
+
+- **WHEN** `archdiff diagram inside:src/lib/seed.ts` runs on a script that only imports `placeOrder` and calls it
+- **THEN** the picture holds the script's top level (`src/lib/seed.ts (top level)`) calling `placeOrder`, and its reason says the module declares no function or class
 
 #### Scenario: A missing subject
 
