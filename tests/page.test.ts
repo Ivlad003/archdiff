@@ -79,6 +79,24 @@ test("the page lists the views, draws the layers and walks to a module and its c
   assert.ok((await page!.textContent("#code"))?.includes("export function placeOrder"));
 });
 
+/** Every generated line of the canvas: its look now, and the middle of its longest segment on screen (where a tap reaches it alone). */
+async function linesOnScreen(): Promise<{ id: string; look: string; x: number; y: number; length: number }[]> {
+  return (await page!.evaluate(`(() => {
+    const canvas = window.archdiff.canvas();
+    const viewport = canvas.viewport();
+    const box = document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect();
+    return canvas.scene().filter((element) => !element.isDeleted && element.customData?.archdiff === "edge").map((element) => {
+      let best = null;
+      for (let i = 1; i < element.points.length; i++) {
+        const [ax, ay] = element.points[i - 1], [bx, by] = element.points[i];
+        const length = Math.hypot(bx - ax, by - ay);
+        if (!best || length > best.length) best = { length, x: element.x + (ax + bx) / 2, y: element.y + (ay + by) / 2 };
+      }
+      return { id: element.id, look: element.strokeColor + "/" + element.strokeWidth + "/" + element.opacity, x: box.left + (best.x + viewport.scrollX) * viewport.zoom, y: box.top + (best.y + viewport.scrollY) * viewport.zoom, length: best.length * viewport.zoom };
+    });
+  })()`)) as { id: string; look: string; x: number; y: number; length: number }[];
+}
+
 /** Where a scene point sits on screen now: through the canvas's own scroll and zoom, wherever the page placed the scene. */
 async function onScreen(x: number, y: number): Promise<{ x: number; y: number }> {
   return (await page!.evaluate(`(() => {
@@ -249,6 +267,44 @@ test("an empty picture and one that cannot be drawn say why on the canvas; a sec
   await page!.mouse.dblclick(point.x, point.y);
   await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("nothing opens from this shape")`);
   assert.ok((await page!.evaluate("location.hash")) === "#view=metrics");
+});
+
+test("a line's light stays while the pointer moves on, moves to the next line tapped and goes out on a tap on nothing", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/?fresh=lights#view=layer%3Alib`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`);
+  await page!.waitForTimeout(800);
+  const drawn = await linesOnScreen();
+  const looks = new Map(drawn.map((line) => [line.id, line.look]));
+  /** The lines whose look is not the one the picture drew them with. */
+  const lit = async (): Promise<string[]> => (await linesOnScreen()).filter((line) => looks.get(line.id) !== line.look).map((line) => line.id);
+  const [first, second] = drawn.filter((line) => line.length > 30);
+  assert.ok(first && second, JSON.stringify(drawn));
+  // The pointer comes over the line (the hover lights it), the tap lights it; leaving it keeps the tap's light.
+  await page!.mouse.move(first.x, first.y);
+  await page!.waitForTimeout(200);
+  await page!.mouse.down();
+  await page!.mouse.up();
+  await page!.waitForTimeout(300);
+  assert.ok((await lit()).includes(first.id));
+  await page!.mouse.move(first.x + 40, first.y + 40);
+  await page!.waitForTimeout(200);
+  assert.ok((await lit()).includes(first.id), "the hover leaving the line put the tap's light out");
+  // Another line tapped: the first is drawn as before (not in the hover's colour), the second lit.
+  await page!.mouse.move(second.x, second.y);
+  await page!.waitForTimeout(200);
+  await page!.mouse.down();
+  await page!.mouse.up();
+  await page!.waitForTimeout(300);
+  const now = await lit();
+  assert.ok(now.includes(second.id) && (now.includes(first.id) === false || first.id === second.id), JSON.stringify(now));
+  // A tap on nothing: every line as the picture drew it.
+  const box = (await page!.evaluate(`document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect().toJSON()`)) as { left: number; bottom: number };
+  await page!.mouse.move(box.left + 16, box.bottom - 80);
+  await page!.waitForTimeout(200);
+  await page!.mouse.down();
+  await page!.mouse.up();
+  await page!.waitForTimeout(300);
+  assert.deepEqual(await lit(), []);
 });
 
 test("a double tap goes in though the page is still busy with its first tap", { skip: !CHROME && "no Chrome installed" }, async () => {

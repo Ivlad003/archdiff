@@ -50,7 +50,12 @@ The system SHALL, on a tap on a shape, show its Markdown page (declarations fold
 
 ### Requirement: A tap on a line says where it leads
 
-The system SHALL, on a tap on a line, light it with its two ends and show its page: what it joins, the imports and calls behind it with their `file:line`; several lines under one tap SHALL be listed to pick from; "follow" (or Shift+tap) SHALL light the chain onward and list it; the line under the pointer SHALL light on hover.
+The system SHALL, on a tap on a line, light it with its two ends and show its page: what it joins, the imports and calls behind it with their `file:line`; several lines under one tap SHALL be listed to pick from; "follow" (or Shift+tap) SHALL light the chain onward and list it; the line under the pointer SHALL light on hover. A tap's light SHALL stay while the pointer moves on, move to the line or shape tapped next, and go out on a tap on nothing, with the selection and any dim the dim tool does not keep; the editor SHALL show no light.
+
+#### Scenario: The light goes out
+
+- **WHEN** a reader taps a line, moves the pointer away, taps another line, then taps the empty canvas
+- **THEN** the first line stays lit until the second is tapped, and after the last tap every line looks as the picture drew it
 
 #### Scenario: A bundle of lines
 

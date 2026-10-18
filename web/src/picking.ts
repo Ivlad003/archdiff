@@ -176,7 +176,11 @@ export function select(ids: string[], centre = false): void {
     void showNode(picked);
   } else if (selected.length === 2) showChain(selected[0]!, selected[1]!);
   else if (selected.length > 2) showSelection();
-  else void showNode(null);
+  else {
+    // Nothing picked: nothing to dim around either.
+    page.canvas()?.dim(null);
+    void showNode(null);
+  }
 }
 
 /** A new picture: nothing selected in it yet (the picture's page is the load's to show). */
@@ -337,10 +341,17 @@ export function walk(direction: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowD
 /**
  * A tap on the canvas: on lines, their page (Shift: the chain onward); with Shift or Ctrl on a shape, the shape joins
  * the selection or leaves it; with the mix tool on a module, the module opens in place (or closes); else the shape is
- * picked (the dim tool fades all but its neighbours) and a tap on nothing clears the pick.
+ * picked (the dim tool fades all but its neighbours) and a tap on nothing clears the pick. A tap without Shift or
+ * Ctrl starts a new pick: the last one's selection and lights go, and a dim the dim tool does not keep.
  */
 export function tap(id: string | null, lines?: PickedLine[], extend?: boolean): void {
   closeMenu();
+
+  if (!extend) {
+    resetSelection();
+
+    if (!tools.dim) page.canvas()?.dim(null);
+  }
 
   if (lines && lines.length > 0) {
     void showEdge(lines, extend === true);

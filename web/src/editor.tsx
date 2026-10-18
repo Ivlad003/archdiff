@@ -452,17 +452,53 @@ function showsScene(mounted: Mounted, place: Viewport): boolean {
   return across > 0 && down > 0 && across * down >= 0.25 * Math.min(width * height, Math.max(1, bounds.maxX - bounds.minX) * Math.max(1, bounds.maxY - bounds.minY));
 }
 
-/**
- * The lights over the scene, each keeping the original look of what it changed to put it back: the tap's light (a
- * run of shapes and lines), the dimming of all but some, and the hover's light under the tap's.
- */
-function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; dim: CanvasHandle["dim"]; hover: CanvasHandle["hover"]; forget(): void } {
-  const lit = new Map<string, { strokeColor: string; strokeWidth: number; backgroundColor: string }>();
-  const dimmed = new Map<string, number>();
-  const hoverLit = new Map<string, { strokeColor: string; strokeWidth: number }>();
+/** What the lights change of an element: its stroke, its fill, its opacity. */
+type Look = Pick<CanvasElement, "strokeColor" | "strokeWidth" | "backgroundColor" | "opacity">;
 
-  /** Maps every element (the deleted too), and writes the scene back only when one changed. */
-  const update = (change: (element: CanvasElement, byId: ReadonlyMap<string, CanvasElement>) => CanvasElement | null): void => {
+/** The colour of the tap's light and of the hover's, under it. */
+const TAP_COLOUR = "#ff6f00";
+const HOVER_COLOUR = "#ffa726";
+
+/**
+ * The lights over the scene: the tap's light (a run of shapes and lines), the dimming of all but some, and the
+ * hover's light under the tap's. Every element a light touched keeps the look the scene drew it with, and its look
+ * is worked out again from all the lights on it whenever one changes — so lights come off in any order: the hover
+ * leaving a lit line no longer puts back its unlit look, and the tap's light, cleared later, no longer puts back the
+ * hover's (both kept a line orange after the reader tapped elsewhere). Lights are for reading: entering the editor
+ * puts every one out (`clear`), as the editor marks its own selection and a light would overwrite a colour drawn there.
+ */
+function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; dim: CanvasHandle["dim"]; hover: CanvasHandle["hover"]; clear(): void; forget(): void } {
+  /** The look the scene drew each touched element with. */
+  const drawn = new Map<string, Look>();
+  let lit: { ids: ReadonlySet<string>; colour: string } = { ids: new Set(), colour: TAP_COLOUR };
+  let hovered: string | null = null;
+  /** The shapes and lines the dim keeps; null: nothing is dimmed. */
+  let kept: ReadonlySet<string> | null = null;
+
+  /** An element's look under the lights on it now, from the look it was drawn with. */
+  const litLook = (element: CanvasElement, look: Look, owner: CanvasElement | undefined): Look => {
+    const role = element.customData?.["archdiff"];
+    const next = { ...look };
+
+    // The dim fades a shape, a line and the label of one it does not keep; a lane never.
+    if (kept !== null && owner !== undefined && (role === "node" || role === "edge" || role === "label") && !kept.has(owner.id)) next.opacity = DIMMED_OPACITY;
+
+    // The tap's light: a line gets the colour and a thick stroke, a shape a warm fill too; the hover's sits under it.
+    if (lit.ids.has(element.id) && (role === "node" || role === "edge")) {
+      next.strokeColor = lit.colour;
+      next.strokeWidth = 4;
+
+      if (role === "node") next.backgroundColor = "#ffe0b2";
+    } else if (hovered === element.id) {
+      next.strokeColor = HOVER_COLOUR;
+      next.strokeWidth = 3;
+    }
+
+    return next;
+  };
+
+  /** Works out the look of every element a light is or was on, and writes the scene back only when one changed. */
+  const apply = (): void => {
     const { api } = mounted;
 
     if (!api) return;
@@ -470,78 +506,49 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
     const byId = new Map(elements.map((element) => [element.id, element]));
     let changed = false;
     const next = elements.map((element) => {
-      const updated = change(element, byId);
+      if (!drawn.has(element.id) && !lit.ids.has(element.id) && hovered !== element.id && kept === null) return element;
+      const look = drawn.get(element.id) ?? { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth, backgroundColor: element.backgroundColor, opacity: element.opacity };
+      drawn.set(element.id, look);
+      // A label follows its shape or line.
+      const role = element.customData?.["archdiff"];
+      const owner = role === "label" ? byId.get(element.containerId ?? element.id.replace(/:text$/, "")) : element;
+      const wanted = litLook(element, look, owner);
 
-      if (updated === null) return element;
+      if (wanted.strokeColor === element.strokeColor && wanted.strokeWidth === element.strokeWidth && wanted.backgroundColor === element.backgroundColor && wanted.opacity === element.opacity) return element;
       changed = true;
 
-      return updated;
+      return { ...element, ...wanted };
     });
 
     if (changed) api.updateScene({ elements: asExcalidraw(next) });
   };
 
-  const highlight = (ids: readonly string[], colour = "#ff6f00"): void => {
-    const wanted = new Set(ids);
-    update((element) => {
-      const original = lit.get(element.id);
-      const role = element.customData?.["archdiff"];
-
-      if (wanted.has(element.id) && (role === "node" || role === "edge")) {
-        if (!original) lit.set(element.id, { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth, backgroundColor: element.backgroundColor });
-
-        // A line keeps its fill (none) and gets the colour and a thick stroke; a shape also gets a warm fill.
-        return role === "edge" ? { ...element, strokeColor: colour, strokeWidth: 4 } : { ...element, strokeColor: colour, strokeWidth: 4, backgroundColor: "#ffe0b2" };
-      }
-
-      if (!original) return null;
-      lit.delete(element.id);
-
-      return { ...element, ...original };
-    });
+  /** A light changes only in view mode: the editor's scene is the reader's own. */
+  const reading = (change: () => void): void => {
+    if (mounted.mode !== "view") return;
+    change();
+    apply();
   };
 
-  const dim = (keep: readonly string[] | null): void => {
-    const kept = keep === null ? null : new Set(keep);
-    update((element, byId) => {
-      const role = element.customData?.["archdiff"];
-      // A label follows its shape or line; a lane is never dimmed.
-      const owner = role === "label" && element.containerId ? byId.get(element.containerId) : role === "label" ? byId.get(element.id.replace(/:text$/, "")) : element;
-      const wanted = kept !== null && owner !== undefined && (role === "node" || role === "edge" || role === "label") && !kept.has(owner.id);
-      const original = dimmed.get(element.id);
-
-      if (wanted && original === undefined) {
-        dimmed.set(element.id, element.opacity);
-
-        return { ...element, opacity: DIMMED_OPACITY };
-      }
-
-      if (wanted || original === undefined) return null;
-      dimmed.delete(element.id);
-
-      return { ...element, opacity: original };
-    });
+  return {
+    highlight: (ids, colour = TAP_COLOUR) => reading(() => (lit = { ids: new Set(ids), colour })),
+    dim: (keep) => reading(() => (kept = keep === null ? null : new Set(keep))),
+    hover: (id) => reading(() => (hovered = id)),
+    clear: () => {
+      lit = { ids: new Set(), colour: TAP_COLOUR };
+      hovered = null;
+      kept = null;
+      apply();
+      drawn.clear();
+    },
+    // A new scene: its elements are drawn afresh, and no light is on them.
+    forget: () => {
+      lit = { ids: new Set(), colour: TAP_COLOUR };
+      hovered = null;
+      kept = null;
+      drawn.clear();
+    },
   };
-
-  // The hover light sits under the tap light: a line the tap lit keeps its look; one line at a time.
-  const hover = (id: string | null): void => {
-    update((element) => {
-      const original = hoverLit.get(element.id);
-
-      if (element.id === id && !lit.has(element.id) && !original) {
-        hoverLit.set(element.id, { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth });
-
-        return { ...element, strokeColor: "#ffa726", strokeWidth: 3 };
-      }
-
-      if (!original || element.id === id) return null;
-      hoverLit.delete(element.id);
-
-      return { ...element, ...original };
-    });
-  };
-
-  return { highlight, dim, hover, forget: () => lit.clear() };
 }
 
 /**
@@ -597,6 +604,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         requestAnimationFrame(() => settle(place));
       },
       setMode: (next) => {
+        if (next === "edit") lights.clear();
         mounted.mode = next;
 
         // Entering the editor: the scene as it is now is the baseline a change is measured from.
