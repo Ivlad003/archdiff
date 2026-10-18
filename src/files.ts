@@ -4,16 +4,18 @@
 // generated directories. Paths are POSIX, relative to the root, sorted.
 //
 // Sits at the I/O edge before extraction: root → file list → extractors.
-// Entry points: `listSourceFiles`, `isSourceFile`, `SOURCE_EXTENSIONS`.
+// Which extensions are source is languages.ts's (`isSourceFile`, passed
+// on here for the layers above core); git.ts lists the files. Entry
+// points: `listSourceFiles`, `isSourceFile`, `MAX_FILE_BYTES`,
+// `SkippedFile`, `toPosix`.
 
-import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { listedFiles } from "./git.ts";
 import { matchesGlob } from "./glob.ts";
-import { LANGUAGES } from "./languages.ts";
+import { isSourceFile } from "./languages.ts";
 
-/** Extensions archdiff parses: every language of `LANGUAGES`. */
-export const SOURCE_EXTENSIONS: readonly string[] = Object.values(LANGUAGES).flatMap((language) => language.extensions);
+export { isSourceFile };
 
 /** A file larger than this (a vendored bundle, generated code) is not parsed: it would cost seconds and tell nothing about the architecture. */
 export const MAX_FILE_BYTES = 1_500_000;
@@ -27,23 +29,9 @@ export interface SkippedFile {
 /** Directories the walk never enters when git does not list the files. */
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", "coverage", ".archdiff", ".next", ".cache", "out"]);
 
-/** A source file archdiff parses: a known extension (a `.d.ts` declaration file too: types and their imports live there). */
-export function isSourceFile(path: string): boolean {
-  return SOURCE_EXTENSIONS.some((extension) => path.endsWith(extension));
-}
-
 /** Windows separators to POSIX. */
 export function toPosix(path: string): string {
   return sep === "/" ? path : path.split(sep).join("/");
-}
-
-/** Tracked and untracked-but-not-ignored files as git lists them, or null outside a repository (or without git). */
-function gitFiles(root: string): string[] | null {
-  const result = spawnSync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-
-  if (result.error || result.status !== 0) return null;
-
-  return result.stdout.split("\0").filter((path) => path !== "");
 }
 
 /** Every file under `root`, skipping generated directories; a symbolic link is followed to a file or a directory, each directory once. */
@@ -101,7 +89,7 @@ function walkFiles(root: string): string[] {
 
 /** Every file of `root` git lists (or the walk finds), relative POSIX paths, sorted: for manifests beside the sources (hooks.json). */
 export function listAllFiles(root: string): string[] {
-  return [...new Set(gitFiles(root) ?? walkFiles(root))].sort();
+  return [...new Set(listedFiles(root) ?? walkFiles(root))].sort();
 }
 
 /**
@@ -110,7 +98,7 @@ export function listAllFiles(root: string): string[] {
  * has (deleted, not yet staged) is left out.
  */
 export function listSourceFiles(root: string, exclude: readonly string[] = []): { files: string[]; skipped: SkippedFile[] } {
-  const all = gitFiles(root) ?? walkFiles(root);
+  const all = listedFiles(root) ?? walkFiles(root);
   // Hidden directories (.github, .agents, .scratch) hold tooling, not the program; `exclude` cannot bring them back but archdiff.json layers may name them later.
   const kept = all.filter((path) => isSourceFile(path) && !path.startsWith(".") && !path.split("/").some((segment) => SKIPPED_DIRECTORIES.has(segment)) && !exclude.some((glob) => matchesGlob(path, glob)));
   const files: string[] = [];

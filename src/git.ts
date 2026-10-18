@@ -1,16 +1,18 @@
-// Git, as archdiff uses it: the plumbing that lists changed files, reads a
-// file at a revision, finds the merge-base and the default base branch,
-// lists branches and commits, and stamps a revision. Every function runs
-// `git` as a child process with an argument list and answers in plain
-// words when git refuses (not a repository, no commits yet, no such ref).
+// Git, as archdiff uses it: the plumbing that lists the files of the
+// working tree and the changed ones, reads a file at a revision, finds the
+// merge-base and the default base branch, lists branches and commits,
+// stamps a revision, and makes a new project's first commit. Every
+// function runs `git` as a child process with an argument list and answers
+// in plain words when git refuses (not a repository, no commits yet, no
+// such ref); no other module of archdiff runs git.
 //
-// Sits at the I/O edge below diff.ts (which compares analyses) and the
-// server. Entry points: `changedFiles`, `treeAt`, `mergeBase`,
-// `defaultBase`, `listBranches`, `commitsBetween`, `fileHistory`,
-// `revisionStamp`.
+// Sits at the I/O edge below review.ts (which reads a change), files.ts
+// (which lists the sources) and the server. Entry points: `listedFiles`,
+// `changedFiles`, `treeAt`, `mergeBase`, `defaultBase`, `listBranches`,
+// `commitsBetween`, `fileHistory`, `revisionStamp`, `commitFirst`.
 
 import { spawnSync } from "node:child_process";
-import { isSourceFile } from "./files.ts";
+import { isSourceFile } from "./languages.ts";
 function git(root: string, args: string[]): { ok: true; out: string } | { ok: false; error: string } {
   const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
 
@@ -238,4 +240,26 @@ export function revisionStamp(root: string): { commit: string; date: string } | 
   const [commit, date] = result.out.trim().split(" ");
 
   return commit && date ? { commit, date } : null;
+}
+
+/** Tracked and untracked-but-not-ignored files as git lists them, or null outside a repository (or without git). */
+export function listedFiles(root: string): string[] | null {
+  const listed = git(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+
+  return listed.ok ? listed.out.split("\0").filter((path) => path !== "") : null;
+}
+
+/** A new repository at `dir` on the branch main, everything in it the first commit, by archdiff; throws with git's words when it refuses. */
+export function commitFirst(dir: string, message: string): void {
+  const steps: [name: string, args: string[]][] = [
+    ["init", ["init", "-q", "-b", "main"]],
+    ["add", ["add", "."]],
+    ["commit", ["-c", "user.email=archdiff@localhost", "-c", "user.name=archdiff", "commit", "-q", "-m", message]],
+  ];
+
+  for (const [name, args] of steps) {
+    const result = git(dir, args);
+
+    if (!result.ok) throw new Error(`git ${name}: ${result.error}`);
+  }
 }

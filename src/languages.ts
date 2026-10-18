@@ -4,7 +4,8 @@
 // Sits before both pipelines: config validation and file collection ask it
 // which files are source; the frontends and the graph ask it about language
 // rules (constructors, implicit members, case-insensitive names).
-// Entry points: `LANGUAGES`, `languageOf` and the per-file predicates below.
+// Entry points: `LANGUAGES`, `languageOf`, `isSourceFile`,
+// `SOURCE_EXTENSIONS` and the per-file predicates below.
 
 /** What archdiff needs to know about one source language, without its grammar. */
 export interface LanguageInfo {
@@ -48,6 +49,14 @@ export const LANGUAGE_NAMES = Object.keys(LANGUAGES).filter(isLanguage).sort();
 /** Narrows a config value to a supported language name. */
 export function isLanguage(name: unknown): name is Language {
   return typeof name === "string" && Object.hasOwn(LANGUAGES, name);
+}
+
+/** Extensions archdiff parses: every language of `LANGUAGES`. */
+export const SOURCE_EXTENSIONS: readonly string[] = Object.values(LANGUAGES).flatMap((language) => language.extensions);
+
+/** A source file archdiff parses: a known extension (a `.d.ts` declaration file too: types and their imports live there). */
+export function isSourceFile(path: string): boolean {
+  return SOURCE_EXTENSIONS.some((extension) => path.endsWith(extension));
 }
 
 /** The language a path belongs to by its extension, or `undefined` for a non-source file. */

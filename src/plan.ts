@@ -18,8 +18,9 @@ import type { Analysis } from "./analyze.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import type { Intent, IntentModule } from "./intent.ts";
 import { isJsonObject, isJsonString } from "./json.ts";
+import { isSourceFile } from "./files.ts";
 import type { SceneElement } from "./scene.ts";
-import { parseView } from "./views.ts";
+import { parseView } from "./view-keys.ts";
 
 export interface PlannedNode {
   /** The element's ID in the drawing. */
@@ -52,8 +53,6 @@ export interface Plan {
   /** Arrows and shapes the plan could not read, with the reason. */
   ignored: string[];
 }
-
-const MODULE_LABEL = /\.[cm]?[jt]sx?$/;
 
 function generated(element: SceneElement): string | null {
   return isJsonObject(element.customData) && isJsonString(element.customData["archdiff"]) ? element.customData["archdiff"] : null;
@@ -125,8 +124,8 @@ function plannedShapes(d: Drawing): Map<string, PlannedNode> {
     }
 
     // `path#name` is a function of that module, however the path looks; a path or a file name is a module.
-    if (!label.includes("#") && (label.includes("/") || MODULE_LABEL.test(label))) {
-      const name = MODULE_LABEL.test(label) ? label : `${label}.ts`;
+    if (!label.includes("#") && (label.includes("/") || isSourceFile(label))) {
+      const name = isSourceFile(label) ? label : `${label}.ts`;
       const node: PlannedNode = { id: element.id, kind: "module", name, because: lane ? `drawn in the lane of ${layer}` : "drawn outside every lane" };
 
       if (layer) node.layer = layer;

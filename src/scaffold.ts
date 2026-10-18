@@ -10,9 +10,9 @@
 // Sits at the edge, beside the CLI: options → files on disk + git.
 // Entry points: `scaffold`, `TEMPLATES`, `ScaffoldOptions`.
 
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { commitFirst } from "./git.ts";
 import { INTENT_FILE, intentMarkdown, type Intent } from "./intent.ts";
 
 export type Language = "ts" | "js";
@@ -173,17 +173,7 @@ export function scaffold(dir: string, options: ScaffoldOptions): string[] {
     }
   }
 
-  if (options.git && !existsSync(join(dir, ".git"))) {
-    const git = (...args: string[]): void => {
-      const result = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
-
-      if (result.status !== 0) throw new Error(`git ${args[0]}: ${result.stderr.trim() || "failed"}`);
-    };
-
-    git("init", "-q", "-b", "main");
-    git("add", ".");
-    git("-c", "user.email=archdiff@localhost", "-c", "user.name=archdiff", "commit", "-q", "-m", `archdiff new: ${options.template} (${options.lang})`);
-  }
+  if (options.git && !existsSync(join(dir, ".git"))) commitFirst(dir, `archdiff new: ${options.template} (${options.lang})`);
 
   return written;
 }
