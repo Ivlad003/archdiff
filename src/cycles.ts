@@ -10,7 +10,7 @@
 // Pure functions of the graph, on scc.ts. Entry points: `cyclesView`,
 // `feedbackArcSet`.
 
-import type { Diagram, Line, Shape } from "./diagram.ts";
+import type { PictureContent, Line, Shape } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode, lane, moduleNode, unplaced } from "./nodes.ts";
 import { stronglyConnected } from "./scc.ts";
@@ -200,12 +200,11 @@ function adjacencyOf(edges: readonly WeightedEdge[]): Map<string, Set<string>> {
  * layers import each other, a lane of the layers in a circle. `only`
  * keeps the cycle holding that module or function.
  */
-export function cyclesView(graph: Graph, only: string | null, options: CycleOptions = {}): Diagram {
+export function cyclesView(graph: Graph, only: string | null, options: CycleOptions = {}): PictureContent {
   const fns = options.fns === true;
-  const keyOf = only === null ? (fns ? "cycles:fns" : "cycles") : `cycle:${only}`;
   const what = fns ? "function" : "module";
 
-  if (only !== null && !(fns ? graph.nodes.has(only) : graph.modules.has(only))) return unplaced(keyOf, only, [], [], [], { reason: `no ${what} "${only}"`, missing: true });
+  if (only !== null && !(fns ? graph.nodes.has(only) : graph.modules.has(only))) return unplaced(only, [], [], [], { reason: `no ${what} "${only}"`, missing: true });
   const { edges: all, typeOnly } = fns ? { edges: callEdges(graph), typeOnly: new Set<string>() } : importEdges(graph, options.types === true);
   const every = stronglyConnected(adjacencyOf(all)).filter((component) => component.length >= 2);
   // A circle of functions inside one module is mutual recursion, not a coupling: counted, not drawn.
@@ -289,7 +288,7 @@ export function cyclesView(graph: Graph, only: string | null, options: CycleOpti
   if (chosen.length === 0 && lanes.length === 0) {
     const reason = only === null ? (fns ? `no call cycles: no two functions of different modules call each other in a circle${within > 0 ? ` (${within} within one module: mutual recursion)` : ""}` : `no import cycles: no two modules import each other${options.types ? "" : " (type-only imports not counted; --types counts them)"}`) : `${only} is in no ${fns ? "call" : "import"} cycle`;
 
-    return unplaced(keyOf, title, [], [], [], { reason });
+    return unplaced(title, [], [], [], { reason });
   }
 
   const typed = edges.filter((edge) => edge.typeOnly).length;
@@ -298,5 +297,5 @@ export function cyclesView(graph: Graph, only: string | null, options: CycleOpti
 
   if (within > 0 && only === null) notes.push(`${within} circles of functions within one module (mutual recursion) not drawn`);
 
-  return unplaced(keyOf, title, nodes, edges, lanes.map(lane), { reason: notes.join("; ") });
+  return unplaced(title, nodes, edges, lanes.map(lane), { reason: notes.join("; ") });
 }

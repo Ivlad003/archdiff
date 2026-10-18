@@ -4,7 +4,7 @@
 // layer, as a dependency structure matrix with the back edges marked),
 // `type:<id>` (where a type is produced, consumed and stored),
 // `path:<fn>` (from an entry to the storages, the branches that lead
-// nowhere pruned), `contract:<module>` (its exports and who uses them
+// nowhere pruned), `usage:<module>` (its exports and who uses them
 // from outside), `events` (emitters, event names, listeners), `tests`
 // (which modules the tests import), `hotspots` (modules sized by lines,
 // coloured by calls in), `packages` (the package.json files as a system)
@@ -13,7 +13,7 @@
 // coordinates and `layout` leaves them alone.
 
 import type { Analysis } from "./analyze.ts";
-import { SIZE, type Diagram, type Line, type Shape } from "./diagram.ts";
+import { SIZE, type Diagram, type Line, type PictureContent, type Shape } from "./diagram.ts";
 import type { HistoryRow } from "./diff.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
@@ -44,19 +44,18 @@ function layerOrder(graph: Graph, types = false): string[] {
  * go against the order (a lower layer importing a higher one) and are marked
  * red. Placed, with the layer names as the first row and column.
  */
-export function matrixView(graph: Graph, scope: string | null = null, types = false): Diagram {
+export function matrixView(graph: Graph, scope: string | null = null, types = false): PictureContent {
   // The matrix of a directory: its modules in the rows and columns, ordered by their layers' order and then greedily
   // by their imports, so that an import against the order (upward) stands out as it does between layers.
   const counts = new Map<string, number>();
   let order: string[];
   let label: (id: string) => string;
-  let view = "matrix";
   let title = "Matrix: rows import columns";
 
   if (scope === null) {
     order = layerOrder(graph, types);
 
-    if (order.length === 0) return unplaced("matrix", "Matrix", [], [], [], { reason: "no layers" });
+    if (order.length === 0) return unplaced("Matrix", [], [], [], { reason: "no layers" });
 
     for (const dep of graph.deps) {
       const from = graph.modules.get(dep.from)?.layer;
@@ -69,10 +68,9 @@ export function matrixView(graph: Graph, scope: string | null = null, types = fa
   } else {
     const prefix = `${scope}/`;
     const modules = [...graph.modules.keys()].filter((id) => id.startsWith(prefix)).sort();
-    view = `matrix:${scope}`;
     title = `Matrix of ${scope}: rows import columns`;
 
-    if (modules.length === 0) return unplaced(view, title, [], [], [], { reason: `no modules under "${scope}"`, missing: true });
+    if (modules.length === 0) return unplaced(title, [], [], [], { reason: `no modules under "${scope}"`, missing: true });
     const inside = new Set(modules);
 
     for (const dep of graph.deps) if (inside.has(dep.from) && inside.has(dep.to) && dep.from !== dep.to && (types || !dep.typeOnly)) counts.set(`${dep.from}\u0000${dep.to}`, (counts.get(`${dep.from}\u0000${dep.to}`) ?? 0) + 1);
@@ -111,7 +109,7 @@ export function matrixView(graph: Graph, scope: string | null = null, types = fa
   });
   const back = nodes.filter((node) => node.diff === "removed").length;
 
-  return unplaced(view, title, nodes, [], [], { placed: true, reason: back > 0 ? `${back} cells go against the ${scope === null ? "layer" : "import"} order (red)` : `every import follows the ${scope === null ? "layer" : "import"} order` });
+  return unplaced(title, nodes, [], [], { placed: true, reason: back > 0 ? `${back} cells go against the ${scope === null ? "layer" : "import"} order (red)` : `every import follows the ${scope === null ? "layer" : "import"} order` });
 }
 
 /** The role a function has for a type by its signature: it returns it, takes it, or both. */
@@ -134,11 +132,11 @@ function roleOf(signature: string | null, type: string): "produces" | "consumes"
  * one. Only functions of the type's module or of modules importing it
  * count, so a same-named type elsewhere is not confused with it.
  */
-export function typeView(analysis: Analysis, id: string): Diagram {
+export function typeView(analysis: Analysis, id: string): PictureContent {
   const { graph } = analysis;
   const type = graph.nodes.get(id);
 
-  if (!type || type.kind !== "type") return unplaced(`type:${id}`, id, [], [], [], { reason: `no type "${id}"`, missing: true });
+  if (!type || type.kind !== "type") return unplaced(id, [], [], [], { reason: `no type "${id}"`, missing: true });
   const importers = new Set([type.module, ...graph.deps.filter((dep) => dep.to === type.module).map((dep) => dep.from)]);
   const members: { node: Shape; role: string }[] = [];
 
@@ -172,7 +170,7 @@ export function typeView(analysis: Analysis, id: string): Diagram {
 
   for (const member of members) if (member.role !== "consumes") edges.push({ from: member.node.id, to: id, kind: "ref", label: member.role });
 
-  return unplaced(`type:${id}`, `Where ${type.name} flows`, nodes, edges, lanesOf(graph, nodes), members.length === 0 ? { reason: "no function takes or returns this type" } : {});
+  return unplaced(`Where ${type.name} flows`, nodes, edges, lanesOf(graph, nodes), members.length === 0 ? { reason: "no function takes or returns this type" } : {});
 }
 
 /**
@@ -180,11 +178,11 @@ export function typeView(analysis: Analysis, id: string): Diagram {
  * then every function that leads to no storage module pruned away, so the
  * picture is the route data takes to where it rests.
  */
-export function pathView(analysis: Analysis, id: string, depth: number): Diagram {
+export function pathView(analysis: Analysis, id: string, depth: number): PictureContent {
   const { graph } = analysis;
   const start = graph.nodes.get(id);
 
-  if (!start) return unplaced(`path:${id}`, id, [], [], [], { reason: `no function "${id}"`, missing: true });
+  if (!start) return unplaced(id, [], [], [], { reason: `no function "${id}"`, missing: true });
   const callsFrom = new Map<string, string[]>();
 
   for (const call of graph.calls) if (call.kind === "call") callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call.to]);
@@ -244,25 +242,24 @@ export function pathView(analysis: Analysis, id: string, depth: number): Diagram
     for (const parent of parents.get(node) ?? []) stack.push(parent);
   }
 
-  if (kept.size === 0) return unplaced(`path:${id}`, `Path from ${start.name} to the storages`, [], [], [], { reason: `no storage within ${depth} calls (modules named like stores or importing a database package)` });
+  if (kept.size === 0) return unplaced(`Path from ${start.name} to the storages`, [], [], [], { reason: `no storage within ${depth} calls (modules named like stores or importing a database package)` });
   kept.add(id);
   const nodes = [...kept].sort((a, b) => (a === id ? -1 : b === id ? 1 : a < b ? -1 : 1)).map((node) => (isStorage(node) && node !== id ? { ...fnNode(graph, node), label: `${graph.nodes.get(node)!.name}\nstorage` } : fnNode(graph, node)));
   const drawn: Line[] = [...edges].map((edge) => edge.split("\u0000") as [string, string]).filter(([from, to]) => kept.has(from) && kept.has(to)).map(([from, to]) => ({ from, to, kind: "call" }));
 
-  return unplaced(`path:${id}`, `Path from ${start.name} to the storages`, nodes, drawn, lanesOf(graph, nodes));
+  return unplaced(`Path from ${start.name} to the storages`, nodes, drawn, lanesOf(graph, nodes));
 }
 
 /**
- * The public contract of a module: its exports, and the modules outside
- * it that use each (a call to the export, or an import binding of its
- * name), importers in their layers' lanes; an export nothing outside uses
- * says so.
+ * Who uses a module: its exports, and the modules outside it that use
+ * each (a call to the export, or an import binding of its name), the
+ * importers in their layers' lanes; an export nothing outside uses says so.
  */
-export function contractView(analysis: Analysis, id: string): Diagram {
+export function usageView(analysis: Analysis, id: string): PictureContent {
   const { graph, facts } = analysis;
   const module = graph.modules.get(id);
 
-  if (!module) return unplaced(`contract:${id}`, id, [], [], [], { reason: `no module "${id}"`, missing: true });
+  if (!module) return unplaced(id, [], [], [], { reason: `no module "${id}"`, missing: true });
   const exported = [...graph.nodes.values()].filter((node) => node.module === id && node.exported && !node.parent);
   const importers = [...new Set(graph.deps.filter((dep) => dep.to === id).map((dep) => dep.from))].sort();
   const used = new Map<string, Set<string>>();
@@ -302,7 +299,7 @@ export function contractView(analysis: Analysis, id: string): Diagram {
   for (const importer of [...usedImporters].sort()) nodes.push(moduleNode(graph, importer));
   const lanes = [lane(id), ...lanesOf(graph, nodes.filter((node) => node.group !== id))];
 
-  return unplaced(`contract:${id}`, `Contract of ${id}`, nodes, edges, lanes, exported.length === 0 ? { reason: "the module exports nothing" } : {});
+  return unplaced(`Usage of ${id}: who uses its exports`, nodes, edges, lanes, exported.length === 0 ? { reason: "the module exports nothing" } : {});
 }
 
 const EMITTERS = new Set(["emit", "emitAsync", "publish", "dispatch", "trigger", "fire"]);
@@ -315,7 +312,7 @@ const LISTENERS = new Set(["on", "once", "addListener", "addEventListener", "sub
  * (the function passed) is drawn as the receiver when it is a function of
  * the same module, else the function that registers it.
  */
-export function eventsView(analysis: Analysis): Diagram {
+export function eventsView(analysis: Analysis): PictureContent {
   const { graph, facts } = analysis;
   const nodes = new Map<string, Shape>();
   const edges: Line[] = [];
@@ -368,22 +365,22 @@ export function eventsView(analysis: Analysis): Diagram {
 
   const drawn = [...nodes.values()].filter((node) => node.kind === "event" || graph.nodes.has(node.id));
 
-  if (drawn.length === 0) return unplaced("events", "Events", [], [], [], { reason: "no emit/publish/dispatch or on/subscribe call with a literal event name" });
+  if (drawn.length === 0) return unplaced("Events", [], [], [], { reason: "no emit/publish/dispatch or on/subscribe call with a literal event name" });
 
-  return unplaced("events", "Events: emitters → events → listeners", drawn, edges.filter((edge) => nodes.has(edge.from) && nodes.has(edge.to)), lanesOf(graph, drawn));
+  return unplaced("Events: emitters → events → listeners", drawn, edges.filter((edge) => nodes.has(edge.from) && nodes.has(edge.to)), lanesOf(graph, drawn));
 }
 
 const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|[.\-_](test|spec|stories)\.[cm]?[jt]sx?$|_test\.(py|rs|php)$|(^|\/)tests?_[^/]*\.py$|Test\.php$/;
 
 /** Which modules the tests import: every non-test module in its layer's lane, with the number of test files importing it; one no test imports is marked. */
-export function testsView(graph: Graph): Diagram {
+export function testsView(graph: Graph): PictureContent {
   const tests = [...graph.modules.keys()].filter((id) => TEST_MODULE.test(id));
   const covered = new Map<string, Set<string>>();
 
   for (const dep of graph.deps) if (TEST_MODULE.test(dep.from) && graph.modules.has(dep.to) && !TEST_MODULE.test(dep.to)) covered.set(dep.to, new Set([...(covered.get(dep.to) ?? []), dep.from]));
   const subjects = [...graph.modules.keys()].filter((id) => !TEST_MODULE.test(id)).sort();
 
-  if (subjects.length === 0) return unplaced("tests", "Tests", [], [], [], { reason: "no modules" });
+  if (subjects.length === 0) return unplaced("Tests", [], [], [], { reason: "no modules" });
   const nodes = subjects.map((id): Shape => {
     const by = covered.get(id)?.size ?? 0;
     const node = { ...moduleNode(graph, id), label: `${id}\n${by === 0 ? "no tests" : `${by} test file${by === 1 ? "" : "s"}`}`, count: by };
@@ -392,7 +389,7 @@ export function testsView(graph: Graph): Diagram {
   });
   const untested = nodes.filter((node) => node.count === 0).length;
 
-  return unplaced("tests", `Tests: ${tests.length} test files cover ${subjects.length - untested} of ${subjects.length} modules`, nodes, [], lanesOf(graph, nodes), { reason: untested > 0 ? `${untested} modules no test file imports (orange)` : "every module is imported by a test" });
+  return unplaced(`Tests: ${tests.length} test files cover ${subjects.length - untested} of ${subjects.length} modules`, nodes, [], lanesOf(graph, nodes), { reason: untested > 0 ? `${untested} modules no test file imports (orange)` : "every module is imported by a test" });
 }
 
 /**
@@ -400,7 +397,7 @@ export function testsView(graph: Graph): Diagram {
  * calls into it from other modules, packed row by row in its layer's lane.
  * The big dark boxes are where change is costly.
  */
-export function hotspotsView(graph: Graph): Diagram {
+export function hotspotsView(graph: Graph): PictureContent {
   const callsIn = new Map<string, number>();
 
   for (const call of graph.calls) {
@@ -445,14 +442,14 @@ export function hotspotsView(graph: Graph): Diagram {
     groups.push({ id: layer, label: layer, kind: "lane", x: 0, y: top, w: width + 20, h: y - top });
   }
 
-  return unplaced("hotspots", "Hotspots: size by lines, shade by calls in", nodes, [], groups, { placed: true });
+  return unplaced("Hotspots: size by lines, shade by calls in", nodes, [], groups, { placed: true });
 }
 
 /** The packages of the repository as a system: what each declares as a dependency on another, and what its modules import from another's. */
-export function packagesView(analysis: Analysis): Diagram {
+export function packagesView(analysis: Analysis): PictureContent {
   const { graph, packages } = analysis;
 
-  if (packages.length < 2) return unplaced("packages", "Packages", [], [], [], { reason: packages.length === 0 ? "no package.json" : "one package: the layers view is its map" });
+  if (packages.length < 2) return unplaced("Packages", [], [], [], { reason: packages.length === 0 ? "no package.json" : "one package: the layers view is its map" });
   const byDir = [...packages].sort((a, b) => b.dir.length - a.dir.length);
   const packageOf = (module: string): string | null => byDir.find((candidate) => candidate.dir === "" || module.startsWith(`${candidate.dir}/`))?.name ?? null;
   const counts = new Map<string, number>();
@@ -494,7 +491,7 @@ export function packagesView(analysis: Analysis): Diagram {
     edges.push({ from, to, kind: "dependency", label: `${count} imports, not declared`, count, diff: "added" });
   }
 
-  return unplaced("packages", `Packages (${packages.length})`, nodes, edges, []);
+  return unplaced(`Packages (${packages.length})`, nodes, edges, []);
 }
 
 /** One box of the class diagram. */
@@ -570,9 +567,8 @@ function classBoxes(analysis: Analysis, module: string): ClassBox[] {
  * they name — in the scope, or brought in from the modules the scope
  * imports. Lanes are modules; the Markdown carries a Mermaid classDiagram.
  */
-export function classesView(analysis: Analysis, scope: string | null, limit: number): Diagram {
+export function classesView(analysis: Analysis, scope: string | null, limit: number): PictureContent {
   const { graph } = analysis;
-  const key = scope === null ? "classes" : `classes:${scope}`;
   let modules: string[];
 
   if (scope === null) modules = [...graph.modules.keys()].sort();
@@ -580,14 +576,14 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
   else {
     modules = [...graph.modules.keys()].filter((id) => id.startsWith(`${scope.replace(/\/+$/, "")}/`)).sort();
 
-    if (modules.length === 0) return unplaced(key, scope, [], [], [], { reason: `no module or directory "${scope}"`, missing: true });
+    if (modules.length === 0) return unplaced(scope, [], [], [], { reason: `no module or directory "${scope}"`, missing: true });
   }
 
   const boxes = new Map<string, ClassBox>();
 
   for (const module of modules) for (const box of classBoxes(analysis, module)) boxes.set(box.id, box);
 
-  if (boxes.size === 0) return unplaced(key, scope === null ? "Classes" : `Classes of ${scope}`, [], [], [], { reason: "no class, interface or object type here" });
+  if (boxes.size === 0) return unplaced(scope === null ? "Classes" : `Classes of ${scope}`, [], [], [], { reason: "no class, interface or object type here" });
   // A name written on `extends`/`implements` → the box it means: the same module first, then the modules this one imports.
   const resolveName = (from: string, name: string): string | null => {
     const own = `${from}#${name}`;
@@ -651,7 +647,7 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
   }
 
   const classes = { boxes: all.map((box) => ({ id: box.id, name: box.name, kind: box.kind, fields: box.fields, methods: box.methods })), relations: edges.map((edge) => ({ from: edge.from, to: edge.to, kind: edge.label as "extends" | "implements" })) };
-  const diagram = unplaced(key, scope === null ? `Classes (${all.length})` : `Classes of ${scope}`, nodes, edges, [...new Set(all.map((box) => box.module))].map(lane), { classes });
+  const diagram = unplaced(scope === null ? `Classes (${all.length})` : `Classes of ${scope}`, nodes, edges, [...new Set(all.map((box) => box.module))].map(lane), { classes });
 
   if (boxes.size > limit) diagram.reason = `${boxes.size - limit} of ${boxes.size} classes cut; --limit raises it, classes:<dir> narrows`;
 
@@ -659,10 +655,8 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
 }
 
 /** The drift of the architecture as a bar per commit: height by the imports and functions that moved, red when a coupling between layers appeared, green when one went. */
-export function timelineDiagram(rows: readonly HistoryRow[], base: string, head: string): Diagram {
-  const key = "timeline";
-
-  if (rows.length === 0) return unplaced(key, `Timeline ${base}..${head}`, [], [], [], { placed: true, reason: "no commits in the range" });
+export function timelineDiagram(rows: readonly HistoryRow[], base: string, head: string): PictureContent {
+  if (rows.length === 0) return unplaced(`Timeline ${base}..${head}`, [], [], [], { placed: true, reason: "no commits in the range" });
   const magnitude = (row: HistoryRow): number => row.depsAdded + row.depsRemoved + row.fnsChanged + row.modulesAdded + row.modulesRemoved + 10 * (row.layerEdgesAdded.length + row.layerEdgesRemoved.length);
   const max = Math.max(1, ...rows.map(magnitude));
   const column = 110;
@@ -681,5 +675,5 @@ export function timelineDiagram(rows: readonly HistoryRow[], base: string, head:
     nodes.push({ id: `commit:${row.commit.sha}`, kind: "cell", label: `${row.commit.short} ${row.commit.date}\n${row.commit.subject.slice(0, 28)}`, ref: { id: row.commit.sha }, x, y: 20 + chart + 10, w: column - 20, h: 48 });
   });
 
-  return unplaced(key, `Timeline ${base}..${head}: ${rows.length} commits`, nodes, [], [], { placed: true, reason: "bars: imports and functions moved; red: a coupling between layers appeared, green: one went" });
+  return unplaced(`Timeline ${base}..${head}: ${rows.length} commits`, nodes, [], [], { placed: true, reason: "bars: imports and functions moved; red: a coupling between layers appeared, green: one went" });
 }

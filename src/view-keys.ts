@@ -1,126 +1,116 @@
-// The keys of the views: the `View` type, how a key (`module:src/x.ts`,
-// `calls:src/x.ts#f`, `matrix`, `focus:src/x.ts#f`, `logic:src/x.ts#f`) is parsed and written, the one question
-// each kind answers, the default depth of each, and which kinds draw
-// modules (where a hub is noise). Plain data and pure functions, no
-// imports: views.ts builds the pictures from them, pipeline.ts shapes
-// them, the page and the CLI name views by them.
+// The views and their keys: one table of the kinds of view — whether a
+// kind takes a subject, the one question it answers, its default depth,
+// whether its shapes are modules (where a hub is noise) — from which the
+// `View` type, the questions and the depths are read, and the codec
+// between a view and its key (`module:src/x.ts`, `calls:src/x.ts#f`,
+// `matrix`). The key is the view on the wire — in a link, a chat tag, a
+// drawing's file name, the Markdown — and the code in between reads it
+// with `parseView` and writes it with `viewKey`, never by hand. Plain
+// data and pure functions without imports: views.ts builds the pictures,
+// pipeline.ts shapes them, the page and the CLI name views by them.
 //
-// Entry points: `View`, `parseView`, `viewKey`, `QUESTION`,
-// `DEFAULT_DEPTH`, `MODULE_VIEWS`.
+// Entry points: `VIEW_KINDS`, `View`, `ViewKind`, `parseView`, `viewKey`,
+// `questionOf`, `defaultDepth`, `isModuleView`.
 
-export type View =
-  | { kind: "layers" }
-  | { kind: "layer"; name: string }
-  | { kind: "dir"; path: string }
-  | { kind: "module"; id: string }
-  | { kind: "inside"; id: string }
-  | { kind: "contract"; id: string }
-  | { kind: "calls"; id: string }
-  | { kind: "sequence"; id: string }
-  | { kind: "path"; id: string }
-  | { kind: "type"; id: string }
-  | { kind: "cycles"; scope: "fns" | null }
-  | { kind: "cycle"; id: string }
-  | { kind: "classes"; scope: string | null }
-  | { kind: "matrix"; scope: string | null }
-  | { kind: "metrics"; scope: string | null }
-  | { kind: "machines" }
-  | { kind: "machine"; id: string }
-  | { kind: "focus"; id: string }
-  | { kind: "logic"; scope: string | null }
-  | { kind: "events" }
-  | { kind: "tests" }
-  | { kind: "hotspots" }
-  | { kind: "packages" }
-  | { kind: "timeline" }
-  | { kind: "coverage" }
-  | { kind: "intent" }
-  | { kind: "modules" };
+/** What one kind of view is: how its key is written, what it answers, how deep it goes by default. */
+interface KindSpec {
+  /** `none`: the key is the kind (`layers`); `required`: `kind:<subject>`; `optional`: either. */
+  subject: "none" | "required" | "optional";
+  /** The one question the picture answers. */
+  question: string;
+  /** How far from the subject the picture goes without `--depth`; 0 when absent. */
+  depth?: number;
+  /** The shapes are modules: a module most of them import is a hub, drawn as a badge. */
+  modules?: true;
+  /** The subject is a directory (or a module path) that may be written with a trailing slash. */
+  path?: true;
+  /** The only subjects the kind takes (`cycles:fns`). */
+  subjects?: readonly string[];
+}
 
-/** The views without a subject. */
-const PLAIN_VIEWS = new Set(["layers", "coverage", "cycles", "classes", "matrix", "metrics", "logic", "events", "tests", "hotspots", "packages", "timeline", "intent", "modules", "machines"]);
+export const VIEW_KINDS = {
+  layers: { subject: "none", question: "which layers import which, and how much" },
+  layer: { subject: "required", question: "which modules of the layer import which, and what they touch outside it", depth: 1, modules: true },
+  dir: { subject: "required", question: "which modules of the directory import which, and their neighbours", depth: 1, modules: true, path: true },
+  module: { subject: "required", question: "what the module imports and what imports it", depth: 1, modules: true },
+  inside: { subject: "required", question: "which functions of the module call which, and what they call outside", depth: 1 },
+  usage: { subject: "required", question: "which exports of the module are used, by whom" },
+  calls: { subject: "required", question: "what a function calls, step by step, and where the trail ends", depth: 3 },
+  sequence: { subject: "required", question: "in what order a function's calls cross the modules", depth: 4 },
+  path: { subject: "required", question: "which calls lead from a function to a store", depth: 8 },
+  type: { subject: "required", question: "where a type is produced, consumed and transformed", depth: 1 },
+  focus: { subject: "required", question: "everything joined to this one shape: what calls or imports it, what it calls or imports, across every module", depth: 1 },
+  logic: { subject: "optional", question: "which branches, loops and early exits a function's body has, and which conditions lead to which outcome" },
+  cycles: { subject: "optional", question: "which modules (or functions) import or call each other in a circle, and where to cut", modules: true, subjects: ["fns"] },
+  cycle: { subject: "required", question: "which modules form this circle, through which imports, and where to cut", modules: true },
+  classes: { subject: "optional", question: "which classes and interfaces exist, with what fields and methods, extending what", path: true },
+  matrix: { subject: "optional", question: "who imports whom, and which imports go against the order", path: true },
+  metrics: { subject: "optional", question: "how coupled and how cohesive each module is: Ca, Ce, instability, abstractness, the distance from the main sequence", path: true },
+  machines: { subject: "none", question: "which state machines the code has, declared by a library or written with literal states" },
+  machine: { subject: "required", question: "which states a machine has, which transitions, and which function or event makes each" },
+  events: { subject: "none", question: "which modules emit which events, and which listen" },
+  tests: { subject: "none", question: "which modules the tests import, and which none does", modules: true },
+  hotspots: { subject: "none", question: "which modules are big, and which are called from everywhere" },
+  packages: { subject: "none", question: "which packages depend on which, declared or not" },
+  timeline: { subject: "none", question: "how the coupling between layers drifted, commit by commit" },
+  coverage: { subject: "none", question: "where the diagrams are blind: calls and imports archdiff could not follow" },
+  intent: { subject: "none", question: "what was intended, what is built, and where the code went beyond the intent", modules: true },
+  modules: { subject: "none", question: "every module of the repository in its layer, and every import between them", modules: true },
+} as const satisfies Record<string, KindSpec>;
 
-/** The views with a subject (`kind:<subject>`). */
-const SUBJECT_VIEWS = new Set(["layer", "dir", "module", "inside", "contract", "calls", "sequence", "path", "type", "cycle", "cycles", "classes", "matrix", "metrics", "machine", "focus", "logic"]);
+export type ViewKind = keyof typeof VIEW_KINDS;
 
-/** The one question each kind of view answers. */
-export const QUESTION: Record<View["kind"], string> = {
-  layers: "which layers import which, and how much",
-  layer: "which modules of the layer import which, and what they touch outside it",
-  dir: "which modules of the directory import which, and their neighbours",
-  module: "what the module imports and what imports it",
-  inside: "which functions of the module call which, and what they call outside",
-  contract: "which exports of the module are used, by whom",
-  calls: "what a function calls, step by step, and where the trail ends",
-  sequence: "in what order a function's calls cross the modules",
-  path: "which calls lead from a function to a store",
-  type: "where a type is produced, consumed and transformed",
-  cycles: "which modules (or functions) import or call each other in a circle, and where to cut",
-  cycle: "which modules form this circle, through which imports, and where to cut",
-  classes: "which classes and interfaces exist, with what fields and methods, extending what",
-  matrix: "who imports whom, and which imports go against the order",
-  metrics: "how coupled and how cohesive each module is: Ca, Ce, instability, abstractness, the distance from the main sequence",
-  machines: "which state machines the code has, declared by a library or written with literal states",
-  machine: "which states a machine has, which transitions, and which function or event makes each",
-  focus: "everything joined to this one shape: what calls or imports it, what it calls or imports, across every module",
-  logic: "which branches, loops and early exits a function's body has, and which conditions lead to which outcome",
-  events: "which modules emit which events, and which listen",
-  tests: "which modules the tests import, and which none does",
-  hotspots: "which modules are big, and which are called from everywhere",
-  packages: "which packages depend on which, declared or not",
-  timeline: "how the coupling between layers drifted, commit by commit",
-  coverage: "where the diagrams are blind: calls and imports archdiff could not follow",
-  intent: "what was intended, what is built, and where the code went beyond the intent",
-  modules: "every module of the repository in its layer, and every import between them",
-};
+/** The kinds whose subject is `S` in the table. */
+type KindsWith<S extends KindSpec["subject"]> = { [K in ViewKind]: (typeof VIEW_KINDS)[K]["subject"] extends S ? K : never }[ViewKind];
 
-/** `layers`, `layer:<name>`, `module:<path>`, `calls:<path>#<fn>`, `coverage` → the view, or null. */
+/** A view: its kind and its subject (a layer, a directory, a module, a function, a scope), null for a view without one. */
+export type View = { kind: KindsWith<"none">; subject: null } | { kind: KindsWith<"required">; subject: string } | { kind: KindsWith<"optional">; subject: string | null };
+
+/** Older names of a kind, still read from a link or a command line: `contract:` was the usage view. */
+const ALIASES: Readonly<Record<string, ViewKind>> = { contract: "usage" };
+
+function isKind(name: string): name is ViewKind {
+  return Object.hasOwn(VIEW_KINDS, name);
+}
+
+/** `layers`, `layer:<name>`, `module:<path>`, `calls:<path>#<fn>`, `cycles:fns` → the view; null for a key no kind reads. */
 export function parseView(key: string): View | null {
-  if (key === "classes") return { kind: "classes", scope: null };
-
-  if (key === "matrix") return { kind: "matrix", scope: null };
-
-  if (key === "metrics") return { kind: "metrics", scope: null };
-
-  if (key === "logic") return { kind: "logic", scope: null };
-
-  if (key === "cycles") return { kind: "cycles", scope: null };
-
-  if (key === "cycles:fns") return { kind: "cycles", scope: "fns" };
-
-  if (PLAIN_VIEWS.has(key)) return { kind: key } as View;
   const at = key.indexOf(":");
+  const written = at === -1 ? key : key.slice(0, at);
+  const name = ALIASES[written] ?? written;
 
-  if (at === -1) return null;
-  const kind = key.slice(0, at);
-  const rest = key.slice(at + 1);
+  if (!isKind(name)) return null;
+  const spec: KindSpec = VIEW_KINDS[name];
 
-  if (rest === "" || !SUBJECT_VIEWS.has(kind)) return null;
+  if (at === -1) return spec.subject === "required" ? null : ({ kind: name, subject: null } as View);
+  // A directory may be written with a trailing slash; nothing else changes the subject.
+  const subject = spec.path ? key.slice(at + 1).replace(/\/+$/, "") : key.slice(at + 1);
 
-  if (kind === "layer") return { kind, name: rest };
+  if (subject === "" || spec.subject === "none" || (spec.subjects && !spec.subjects.includes(subject))) return null;
 
-  if (kind === "dir") return { kind, path: rest.replace(/\/+$/, "") };
-
-  if (kind === "cycles") return null;
-
-  if (kind === "classes" || kind === "matrix" || kind === "metrics" || kind === "logic") return { kind, scope: rest.replace(/\/+$/, "") };
-
-  return { kind, id: rest } as View;
+  return { kind: name, subject } as View;
 }
 
+/** The key of a view: the kind, and `:<subject>` when it has one. */
 export function viewKey(view: View): string {
-  if (view.kind === "classes" || view.kind === "matrix" || view.kind === "metrics" || view.kind === "logic" || view.kind === "cycles") return view.scope === null ? view.kind : `${view.kind}:${view.scope}`;
-
-  if ("name" in view) return `${view.kind}:${view.name}`;
-
-  if ("path" in view) return `${view.kind}:${view.path}`;
-
-  if ("id" in view) return `${view.kind}:${view.id}`;
-
-  return view.kind;
+  return view.subject === null ? view.kind : `${view.kind}:${view.subject}`;
 }
 
-export const DEFAULT_DEPTH: Partial<Record<View["kind"], number>> = { layer: 1, dir: 1, module: 1, inside: 1, calls: 3, sequence: 4, path: 8, type: 1, focus: 1 };
+/** The one question the pictures of a kind answer. */
+export function questionOf(kind: ViewKind): string {
+  return VIEW_KINDS[kind].question;
+}
 
-/** The views whose shapes are modules, where a hub (a module most of them import) is noise rather than news. */
-export const MODULE_VIEWS = new Set<View["kind"]>(["layer", "dir", "module", "cycle", "cycles", "tests", "intent", "modules"]);
+/** How far from the subject a picture of the kind goes without `--depth`. */
+export function defaultDepth(kind: ViewKind): number {
+  const spec: KindSpec = VIEW_KINDS[kind];
+
+  return spec.depth ?? 0;
+}
+
+/** The kinds whose shapes are modules, where a module most of them import (a logger, the types) is noise rather than news. */
+export function isModuleView(kind: ViewKind): boolean {
+  const spec: KindSpec = VIEW_KINDS[kind];
+
+  return spec.modules === true;
+}

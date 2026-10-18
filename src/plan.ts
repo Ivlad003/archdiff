@@ -270,7 +270,7 @@ export function planFromScene(analysis: Analysis, viewKey: string, elements: rea
     live,
     lanes: live.filter((element) => generated(element) === "lane"),
     nodes: live.filter((element) => generated(element) === "node"),
-    subjectModule: view?.kind === "module" ? view.id : view?.kind === "calls" ? moduleOf(view.id) : null,
+    subjectModule: view?.kind === "module" ? view.subject : view?.kind === "calls" ? moduleOf(view.subject) : null,
     plan: { view: viewKey, added: [], edges: [], removed: [], notes: [], layerWarnings: [], ignored: [] },
   };
   const planned = plannedShapes(d);

@@ -15,7 +15,7 @@
 // `machinesView`, `machineView`, `Machine`.
 
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, Line, Shape, MachineData } from "./diagram.ts";
+import type { PictureContent, Line, Shape, MachineData } from "./diagram.ts";
 import { lane, unplaced } from "./nodes.ts";
 
 export interface Machine extends MachineData {
@@ -111,22 +111,22 @@ export function machinesOf(analysis: Analysis): Machine[] {
 }
 
 /** Every machine as a shape in its module's lane; a tap opens it. */
-export function machinesView(analysis: Analysis): Diagram {
+export function machinesView(analysis: Analysis): PictureContent {
   const machines = machinesOf(analysis);
 
-  if (machines.length === 0) return unplaced("machines", "State machines", [], [], [], { reason: "no state machine: no field or variable set to two or more literal states and read as one, and no createMachine / StateMachine / Machine(…)" });
+  if (machines.length === 0) return unplaced("State machines", [], [], [], { reason: "no state machine: no field or variable set to two or more literal states and read as one, and no createMachine / StateMachine / Machine(…)" });
   const nodes: Shape[] = machines.map((machine) => ({ id: machine.id, kind: "state", label: `${machine.name}\n${machine.states.length} states · ${machine.transitions.length} transitions${machine.kind === "explicit" ? ` · ${machine.library}` : ""}`, ref: { id: machine.id, file: machine.module, line: machine.line }, group: machine.module, x: 0, y: 0, w: 0, h: 0 }));
   const explicit = machines.filter((machine) => machine.kind === "explicit").length;
 
-  return unplaced("machines", `State machines (${machines.length})`, nodes, [], [...new Set(machines.map((machine) => machine.module))].map(lane), { reason: `${explicit} declared by a library, ${machines.length - explicit} written with literals; tap one to see its states and transitions` });
+  return unplaced(`State machines (${machines.length})`, nodes, [], [...new Set(machines.map((machine) => machine.module))].map(lane), { reason: `${explicit} declared by a library, ${machines.length - explicit} written with literals; tap one to see its states and transitions` });
 }
 
 /** One machine: a start mark, its states (dashed when declared but never set), its transitions labelled with the event or the function that makes them. */
-export function machineView(analysis: Analysis, id: string): Diagram {
+export function machineView(analysis: Analysis, id: string): PictureContent {
   const key = `machine:${id}`;
   const machine = machinesOf(analysis).find((candidate) => candidate.id === key);
 
-  if (!machine) return unplaced(key, id, [], [], [], { reason: `no state machine "${id}" (archdiff diagram machines lists them)`, missing: true });
+  if (!machine) return unplaced(id, [], [], [], { reason: `no state machine "${id}" (archdiff diagram machines lists them)`, missing: true });
   const stateId = (name: string): string => `state:${name}`;
   const nodes: Shape[] = [];
   const edges: Line[] = [];
@@ -163,5 +163,5 @@ export function machineView(analysis: Analysis, id: string): Diagram {
   const notes = [machine.kind === "explicit" ? `declared with ${machine.library}` : `written with literals in ${machine.module}: states from assignments, comparisons${machine.states.some((state) => state.declared) ? " and the type" : ""}`, unset > 0 ? `${unset} states never set (dashed)` : "", fromAny > 0 ? `${fromAny} transitions from any state: set outside a case or an if on ${machine.name}` : ""].filter(Boolean);
   const data: MachineData = { name: machine.name, module: machine.module, initial: machine.initial, states: machine.states, transitions: machine.transitions };
 
-  return unplaced(key, `State machine ${machine.name} (${machine.module})`, nodes, edges, [], { machine: data, reason: notes.join("; ") });
+  return unplaced(`State machine ${machine.name} (${machine.module})`, nodes, edges, [], { machine: data, reason: notes.join("; ") });
 }

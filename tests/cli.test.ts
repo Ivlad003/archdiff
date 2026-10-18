@@ -515,12 +515,14 @@ test("inside shows a module's functions and their calls in module lanes; sequenc
   assert.equal(archdiff(["diagram", "inside:nope.ts", fixture]).status, 2);
 });
 
-test("matrix, contract, type flow, path to the storages and hotspots on the fixture", () => {
+test("matrix, usage, type flow, path to the storages and hotspots on the fixture", () => {
   const matrix = JSON.parse(archdiff(["diagram", "matrix", fixture, "--format", "json"]).stdout) as { placed?: boolean; nodes: { id: string; label: string; diff?: string }[]; reason?: string };
   assert.equal(matrix.placed, true);
   assert.ok(matrix.nodes.some((node) => node.id === "cell:routes>lib" && node.label === "1"), JSON.stringify(matrix.nodes.filter((node) => node.label !== "")));
   assert.ok(matrix.reason?.includes("every import follows the layer order"), matrix.reason);
-  const contract = archdiff(["diagram", "contract:src/lib/orders.ts", fixture, "--format", "mermaid"]).stdout;
+  const contract = archdiff(["diagram", "usage:src/lib/orders.ts", fixture, "--format", "mermaid"]).stdout;
+  // The old name of the view still opens it.
+  assert.equal(archdiff(["diagram", "contract:src/lib/orders.ts", fixture, "--format", "mermaid"]).stdout, contract);
   assert.ok(contract.includes("src_routes_checkout_tsx --> src_lib_orders_ts_OrderService"), contract);
   assert.ok(contract.includes("findOrder<br/>(unused outside)"), contract);
   const type = archdiff(["diagram", "type:src/lib/orders.ts#Order", fixture]).stdout;

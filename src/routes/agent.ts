@@ -144,7 +144,7 @@ export async function postFlowMocks(ctx: RouteContext, { body, response }: Route
   if (!view || view.kind !== "calls") return problem(response, 400, "the mocks need a calls: view");
   const description = isJsonObject(parsed) && isJsonString(parsed["description"]) ? parsed["description"] : "";
   const analysis = await ctx.fresh();
-  const flow = dataFlow(analysis, view.id, [], 4);
+  const flow = dataFlow(analysis, view.subject, [], 4);
   const typed = mocksFromTypes(flow);
 
   if (!agentSpec) return json(response, { source: "types", ...typed });
@@ -177,7 +177,7 @@ export async function postFlowRun(ctx: RouteContext, { body, response }: RouteRe
   if (isJsonObject(parsed) && isJsonObject(parsed["input"])) options.input = parsed["input"];
 
   if (isJsonObject(parsed) && isJsonObject(parsed["storages"])) options.storages = parsed["storages"];
-  const result = await runFlow(analysis, view.id, options);
+  const result = await runFlow(analysis, view.subject, options);
 
   return json(response, { run: result, markdown: runMarkdown(result) });
 }
@@ -209,7 +209,7 @@ export async function getFlow(ctx: RouteContext, { url, response }: RouteRequest
   if (!view || view.kind !== "calls") return problem(response, 400, "the flow needs a calls: view");
   const analysis = await ctx.fresh();
   const depthText = url.searchParams.get("depth");
-  const flow = dataFlow(analysis, view.id, readLayout(root, key)?.mocks ?? [], depthText === null || depthText === "" ? 4 : Number(depthText));
+  const flow = dataFlow(analysis, view.subject, readLayout(root, key)?.mocks ?? [], depthText === null || depthText === "" ? 4 : Number(depthText));
 
   return json(response, { flow, markdown: flowMarkdown(flow) });
 }

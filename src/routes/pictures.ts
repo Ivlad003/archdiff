@@ -38,7 +38,7 @@ export async function postLayout(ctx: RouteContext, { url, body, response }: Rou
 
 /** The analysis with what a view needs read at the edge: the logic of a function from its file. */
 async function sourceFor(analysis: Awaited<ReturnType<RouteContext["fresh"]>>, view: View): Promise<typeof analysis> {
-  return view.kind === "logic" && view.scope !== null ? withLogic(analysis, view.scope) : analysis;
+  return view.kind === "logic" && view.subject !== null ? withLogic(analysis, view.subject) : analysis;
 }
 
 export async function postExpand(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {

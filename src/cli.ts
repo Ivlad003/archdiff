@@ -26,7 +26,7 @@ import { layout } from "./diagram.ts";
 import { parseView, viewOf, viewList, viewOptionsOf } from "./views.ts";
 import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, mergePlan, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
-import { listSpecs, specPrompt, validateSpecs } from "./spec.ts";
+import { listSpecs, specPrompt, specSubject, validateSpecs } from "./spec.ts";
 import { writeTestSkeletons } from "./gherkin.ts";
 import { FEATURES_DIRECTORY as FEATURES_DIRECTORY_NAME } from "./spec.ts";
 import { pictureFlags, pictureOptionsHelp, readPictureOptions } from "./options.ts";
@@ -153,7 +153,7 @@ const COMMANDS: readonly Command[] = [
     help: [
       "Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,",
       "drawio, excalidraw, archimate. Views: layers | layer:<name> | dir:<path> |",
-      "module:<path> | inside:<path> | contract:<path> | calls:<path>#<fn> |",
+      "module:<path> | inside:<path> | usage:<path> | calls:<path>#<fn> |",
       "sequence:<path>#<fn> | path:<path>#<fn> | type:<path>#<Type> | cycles |",
       "cycle:<path> | classes | classes:<path|dir> | matrix | matrix:<dir> | events | tests |",
       "hotspots | packages | timeline [--base --head] | coverage | intent | modules | metrics |",
@@ -183,7 +183,7 @@ const COMMANDS: readonly Command[] = [
       // The timeline reads the commits from --base (default the merge-base) to --head (default HEAD); the logic of a function reads its
       // file; --changes lays the review's marks over the view.
       if (view.kind === "timeline") analysis = await withTimeline(analysis, call.text("base") ?? mergeBase(analysis.root), call.text("head") ?? "HEAD");
-      else if (view.kind === "logic" && view.scope !== null) analysis = await withLogic(analysis, view.scope);
+      else if (view.kind === "logic" && view.subject !== null) analysis = await withLogic(analysis, view.subject);
       else if (picture.value.options.changes) options.diff = (await review(analysis.root, call.text("base"), call.text("head"))).diff;
       let diagram = layout(viewOf(analysis, view, options));
 
@@ -261,7 +261,7 @@ const COMMANDS: readonly Command[] = [
       const depth = call.has("depth") ? Number(call.text("depth")) : 4;
 
       if (!(Number.isInteger(depth) && depth >= 0)) return fail("flow: --depth must be a whole number");
-      const flow = dataFlow(analysis, view.id, readLayout(analysis.root, key!)?.mocks ?? [], depth);
+      const flow = dataFlow(analysis, view.subject, readLayout(analysis.root, key!)?.mocks ?? [], depth);
 
       return writeOut(call.has("json") ? `${JSON.stringify(flow, null, 2)}\n` : flowMarkdown(flow), call.text("out"));
     },
@@ -307,7 +307,7 @@ const COMMANDS: readonly Command[] = [
       if (storages) options.storages = storages;
 
       if (timeout !== undefined) options.timeoutMs = timeout;
-      const result = await runFlow(analysis, view.id, options);
+      const result = await runFlow(analysis, view.subject, options);
       const written = writeOut(call.has("json") ? `${JSON.stringify(result, null, 2)}\n` : runMarkdown(result), call.text("out"));
 
       return written !== 0 ? written : result.error ? 1 : 0;
@@ -521,9 +521,7 @@ const COMMANDS: readonly Command[] = [
         const view = prompt === "all" || prompt === "update" ? null : parseView(prompt);
 
         if (prompt !== "all" && prompt !== "update" && !view) return fail(`spec: unknown view "${prompt}"`);
-        const subject = view && "id" in view ? view.id : view && "name" in view ? `the layer ${view.name}` : view && "path" in view ? `the directory ${view.path}` : null;
-
-        return writeOut(specPrompt(analysis, mode, subject), call.text("out"));
+        return writeOut(specPrompt(analysis, mode, specSubject(view)), call.text("out"));
       }
 
       const { initialised, specs } = listSpecs(analysis.root);

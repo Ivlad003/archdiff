@@ -16,7 +16,7 @@ import { onlyChanged, overlayDiff } from "./diff.ts";
 import type { Graph } from "./graph.ts";
 import { applyOverlays } from "./overlays.ts";
 import { dropLightLines, expandInPlace, fold, hideLanes, hubsAsBadges, MAX_SHAPES } from "./shape.ts";
-import { MODULE_VIEWS, QUESTION, type View } from "./view-keys.ts";
+import { isModuleView, questionOf, type View } from "./view-keys.ts";
 import type { ViewOptions } from "./views.ts";
 
 export interface StepContext {
@@ -37,9 +37,9 @@ export interface Step {
 
 export const STEPS: readonly Step[] = [
   { name: "hide lanes", applies: ({ options }) => (options.hideLanes?.length ?? 0) > 0, run: (diagram, { options }) => hideLanes(diagram, options.hideLanes ?? []) },
-  { name: "open in place", applies: ({ options, view }) => (options.expand?.length ?? 0) > 0 && MODULE_VIEWS.has(view.kind), run: (diagram, { graph, options }) => expandInPlace(diagram, graph, options.expand ?? []) },
-  { name: "hubs as badges", applies: ({ options, view }) => options.hubs !== false && MODULE_VIEWS.has(view.kind), run: (diagram, { subject, analysis }) => hubsAsBadges(diagram, subject, analysis.config.hubs) },
-  { name: "question", applies: (_ctx, diagram) => !diagram.question, run: (diagram, { view }) => ({ ...diagram, question: QUESTION[view.kind] }) },
+  { name: "open in place", applies: ({ options, view }) => (options.expand?.length ?? 0) > 0 && isModuleView(view.kind), run: (diagram, { graph, options }) => expandInPlace(diagram, graph, options.expand ?? []) },
+  { name: "hubs as badges", applies: ({ options, view }) => options.hubs !== false && isModuleView(view.kind), run: (diagram, { subject, analysis }) => hubsAsBadges(diagram, subject, analysis.config.hubs) },
+  { name: "question", applies: (_ctx, diagram) => !diagram.question, run: (diagram, { view }) => ({ ...diagram, question: questionOf(view.kind) }) },
   { name: "fold", applies: (_ctx, diagram) => !diagram.placed && !diagram.classes && !diagram.logic, run: (diagram, { options }) => fold(diagram, options.limit ?? MAX_SHAPES) },
   { name: "light lines", applies: ({ options }) => (options.weight ?? 1) > 1, run: (diagram, { options }) => dropLightLines(diagram, options.weight ?? 1) },
   { name: "changes", applies: ({ options, view }) => options.diff !== undefined && view.kind !== "timeline", run: (diagram, { options }) => overlayDiff(diagram, options.diff!) },

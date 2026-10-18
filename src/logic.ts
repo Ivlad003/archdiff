@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, Line, Shape, LogicData, LogicPath } from "./diagram.ts";
+import type { PictureContent, Line, Shape, LogicData, LogicPath } from "./diagram.ts";
 import { readLogic, type LogicFact, type LogicStep } from "./extract/logic.ts";
 import { moduleOf, type Declaration } from "./graph.ts";
 import { lane, unplaced } from "./nodes.ts";
@@ -116,17 +116,16 @@ function calleeOf(analysis: Analysis, fnId: string, step: LogicStep): string | n
 }
 
 /** One function's body as a flowchart; the `logic` list when `scope` is null. */
-export function logicView(analysis: Analysis, scope: string | null): Diagram {
+export function logicView(analysis: Analysis, scope: string | null): PictureContent {
   if (scope === null) return logicListView(analysis);
-  const key = `logic:${scope}`;
   const fn = analysis.graph.nodes.get(scope);
 
-  if (!fn || fn.kind !== "fn") return unplaced(key, scope, [], [], [], { reason: `no function "${scope}" (archdiff views lists them)`, missing: true });
+  if (!fn || fn.kind !== "fn") return unplaced(scope, [], [], [], { reason: `no function "${scope}" (archdiff views lists them)`, missing: true });
 
-  if (!analysis.logic || analysis.logic.id !== scope) return unplaced(key, `Logic of ${fnLabel(fn)}`, [], [], [], { reason: "the logic is read from the function's file (archdiff diagram logic:<path>#<fn> reads it)" });
+  if (!analysis.logic || analysis.logic.id !== scope) return unplaced(`Logic of ${fnLabel(fn)}`, [], [], [], { reason: "the logic is read from the function's file (archdiff diagram logic:<path>#<fn> reads it)" });
   const fact = analysis.logic.fact;
 
-  if (!fact) return unplaced(key, `Logic of ${fnLabel(fn)}`, [], [], [], { reason: `the body of ${fnLabel(fn)} could not be read: ${fn.module} is not TypeScript, JavaScript or Python, or the function was not found at line ${fn.line}` });
+  if (!fact) return unplaced(`Logic of ${fnLabel(fn)}`, [], [], [], { reason: `the body of ${fnLabel(fn)} could not be read: ${fn.module} is not TypeScript, JavaScript or Python, or the function was not found at line ${fn.line}` });
   const nodes: Shape[] = fact.nodes.map((step) => {
     const kind: Shape["kind"] = step.kind === "start" ? "start" : step.kind === "decision" || step.kind === "loop" ? "decision" : step.kind === "action" ? "action" : "end";
     const node: Shape = { id: step.id, kind, label: step.kind === "loop" ? `↻ ${step.text}` : step.text, ref: { file: fn.module, line: step.line, endLine: step.endLine }, x: 0, y: 0, w: 0, h: 0 };
@@ -151,18 +150,18 @@ export function logicView(analysis: Analysis, scope: string | null): Diagram {
   if (more > 0) logic.morePaths = more;
   const notes = [`${decisions} ${decisions === 1 ? "decision" : "decisions"}, ${loops} ${loops === 1 ? "loop" : "loops"}, ${exits} ${exits === 1 ? "exit" : "exits"}; ${paths.length}${more > 0 ? "+" : ""} paths from the start to an exit, listed in the Markdown as the rules`, fact.truncated ? "the body is longer than the picture holds: the rest was left out" : ""].filter(Boolean);
 
-  return unplaced(key, `Logic of ${fnLabel(fn)} (${fn.module})`, nodes, edges, [], { logic, reason: notes.join("; ") });
+  return unplaced(`Logic of ${fnLabel(fn)} (${fn.module})`, nodes, edges, [], { logic, reason: notes.join("; ") });
 }
 
 /** The functions with branches, one shape each in its module's lane, labelled with how much it branches; a tap opens its flowchart. */
-function logicListView(analysis: Analysis): Diagram {
+function logicListView(analysis: Analysis): PictureContent {
   const all = logicList(analysis);
 
-  if (all.length === 0) return unplaced("logic", "Logic", [], [], [], { reason: "no function with a branch in it: no if, switch, loop or try in any body" });
+  if (all.length === 0) return unplaced("Logic", [], [], [], { reason: "no function with a branch in it: no if, switch, loop or try in any body" });
   const listed = all.slice(0, MAX_LISTED);
   const nodes: Shape[] = listed.map((fn) => ({ id: fn.id, kind: "action", label: `${fnLabel(fn)}\n${fn.branches} ${fn.branches === 1 ? "branch" : "branches"}`, ref: { id: fn.id, file: fn.module, line: fn.line, endLine: fn.endLine }, group: moduleOf(fn.id), x: 0, y: 0, w: 0, h: 0 }));
   const modules = [...new Set(listed.map((fn) => moduleOf(fn.id)))];
   const left = all.length - listed.length;
 
-  return unplaced("logic", `Logic: ${all.length} functions with branches`, nodes, [], modules.map(lane), { reason: `the ${listed.length} most branching functions${left > 0 ? `; ${left} more in the views list` : ""}; tap one for its flowchart and the rules it holds` });
+  return unplaced(`Logic: ${all.length} functions with branches`, nodes, [], modules.map(lane), { reason: `the ${listed.length} most branching functions${left > 0 ? `; ${left} more in the views list` : ""}; tap one for its flowchart and the rules it holds` });
 }

@@ -4,6 +4,8 @@
 // keys and the views list.
 
 import type { Shape, ViewEntry } from "./api.ts";
+import { parseView } from "../../src/view-keys.ts";
+
 /** The view a shape opens: a layer its modules, a module its imports, a function its calls. */
 export function ownView(node: Shape): string | null {
   const id = node.ref?.id ?? node.id;
@@ -77,74 +79,83 @@ export function subjectOf(node: Shape): string | null {
 }
 
 /** The other pictures of the same subject: a module's dependencies or its inside, a function's call tree or its sequence. */
-export function siblingViews(view: string): { label: string; key: string }[] {
-  const at = view.indexOf(":");
+export function siblingViews(key: string): { label: string; key: string }[] {
+  const view = parseView(key);
 
   // A plain view (layers, modules, matrix…) has no subject and so no siblings.
-  if (at === -1) return [];
-  const kind = view.slice(0, at);
-  const rest = view.slice(at + 1);
+  if (!view || view.subject === null) return [];
+  const subject = view.subject;
+  const of = (kind: string, label: string): { label: string; key: string } => ({ label, key: `${kind}:${subject}` });
 
-  const fnLike = rest.includes("#");
+  // A function's pictures: its calls, their order, its way to the storages, everything joined to it, its logic, its cycle.
+  if (subject.includes("#") && ["calls", "sequence", "path", "cycle", "focus", "logic"].includes(view.kind)) return [of("calls", "call tree"), of("sequence", "sequence of calls"), of("path", "path to the storages"), of("focus", "focus: everything joined to it"), of("logic", "logic: the flowchart and its rules"), of("cycle", "its call cycle")];
 
-  if (fnLike && (kind === "calls" || kind === "sequence" || kind === "path" || kind === "cycle" || kind === "focus" || kind === "logic")) return [{ label: "call tree", key: `calls:${rest}` }, { label: "sequence of calls", key: `sequence:${rest}` }, { label: "path to the storages", key: `path:${rest}` }, { label: "focus: everything joined to it", key: `focus:${rest}` }, { label: "logic: the flowchart and its rules", key: `logic:${rest}` }, { label: "its call cycle", key: `cycle:${rest}` }];
+  // A module's pictures (a classes view of one file is one of them).
+  if (["module", "inside", "usage", "cycle", "focus"].includes(view.kind) || (view.kind === "classes" && /\.[a-z]+$/.test(subject))) return [of("module", "dependencies"), of("inside", "inside: functions and calls"), of("focus", "focus: everything joined to it"), of("classes", "classes: fields and methods"), of("usage", "usage: who uses its exports"), of("cycle", "its import cycle")];
 
-  if (kind === "module" || kind === "inside" || kind === "contract" || kind === "cycle" || kind === "focus" || (kind === "classes" && rest !== "" && !rest.endsWith("/") && /\.[a-z]+$/.test(rest))) return [{ label: "dependencies", key: `module:${rest}` }, { label: "inside: functions and calls", key: `inside:${rest}` }, { label: "focus: everything joined to it", key: `focus:${rest}` }, { label: "classes: fields and methods", key: `classes:${rest}` }, { label: "contract: exports and their users", key: `contract:${rest}` }, { label: "its import cycle", key: `cycle:${rest}` }];
-
-  if (kind === "dir" || kind === "classes") return [{ label: "modules of the directory", key: `dir:${rest}` }, { label: "classes of the directory", key: `classes:${rest}` }];
+  if (view.kind === "dir" || view.kind === "classes") return [of("dir", "modules of the directory"), of("classes", "classes of the directory")];
 
   return [];
 }
 
 /** The path above a view, for the breadcrumbs: layers › layer › directories › module › function. */
-export function crumbsOf(views: readonly ViewEntry[], view: string): { label: string; key: string }[] {
+export function crumbsOf(views: readonly ViewEntry[], key: string): { label: string; key: string }[] {
   const crumbs: { label: string; key: string }[] = [{ label: "layers", key: "layers" }];
-  const at = view.indexOf(":");
-  const kind = at === -1 ? view : view.slice(0, at);
-  const rest = at === -1 ? "" : view.slice(at + 1);
+  const view = parseView(key);
   const layerOf = (module: string): string | null => views.find((entry) => entry.key === `module:${module}`)?.layer ?? null;
 
+  // The directories above a module that have views of their own.
   const directories = (module: string): void => {
     const parts = module.split("/");
 
     for (let depth = 1; depth < parts.length; depth++) {
-      const key = `dir:${parts.slice(0, depth).join("/")}`;
+      const dir = `dir:${parts.slice(0, depth).join("/")}`;
 
-      if (views.some((entry) => entry.key === key)) crumbs.push({ label: `${parts[depth - 1]}/`, key });
+      if (views.some((entry) => entry.key === dir)) crumbs.push({ label: `${parts[depth - 1]}/`, key: dir });
     }
   };
 
-  if (kind === "layer") crumbs.push({ label: rest, key: view });
-  else if (kind === "dir") {
-    const parts = rest.split("/");
+  if (!view || view.kind === "layers") return crumbs;
+
+  if (view.subject === null) {
+    crumbs.push({ label: view.kind, key });
+
+    return crumbs;
+  }
+
+  const subject = view.subject;
+
+  if (view.kind === "layer") crumbs.push({ label: subject, key });
+  else if (view.kind === "dir") {
+    const parts = subject.split("/");
 
     for (let depth = 1; depth <= parts.length; depth++) crumbs.push({ label: `${parts[depth - 1]}/`, key: `dir:${parts.slice(0, depth).join("/")}` });
-  } else if (kind === "classes" && rest !== "") {
-    const module = rest;
-    const layer = layerOf(module);
+  } else if (view.kind === "classes") {
+    const layer = layerOf(subject);
 
     if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
-    directories(module);
-    crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: /\.[a-z]+$/.test(module) ? `module:${module}` : `dir:${module}` });
-    crumbs.push({ label: "classes", key: view });
-  } else if (["module", "inside", "contract", "cycle", "calls", "sequence", "path", "type", "focus", "logic"].includes(kind)) {
-    const hash = rest.indexOf("#");
-    const module = hash === -1 ? rest : rest.slice(0, hash);
+    directories(subject);
+    crumbs.push({ label: subject.slice(subject.lastIndexOf("/") + 1), key: /\.[a-z]+$/.test(subject) ? `module:${subject}` : `dir:${subject}` });
+    crumbs.push({ label: "classes", key });
+  } else if (["module", "inside", "usage", "cycle", "calls", "sequence", "path", "type", "focus", "logic"].includes(view.kind)) {
+    // The layer, the directories and the module above the subject; then the function, then the picture of it.
+    const hash = subject.indexOf("#");
+    const module = hash === -1 ? subject : subject.slice(0, hash);
     const layer = layerOf(module);
-    const ofFn = hash !== -1 && (kind === "focus" || kind === "logic");
+    const ofFn = hash !== -1 && (view.kind === "focus" || view.kind === "logic" || view.kind === "cycle");
 
     if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
     directories(module);
     crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: `module:${module}` });
 
-    if (kind === "inside" || kind === "contract" || kind === "cycle" || (kind === "focus" && hash === -1)) crumbs.push({ label: kind, key: view });
+    if (hash === -1 && (view.kind === "inside" || view.kind === "usage" || view.kind === "cycle" || view.kind === "focus")) crumbs.push({ label: view.kind, key });
 
-    if (kind === "calls" || kind === "sequence" || kind === "path" || ofFn) crumbs.push({ label: rest.slice(hash + 1), key: `calls:${rest}` });
+    if (view.kind === "calls" || view.kind === "sequence" || view.kind === "path" || ofFn) crumbs.push({ label: subject.slice(hash + 1), key: `calls:${subject}` });
 
-    if (kind === "sequence" || kind === "path" || ofFn) crumbs.push({ label: kind, key: view });
+    if (view.kind === "sequence" || view.kind === "path" || ofFn) crumbs.push({ label: view.kind, key });
 
-    if (kind === "type") crumbs.push({ label: `type ${rest.slice(hash + 1)}`, key: view });
-  } else if (kind !== "layers") crumbs.push({ label: kind, key: view });
+    if (view.kind === "type") crumbs.push({ label: `type ${subject.slice(hash + 1)}`, key });
+  } else crumbs.push({ label: view.kind, key });
 
   return crumbs;
 }

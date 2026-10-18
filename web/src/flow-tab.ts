@@ -8,6 +8,14 @@ import { api } from "./api.ts";
 import { element } from "./dom.ts";
 import { page } from "./page.ts";
 import { stateFromHash } from "./state.ts";
+import { parseView } from "../../src/view-keys.ts";
+
+/** The entry point a calls view starts from (`calls:<path>#<fn>`), or null on any other view. */
+function entryOf(key: string): string | null {
+  const view = parseView(key);
+
+  return view?.kind === "calls" ? view.subject : null;
+}
 
 /** The Markdown of the flow (and of the last run), for the copy button. */
 let flowMarkdown = "";
@@ -38,13 +46,13 @@ export async function loadFlow(): Promise<void> {
   const state = stateFromHash();
   flowMocks.replaceChildren();
   flowSteps.replaceChildren();
-  element("flow-tab").hidden = !state.view.startsWith("calls:") || state.review;
+  element("flow-tab").hidden = entryOf(state.view) === null || state.review;
 
   if (element("flow-tab").hidden) return;
   const { flow, markdown } = await api.flow(state.view, state.depth);
   lastFlow = flow;
   flowMarkdown = markdown;
-  const entryId = state.view.slice("calls:".length);
+  const entryId = entryOf(state.view)!;
   const input = textarea(`Mock input of ${entryId.slice(entryId.indexOf("#") + 1)} (JSON object: a key per parameter)`, flow.input ?? "", '{"request": {"total": 42}}');
   const storageFields = flow.storages.map((storage) => ({ id: storage.id, field: textarea(`Mock content of ${storage.module} (${storage.storage})`, storage.content ?? "", '{"rows": [{"id": 1}]}') }));
   mockInput = input;
@@ -106,7 +114,7 @@ async function generateMocks(): Promise<void> {
   const state = stateFromHash();
   const note = element<HTMLInputElement>("mock-description");
 
-  if (!state.view.startsWith("calls:") || !mockInput) return;
+  if (entryOf(state.view) === null || !mockInput) return;
   note.disabled = true;
   flowSteps.prepend(Object.assign(document.createElement("div"), { className: "muted", id: "mock-note", textContent: "generating mocks…" }));
 
@@ -127,7 +135,7 @@ async function generateMocks(): Promise<void> {
 async function playFlow(): Promise<void> {
   const state = stateFromHash();
 
-  if (!lastFlow || !page.canvas() || !state.view.startsWith("calls:")) return;
+  if (!lastFlow || !page.canvas() || entryOf(state.view) === null) return;
   const button = element<HTMLButtonElement>("flow-play");
   button.disabled = true;
   page.showTab("flow");
@@ -155,7 +163,7 @@ element<HTMLButtonElement>("flow-play").addEventListener("click", () => void pla
 async function runFlowNow(): Promise<void> {
   const state = stateFromHash();
 
-  if (!state.view.startsWith("calls:")) return;
+  if (entryOf(state.view) === null) return;
   const button = element<HTMLButtonElement>("flow-run");
   const panel = element<HTMLDivElement>("flow-run-result");
   button.disabled = true;

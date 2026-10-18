@@ -130,6 +130,9 @@ export interface Diagram {
   classes?: { boxes: { id: string; name: string; kind: "class" | "interface" | "type"; fields: string[]; methods: string[] }[]; relations: { from: string; to: string; kind: "extends" | "implements" }[] };
 }
 
+/** What a view draws, before `viewOf` names it with the view's key (view-keys.ts): a picture without its `view`. */
+export type PictureContent = Omit<Diagram, "view">;
+
 /** A frame of a sequence around the messages `first`..`last` (indices): the calls under one guard. */
 export interface SequenceFragment {
   kind: "opt" | "loop";

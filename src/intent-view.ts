@@ -11,7 +11,7 @@
 // Entry point: `intentView`.
 
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, Line, Lane, Shape } from "./diagram.ts";
+import type { PictureContent, Line, Lane, Shape } from "./diagram.ts";
 import { INTENT_FILE, type Intent } from "./intent.ts";
 
 /**
@@ -22,8 +22,8 @@ import { INTENT_FILE, type Intent } from "./intent.ts";
  * when the import or call is not in the code, orange when the code has
  * one the intent does not.
  */
-export function intentView(analysis: Analysis, intent: Intent | null): Diagram {
-  if (!intent) return { view: "intent", title: "Intent", nodes: [], edges: [], groups: [], reason: `no ${INTENT_FILE}: archdiff intent --init writes one from the code, archdiff import <file> from a document, or draw here and run the agent` };
+export function intentView(analysis: Analysis, intent: Intent | null): PictureContent {
+  if (!intent) return { title: "Intent", nodes: [], edges: [], groups: [], reason: `no ${INTENT_FILE}: archdiff intent --init writes one from the code, archdiff import <file> from a document, or draw here and run the agent` };
   const { graph } = analysis;
   const layerNames = [...intent.layers.map((layer) => layer.name)];
 
@@ -113,5 +113,5 @@ export function intentView(analysis: Analysis, intent: Intent | null): Diagram {
   const groups: Lane[] = layerNames.map((name) => ({ id: name, label: intent.layers.find((layer) => layer.name === name)?.description ? `${name} — ${intent.layers.find((layer) => layer.name === name)!.description}` : name, kind: "lane", x: 0, y: 0, w: 0, h: 0 }));
   const parts = [planned > 0 ? `${planned} planned, not built yet (dashed)` : "everything planned is built", beyond > 0 ? `${beyond} modules beyond the intent (orange)` : "", extra > 0 ? `${extra} imports beyond the intent (orange)` : ""].filter(Boolean);
 
-  return { view: "intent", title: `Intent: ${INTENT_FILE} against the code`, nodes, edges, groups, reason: parts.join("; "), question: "what was intended, what is built, and where the code went beyond the intent" };
+  return { title: `Intent: ${INTENT_FILE} against the code`, nodes, edges, groups, reason: parts.join("; "), question: "what was intended, what is built, and where the code went beyond the intent" };
 }

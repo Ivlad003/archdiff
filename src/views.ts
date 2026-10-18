@@ -15,26 +15,26 @@
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
 
 import type { Analysis } from "./analyze.ts";
-import { SIZE, type Diagram, type Line, type Shape } from "./diagram.ts";
+import { SIZE, type Diagram, type Line, type PictureContent, type Shape } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
 import { moduleOf, type Graph, type Declaration } from "./graph.ts";
-import { classesView, contractView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
+import { classesView, usageView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
 import { logicList, logicView } from "./logic.ts";
 import { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 import { MAX_SHAPES } from "./shape.ts";
-import { DEFAULT_DEPTH, type View } from "./view-keys.ts";
+import { defaultDepth, viewKey, type View } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
 import { timelineDiagram } from "./views-more.ts";
 import type { GraphDiff } from "./diff.ts";
 import type { LaneMode, Overlay, PictureOptions } from "./options.ts";
 
 export { MAX_SHAPES } from "./shape.ts";
-export { parseView, viewKey, QUESTION, type View } from "./view-keys.ts";
+export { parseView, viewKey, type View } from "./view-keys.ts";
 export { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 
 export interface ViewOptions {
@@ -183,7 +183,7 @@ export function viewList(analysis: Analysis): ViewEntry[] {
 }
 
 /** The layers and the imports between them, each line counted. */
-function layersView(graph: Graph): Diagram {
+function layersView(graph: Graph): PictureContent {
   const counts = new Map<string, number>();
   const modulesOf = new Map<string, number>();
 
@@ -204,25 +204,25 @@ function layersView(graph: Graph): Diagram {
     return { from, to, kind: "dependency", count, label: String(count) };
   });
 
-  return unplaced("layers", "Layers", nodes, edges, []);
+  return unplaced("Layers", nodes, edges, []);
 }
 
 /** The modules of a layer; depth 1 (default) adds the modules of other layers they import or are imported by. */
-function layerView(graph: Graph, name: string, depth: number): Diagram {
+function layerView(graph: Graph, name: string, depth: number): PictureContent {
   const own = [...graph.modules.values()].filter((module) => module.layer === name).map((module) => module.id);
 
-  if (own.length === 0) return unplaced(`layer:${name}`, name, [], [], [], { reason: `no layer "${name}"`, missing: true });
+  if (own.length === 0) return unplaced(name, [], [], [], { reason: `no layer "${name}"`, missing: true });
   const members = grow(graph, new Set(own), depth, "both");
   const ownSet = new Set(own);
   // The layer's own modules first: a folded picture keeps them and folds the neighbours.
   const nodes = [...members].sort((a, b) => Number(ownSet.has(b)) - Number(ownSet.has(a)) || (a < b ? -1 : 1)).map((id) => moduleNode(graph, id));
 
-  return unplaced(`layer:${name}`, `Layer ${name}`, nodes, depEdges(graph, members, false), lanesOf(graph, nodes));
+  return unplaced(`Layer ${name}`, nodes, depEdges(graph, members, false), lanesOf(graph, nodes));
 }
 
 /** One module: what imports it (left) and what it imports (right), and with `packages` the packages too; depth 1 default. */
-function moduleView(graph: Graph, id: string, depth: number, packages: boolean): Diagram {
-  if (!graph.modules.has(id)) return unplaced(`module:${id}`, id, [], [], [], { reason: `no module "${id}"`, missing: true });
+function moduleView(graph: Graph, id: string, depth: number, packages: boolean): PictureContent {
+  if (!graph.modules.has(id)) return unplaced(id, [], [], [], { reason: `no module "${id}"`, missing: true });
   const members = grow(graph, new Set([id]), depth, "both");
   const nodes = [...members].sort().map((member) => moduleNode(graph, member));
   const edges = depEdges(graph, members, packages);
@@ -230,37 +230,37 @@ function moduleView(graph: Graph, id: string, depth: number, packages: boolean):
 
   for (const external of [...externals].sort()) nodes.push(externalNode(graph, external));
 
-  return unplaced(`module:${id}`, id, nodes, edges, lanesOf(graph, nodes));
+  return unplaced(id, nodes, edges, lanesOf(graph, nodes));
 }
 
 /** The modules of a directory (and below), with the imports among them; depth 1 (default) adds their neighbours outside it. */
-function dirView(graph: Graph, path: string, depth: number): Diagram {
+function dirView(graph: Graph, path: string, depth: number): PictureContent {
   const prefix = `${path}/`;
   const own = [...graph.modules.keys()].filter((id) => id.startsWith(prefix));
 
-  if (own.length === 0) return unplaced(`dir:${path}`, path, [], [], [], { reason: `no modules under "${path}/"`, missing: true });
+  if (own.length === 0) return unplaced(path, [], [], [], { reason: `no modules under "${path}/"`, missing: true });
   const members = grow(graph, new Set(own), depth, "both");
   const ownSet = new Set(own);
   const nodes = [...members].sort((a, b) => Number(ownSet.has(b)) - Number(ownSet.has(a)) || (a < b ? -1 : 1)).map((id) => moduleNode(graph, id));
 
-  return unplaced(`dir:${path}`, `${path}/`, nodes, depEdges(graph, members, false), lanesOf(graph, nodes));
+  return unplaced(`${path}/`, nodes, depEdges(graph, members, false), lanesOf(graph, nodes));
 }
 
 /** The whole map: every module in its layer's lane and every import between modules (packages left out). Big by nature: hubs, the fold and the weight keep it readable. */
-function modulesView(graph: Graph): Diagram {
+function modulesView(graph: Graph): PictureContent {
   const ids = [...graph.modules.keys()].sort();
 
-  if (ids.length === 0) return unplaced("modules", "Modules", [], [], [], { reason: "no modules" });
+  if (ids.length === 0) return unplaced("Modules", [], [], [], { reason: "no modules" });
   const nodes = ids.map((id) => moduleNode(graph, id));
 
-  return unplaced("modules", `Modules: ${ids.length} in ${graph.layers.length} layers`, nodes, depEdges(graph, new Set(ids), false), lanesOf(graph, nodes));
+  return unplaced(`Modules: ${ids.length} in ${graph.layers.length} layers`, nodes, depEdges(graph, new Set(ids), false), lanesOf(graph, nodes));
 }
 
 /** The call tree from a function: the functions it calls, and theirs, `depth` levels (default 3); gaps as holes. */
-function callsView(graph: Graph, id: string, depth: number): Diagram {
+function callsView(graph: Graph, id: string, depth: number): PictureContent {
   const start = graph.nodes.get(id);
 
-  if (!start) return unplaced(`calls:${id}`, id, [], [], [], { reason: `no function "${id}"`, missing: true });
+  if (!start) return unplaced(id, [], [], [], { reason: `no function "${id}"`, missing: true });
   const members = new Set([id]);
   const edges: Line[] = [];
   const seenEdges = new Set<string>();
@@ -308,11 +308,11 @@ function callsView(graph: Graph, id: string, depth: number): Diagram {
   const nodes = [...members].map((member) => fnNode(graph, member));
   nodes[0] = { ...nodes[0]!, kind: "fn" };
 
-  return unplaced(`calls:${id}`, `Calls from ${start.parent ? `${start.parent}.` : ""}${start.name}`, [...nodes, ...holes], edges, lanesOf(graph, [...nodes, ...holes]));
+  return unplaced(`Calls from ${start.parent ? `${start.parent}.` : ""}${start.name}`, [...nodes, ...holes], edges, lanesOf(graph, [...nodes, ...holes]));
 }
 
 /** The modules with calls into the repository archdiff could not follow (blind spots) or imports it could not resolve, by layer, labelled with the counts. */
-function coverageView(graph: Graph): Diagram {
+function coverageView(graph: Graph): PictureContent {
   const gapsOf = new Map<string, number>();
 
   for (const gap of graph.gaps) if (gap.reason === "dynamic" || gap.reason === "unknown-member" || gap.reason === "interface") gapsOf.set(moduleOf(gap.from), (gapsOf.get(moduleOf(gap.from)) ?? 0) + 1);
@@ -325,7 +325,7 @@ function coverageView(graph: Graph): Diagram {
     .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
     .map(([id, gaps]): Shape => ({ ...moduleNode(graph, id), label: `${id}\n${gaps} gaps / ${callsOf.get(id) ?? 0} calls`, count: gaps, diff: "changed" }));
 
-  return unplaced("coverage", "What the diagrams cannot show", nodes, [], lanesOf(graph, nodes), nodes.length === 0 ? { reason: "every import and call was followed" } : {});
+  return unplaced("What the diagrams cannot show", nodes, [], lanesOf(graph, nodes), nodes.length === 0 ? { reason: "every import and call was followed" } : {});
 }
 
 /**
@@ -333,10 +333,10 @@ function coverageView(graph: Graph): Diagram {
  * them, and (depth 1, default) the functions of other modules they call,
  * each module a lane. The map of one file.
  */
-function insideView(graph: Graph, id: string, depth: number): Diagram {
+function insideView(graph: Graph, id: string, depth: number): PictureContent {
   const module = graph.modules.get(id);
 
-  if (!module) return unplaced(`inside:${id}`, id, [], [], [], { reason: `no module "${id}"`, missing: true });
+  if (!module) return unplaced(id, [], [], [], { reason: `no module "${id}"`, missing: true });
   const own = [...graph.nodes.values()].filter((node) => node.module === id && node.kind !== "type").map((node) => node.id);
   const members = new Set(own);
   let frontier = new Set(own);
@@ -368,9 +368,9 @@ function insideView(graph: Graph, id: string, depth: number): Diagram {
     .sort((a, b) => Number(moduleOf(b) === id) - Number(moduleOf(a) === id) || (graph.nodes.get(a)!.line - graph.nodes.get(b)!.line))
     .map((member) => ({ ...fnNode(graph, member), group: moduleOf(member) }));
 
-  if (nodes.length === 0) return unplaced(`inside:${id}`, `Inside ${id}`, [], [], [], { reason: "the module declares no function or class" });
+  if (nodes.length === 0) return unplaced(`Inside ${id}`, [], [], [], { reason: "the module declares no function or class" });
 
-  return unplaced(`inside:${id}`, `Inside ${id}`, nodes, edges, [...new Set(modules)].map(lane));
+  return unplaced(`Inside ${id}`, nodes, edges, [...new Set(modules)].map(lane));
 }
 
 /**
@@ -381,12 +381,11 @@ function insideView(graph: Graph, id: string, depth: number): Diagram {
  * modules that import it or that it imports without a call between them
  * (the module itself as a shape then). Lanes are modules.
  */
-function focusView(graph: Graph, id: string, depth: number): Diagram {
-  const key = `focus:${id}`;
+function focusView(graph: Graph, id: string, depth: number): PictureContent {
   const fn = graph.nodes.get(id);
   const module = graph.modules.get(id);
 
-  if ((!fn || fn.kind === "type") && !module) return unplaced(key, id, [], [], [], { reason: `no function or module "${id}"`, missing: true });
+  if ((!fn || fn.kind === "type") && !module) return unplaced(id, [], [], [], { reason: `no function or module "${id}"`, missing: true });
   const own = module ? [...graph.nodes.values()].filter((node) => node.module === id && node.kind !== "type").map((node) => node.id) : [id];
   const members = new Set(own);
   const edges: Line[] = [];
@@ -460,7 +459,7 @@ function focusView(graph: Graph, id: string, depth: number): Diagram {
   const callers = edges.filter((edge) => edge.kind !== "dependency" && own.includes(edge.to) && !own.includes(edge.from)).length;
   const callees = edges.filter((edge) => edge.kind !== "dependency" && own.includes(edge.from) && !own.includes(edge.to)).length;
 
-  return unplaced(key, `Everything joined to ${subject}`, nodes, edges, lanes.map(lane), { reason: `${callers} calls in, ${callees} calls out, ${lanes.length - 1} other modules, ${depth} ${depth === 1 ? "step" : "steps"} each way (--depth goes further)` });
+  return unplaced(`Everything joined to ${subject}`, nodes, edges, lanes.map(lane), { reason: `${callers} calls in, ${callees} calls out, ${lanes.length - 1} other modules, ${depth} ${depth === 1 ? "step" : "steps"} each way (--depth goes further)` });
 }
 
 /** The width of a column of the sequence view and the height of one message row. */
@@ -474,10 +473,10 @@ const SEQ_ROW = 44;
  * down, every call a horizontal message in the order the code makes them
  * (depth first, by line), `depth` levels deep, at most `limit` messages.
  */
-function sequenceView(graph: Graph, id: string, depth: number, limit: number): Diagram {
+function sequenceView(graph: Graph, id: string, depth: number, limit: number): PictureContent {
   const start = graph.nodes.get(id);
 
-  if (!start) return unplaced(`sequence:${id}`, id, [], [], [], { reason: `no function "${id}"`, missing: true });
+  if (!start) return unplaced(id, [], [], [], { reason: `no function "${id}"`, missing: true });
   const callsFrom = new Map<string, typeof graph.calls>();
 
   for (const call of graph.calls) if (call.kind === "call") callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call]);
@@ -598,7 +597,7 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
     edges.push({ from: message.from, to: message.to, kind: "message", label: `${i + 1}. ${message.label}()${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`, route });
   });
 
-  const diagram = unplaced(`sequence:${id}`, `Sequence from ${start.parent ? `${start.parent}.` : ""}${start.name}`, nodes, edges, [], { placed: true, sequence: { participants, messages: messages.map(({ from, to, label, line, times }) => ((times ?? 1) > 1 ? { from, to, label, line, times: times as number } : { from, to, label, line })), ...(fragments.length > 0 ? { fragments } : {}) } });
+  const diagram = unplaced(`Sequence from ${start.parent ? `${start.parent}.` : ""}${start.name}`, nodes, edges, [], { placed: true, sequence: { participants, messages: messages.map(({ from, to, label, line, times }) => ((times ?? 1) > 1 ? { from, to, label, line, times: times as number } : { from, to, label, line })), ...(fragments.length > 0 ? { fragments } : {}) } });
 
   if (fragments.length > 0) diagram.reason = `${fragments.length} fragments: the calls under a branch or a loop, framed`;
 
@@ -628,49 +627,49 @@ export function viewOptionsOf(picture: PictureOptions): ViewOptions {
 
 /** The unplaced diagram of a view, folded to `limit` shapes. */
 export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}): Diagram {
-  const depth = options.depth ?? DEFAULT_DEPTH[view.kind] ?? 0;
+  const depth = options.depth ?? defaultDepth(view.kind);
   const { graph } = analysis;
 
-  const full = (): Diagram => {
+  const full = (): PictureContent => {
     switch (view.kind) {
       case "layers":
         return layersView(graph);
       case "layer":
-        return layerView(graph, view.name, depth);
+        return layerView(graph, view.subject, depth);
       case "dir":
-        return dirView(graph, view.path, depth);
+        return dirView(graph, view.subject, depth);
       case "module":
-        return moduleView(graph, view.id, depth, options.packages === true);
+        return moduleView(graph, view.subject, depth, options.packages === true);
       case "inside":
-        return insideView(graph, view.id, depth);
-      case "contract":
-        return contractView(analysis, view.id);
+        return insideView(graph, view.subject, depth);
+      case "usage":
+        return usageView(analysis, view.subject);
       case "calls":
-        return callsView(graph, view.id, depth);
+        return callsView(graph, view.subject, depth);
       case "sequence":
-        return sequenceView(graph, view.id, depth, options.limit ?? MAX_SHAPES);
+        return sequenceView(graph, view.subject, depth, options.limit ?? MAX_SHAPES);
       case "path":
-        return pathView(analysis, view.id, depth);
+        return pathView(analysis, view.subject, depth);
       case "type":
-        return typeView(analysis, view.id);
+        return typeView(analysis, view.subject);
       case "cycles":
-        return cyclesView(graph, null, { types: options.types === true, fns: view.scope === "fns" });
+        return cyclesView(graph, null, { types: options.types === true, fns: view.subject === "fns" });
       case "cycle":
-        return cyclesView(graph, view.id, { types: options.types === true, fns: view.id.includes("#") });
+        return cyclesView(graph, view.subject, { types: options.types === true, fns: view.subject.includes("#") });
       case "classes":
-        return classesView(analysis, view.scope, options.limit ?? MAX_SHAPES);
+        return classesView(analysis, view.subject, options.limit ?? MAX_SHAPES);
       case "matrix":
-        return matrixView(graph, view.scope, options.types === true);
+        return matrixView(graph, view.subject, options.types === true);
       case "metrics":
-        return metricsView(analysis, view.scope, options.limit ?? MAX_SHAPES, options.types === true);
+        return metricsView(analysis, view.subject, options.limit ?? MAX_SHAPES, options.types === true);
       case "machines":
         return machinesView(analysis);
       case "machine":
-        return machineView(analysis, view.id);
+        return machineView(analysis, view.subject);
       case "focus":
-        return focusView(graph, view.id, depth);
+        return focusView(graph, view.subject, depth);
       case "logic":
-        return logicView(analysis, view.scope);
+        return logicView(analysis, view.subject);
       case "events":
         return eventsView(analysis);
       case "tests":
@@ -681,7 +680,7 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
         return packagesView(analysis);
       case "timeline":
         // From the commits of a range, which the caller attaches with `withTimeline` (git is read at the edge, not here).
-        return analysis.timeline ? timelineDiagram(analysis.timeline.rows, analysis.timeline.base, analysis.timeline.head) : unplaced("timeline", "Timeline", [], [], [], { placed: true, reason: "the timeline is built from the commits (archdiff diagram timeline --base --head)" });
+        return analysis.timeline ? timelineDiagram(analysis.timeline.rows, analysis.timeline.base, analysis.timeline.head) : unplaced("Timeline", [], [], [], { placed: true, reason: "the timeline is built from the commits (archdiff diagram timeline --base --head)" });
       case "coverage":
         return coverageView(graph);
       case "intent":
@@ -693,7 +692,8 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
 
   // The steps after a view — hidden lanes, the mix, hubs, the question, the fold, the weight, the review's marks, the
   // overlays — are the pipeline's data (pipeline.ts), each a pure Diagram → Diagram that explains itself in `reason`.
-  return runSteps(full(), { analysis, graph, view, options, subject: "id" in view ? view.id : null });
+  // The view's key comes from the codec (view-keys.ts), never from the view function that drew the picture.
+  return runSteps({ view: viewKey(view), ...full() }, { analysis, graph, view, options, subject: view.subject });
 }
 
 

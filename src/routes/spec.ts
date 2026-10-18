@@ -2,7 +2,7 @@
 // repository, one of them, the prompt that has the agent write or review
 // them, and the OpenSpec validation.
 
-import { listSpecs, readSpec, specPrompt, validateSpecs } from "../spec.ts";
+import { listSpecs, readSpec, specPrompt, specSubject, validateSpecs } from "../spec.ts";
 import { parseView } from "../views.ts";
 import { json, problem, type RouteContext, type RouteRequest } from "./context.ts";
 
@@ -26,10 +26,9 @@ export async function getSpecPrompt(ctx: RouteContext, { url, response }: RouteR
   const view = key ? parseView(key) : null;
 
   if (key && !view) return problem(response, 400, "unknown view");
-  const subject = view && "id" in view ? view.id : view && "name" in view ? `the layer ${view.name}` : view && "path" in view ? `the directory ${view.path}` : null;
   const analysis = await ctx.fresh();
 
-  return json(response, { markdown: specPrompt(analysis, mode, subject) });
+  return json(response, { markdown: specPrompt(analysis, mode, specSubject(view)) });
 }
 
 export async function postSpecValidate(ctx: RouteContext, { response }: RouteRequest): Promise<void> {

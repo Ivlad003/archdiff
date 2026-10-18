@@ -15,7 +15,7 @@
 // `metricsOf`, `metricsView`, `overlayInstability`.
 
 import type { Analysis } from "./analyze.ts";
-import { farFromMainSequence, SIZE, type Diagram, type Shape, type LayerMetrics, type Metrics, type ModuleMetrics } from "./diagram.ts";
+import { farFromMainSequence, SIZE, type Diagram, type PictureContent, type Shape, type LayerMetrics, type Metrics, type ModuleMetrics } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { unplaced } from "./nodes.ts";
 
@@ -208,14 +208,13 @@ function worstFirst(metrics: Metrics, scope: string | null): ModuleMetrics[] {
  * of D or of a low cohesion is shaded. Placed, at most `limit` rows
  * (`--limit` raises it); `metrics:<layer>` keeps one layer's modules.
  */
-export function metricsView(analysis: Analysis, scope: string | null, limit: number, types = false): Diagram {
-  const key = scope === null ? "metrics" : `metrics:${scope}`;
+export function metricsView(analysis: Analysis, scope: string | null, limit: number, types = false): PictureContent {
 
-  if (scope !== null && !analysis.graph.layers.includes(scope)) return unplaced(key, scope, [], [], [], { reason: `no layer "${scope}"`, missing: true });
+  if (scope !== null && !analysis.graph.layers.includes(scope)) return unplaced(scope, [], [], [], { reason: `no layer "${scope}"`, missing: true });
   const metrics = metricsOf(analysis, types);
   const rows = worstFirst(metrics, scope);
 
-  if (rows.length === 0) return unplaced(key, "Metrics", [], [], [], { reason: "no modules" });
+  if (rows.length === 0) return unplaced("Metrics", [], [], [], { reason: "no modules" });
   const shown = rows.slice(0, limit);
   const cell = SIZE.cell;
   const head = 240;
@@ -248,7 +247,7 @@ export function metricsView(analysis: Analysis, scope: string | null, limit: num
   const loose = shown.filter((row) => row.cohesion < 0.3 && row.fns > 2).length;
   const parts = [far > 0 ? `${far} modules far from the main sequence (D ≥ 0.7, orange)` : "no module far from the main sequence", loose > 0 ? `${loose} modules of loosely related functions (cohesion < 0.3)` : "", rows.length > shown.length ? `${shown.length} of ${rows.length} modules; --limit raises it` : ""].filter(Boolean);
 
-  return unplaced(key, scope === null ? "Metrics: coupling and cohesion by module" : `Metrics of ${scope}`, nodes, [], [], { placed: true, metrics: { modules: shown, layers: scope === null ? metrics.layers : metrics.layers.filter((layer) => layer.name === scope) }, reason: parts.join("; ") });
+  return unplaced(scope === null ? "Metrics: coupling and cohesion by module" : `Metrics of ${scope}`, nodes, [], [], { placed: true, metrics: { modules: shown, layers: scope === null ? metrics.layers : metrics.layers.filter((layer) => layer.name === scope) }, reason: parts.join("; ") });
 }
 
 /** Every module shaded by its instability, labelled with I and Ca; one that is unstable and depended upon (I ≥ 0.7, Ca ≥ 3) is marked: a change to it reaches far and it changes often. */

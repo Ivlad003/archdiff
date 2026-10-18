@@ -179,7 +179,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     // The timeline is built from the commits of a range and the logic of a function from its file; `changes` lays the review's
     // marks over the view: all read git or the disk here, at the edge.
     if (view.kind === "timeline") source = await withTimeline(analysis, base || options.base || mergeBase(root), head || "HEAD");
-    else if (view.kind === "logic" && view.scope !== null) source = await withLogic(analysis, view.scope);
+    else if (view.kind === "logic" && view.subject !== null) source = await withLogic(analysis, view.subject);
     else if (picked.changes) viewOptions.diff = (await review(root, base || options.base, head)).diff;
     const diagram = layout(viewOf(source, view, viewOptions), positionsOf(saved?.elements ?? null));
     const stamp = revisionStamp(root);

@@ -15,6 +15,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import type { Analysis } from "./analyze.ts";
 import { INTENT_FILE } from "./intent.ts";
+import type { View } from "./view-keys.ts";
 
 export const SPECS_DIRECTORY = "openspec/specs";
 
@@ -124,7 +125,7 @@ export function specPrompt(analysis: Analysis, mode: "generate" | "update", subj
   const contract = analysis.intent ? `- ${INTENT_FILE} is the contract: ${analysis.intent.layers.length} layers, ${analysis.intent.modules.length} modules, ${analysis.intent.edges.length} imports. The specs must agree with it; where the code and the contract differ, say so in the spec's Purpose and specify what the code does.` : `- There is no ${INTENT_FILE}; specify what the code does.`;
   const lines = [`# ${mode === "generate" ? `Specify ${subject ?? "the repository"}` : "Review the specification against the code"}`, ""];
   lines.push(`Repository: ${analysis.root} (${analysis.stats.files} files, ${analysis.stats.modules} modules, ${analysis.graph.layers.length} layers: ${analysis.graph.layers.join(", ")}).`, "");
-  lines.push("## What exists", "", existing, init, contract, "", "## How to look", "", "- `npx @ivlad003/archdiff views` lists every picture; `npx @ivlad003/archdiff diagram <view>` prints a picture as Markdown with its Mermaid, the shapes with `file:line`; `module:<path>`, `inside:<path>`, `calls:<path>#<fn>`, `contract:<path>` and `type:<path>#<Type>` are the ones that tell what a module does and who uses it.", "- Read the code the pictures point to before writing a requirement; a requirement states behaviour the code has (or the contract promises), with its inputs, outputs, limits and errors.", "");
+  lines.push("## What exists", "", existing, init, contract, "", "## How to look", "", "- `npx @ivlad003/archdiff views` lists every picture; `npx @ivlad003/archdiff diagram <view>` prints a picture as Markdown with its Mermaid, the shapes with `file:line`; `module:<path>`, `inside:<path>`, `calls:<path>#<fn>`, `usage:<path>`, `logic:<path>#<fn>` and `type:<path>#<Type>` are the ones that tell what a module does and who uses it.", "- Read the code the pictures point to before writing a requirement; a requirement states behaviour the code has (or the contract promises), with its inputs, outputs, limits and errors.", "");
 
   if (mode === "generate") {
     lines.push("## The task", "", `Write the OpenSpec specification of **${subject ?? "every layer of the repository"}** in \`openspec/specs/<capability>/spec.md\` (one capability per file; a layer or directory is usually one capability, a big module may be its own) and the matching Gherkin file in \`features/<capability>.feature\`${subject ? "" : ", one pair per layer"}.`, "", "Then run `npx -y @fission-ai/openspec validate --specs` and fix what it reports. Finish with the list of files written.", "");
@@ -135,6 +136,13 @@ export function specPrompt(analysis: Analysis, mode: "generate" | "update", subj
   lines.push(FORMAT, "", "When a requirement is a real choice — what the behaviour SHOULD be where the code is ambiguous — ask the user with one archdiff-question block rather than guessing.");
 
   return `${lines.join("\n")}\n`;
+}
+
+/** What a spec of a view is about, in the words of the prompt: a module or a function by its ID, a layer, a directory; null for every layer. */
+export function specSubject(view: View | null): string | null {
+  if (!view || view.subject === null) return null;
+
+  return view.kind === "layer" ? `the layer ${view.subject}` : view.kind === "dir" ? `the directory ${view.subject}` : view.subject;
 }
 
 /** Runs the OpenSpec CLI's validation of the specs; the output, and whether it passed. Needs npm and the network for the first run. */

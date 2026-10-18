@@ -7,14 +7,15 @@
 // Entry points: `lane`, `unplaced`, `lanesOf`, `moduleNode`,
 // `externalNode`, `fnNode`, `depEdges`, `grow`.
 
-import type { Diagram, Line, Lane, Shape } from "./diagram.ts";
+import type { Line, Lane, PictureContent, Shape } from "./diagram.ts";
 import type { Graph } from "./graph.ts";
 export function lane(id: string): Lane {
   return { id, label: id, kind: "lane", x: 0, y: 0, w: 0, h: 0 };
 }
 
-export function unplaced(view: string, title: string, nodes: Shape[], edges: Line[], groups: Lane[], extra: Partial<Diagram> = {}): Diagram {
-  return { view, title, nodes, edges, groups, ...extra };
+/** The content of a picture before `layout`: what a view draws; `viewOf` names it with the view's key. */
+export function unplaced(title: string, nodes: Shape[], edges: Line[], groups: Lane[], extra: Partial<PictureContent> = {}): PictureContent {
+  return { title, nodes, edges, groups, ...extra };
 }
 
 /** The lanes of the layers the nodes use, in the graph's order. */
