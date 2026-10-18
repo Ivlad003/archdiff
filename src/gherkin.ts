@@ -9,7 +9,7 @@
 // `testSkeleton`, `writeTestSkeletons`.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { FEATURES_DIRECTORY } from "./spec.ts";
 
 export interface Scenario {
@@ -77,19 +77,24 @@ export function testSkeleton(feature: Feature, source: string): string {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-/** Writes `tests/<feature>.test.ts` for every feature; a file not written by archdiff is skipped and named. */
+/**
+ * Writes `<outDir>/<feature>.test.ts` for every feature — `outDir` relative to the root (`tests` by default) or
+ * absolute; a file not written by archdiff is skipped and named. The paths are as the caller wrote the directory.
+ */
 export function writeTestSkeletons(root: string, outDir = "tests"): { written: string[]; skipped: string[] } {
   const written: string[] = [];
   const skipped: string[] = [];
   const directory = join(root, FEATURES_DIRECTORY);
 
   if (!existsSync(directory)) return { written, skipped };
-  mkdirSync(join(root, outDir), { recursive: true });
+  // An absolute directory is where it says; `join` would put it under the root.
+  const out = resolve(root, outDir);
+  mkdirSync(out, { recursive: true });
 
   for (const name of readdirSync(directory).filter((file) => file.endsWith(".feature")).sort()) {
     const feature = parseFeature(readFileSync(join(directory, name), "utf8"));
     const target = join(outDir, `${name.replace(/\.feature$/, "")}.test.ts`);
-    const full = join(root, target);
+    const full = join(out, `${name.replace(/\.feature$/, "")}.test.ts`);
 
     if (existsSync(full) && !readFileSync(full, "utf8").startsWith("// archdiff:generated")) {
       skipped.push(target);

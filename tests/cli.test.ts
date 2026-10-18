@@ -1620,6 +1620,12 @@ test("spec --tests writes a test skeleton per Gherkin scenario and keeps a test 
     assert.ok(written.includes('test("Place an order", { todo: "not written yet" }, () => {\n  // When I place an order of 5\n  // Then it is saved\n  // And it is logged\n});'), written);
     assert.ok(written.includes('test("Pay", { todo: "not written yet" }, () => {'), written);
     assert.equal(readFileSync(join(dir, "tests/mine.test.ts"), "utf8"), "// my own test file\n");
+    // A directory given as an absolute path is where the skeletons go (not under the root), and the output names it so.
+    const elsewhere = join(dir, "elsewhere", "skeletons");
+    const absolute = archdiff(["spec", dir, "--tests", elsewhere]);
+    assert.equal(absolute.status, 0, absolute.stdout);
+    assert.ok(absolute.stdout.includes(`${join(elsewhere, "orders.test.ts")}\twritten`), absolute.stdout);
+    assert.ok(existsSync(join(elsewhere, "orders.test.ts")) && !existsSync(join(dir, elsewhere)), "the skeleton sits at the absolute path and nowhere under the root");
     // The skeleton is a valid test file: node runs it with every test marked to do.
     // Outside this test run's own context, so the child's reporter writes to its stdout as it would for a user.
     const env = { ...process.env };
