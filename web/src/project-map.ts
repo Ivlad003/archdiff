@@ -3,10 +3,13 @@
 // (or per directory when the repository is big), coloured by layer and
 // sized by lines, a line per import. Hover names a dot and lights its
 // neighbours, a click opens the module's view, Shift+click everything
-// joined to it, a double click its inside; the dots of the current
-// picture wear a ring, so the reader sees where in the project the
-// picture sits. Search filters the labels, the layer chips hide layers.
-// Takes the page as its context (page.ts).
+// joined to it, a double click its inside (a click waits a moment to
+// know which it is); the dots of the current picture wear a ring, so the
+// reader sees where in the project the picture sits. Search filters the
+// labels, the layer chips hide layers. A dot pushes away only the dots
+// near it and every dot is pulled to the middle, so a module nothing
+// imports stays beside the rest instead of flying off, and the whole map
+// fits the canvas. Takes the page as its context (page.ts).
 //
 // Entry points: `toggleProjectMap`, `projectMapOpen`, `refreshProjectMap`;
 // `mapDots` and `mapSettled` for the browser tests.
@@ -32,6 +35,16 @@ const PALETTE = ["#1565c0", "#2e7d32", "#ef6c00", "#6a1b9a", "#00838f", "#c62828
 
 /** Iterations of the layout before it stops. */
 const ITERATIONS = 320;
+/** How far a dot pushes the others away, in ideal distances: beyond, it leaves them be (the far push is what scattered the map). */
+const REACH = 3;
+/** The pull of every dot to the middle of the map, by its distance from there: a module joined to nothing stays near the rest. */
+const GRAVITY = 0.05;
+/** The pull of a dot to the middle of its layer, by its distance from there: a layer holds together. */
+const LAYER_PULL = 0.03;
+/** The room kept between two dots, in world units beyond their radii. */
+const DOT_GAP = 6;
+/** Two clicks on one dot within this many milliseconds are a double click; a single click waits as long before it opens. */
+const DOUBLE_CLICK_MS = 350;
 
 let data: ProjectMap | null = null;
 let dots: Dot[] = [];
@@ -45,6 +58,8 @@ let hover: string | null = null;
 let search = "";
 const hiddenLayers = new Set<string>();
 let drag: { id: string | null; startX: number; startY: number; moved: boolean; viewX: number; viewY: number } | null = null;
+/** A click on a dot waiting to know whether a second one comes (a double click): the dot, what the click opens, the timer. */
+let pendingClick: { id: string; timer: ReturnType<typeof setTimeout> } | null = null;
 let loadedFor = "";
 
 const overlay = (): HTMLDivElement => element<HTMLDivElement>("project-map");
@@ -86,7 +101,10 @@ function seed(map: ProjectMap): void {
   iteration = 0;
 }
 
-/** One step of the layout: repulsion between every two dots, attraction along the imports, a pull to the centre and to the layer's own centre, cooling. */
+/**
+ * One step of the layout: repulsion between two dots near each other, attraction along the imports, a pull to the
+ * middle of the map and to the middle of the layer, cooling; then dots that overlap are moved apart.
+ */
 function step(): void {
   if (!data || dots.length === 0) return;
   const n = dots.length;
@@ -113,6 +131,7 @@ function step(): void {
         distance = 0.014;
       }
 
+      if (distance > REACH * k) continue;
       const force = (k * k) / distance / distance;
       a.vx += dx * force;
       a.vy += dy * force;
@@ -136,8 +155,9 @@ function step(): void {
     b.vy += dy * force;
   }
 
-  // The centre of each layer, for the pull that keeps a layer together.
+  // The middle of each layer, for the pull that keeps a layer together, and of the whole map.
   const centres = new Map<number, { x: number; y: number; n: number }>();
+  const middle = { x: 0, y: 0 };
 
   for (const dot of dots) {
     const centre = centres.get(dot.layer) ?? { x: 0, y: 0, n: 0 };
@@ -145,13 +165,15 @@ function step(): void {
     centre.y += dot.y;
     centre.n++;
     centres.set(dot.layer, centre);
+    middle.x += dot.x / n;
+    middle.y += dot.y / n;
   }
 
   for (const dot of dots) {
     if (dot.pinned) continue;
     const centre = centres.get(dot.layer)!;
-    dot.vx += (centre.x / centre.n - dot.x) * 0.03 - dot.x * 0.012;
-    dot.vy += (centre.y / centre.n - dot.y) * 0.03 - dot.y * 0.012;
+    dot.vx += (centre.x / centre.n - dot.x) * LAYER_PULL + (middle.x - dot.x) * GRAVITY;
+    dot.vy += (centre.y / centre.n - dot.y) * LAYER_PULL + (middle.y - dot.y) * GRAVITY;
     const speed = Math.hypot(dot.vx, dot.vy);
     const capped = Math.min(speed, temperature);
 
@@ -161,8 +183,32 @@ function step(): void {
     }
   }
 
+  // Dots that overlap move apart, half each (a dot the reader placed stays, and the other moves the whole way).
+  for (let i = 0; i < n; i++) {
+    const a = dots[i]!;
+
+    for (let j = i + 1; j < n; j++) {
+      const b = dots[j]!;
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const distance = Math.hypot(dx, dy) || 0.01;
+      const room = a.radius + b.radius + DOT_GAP;
+
+      if (distance >= room || (a.pinned && b.pinned)) continue;
+      const push = (room - distance) / distance;
+      const share = a.pinned ? 0 : b.pinned ? 1 : 0.5;
+      a.x += dx * push * share;
+      a.y += dy * push * share;
+      b.x -= dx * push * (1 - share);
+      b.y -= dy * push * (1 - share);
+    }
+  }
+
   iteration++;
 }
+
+/** The smallest scale of the map, the fit's and the wheel's: low enough for any map to fit whole. */
+const MIN_SCALE = 0.05;
 
 /** Fits every dot into the canvas with a margin. */
 function fit(): void {
@@ -172,7 +218,7 @@ function fit(): void {
   const maxX = Math.max(...dots.map((dot) => dot.x));
   const minY = Math.min(...dots.map((dot) => dot.y));
   const maxY = Math.max(...dots.map((dot) => dot.y));
-  const k = Math.min(3, Math.max(0.15, Math.min((box.width - 80) / Math.max(1, maxX - minX), (box.height - 80) / Math.max(1, maxY - minY))));
+  const k = Math.min(3, Math.max(MIN_SCALE, Math.min((box.width - 80) / Math.max(1, maxX - minX), (box.height - 80) / Math.max(1, maxY - minY))));
   view = { k, x: box.width / 2 - ((minX + maxX) / 2) * k, y: box.height / 2 - ((minY + maxY) / 2) * k };
 }
 
@@ -356,11 +402,21 @@ async function loadMap(): Promise<void> {
   }
 }
 
+/** The view a dot opens, the map closed: a click's, a Shift+click's or a double click's. */
+function openDot(id: string, kind: "open" | "focus" | "inside"): void {
+  toggleProjectMap(false);
+  setLink({ ...currentLink(), view: viewOfDot(id, kind) });
+}
+
 /** Shows or hides the map; the data loads on the first opening and again when the code changed. */
 export function toggleProjectMap(force?: boolean): void {
   const box = overlay();
   const show = force ?? box.hidden;
   box.hidden = !show;
+
+  // A click that was waiting for a second one opens nothing once the map is closed.
+  if (pendingClick) clearTimeout(pendingClick.timer);
+  pendingClick = null;
   element<HTMLButtonElement>("tool-project").classList.toggle("active", show);
 
   if (!show) return;
@@ -451,23 +507,24 @@ target.addEventListener("pointermove", (event) => {
   }
 });
 
+// A click on a dot opens its view (Shift: everything joined to it), a second click on it soon after its inside; the
+// first waits that long, or the map would close under the second.
 target.addEventListener("pointerup", (event) => {
   const was = drag;
   drag = null;
 
   if (!was || was.moved || !was.id) return;
-  // A click on a dot: its view (Shift: everything joined to it); the map closes and the picture opens.
-  const key = viewOfDot(was.id, event.shiftKey ? "focus" : "open");
-  toggleProjectMap(false);
-  setLink({ ...currentLink(), view: key });
-});
+  const id = was.id;
 
-target.addEventListener("dblclick", (event) => {
-  const dot = dotAt(event.clientX, event.clientY);
+  if (pendingClick?.id === id) {
+    openDot(id, "inside");
 
-  if (!dot) return;
-  toggleProjectMap(false);
-  setLink({ ...currentLink(), view: viewOfDot(dot.id, "inside") });
+    return;
+  }
+
+  if (pendingClick) clearTimeout(pendingClick.timer);
+  const kind = event.shiftKey ? "focus" : "open";
+  pendingClick = { id, timer: setTimeout(() => openDot(id, kind), DOUBLE_CLICK_MS) };
 });
 
 target.addEventListener("pointerleave", () => {
@@ -485,7 +542,7 @@ target.addEventListener(
     const px = event.clientX - box.left;
     const py = event.clientY - box.top;
     const factor = Math.exp(-event.deltaY * 0.0015);
-    const k = Math.max(0.1, Math.min(6, view.k * factor));
+    const k = Math.max(MIN_SCALE, Math.min(6, view.k * factor));
     // Zoom around the pointer: the world point under it stays put.
     view = { k, x: px - ((px - view.x) / view.k) * k, y: py - ((py - view.y) / view.k) * k };
     draw();

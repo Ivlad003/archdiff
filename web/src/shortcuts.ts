@@ -39,7 +39,11 @@ function readingKey(event: KeyboardEvent): void {
     event.preventDefault();
     focusViewSearch();
   } else if (event.key === "o") toggleOptions();
-  else if (event.key === "p" && drawable) toggleProjectMap();
+  else if (event.key === "p" && drawable) {
+    // The map's search box takes the focus: the key is not typed into it as a search.
+    event.preventDefault();
+    toggleProjectMap();
+  }
   else if (event.key === "0") page.canvas()?.scrollToContent();
   else if (event.key === "Backspace") history.back();
   else if (isArrow(event.key) && picked) {

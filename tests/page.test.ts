@@ -572,8 +572,19 @@ test("Shift or Ctrl+tap selects several shapes; a right click opens the menu; th
   await page!.waitForFunction(`window.archdiff.mapSettled()`, undefined, { timeout: 20_000 });
   const dots = (await page!.evaluate("window.archdiff.mapDots()")) as { id: string; x: number; y: number }[];
   assert.ok(dots.length >= 5, `${dots.length} dots`);
+  // The key that opened the map is not typed into its search box, and every dot is on the map's canvas.
+  assert.equal(await page!.inputValue("#map-search"), "");
+  const mapBox = (await page!.evaluate(`document.querySelector("#project-map-canvas").getBoundingClientRect().toJSON()`)) as { left: number; top: number; right: number; bottom: number };
+  assert.ok(dots.every((dot) => dot.x >= mapBox.left && dot.x <= mapBox.right && dot.y >= mapBox.top && dot.y <= mapBox.bottom), JSON.stringify({ mapBox, dots }));
   const storeDot = dots.find((dot) => dot.id === "src/db/store.ts")!;
   await page!.mouse.click(storeDot.x, storeDot.y);
   await page!.waitForFunction(`location.hash.includes("module%3Asrc%2Fdb%2Fstore.ts")`);
+  await page!.waitForFunction(`document.querySelector("#project-map").hidden`);
+  // A double click on a dot goes inside its module: the first click waits for the second instead of closing the map.
+  await page!.keyboard.press("p");
+  await page!.waitForFunction(`!document.querySelector("#project-map").hidden && window.archdiff.mapSettled()`, undefined, { timeout: 20_000 });
+  const ordersDot = ((await page!.evaluate("window.archdiff.mapDots()")) as { id: string; x: number; y: number }[]).find((dot) => dot.id === "src/lib/orders.ts")!;
+  await page!.mouse.dblclick(ordersDot.x, ordersDot.y);
+  await page!.waitForFunction(`location.hash.includes("inside%3Asrc%2Flib%2Forders.ts")`);
   await page!.waitForFunction(`document.querySelector("#project-map").hidden`);
 });

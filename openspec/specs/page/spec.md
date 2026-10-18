@@ -105,12 +105,22 @@ The system SHALL add a shape to the selection on a tap with Shift, Ctrl or Cmd h
 
 ### Requirement: The project map shows where the picture sits
 
-The system SHALL open, on **project** or `p`, a map of the whole repository over the canvas (`GET /api/graph`): a dot per module (per directory above 400 modules) coloured by layer and sized by lines, a line per import, laid out by forces; hover SHALL name a dot and light its neighbours, the dots of the current picture SHALL wear a ring, a click SHALL open the module's view, Shift+click its focus view, a double click its inside; layer chips SHALL hide layers and a search box SHALL find a module; Escape SHALL close it.
+The system SHALL open, on **project** or `p`, a map of the whole repository over the canvas (`GET /api/graph`): a dot per module (per directory above 400 modules) coloured by layer and sized by lines, a line per import, laid out by forces that keep it together — a dot pushes away only the dots near it, every dot is pulled to the middle and to its layer's, dots do not overlap — and fitted whole into the canvas; hover SHALL name a dot and light its neighbours, the dots of the current picture SHALL wear a ring, a click SHALL open the module's view, Shift+click its focus view, a double click its inside (a click waits for a second one before it opens); layer chips SHALL hide layers and a search box SHALL find a module, empty when `p` opened the map; Escape SHALL close it.
 
 #### Scenario: A dot opens its module
 
 - **WHEN** the map is open and the dot of `store.ts` is clicked
 - **THEN** the map closes and the link holds `module:src/db/store.ts`
+
+#### Scenario: A double click goes inside
+
+- **WHEN** the map is open and the dot of `orders.ts` is double-clicked
+- **THEN** the map closes and the link holds `inside:src/lib/orders.ts`
+
+#### Scenario: Modules joined to nothing
+
+- **WHEN** a repository has scripts that import nothing and that nothing imports
+- **THEN** their dots sit beside the others, and every dot of the map is on the canvas
 
 ### Requirement: Sideways navigation
 
