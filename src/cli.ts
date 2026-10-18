@@ -87,7 +87,13 @@ function refsOf(call: Call): Refs {
 async function writePicture(call: Call, command: string, root: string, view: View, options: PictureOptions, format: ExportFormat | "md", json: (picture: Picture) => string = (picture) => exportDiagram(picture.diagram, "json")): Promise<{ code: number; picture: Picture | null }> {
   const picture = await drawPicture(await analyze(root), { view, options, refs: refsOf(call) });
 
-  if (picture.diagram.missing) return { code: fail(`${command}: ${picture.diagram.reason} (archdiff views lists them)`), picture: null };
+  // A missing subject: the reason, and where the subjects are listed, unless the reason says so already (a machine's).
+  if (picture.diagram.missing) {
+    const reason = picture.diagram.reason ?? "";
+
+    return { code: fail(`${command}: ${reason}${/ lists them\)$/.test(reason) ? "" : " (archdiff views lists them)"}`), picture: null };
+  }
+
   const text = format === "md" ? picture.markdown : format === "json" ? json(picture) : exportDiagram(picture.diagram, format, options.mermaid);
 
   return { code: writeOut(text, call.text("out")), picture };

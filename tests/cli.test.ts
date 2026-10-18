@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { withTempDir } from "./temp-dir.ts";
@@ -137,15 +137,37 @@ test("coverage names what the diagrams cannot show, and counts only blind calls 
   assert.ok(report.markdown.includes("\n# Coverage: what the diagrams cannot show\n"));
 });
 
-test("a wrong view, format or command exits 2 with a message on stderr", () => {
-  assert.equal(archdiff(["diagram", "nothing:x", fixture]).status, 2);
-  assert.equal(archdiff(["diagram", "layers", fixture, "--format", "png"]).status, 2);
-  const unknown = archdiff(["frobnicate"]);
-  assert.equal(unknown.status, 2);
-  assert.ok(unknown.stderr.includes('unknown command "frobnicate"'));
-  assert.equal(archdiff([]).status, 2);
-  assert.equal(archdiff(["--help"]).status, 0);
-});
+test("a wrong call exits 2 with one plain line on stderr: the view, the format, the command, an argument, a flag, --out, --port, archdiff.json, git", () =>
+  withTempDir("archdiff-wrong-", (dir) => {
+    /** The call exits 2 and says exactly this on stderr, nothing on stdout. */
+    const refused = (args: string[], message: string): void => {
+      const result = archdiff(args);
+      assert.equal(result.status, 2, `${args.join(" ")}: ${result.stderr}`);
+      assert.equal(result.stderr, `archdiff: ${message}\n`);
+      assert.equal(result.stdout, "");
+    };
+    assert.equal(archdiff(["diagram", "nothing:x", fixture]).status, 2);
+    assert.equal(archdiff(["diagram", "layers", fixture, "--format", "png"]).status, 2);
+    refused(["frobnicate"], 'unknown command "frobnicate" (archdiff --help)');
+    assert.equal(archdiff([]).status, 2);
+    assert.equal(archdiff(["--help"]).status, 0);
+    refused(["views", fixture, "extra"], 'views: unexpected argument "extra" (archdiff --help)');
+    refused(["diagram", "layers", fixture, "--dpth", "2"], "diagram: unknown flag --dpth (did you mean --depth?)");
+    refused(["diagram", "layers", fixture, "--out", dir], `--out ${dir}: a directory; name a file`);
+    refused(["web", fixture, "--port", "abc"], "web: --port must be a port number");
+    refused(["web", fixture, "--port", "70000"], "web: --port must be a port number");
+    // A subject the code does not have: the reason, and once where the subjects are listed.
+    refused(["diagram", "logic:src/nope.ts#f", fixture], 'diagram: no function "src/nope.ts#f" (archdiff views lists them)');
+    refused(["diagram", "machine:src/nope.ts#f", fixture], 'diagram: no state machine "src/nope.ts#f" (archdiff diagram machines lists them)');
+    // A broken archdiff.json names the file and the field; outside git, review says so.
+    cpSync(fixture, dir, { recursive: true });
+    writeFileSync(join(dir, "archdiff.json"), '{ "layers": { "lib": "src/lib/**" } }');
+    refused(["analyze", dir], 'archdiff.json: "layers.lib" must be a list of strings');
+    writeFileSync(join(dir, "archdiff.json"), '{ "layers": ');
+    assert.match(archdiff(["analyze", dir]).stderr, /^archdiff: archdiff\.json: not valid JSON \(/);
+    rmSync(join(dir, "archdiff.json"));
+    refused(["review", dir], `${dir} is not a git repository`);
+  }));
 
 test("review reports the architectural diff of the working tree against a base commit", () =>
   withTempDir("archdiff-review-", (dir) => {

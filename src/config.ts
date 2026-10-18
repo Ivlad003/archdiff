@@ -70,7 +70,13 @@ export function loadConfig(root: string): Config {
   const file = join(root, CONFIG_FILE);
 
   if (!existsSync(file)) return DEFAULT_CONFIG;
-  const parsed = parseJson(readFileSync(file, "utf8"));
+  let parsed;
+
+  try {
+    parsed = parseJson(readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new Error(`${CONFIG_FILE}: not valid JSON (${error instanceof Error ? error.message : String(error)})`);
+  }
 
   if (!isJsonObject(parsed)) throw new Error(`${CONFIG_FILE}: must be a JSON object`);
   const exclude = stringList(parsed["exclude"], CONFIG_FILE, "exclude");
