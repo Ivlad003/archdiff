@@ -273,6 +273,10 @@ test("a wrong call exits 2 with one plain line on stderr: the view, the format, 
     refused(["diagram", "layers", fixture, "--out", dir], `--out ${dir}: a directory; name a file`);
     refused(["web", fixture, "--port", "abc"], "web: --port must be a port number");
     refused(["web", fixture, "--port", "70000"], "web: --port must be a port number");
+    // A directory that is not there, a flag written short, a view plan does not know: said plainly.
+    refused(["views", join(dir, "nope")], `views: no directory ${join(dir, "nope")}`);
+    refused(["views", fixture, "-d"], "views: unknown flag -d (flags are written --name; archdiff --help lists them)");
+    refused(["plan", "nope", fixture], 'plan: unknown view "nope" (archdiff views lists them)');
     // A flag of a value never takes the next flag for it, and alone it is a call without its value.
     refused(["metrics", fixture, "--out", "--json"], "metrics: --out needs a value");
     refused(["compare", fixture, "--heads", "--base", "main"], "compare: --heads needs a value");
@@ -381,6 +385,8 @@ test("a file over the size limit is left out and named by the coverage report", 
       ["src/lib/vendor.js"],
     );
     assert.ok(report.markdown.includes("## Files not analysed\n\n- src/lib/vendor.js — 1.6 MB, over the 1.5 MB limit"));
+    // After the modules' own sections: none of them reads as a file not analysed.
+    assert.ok(report.markdown.indexOf("## Files not analysed") > report.markdown.lastIndexOf("\n### "), report.markdown);
   }));
 
 test("a review of a directory inside the repository reads the files of that directory from git", () =>
@@ -473,6 +479,19 @@ test("plan refuses a view without a drawing and web --agent refuses an unknown a
   assert.equal(unknown.status, 2);
   assert.ok(unknown.stderr.includes("not claude or cursor"));
 });
+
+test("a repository with no commit yet says so: history and the timeline, and the branch checked out", () =>
+  withTempDir("archdiff-unborn-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    gitIn(dir)("init", "-q", "-b", "trunk");
+    for (const args of [["history", dir], ["diagram", "timeline", dir]]) {
+      const result = archdiff(args);
+      assert.equal(result.status, 2, args.join(" "));
+      assert.equal(result.stderr, `archdiff: ${dir} has no commits yet\n`);
+    }
+
+    assert.ok(archdiff(["branches", dir]).stdout.includes("current: trunk\n"));
+  }));
 
 test("history lists the drift commit by commit, and review --head compares two refs", () =>
   withTempDir("archdiff-history-", (dir) => {
@@ -614,7 +633,7 @@ test("facts never guessed: a parameter or a local spelled like a function, super
     // A listener at a module's top level is drawn with the function it registers.
     assert.ok(mermaid("events").includes('event_order_shipped -.->|"on"| src_bus_ts_onShipped'), mermaid("events"));
     // Django's tests.py is a test, an A/B test module is none; a word inside a name makes no handler module.
-    assert.ok(archdiff(["diagram", "tests", dir]).stdout.includes("# Tests: 1 test files cover 1 of"), archdiff(["diagram", "tests", dir]).stdout.slice(0, 300));
+    assert.ok(archdiff(["diagram", "tests", dir]).stdout.includes("# Tests: 1 test file covers 1 of"), archdiff(["diagram", "tests", dir]).stdout.slice(0, 300));
     assert.ok(!archdiff(["views", dir]).stdout.includes("uncalled method of a handler"));
   }));
 
@@ -846,7 +865,7 @@ test("cycles, events, tests, packages and timeline on a repository that has them
     git("commit", "-q", "-m", "lib: extra");
     const timeline = JSON.parse(archdiff(["diagram", "timeline", dir, "--base", "main~1", "--head", "main", "--format", "json"]).stdout) as { placed?: boolean; nodes: { id: string; label: string }[]; title: string };
     assert.equal(timeline.placed, true);
-    assert.ok(timeline.title.includes("1 commits"), timeline.title);
+    assert.ok(timeline.title.includes("1 commit"), timeline.title);
     assert.ok(timeline.nodes.some((node) => node.id.startsWith("commit:") && node.label.includes("lib: extra")), JSON.stringify(timeline.nodes));
   }));
 
@@ -1140,7 +1159,7 @@ test("--changes lays the review's marks over any view", () =>
     // --only-changes: the changed module, its importer, nothing else.
     const only = JSON.parse(archdiff(["diagram", "layer:lib", dir, "--changes", "--base", "HEAD", "--only-changes", "--format", "json"]).stdout) as { nodes: { id: string }[]; reason?: string };
     assert.deepEqual(only.nodes.map((node) => node.id).sort(), ["src/lib/log.ts", "src/lib/orders.ts"]);
-    assert.ok(only.reason?.includes("only the 1 changed shapes and their neighbours"), only.reason);
+    assert.ok(only.reason?.includes("only the 1 changed shape and their neighbours"), only.reason);
   }));
 
 test("--mermaid picks a Mermaid type that fits the view", () => {
@@ -1293,7 +1312,7 @@ test("metrics: coupling and cohesion by module and layer, as Markdown and JSON; 
   assert.ok(stdout.includes("| **lib** | 2 | 1 | 1 | 0.50 |"), stdout);
   assert.ok(stdout.includes("| src/routes/checkout.tsx | routes | 0 | 1 | 1.00 | 0.00 | 0.00 |"), stdout);
   // An isolated script (nothing imports it, it imports nothing of the repository): D is 1 and carries no ⚠.
-  assert.ok(stdout.includes("| cartridges/base/cartridge/scripts/hooks/basket.js | cartridge | 0 | 0 | 0.00 | 0.00 | 1.00 | 1.00 | 1 | 4 |"), stdout);
+  assert.ok(stdout.includes("| cartridges/base/cartridge/scripts/hooks/basket.js | cartridge | 0 | 0 | 0.00 | 0.00 | 1.00 | 1.00 | 1 | 3 |"), stdout);
   const json = JSON.parse(archdiff(["metrics", fixture, "--json", "--layer", "db"]).stdout) as { modules: { id: string; ca: number; instability: number }[]; layers: { name: string }[] };
   assert.deepEqual(json.modules.map((row) => [row.id, row.ca, row.instability]), [["src/db/store.ts", 1, 0]]);
   assert.deepEqual(json.layers.map((layer) => layer.name), ["db"]);

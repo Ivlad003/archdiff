@@ -11,6 +11,7 @@
 // Entry points: `readDrawing`, `writeDrawing`, `drawingSlug`, `parseDrawing`,
 // `DrawingFile`; the pure scene helpers are re-exported from scene.ts.
 
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CACHE_DIRECTORY } from "./cache.ts";
@@ -39,8 +40,20 @@ export function drawingSlug(view: string): string {
   return view.replace(/[^A-Za-z0-9.-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 150) || "view";
 }
 
+/**
+ * The file of a view's drawing, relative to the root: `<slug>.json`, or — when two views spell one slug
+ * (`module:src/lib_log.ts`, `module:src/lib/log.ts`; a key over 150 characters) and that file is the other view's —
+ * `<slug>-<hash>.json`, named by the whole key. A drawing written before keeps its plain name.
+ */
+export function drawingFile(root: string, view: string): string {
+  const plain = `${DRAWINGS_DIRECTORY}/${drawingSlug(view)}.json`;
+  const there = readDrawingFile(join(root, plain));
+
+  return there === null || there.view === view ? plain : `${DRAWINGS_DIRECTORY}/${drawingSlug(view)}-${createHash("sha256").update(view).digest("hex").slice(0, 10)}.json`;
+}
+
 export function drawingPath(root: string, view: string): string {
-  return join(root, DRAWINGS_DIRECTORY, `${drawingSlug(view)}.json`);
+  return join(root, drawingFile(root, view));
 }
 
 function isElement(value: JsonValue): value is SceneElement {
@@ -89,12 +102,14 @@ export function readDrawingFile(file: string): DrawingFile | null {
 
 /** Writes the drawing atomically; returns the path relative to the root. */
 export function writeDrawing(root: string, drawing: DrawingFile): string {
-  const file = drawingPath(root, drawing.view);
+  // Never over another view's drawing that spells the same slug.
+  const relative = drawingFile(root, drawing.view);
+  const file = join(root, relative);
   mkdirSync(join(root, DRAWINGS_DIRECTORY), { recursive: true });
   const temporary = `${file}.${process.pid}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(drawing, null, 2)}\n`);
   renameSync(temporary, file);
 
-  return `${DRAWINGS_DIRECTORY}/${drawingSlug(drawing.view)}.json`;
+  return relative;
 }
 

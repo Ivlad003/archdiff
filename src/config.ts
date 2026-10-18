@@ -15,6 +15,15 @@ import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts
 
 export const CONFIG_FILE = "archdiff.json";
 
+/** What `read` returns, its error said as an error of the config file (`archdiff.json: agent: …`). */
+function named<T>(read: () => T): T {
+  try {
+    return read();
+  } catch (error) {
+    throw new Error(`${CONFIG_FILE}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /** The settings of one repository. */
 export interface Config {
   /** Globs of files left out of the analysis, besides what git ignores. */
@@ -97,7 +106,7 @@ export function loadConfig(root: string): Config {
 
   if (other !== undefined && !isJsonString(other)) throw new Error(`${CONFIG_FILE}: "other" must be a string`);
 
-  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: agentFromConfig(parsed["agent"]), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages"), checks: stringList(parsed["checks"], CONFIG_FILE, "checks") };
+  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: named(() => agentFromConfig(parsed["agent"])), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages"), checks: stringList(parsed["checks"], CONFIG_FILE, "checks") };
 }
 
 /** `"hubs": { "min": 6, "share": 0.25, "max": 40 }`, each field optional; a wrong field names itself. */

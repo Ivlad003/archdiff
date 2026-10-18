@@ -33,7 +33,8 @@ function git(root: string, args: string[]): { ok: true; out: string } | { ok: fa
 
     if (/not a git repository/i.test(text)) return { ok: false, error: `${root} is not a git repository` };
 
-    if (/bad revision 'HEAD'|ambiguous argument 'HEAD'/.test(text)) return { ok: false, error: `${root} has no commits yet` };
+    // `HEAD`, `HEAD..HEAD`, `HEAD~1`: a repository with no commit has no HEAD to read.
+    if (/bad revision 'HEAD|ambiguous argument 'HEAD|unknown revision or path not in the working tree.*HEAD/.test(text) && !git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).ok) return { ok: false, error: `${root} has no commits yet` };
 
     if (/unknown revision|bad revision|ambiguous argument/.test(text)) return { ok: false, error: text.split("\n")[0] ?? text };
 
@@ -285,8 +286,9 @@ export interface Branch {
 
 /** Every branch, local then remote (HEAD pointers left out), newest commit first, with the current one marked. */
 export function listBranches(root: string): { current: string | null; branches: Branch[] } {
-  const current = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
-  const head = current.ok && current.out.trim() !== "HEAD" ? current.out.trim() : null;
+  // The branch HEAD names, even before its first commit; none on a detached HEAD.
+  const current = git(root, ["symbolic-ref", "--short", "-q", "HEAD"]);
+  const head = current.ok && current.out.trim() !== "" ? current.out.trim() : null;
   const log = git(root, ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)%00%(objectname:short)%00%(committerdate:short)%00%(subject)", "refs/heads", "refs/remotes"]);
 
   if (!log.ok) throw new Error(log.error);
@@ -400,6 +402,15 @@ function commitsOf(out: string): Commit[] {
 
       return { sha, short, author, date, subject };
     });
+}
+
+/** Whether git ignores a path of the repository (by any .gitignore, the global one too); null outside git. */
+export function isIgnored(root: string, path: string): boolean | null {
+  const result = git(root, ["check-ignore", "-q", "--", path]);
+
+  if (result.ok) return true;
+
+  return /not a git repository/.test(result.error) ? null : false;
 }
 
 /** The base branch a comparison starts from: develop, main or master, local or on origin, whichever exists first; null when none. */

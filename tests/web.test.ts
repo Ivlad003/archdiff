@@ -101,6 +101,13 @@ test("a drawing saved by the editor places the shapes of the live diagram and me
   // A wrong body is refused and nothing changes.
   const bad = await fetch(`${base}/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", body: JSON.stringify({ elements: "no" }) });
   assert.equal(bad.status, 400);
+  // Two views that spell one file name keep a drawing each: the second gets a name of its own.
+  const save = async (key: string, id: string): Promise<string> => ((await (await fetch(`${base}/api/drawing?view=${encodeURIComponent(key)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: [{ id, type: "freedraw", x: 1, y: 1, width: 5, height: 5 }], mocks: [] }) })).json()) as { saved: string }).saved;
+  assert.equal(await save("module:src/lib/log.ts", "stroke-a"), ".archdiff/layouts/module_src_lib_log.ts.json");
+  assert.match(await save("module:src/lib_log.ts", "stroke-b"), /^\.archdiff\/layouts\/module_src_lib_log\.ts-[0-9a-f]{10}\.json$/);
+  const strokes = async (key: string): Promise<string[]> => (await getJson<{ elements: { id: string }[] }>(`/api/scene?view=${encodeURIComponent(key)}`)).elements.map((element) => element.id).filter((id) => id.startsWith("stroke-"));
+  assert.deepEqual(await strokes("module:src/lib/log.ts"), ["stroke-a"]);
+  assert.deepEqual(await strokes("module:src/lib_log.ts"), ["stroke-b"]);
 });
 
 test("a shape's page is asked for the picture the page shows: an opened module's function has a page, a package.json is a readable file", async () => {

@@ -109,8 +109,9 @@ export function storageOf(analysis: Analysis, module: string): string | null {
     const external = graph.externals.get(dep.to);
 
     if (!external) continue;
-    const key = external.kind === "builtin" ? `node:${external.name}` : external.name;
-    const label = config.storagePackages[key] ?? STORAGE_PACKAGES[key];
+    const key = external.kind === "builtin" ? external.id : external.name;
+    // Python's `sqlite3` is a module of its standard library (`py:sqlite3`), named in the table by its own name.
+    const label = config.storagePackages[key] ?? STORAGE_PACKAGES[key] ?? (key.startsWith("py:") ? STORAGE_PACKAGES[external.name] : undefined);
 
     if (label) return label;
   }

@@ -19,6 +19,7 @@ import { farFromMainSequence, SIZE, type Diagram, type PictureContent, type Shap
 import { moduleOf, type Graph } from "./graph.ts";
 import { unplaced } from "./nodes.ts";
 import { moduleOfShape } from "./shape-keys.ts";
+import { counted } from "./words.ts";
 
 /** Union–find over the functions of a module, for the groups the cohesion counts. */
 class Groups {
@@ -246,7 +247,7 @@ export function metricsView(analysis: Analysis, scope: string | null, limit: num
   });
   const far = shown.filter(farFromMainSequence).length;
   const loose = shown.filter((row) => row.cohesion < 0.3 && row.fns > 2).length;
-  const parts = [far > 0 ? `${far} modules far from the main sequence (D ≥ 0.7, orange)` : "no module far from the main sequence", loose > 0 ? `${loose} modules of loosely related functions (cohesion < 0.3)` : "", rows.length > shown.length ? `${shown.length} of ${rows.length} modules; --limit raises it` : ""].filter(Boolean);
+  const parts = [far > 0 ? `${counted(far, "module")} far from the main sequence (D ≥ 0.7, orange)` : "no module far from the main sequence", loose > 0 ? `${counted(loose, "module")} of loosely related functions (cohesion < 0.3)` : "", rows.length > shown.length ? `${shown.length} of ${rows.length} modules; --limit raises it` : ""].filter(Boolean);
 
   return unplaced(scope === null ? "Metrics: coupling and cohesion by module" : `Metrics of ${scope}`, nodes, [], [], { placed: true, metrics: { modules: shown, layers: scope === null ? metrics.layers : metrics.layers.filter((layer) => layer.name === scope) }, reason: parts.join("; ") });
 }

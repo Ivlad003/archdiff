@@ -18,6 +18,7 @@ import { moduleOfShape, standsFor } from "./shape-keys.ts";
 import { overlayInstability } from "./metrics.ts";
 
 import { OVERLAYS, type Overlay } from "./options.ts";
+import { counted } from "./words.ts";
 
 export { OVERLAYS, type Overlay } from "./options.ts";
 
@@ -86,7 +87,7 @@ export function overlayHeat(diagram: Diagram, graph: Graph): Diagram {
     // A diff mark of the review or the tests overlay stays; the shade sits under it.
     if (count === undefined) return node;
 
-    return { ...node, heat: count / max, label: `${node.label}\n${count} calls in` };
+    return { ...node, heat: count / max, label: `${node.label}\n${counted(count, "call")} in` };
   });
 
   return { ...diagram, nodes, reason: [diagram.reason, "shade: calls in from other modules"].filter(Boolean).join("; ") };

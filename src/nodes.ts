@@ -37,7 +37,7 @@ export function moduleNode(graph: Graph, id: string): Shape {
 export function externalNode(graph: Graph, id: string): Shape {
   const external = graph.externals.get(id)!;
 
-  return { id, kind: "external", label: external.kind === "builtin" ? `node:${external.name}` : external.name, x: 0, y: 0, w: 0, h: 0 };
+  return { id, kind: "external", label: external.kind === "builtin" ? external.id : external.name, x: 0, y: 0, w: 0, h: 0 };
 }
 
 export function fnNode(graph: Graph, id: string): Shape {

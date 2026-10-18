@@ -18,12 +18,14 @@ import { runFlow, runMarkdown } from "./run.ts";
 import { DRAWINGS_DIRECTORY, readDrawing, readDrawingFile } from "./drawings.ts";
 import { mergePlan, planFromScene, taskMarkdown } from "./plan.ts";
 import { agentFromConfig } from "./agent.ts";
+import { counted } from "./words.ts";
 import { metricsMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
 import { historyMarkdown, reviewFindings } from "./diff.ts";
 import { drawPicture, type Picture, type Refs } from "./picture.ts";
 import { analysisAt, history } from "./review.ts";
-import { defaultBase, listBranches, mergeBase, revisionStamp } from "./git.ts";
+import { defaultBase, isIgnored, listBranches, mergeBase, revisionStamp } from "./git.ts";
+import { CACHE_DIRECTORY } from "./cache.ts";
 import { serve } from "./server.ts";
 import { drawnAtHead, usesDepth } from "./view-keys.ts";
 import { parseView, viewList, viewOf, type View } from "./views.ts";
@@ -191,16 +193,16 @@ const COMMANDS: readonly Command[] = [
     async run(call) {
       const root = call.dir(0);
       const analysis = await analyze(root, { cache: !call.has("no-cache") });
-      const ignore = resolve(root, ".gitignore");
 
-      // The cache and the drawings live in .archdiff/; a repository that does not ignore it will see them in git status.
-      if (!call.has("no-cache") && existsSync(resolve(root, ".git")) && !(existsSync(ignore) && /^\.archdiff\/?\s*$/m.test(readFileSync(ignore, "utf8")))) process.stderr.write("archdiff: .archdiff/ (the cache) is not in .gitignore; add it, or commit .archdiff/layouts/ on purpose\n");
+      // The cache lives in .archdiff/; a repository that does not ignore it sees it in git status. Git says, by any of
+      // its ignore files and patterns (`.archdiff/`, or the cache file alone with the drawings committed on purpose).
+      if (!call.has("no-cache") && isIgnored(root, `${CACHE_DIRECTORY}/facts.json.gz`) === false) process.stderr.write("archdiff: .archdiff/ (the cache) is not in .gitignore; add it, or commit .archdiff/layouts/ on purpose\n");
 
       if (call.has("json")) {
         process.stdout.write(`${JSON.stringify(analysis.stats, null, 2)}\n`);
       } else {
         const s = analysis.stats;
-        process.stdout.write(`${s.files} files, ${s.modules} modules in ${analysis.graph.layers.length} layers, ${s.fns} functions, ${s.classes} classes, ${s.types} types\n${s.deps} imports (${s.unresolvedImports} unresolved), ${s.calls} calls followed, ${s.gaps} gaps\n${s.ms.total} ms (list ${s.ms.list}, extract ${s.ms.extract}, graph ${s.ms.graph}; cache ${s.cacheHits} hits, ${s.cacheMisses} misses)\n`);
+        process.stdout.write(`${counted(s.files, "file")}, ${counted(s.modules, "module")} in ${counted(analysis.graph.layers.length, "layer")}, ${counted(s.fns, "function")}, ${counted(s.classes, "class", "classes")}, ${counted(s.types, "type")}\n${counted(s.deps, "import")} (${s.unresolvedImports} unresolved), ${counted(s.calls, "call")} followed, ${counted(s.gaps, "gap")}\n${s.ms.total} ms (list ${s.ms.list}, extract ${s.ms.extract}, graph ${s.ms.graph}; cache ${s.cacheHits} hits, ${s.cacheMisses} misses)\n`);
       }
 
       return 0;
@@ -521,7 +523,7 @@ const COMMANDS: readonly Command[] = [
       // The contract is the reader's text too (its prose, its arrows): replaced only when asked.
       if (existsSync(resolve(root, INTENT_FILE)) && !call.has("force")) return fail(`import: ${INTENT_FILE} exists; --force replaces it with ${file}`);
       const wrote = writeIntent(root, intent);
-      process.stderr.write(`archdiff import: ${intent.layers.length} layers, ${intent.modules.length} modules, ${intent.edges.length} imports → ${wrote}\n`);
+      process.stderr.write(`archdiff import: ${counted(intent.layers.length, "layer")}, ${counted(intent.modules.length, "module")}, ${counted(intent.edges.length, "import")} → ${wrote}\n`);
 
       return 0;
     },
@@ -540,7 +542,7 @@ const COMMANDS: readonly Command[] = [
         if (intent && !call.has("force")) return fail(`intent: ${INTENT_FILE} exists; --force overwrites it from the code`);
         intent = intentFromCode(analysis, { level: call.has("layers") ? "layers" : "auto" });
         writeIntent(analysis.root, intent);
-        process.stderr.write(`archdiff intent: ${INTENT_FILE} written from the code (${intent.layers.length} layers, ${intent.modules.length} modules)\n`);
+        process.stderr.write(`archdiff intent: ${INTENT_FILE} written from the code (${counted(intent.layers.length, "layer")}, ${counted(intent.modules.length, "module")})\n`);
       }
 
       const key = call.text("view");
@@ -633,7 +635,7 @@ const COMMANDS: readonly Command[] = [
 
       const report = checkIntent(analysis, analysis.intent);
       const code = writeOut(call.has("json") ? `${JSON.stringify(report, null, 2)}\n` : checkMarkdown(report, analysis.root), call.text("out"));
-      process.stderr.write(report.ok ? "archdiff check: the code follows the intent\n" : `archdiff check: ${report.violations.length} imports go against the intent\n`);
+      process.stderr.write(report.ok ? "archdiff check: the code follows the intent\n" : `archdiff check: ${report.violations.length} ${report.violations.length === 1 ? "import goes" : "imports go"} against the intent\n`);
 
       return code !== 0 ? code : report.ok ? 0 : 1;
     },
@@ -647,7 +649,9 @@ const COMMANDS: readonly Command[] = [
     async run(call) {
       const key = call.positional[0];
 
-      if (!key || !parseView(key)) return fail("plan: a view is required (archdiff views lists them)");
+      if (!key) return fail("plan: a view is required (archdiff views lists them)");
+
+      if (!parseView(key)) return fail(`plan: unknown view "${key}" (archdiff views lists them)`);
       const analysis = await analyze(call.dir(1));
       const saved = readDrawing(analysis.root, key);
 
@@ -724,6 +728,14 @@ function parseCall(command: Command | null, argv: readonly string[]): { call: Ca
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
 
+    // `-h` is help; any other word with one dash is a flag written short, which archdiff has none of.
+    if (arg === "-h") {
+      flags.set("help", true);
+      continue;
+    }
+
+    if (/^-[^-]/.test(arg)) return { error: `${command?.name ?? "archdiff"}: unknown flag ${arg} (flags are written --name; archdiff --help lists them)` };
+
     if (!arg.startsWith("--")) {
       positional.push(arg);
       continue;
@@ -757,7 +769,14 @@ function parseCall(command: Command | null, argv: readonly string[]): { call: Ca
   const call: Call = {
     positional,
     flags,
-    dir: (index) => resolve(positional[index] ?? "."),
+    // A directory the call names must be one: a missing path is the call's mistake, not a scandir error.
+    dir: (index) => {
+      const dir = resolve(positional[index] ?? ".");
+
+      if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`${command?.name ?? "archdiff"}: no directory ${positional[index] ?? "."}`);
+
+      return dir;
+    },
     text: (name) => {
       const value = flags.get(name);
 

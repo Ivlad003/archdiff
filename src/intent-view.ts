@@ -13,6 +13,7 @@
 import type { Analysis } from "./analyze.ts";
 import type { PictureContent, Line, Lane, Shape } from "./diagram.ts";
 import { INTENT_FILE, type Intent } from "./intent.ts";
+import { counted } from "./words.ts";
 
 /**
  * The intent drawn against the code: lanes are the intent's layers, shapes
@@ -111,7 +112,7 @@ export function intentView(analysis: Analysis, intent: Intent | null): PictureCo
   }
 
   const groups: Lane[] = layerNames.map((name) => ({ id: name, label: intent.layers.find((layer) => layer.name === name)?.description ? `${name} — ${intent.layers.find((layer) => layer.name === name)!.description}` : name, kind: "lane", x: 0, y: 0, w: 0, h: 0 }));
-  const parts = [planned > 0 ? `${planned} planned, not built yet (dashed)` : "everything planned is built", beyond > 0 ? `${beyond} modules beyond the intent (orange)` : "", extra > 0 ? `${extra} imports beyond the intent (orange)` : ""].filter(Boolean);
+  const parts = [planned > 0 ? `${planned} planned, not built yet (dashed)` : "everything planned is built", beyond > 0 ? `${counted(beyond, "module")} beyond the intent (orange)` : "", extra > 0 ? `${counted(extra, "import")} beyond the intent (orange)` : ""].filter(Boolean);
 
   return { title: `Intent: ${INTENT_FILE} against the code`, nodes, edges, groups, reason: parts.join("; "), question: "what was intended, what is built, and where the code went beyond the intent" };
 }

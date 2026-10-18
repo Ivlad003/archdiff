@@ -331,6 +331,17 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
   const usable = diagram.edges.filter((edge) => boxes.has(edge.from) && boxes.has(edge.to) && edge.from !== edge.to && !edge.route);
   const columns = columnsOf(diagram.nodes);
 
+  // A line from a shape to itself (a state that stays, a function that recurses): a loop out of its right side,
+  // over its corner and into its top — not an arrow of no length.
+  for (const edge of diagram.edges) {
+    const node = edge.from === edge.to && !edge.route ? boxes.get(edge.from) : undefined;
+
+    if (!node) continue;
+    const right = node.x + node.w;
+    const into = node.x + node.w * 0.7;
+    routes.set(edge, [{ x: right, y: centreY(node) - 6 }, { x: right + 24, y: centreY(node) - 6 }, { x: right + 24, y: node.y - 18 }, { x: into, y: node.y - 18 }, { x: into, y: node.y }]);
+  }
+
   // Ports: the edges leaving a shape spread down its right side in the order of their targets, the edges entering a
   // shape spread down its left side in the order of their sources, so no two lines share an end point.
   const outgoing = new Map<string, Line[]>();

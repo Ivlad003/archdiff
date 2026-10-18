@@ -293,7 +293,7 @@ export function cyclesView(graph: Graph, only: string | null, options: CycleOpti
 
   const typed = edges.filter((edge) => edge.typeOnly).length;
 
-  if (typed > 0) notes.push(`${typed} lines carry types only (dashed)`);
+  if (typed > 0) notes.push(`${typed} ${typed === 1 ? "line carries" : "lines carry"} types only (dashed)`);
 
   if (within > 0 && only === null) notes.push(`${within} circles of functions within one module (mutual recursion) not drawn`);
 

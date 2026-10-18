@@ -302,7 +302,8 @@ function declareModules(b: Building): void {
     };
 
     for (const decl of file.decls) addDecl(decl);
-    const module: Module = { id: file.path, layer: layerOf(file.path, b.config), decls, lines: file.endLine, opaque: file.completeness === "opaque" };
+    // The lines of the file as `wc -l` counts them: a file that ends with a newline ends at the start of a line no one wrote.
+    const module: Module = { id: file.path, layer: layerOf(file.path, b.config), decls, lines: file.endCol === 1 ? file.endLine - 1 : file.endLine, opaque: file.completeness === "opaque" };
 
     if (file.doc) module.doc = file.doc;
     b.modules.set(file.path, module);
@@ -330,7 +331,8 @@ function bindImports(b: Building): void {
       if (target.kind === "file") {
         b.deps.push({ from: file.path, to: target.path, typeOnly, reexport: fact.reexport, line: fact.line });
       } else if (target.kind === "package" || target.kind === "builtin") {
-        const id = `${target.kind === "package" ? "pkg" : "node"}:${target.name}`;
+        // A package by its name; a language's own library by the language: `node:fs`, `py:os`, `rust:std`, `php:strlen`.
+        const id = `${target.kind === "package" ? "pkg" : target.runtime === undefined ? "node" : target.runtime === "python" ? "py" : target.runtime}:${target.name}`;
 
         if (!b.externals.has(id)) b.externals.set(id, { id, kind: target.kind, name: target.name });
         b.deps.push({ from: file.path, to: id, typeOnly, reexport: fact.reexport, line: fact.line });

@@ -33,6 +33,7 @@ import type { BranchGraph } from "./git.ts";
 import { compareDiagram, diffDiagram, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
 import type { LogicFact } from "./extract/logic.ts";
 import { DEFAULT_PICTURE_OPTIONS, type PictureOptions } from "./options.ts";
+import { counted } from "./words.ts";
 
 export { parseView, viewKey, type View } from "./view-keys.ts";
 export { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
@@ -263,7 +264,7 @@ function modulesView(graph: Graph): PictureContent {
   if (ids.length === 0) return unplaced("Modules", [], [], [], { reason: "no modules" });
   const nodes = ids.map((id) => moduleNode(graph, id));
 
-  return unplaced(`Modules: ${ids.length} in ${graph.layers.length} layers`, nodes, depEdges(graph, new Set(ids), false), lanesOf(graph, nodes));
+  return unplaced(`Modules: ${ids.length} in ${counted(graph.layers.length, "layer")}`, nodes, depEdges(graph, new Set(ids), false), lanesOf(graph, nodes));
 }
 
 /** The call tree from a function: the functions it calls, and theirs, `depth` levels (default 3); its gaps drawn as hole shapes. */
@@ -339,7 +340,7 @@ function coverageView(graph: Graph): PictureContent {
     .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
     .map(([id, gaps]): Shape => ({ ...moduleNode(graph, id), label: `${id}\n${gaps} gaps / ${callsOf.get(id) ?? 0} calls`, count: gaps, diff: "warning" }));
 
-  return unplaced("What the diagrams cannot show", nodes, [], lanesOf(graph, nodes), nodes.length === 0 ? { reason: "every import and call was followed" } : {});
+  return unplaced("What the diagrams cannot show", nodes, [], lanesOf(graph, nodes), nodes.length === 0 ? { reason: "no blind spot, no unresolved import, no syntax error: what is not followed goes out of the repository" } : {});
 }
 
 /**
@@ -689,7 +690,7 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): P
   if (messages.length === 0) diagram.reason = "the function calls nothing archdiff can follow";
   else if (messages.length >= limit) diagram.reason = `cut at ${limit} messages; --limit raises it`;
 
-  if (folded > 0) diagram.reason = [diagram.reason, `${folded} modules share the last lifeline (at most ${MAX_PARTICIPANTS})`].filter(Boolean).join("; ");
+  if (folded > 0) diagram.reason = [diagram.reason, `${counted(folded, "module")} ${folded === 1 ? "shares" : "share"} the last lifeline (at most ${MAX_PARTICIPANTS})`].filter(Boolean).join("; ");
 
   return diagram;
 }

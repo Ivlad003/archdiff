@@ -15,6 +15,7 @@ import type { PictureContent, Line, Shape, LogicData, LogicRule } from "./diagra
 import type { LogicFact, LogicStep } from "./extract/logic.ts";
 import { moduleOf, type Declaration } from "./graph.ts";
 import { lane, unplaced } from "./nodes.ts";
+import { counted } from "./words.ts";
 
 /** Rules listed in the table of a function, at most. */
 const MAX_RULES = 64;
@@ -127,7 +128,7 @@ export function logicView(analysis: Analysis, scope: string | null, fact: LogicF
   if (fact.truncated) logic.truncated = true;
 
   if (more > 0) logic.moreRules = more;
-  const notes = [`${decisions} ${decisions === 1 ? "decision" : "decisions"}, ${loops} ${loops === 1 ? "loop" : "loops"}, ${exits} ${exits === 1 ? "exit" : "exits"}; ${rules.length}${more > 0 ? "+" : ""} rules (paths from the start to an exit), listed in the Markdown`, fact.truncated ? "the body is longer than the picture holds: the rest was left out" : ""].filter(Boolean);
+  const notes = [`${decisions} ${decisions === 1 ? "decision" : "decisions"}, ${loops} ${loops === 1 ? "loop" : "loops"}, ${exits} ${exits === 1 ? "exit" : "exits"}; ${rules.length}${more > 0 ? "+" : ""} ${rules.length === 1 && more === 0 ? "rule" : "rules"} (paths from the start to an exit), listed in the Markdown`, fact.truncated ? "the body is longer than the picture holds: the rest was left out" : ""].filter(Boolean);
 
   return unplaced(`Logic of ${fnLabel(fn)} (${fn.module})`, nodes, edges, [], { logic, reason: notes.join("; ") });
 }
@@ -142,5 +143,5 @@ function logicListView(analysis: Analysis): PictureContent {
   const modules = [...new Set(listed.map((fn) => moduleOf(fn.id)))];
   const left = all.length - listed.length;
 
-  return unplaced(`Logic: ${all.length} functions with branches`, nodes, [], modules.map(lane), { reason: `the ${listed.length} most branching functions${left > 0 ? `; ${left} more in the views list` : ""}; tap one for its flowchart and the rules it holds` });
+  return unplaced(`Logic: ${counted(all.length, "function")} with branches`, nodes, [], modules.map(lane), { reason: `the ${listed.length === 1 ? "one" : listed.length} most branching ${listed.length === 1 ? "function" : "functions"}${left > 0 ? `; ${left} more in the views list` : ""}; tap one for its flowchart and the rules it holds` });
 }

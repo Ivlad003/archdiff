@@ -127,7 +127,8 @@ function stateMermaid(diagram: Diagram): string {
 
   for (const state of machine.states) lines.push(`  state "${state.name.replace(/"/g, "'")}${state.assigned ? "" : " (never set)"}" as ${ids.get(state.name)}`);
 
-  if (machine.transitions.some((transition) => transition.from === "*")) lines.push('  state "any state" as s_any');
+  // The pseudo-state of the transitions from any state, by the ID it was given (a state named "any" may hold `s_any`).
+  if (machine.transitions.some((transition) => transition.from === "*")) lines.push(`  state "any state" as ${ids.get("*")}`);
 
   if (machine.initial !== null) lines.push(`  [*] --> ${ids.get(machine.initial)}`);
 
@@ -285,7 +286,8 @@ function branchesGitgraph(diagram: Diagram): string {
 /** The timeline as a gitGraph: one commit per bar, tagged with the couplings it added or removed. */
 function gitgraphMermaid(diagram: Diagram): string {
   if (diagram.view === "branches") return branchesGitgraph(diagram);
-  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "gitGraph"];
+  // The reason first (a range of no commit says so, not an empty graph alone).
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), ...(diagram.reason ? [`%% ${diagram.reason}`] : []), "gitGraph"];
 
   for (const node of diagram.nodes.filter((candidate) => candidate.id.startsWith("commit:"))) {
     const [head, subject] = node.label.split("\n");

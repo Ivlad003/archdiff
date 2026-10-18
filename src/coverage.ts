@@ -109,14 +109,8 @@ export function coverageReport(analysis: Analysis): CoverageReport {
   if (Object.keys(byReason).length === 0) lines.push("- none");
   lines.push("", "## Modules with gaps", "");
 
-  if (modules.length === 0) lines.push("None: every import and call was followed.", "");
-
-  if (analysis.skipped.length > 0) {
-    lines.push("## Files not analysed", "");
-
-    for (const file of analysis.skipped) lines.push(`- ${file.path} — ${file.reason}`);
-    lines.push("");
-  }
+  // The calls out of the repository above are no gaps of a module: "none" here is of blind spots, unresolved imports, syntax errors.
+  if (modules.length === 0) lines.push("None: no blind spot, no unresolved import, no syntax error.", "");
 
   for (const row of modules) {
     const parts = Object.entries(row.gaps).map(([reason, n]) => `${n} ${reason}`);
@@ -129,6 +123,14 @@ export function coverageReport(analysis: Analysis): CoverageReport {
     for (const example of row.examples.slice(0, 8)) lines.push(`- \`${example.callee}\` — ${example.reason} (${row.module}:${example.line})`);
 
     for (const unresolved of row.unresolvedImports.slice(0, 8)) lines.push(`- import \`${unresolved.specifier}\` — ${unresolved.reason} (${row.module}:${unresolved.line})`);
+    lines.push("");
+  }
+
+  // After the modules' own sections, so none of them reads as a file not analysed.
+  if (analysis.skipped.length > 0) {
+    lines.push("## Files not analysed", "");
+
+    for (const file of analysis.skipped) lines.push(`- ${file.path} — ${file.reason}`);
     lines.push("");
   }
 

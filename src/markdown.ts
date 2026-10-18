@@ -16,6 +16,7 @@ import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
 import { isBlindSpot, moduleOf } from "./graph.ts";
 import { standsFor } from "./shape-keys.ts";
 import { parseView } from "./view-keys.ts";
+import { counted } from "./words.ts";
 
 function position(node: Shape): string {
   if (!node.ref?.file) return "";
@@ -81,11 +82,11 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
   // A function's logic reads as its rules: every path from the start to an exit, the conditions taken, the calls made, how it ends.
   if (diagram.logic) {
     const logic = diagram.logic;
-    lines.push("## Rules: every path from the start to an exit", "", `${logic.decisions} decisions, ${logic.loops} loops, ${logic.exits} exits in \`${logic.module}\`.${logic.truncated ? " The body is longer than the picture holds." : ""}`, "", "| when | calls | ends with |", "| --- | --- | --- |");
+    lines.push("## Rules: every path from the start to an exit", "", `${counted(logic.decisions, "decision")}, ${counted(logic.loops, "loop")}, ${counted(logic.exits, "exit")} in \`${logic.module}\`.${logic.truncated ? " The body is longer than the picture holds." : ""}`, "", "| when | calls | ends with |", "| --- | --- | --- |");
 
     for (const rule of logic.rules) lines.push(`| ${rule.conditions.length === 0 ? "always" : rule.conditions.map((condition) => `\`${condition.replace(/\|/g, "\\|")}\``).join(" and ")} | ${rule.calls.map((call) => `\`${call.replace(/\|/g, "\\|")}\``).join(", ")} | ${rule.kind === "end" ? "the end of the body" : `**${rule.outcome.replace(/\|/g, "\\|")}**`} |`);
 
-    if (logic.moreRules) lines.push("", `… ${logic.moreRules} more rules`);
+    if (logic.moreRules) lines.push("", `… ${counted(logic.moreRules, "more rule", "more rules")}`);
     lines.push("", "A condition reads `condition: branch`; `each` and `done` are a loop's body and its end; `ok` and `error` a try's.");
 
     return `${lines.join("\n").trimEnd()}\n`;
@@ -321,7 +322,7 @@ export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file:
 
   if (node.kind === "layer") {
     const members = [...graph.modules.values()].filter((module) => module.layer === id).map((module) => module.id);
-    lines.push(`${members.length} modules.`, "", "## Modules", "");
+    lines.push(`${counted(members.length, "module")}.`, "", "## Modules", "");
 
     for (const member of members) lines.push(`- ${member}`);
     lines.push("");

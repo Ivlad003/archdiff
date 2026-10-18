@@ -157,7 +157,7 @@ class Door:
   const door = facts.decls.find((decl) => decl.name === "Door")!;
   assert.equal(door.kind, "class");
   assert.equal(door.doc, "A door.");
-  assert.deepEqual(door.members.map((member) => [member.name, member.accessor ?? false]), [["__init__", false], ["is_open", true], ["open", false]]);
+  assert.deepEqual(door.members.map((member) => [member.name, member.accessor ?? false]), [["__init__", false], ["is_open", "get"], ["open", false]]);
   const open = door.members.find((member) => member.name === "open")!;
   assert.deepEqual(open.calls.map((call) => [call.callee, (call.guards ?? []).map((guard) => guard.kind).join(">")]), [["save", "if"], ["logging.info", "if"]]);
   assert.deepEqual(facts.states?.filter((state) => state.kind === "assign").map((state) => [state.value, state.within, state.under ?? null, state.initial ?? false]), [["closed", "Door.__init__", null, true], ["open", "Door.open", ["closed"], false]]);

@@ -239,7 +239,8 @@ export async function runFlow(analysis: Analysis, entry: string, options: RunOpt
           const steps = report.events.filter((event) => event.kind === "enter").map((event, i) => ({ id: event.id!, order: i + 1 }));
           const entered = new Set(steps.map((step) => step.id));
           const storageCalls = report.events.filter((event) => event.kind === "storage").map((event) => ({ module: event.module!, member: event.member!, args: event.args ?? [] }));
-          const out: RunResult = { entry, steps, storageCalls, result: report.result, error: report.error, ms, predicted, missed: predicted.filter((id) => !entered.has(id)), unexpected: [...entered].filter((id) => !predicted.includes(id)) };
+          // `new OrderService()` is predicted as the class and entered as its constructor: one step.
+          const out: RunResult = { entry, steps, storageCalls, result: report.result, error: report.error, ms, predicted, missed: predicted.filter((id) => !entered.has(id) && !entered.has(`${id}.constructor`)), unexpected: [...entered].filter((id) => !foresaw(predicted, id)) };
           const tail = stderr.trim().split("\n").slice(-12).join("\n");
 
           if (tail) out.stderr = tail;
@@ -261,6 +262,11 @@ function parseLoosely(text: string): unknown {
   }
 }
 
+/** Whether the flow predicted a step entered: the function itself, or for a constructor the class it builds (`new X()`). */
+function foresaw(predicted: readonly string[], id: string): boolean {
+  return predicted.includes(id) || (id.endsWith(".constructor") && predicted.includes(id.slice(0, -".constructor".length)));
+}
+
 /** The run as Markdown: the steps in order against the prediction, the storage calls, the result. */
 export function runMarkdown(run: RunResult): string {
   const lines = [`<!-- archdiff:generated — run ${run.entry} -->`, `# Run of ${run.entry}`, ""];
@@ -271,7 +277,7 @@ export function runMarkdown(run: RunResult): string {
   if (run.steps.length > 0) {
     lines.push("## Steps, as they happened", "");
 
-    for (const step of run.steps) lines.push(`${step.order}. \`${step.id}\`${run.predicted.includes(step.id) ? "" : " — not predicted"}`);
+    for (const step of run.steps) lines.push(`${step.order}. \`${step.id}\`${foresaw(run.predicted, step.id) ? "" : " — not predicted"}`);
     lines.push("");
   }
 

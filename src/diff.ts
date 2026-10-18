@@ -17,6 +17,7 @@ import { toMermaid } from "./export/mermaid.ts";
 import { moduleOf, type Graph, type Declaration } from "./graph.ts";
 import { allowedLayerPairs, type Intent } from "./intent.ts";
 import { standsFor } from "./shape-keys.ts";
+import { counted } from "./words.ts";
 
 export interface NodeChange {
   id: string;
@@ -191,7 +192,7 @@ export function diffDiagram(diff: GraphDiff, base: Graph, head: Graph): PictureC
       if (mark) node.diff = mark;
       nodes.push(node);
     } else if (external) {
-      const node: Shape = { id, kind: "external", label: external.kind === "builtin" ? `node:${external.name}` : external.name, x: 0, y: 0, w: 0, h: 0 };
+      const node: Shape = { id, kind: "external", label: external.kind === "builtin" ? external.id : external.name, x: 0, y: 0, w: 0, h: 0 };
 
       if (diff.externalsAdded.includes(id)) node.diff = "added";
       else if (diff.externalsRemoved.includes(id)) node.diff = "removed";
@@ -441,7 +442,7 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
       const external = findExternal(end);
 
       if (module) nodes.push({ id: end, kind: "module", label: end, ref: { id: end, file: end, line: 1 }, group: module.layer, x: 0, y: 0, w: 0, h: 0 });
-      else if (external) nodes.push({ id: end, kind: "external", label: external.kind === "builtin" ? `node:${external.name}` : external.name, x: 0, y: 0, w: 0, h: 0 });
+      else if (external) nodes.push({ id: end, kind: "external", label: external.kind === "builtin" ? external.id : external.name, x: 0, y: 0, w: 0, h: 0 });
       ids.add(end);
     }
   }
@@ -575,5 +576,5 @@ export function onlyChanged(diagram: Diagram): Diagram {
   const groups = diagram.groups.filter((group) => nodes.some((node) => node.group === group.id));
   const gone = diagram.nodes.length - nodes.length;
 
-  return { ...diagram, nodes, edges, groups, reason: [diagram.reason, `only the ${marked.size} changed shapes and their neighbours; ${gone} others left out`].filter(Boolean).join("; ") };
+  return { ...diagram, nodes, edges, groups, reason: [diagram.reason, `only the ${counted(marked.size, "changed shape")} and their neighbours; ${gone} ${gone === 1 ? "other" : "others"} left out`].filter(Boolean).join("; ") };
 }

@@ -11,6 +11,7 @@
 
 import { builtinModules } from "node:module";
 import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, TypeFieldFact, TypeRefFact, ValueRefFact } from "./facts.ts";
+import { addMember } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
 import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Query, type Tree } from "./treesitter.ts";
 import { collectTsMachines, collectTsStates, countBranches, guardsOf, TS_CONTROL } from "./control.ts";
@@ -1206,12 +1207,14 @@ function classDecl(name: string, cls: Node, at: Node, exported: boolean, declCal
       // A method: a fn member, exported unless private; only a method with a body has calls.
       const member = flag(decl("fn", mname, m, signature(m), !isPrivate, m.type === "method_definition" ? declCalls(m, scope) : [], collectTypeRefs(m, typeParams), []));
 
-      if (m.children.some((c) => c.type === "get" || c.type === "set")) member.accessor = true;
+      const accessor = m.children.find((c) => c.type === "get" || c.type === "set")?.type;
+
+      if (accessor === "get" || accessor === "set") member.accessor = accessor;
       // A constructor also carries its parameters' decorators (`@Inject(T) private x`).
       const withParams = mname === "constructor" ? [...memberDecorators, ...parameterDecorators(m)] : memberDecorators;
 
       if (withParams.length > 0) member.decorators = withParams;
-      members.push(member);
+      addMember(members, member);
       continue;
     }
 

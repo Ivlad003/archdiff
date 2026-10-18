@@ -352,8 +352,11 @@ export interface DeclFact {
    * Absent when the body has none.
    */
   values?: string;
-  /** A getter or setter: property access runs it without a call expression. */
-  accessor?: true;
+  /**
+   * A getter, a setter, or both of one name (merged into one member: one name, one declaration of the class):
+   * property access runs it without a call expression.
+   */
+  accessor?: "get" | "set" | "get/set";
   /** The language calls the member through syntax, not a call that names it: a Rust `Drop::drop`, `Display::fmt`, `Add::add`. */
   implicit?: true;
   /** A `static` class member. */
@@ -764,6 +767,26 @@ export interface UnsupportedFact {
 }
 
 /** Facts back from JSON (the fact cache) or a structured clone: `exports` is the one Set, written as an array. */
+/**
+ * Adds a class member to its list; the getter and the setter of one name (`get x()`, `set x(v)`; Python's
+ * `@property` and `@x.setter`) become one member — they are one declaration of the class, and two of one name
+ * would be one node of the graph, the second hiding the first — with the calls of both.
+ */
+export function addMember(members: DeclFact[], member: DeclFact): void {
+  const twin = member.accessor ? members.find((other) => other.accessor && other.name === member.name && other.kind === member.kind) : undefined;
+
+  if (!twin) {
+    members.push(member);
+
+    return;
+  }
+
+  twin.calls.push(...member.calls);
+  twin.types.push(...member.types);
+
+  if (twin.accessor !== member.accessor) twin.accessor = "get/set";
+}
+
 export function reviveFacts(facts: FileFacts): FileFacts {
   return facts.exports instanceof Set ? facts : { ...facts, exports: new Set(facts.exports as unknown as string[]) };
 }

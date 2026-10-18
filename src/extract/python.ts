@@ -14,6 +14,7 @@
 // call the graph cannot follow), value ref (a fn read as a value).
 
 import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, Kwarg, LiteralValue, PassFact, StatementFact, ValueRefFact } from "./facts.ts";
+import { addMember } from "./facts.ts";
 import { isLicense, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, located, unsupportedAt, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
 import { collectPyMachines, collectPyStates, countBranches, guardsOf, PY_CONTROL } from "./control.ts";
@@ -294,8 +295,9 @@ function classDecl(def: Node, name: string, symbol: string, topLevel: boolean, f
 
     if (isStatic || names.includes("classmethod")) decl.static = true;
 
-    if (names.some(isAccessor)) decl.accessor = true;
-    members.push(decl);
+    // `@property` reads, `@x.setter` (and `@x.deleter`) writes: one member of the name, as the class has one.
+    if (names.some(isAccessor)) decl.accessor = names.some((name) => /\.(setter|deleter)$/.test(name)) ? "set" : "get";
+    addMember(members, decl);
     noteDecorators(item, path, true, facts);
   }
 

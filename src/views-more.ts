@@ -25,6 +25,7 @@ import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 import { greedyOrder } from "./order.ts";
+import { counted } from "./words.ts";
 
 /**
  * The layers ordered so that most imports point down the list: repeatedly
@@ -124,7 +125,7 @@ export function matrixView(graph: Graph, scope: string | null = null, types = fa
   }).filter((cell) => index.has(cell.from) && index.has(cell.to)).sort((a, b) => index.get(a.from)! - index.get(b.from)! || index.get(a.to)! - index.get(b.to)!);
   const matrix = { scope, rows: order.map((item) => ({ id: item, label: label(item) })), cells };
 
-  return unplaced(title, nodes, [], [], { placed: true, matrix, reason: back > 0 ? `${back} cells go against the ${scope === null ? "layer" : "import"} order (red)` : `every import follows the ${scope === null ? "layer" : "import"} order` });
+  return unplaced(title, nodes, [], [], { placed: true, matrix, reason: back > 0 ? `${back} ${back === 1 ? "cell goes" : "cells go"} against the ${scope === null ? "layer" : "import"} order (red)` : `every import follows the ${scope === null ? "layer" : "import"} order` });
 }
 
 /** The role a function has for a type by its signature: it returns it, takes it, or both. */
@@ -422,7 +423,7 @@ export function testsView(graph: Graph): PictureContent {
   });
   const untested = nodes.filter((node) => node.count === 0).length;
 
-  return unplaced(`Tests: ${tests.length} test files cover ${subjects.length - untested} of ${subjects.length} modules`, nodes, [], lanesOf(graph, nodes), { reason: untested > 0 ? `${untested} modules no test file imports (orange)` : "every module is imported by a test" });
+  return unplaced(`Tests: ${counted(tests.length, "test file")} ${tests.length === 1 ? "covers" : "cover"} ${subjects.length - untested} of ${counted(subjects.length, "module")}`, nodes, [], lanesOf(graph, nodes), { reason: untested > 0 ? `${counted(untested, "module")} no test file imports (orange)` : "every module is imported by a test" });
 }
 
 /**
@@ -504,7 +505,7 @@ export function packagesView(analysis: Analysis): PictureContent {
     if (owner) modulesOf.set(owner, (modulesOf.get(owner) ?? 0) + 1);
   }
 
-  const nodes = packages.map((candidate): Shape => ({ id: candidate.name, kind: "package", label: `${candidate.name}\n${candidate.dir || "."} · ${modulesOf.get(candidate.name) ?? 0} modules`, opens: candidate.dir ? `dir:${candidate.dir}` : "layers", ref: { file: candidate.dir ? `${candidate.dir}/package.json` : "package.json", line: 1 }, count: modulesOf.get(candidate.name) ?? 0, x: 0, y: 0, w: 0, h: 0 }));
+  const nodes = packages.map((candidate): Shape => ({ id: candidate.name, kind: "package", label: `${candidate.name}\n${candidate.dir || "."} · ${counted(modulesOf.get(candidate.name) ?? 0, "module")}`, opens: candidate.dir ? `dir:${candidate.dir}` : "layers", ref: { file: candidate.dir ? `${candidate.dir}/package.json` : "package.json", line: 1 }, count: modulesOf.get(candidate.name) ?? 0, x: 0, y: 0, w: 0, h: 0 }));
   const edges: Line[] = [];
   const seen = new Set<string>();
 
@@ -575,7 +576,8 @@ function classBoxes(analysis: Analysis, module: string): ClassBox[] {
 
         if (member.kind !== "fn") continue;
         const signature = member.signature ?? "()";
-        methods.push(`${member.static ? "$" : "+"}${member.name}${member.accessor ? " ⟨get⟩" : ""}${signature.startsWith("(") ? signature : `(${signature})`}`);
+        // UML's marks: `$` static, `-` private (`#name`, `private`, Python's `_name`), `+` the rest.
+        methods.push(`${member.static ? "$" : member.hash || !member.exported ? "-" : "+"}${member.name}${member.accessor ? ` ⟨${member.accessor}⟩` : ""}${signature.startsWith("(") ? signature : `(${signature})`}`);
       }
 
       for (const property of decl.properties ?? []) fields.push(`+${property.name}`);
@@ -682,7 +684,7 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
   const classes = { boxes: all.map((box) => ({ id: box.id, name: box.name, kind: box.kind, fields: box.fields, methods: box.methods })), relations: edges.map((edge) => ({ from: edge.from, to: edge.to, kind: edge.label as "extends" | "implements" })) };
   const diagram = unplaced(scope === null ? `Classes (${all.length})` : `Classes of ${scope}`, nodes, edges, [...new Set(all.map((box) => box.module))].map(lane), { classes });
 
-  if (boxes.size > limit) diagram.reason = `${boxes.size - limit} of ${boxes.size} classes cut; --limit raises it, classes:<dir> narrows`;
+  if (boxes.size > limit) diagram.reason = `${boxes.size - limit} of ${counted(boxes.size, "class", "classes")} cut; --limit raises it, classes:<dir> narrows`;
 
   return diagram;
 }
@@ -708,7 +710,7 @@ export function timelineDiagram(rows: readonly HistoryRow[], base: string, head:
     nodes.push({ id: `commit:${row.commit.sha}`, kind: "cell", label: `${row.commit.short} ${row.commit.date}\n${row.commit.subject.slice(0, 28)}`, opens: `commit:${row.commit.sha}`, x, y: 20 + chart + 10, w: column - 20, h: 48 });
   });
 
-  return unplaced(`Timeline ${base}..${head}: ${rows.length} commits`, nodes, [], [], { placed: true, reason: "bars: imports and functions moved; red: a coupling between layers appeared, green: one went" });
+  return unplaced(`Timeline ${base}..${head}: ${counted(rows.length, "commit")}`, nodes, [], [], { placed: true, reason: "bars: imports and functions moved; red: a coupling between layers appeared, green: one went" });
 }
 
 /** The cell of one commit in the branches' picture, and the room between two columns (the lines to a branch turn there). */

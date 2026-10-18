@@ -26,7 +26,8 @@ import { RustResolver } from "./rust-imports.ts";
 export type Resolution =
   | { kind: "file"; path: string }
   | { kind: "package"; name: string }
-  | { kind: "builtin"; name: string }
+  /** The language's own library: Node's (`runtime` absent), Python's standard library, Rust's `std`, PHP's functions. */
+  | { kind: "builtin"; name: string; runtime?: "python" | "rust" | "php" }
   /** The importing file itself (Rust `use self::Kind::*`, a Python relative import of the package's own module): no dependency, nothing unresolved. */
   | { kind: "self" }
   /** A file of the repository that is no source (JSON, a stylesheet, an image): no module to draw, nothing unresolved. */
@@ -253,15 +254,21 @@ export function tsconfigResolver(root: string, _files: Iterable<string>): (from:
 }
 
 /** A language resolver's answer as the graph's. */
-function fromLanguage(resolution: LanguageResolution, specifier: string): Resolution {
+function fromLanguage(resolution: LanguageResolution, specifier: string, runtime: "python" | "rust" | "php"): Resolution {
   switch (resolution.kind) {
     case "internal":
       return { kind: "file", path: resolution.file };
     case "external":
       return { kind: "package", name: resolution.pkg };
     case "builtin":
-    case "stdlib":
-      return { kind: "builtin", name: specifier.replace(/^(class|function|const|include) /, "").split(/[.:\\]/)[0] ?? specifier };
+    case "stdlib": {
+      // Named as the language names it: Python's module (`os` of `os.path`), Rust's crate (`std` of `std::fs`), and
+      // PHP's function itself (`strlen` of `App\strlen`: an unqualified call in a namespace falls back to the global one).
+      const written = specifier.replace(/^(class|function|const|include) /, "");
+      const name = runtime === "php" ? (written.split("\\").pop() ?? written) : (written.split(runtime === "rust" ? "::" : ".")[0] ?? written);
+
+      return { kind: "builtin", name, runtime };
+    }
     case "local":
       return { kind: "self" };
     case "generated":
@@ -291,12 +298,12 @@ export function createResolver(root: string, files: Iterable<string>, facts: rea
       case "python":
         python ??= new PythonResolver(root, known);
 
-        return fromLanguage(python.resolve(from, specifier), specifier);
+        return fromLanguage(python.resolve(from, specifier), specifier, "python");
       case "rust": {
         rust ??= new RustResolver(root, known);
         const direct = rust.resolve(from, specifier);
 
-        if (direct.kind !== "unresolved") return fromLanguage(direct, specifier);
+        if (direct.kind !== "unresolved") return fromLanguage(direct, specifier, "rust");
 
         // `use self::Kind::*`, `use self::Kind`: a declaration of the file itself, not a module.
         if (specifier.startsWith("self::")) {
@@ -325,16 +332,16 @@ export function createResolver(root: string, files: Iterable<string>, facts: rea
           const base = through.source.endsWith(`::${target}`) || through.source === target ? through.source : `${through.source}::${target}`;
           const hop = rust.resolve(prefix.file, rest.length === 0 ? base : `${base}::${rest.join("::")}`);
 
-          if (hop.kind !== "unresolved") return fromLanguage(hop, specifier);
+          if (hop.kind !== "unresolved") return fromLanguage(hop, specifier, "rust");
           break;
         }
 
-        return fromLanguage(direct, specifier);
+        return fromLanguage(direct, specifier, "rust");
       }
       case "php":
         php ??= new PhpResolver(root, known, facts);
 
-        return fromLanguage(php.resolve(from, specifier), specifier);
+        return fromLanguage(php.resolve(from, specifier), specifier, "php");
       default:
         return ecmascript(from, specifier);
     }
