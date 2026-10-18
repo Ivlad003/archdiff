@@ -12,9 +12,9 @@
 // export row (a public name, from `__all__` or the `_` convention), hole (an
 // unsupported fact or an unresolved call), value ref (a fn read as a value).
 
-import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, Kwarg, LiteralValue, PassFact, StatementFact, UnsupportedFact, ValueRefFact } from "./facts.ts";
+import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, Kwarg, LiteralValue, PassFact, StatementFact, ValueRefFact } from "./facts.ts";
 import { isLicense, nonEmpty } from "./doc-comments.ts";
-import { errorLine, fingerprintFacts, located, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
+import { errorLine, fingerprintFacts, located, unsupportedAt, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
 import { collectPyMachines, collectPyStates, countBranches, guardsOf, PY_CONTROL } from "./control.ts";
 
 /** Decorators that keep the function a plain function (or method) of that name. */
@@ -248,7 +248,7 @@ function noteDecorators(node: Node, symbol: string, member: boolean, facts: File
     const at = located(decorator.node);
     const expr = decorator.node.namedChildren[0];
     (facts.decorators ??= []).push({ name: decorator.name, call: expr?.type === "call" ? argumentsOf(expr, { left: LITERAL_BUDGET }) : null, target: symbol, line: at.line, col: at.col });
-    facts.unsupported.push({ ...unsupported(decorator.node, `decorator \`${decorator.name}\` may replace \`${symbol}\``), symbol });
+    facts.unsupported.push({ ...unsupportedAt(decorator.node, `decorator \`${decorator.name}\` may replace \`${symbol}\``), symbol });
     facts.valueRefs.push(member ? { name: symbol.slice(symbol.lastIndexOf(".") + 1), member: true, line: at.line, col: at.col } : { name: symbol, line: at.line, col: at.col });
   }
 }
@@ -858,12 +858,12 @@ function collectDynamic(root: Node, facts: FileFacts): void {
       const symbol = enclosingFn(node);
 
       if (callee === "getattr") {
-        const fact = unsupported(node, "`getattr` reads an attribute chosen at run time");
+        const fact = unsupportedAt(node, "`getattr` reads an attribute chosen at run time");
 
         if (symbol) fact.symbol = symbol;
         facts.unsupported.push(fact);
-      } else if (callee === "importlib.import_module" || callee === "import_module" || callee === "__import__") facts.unsupported.push(unsupported(node, "dynamic import"));
-      else if (callee === "exec" || callee === "eval") facts.unsupported.push(unsupported(node, `\`${callee}\` runs code archdiff cannot read`));
+      } else if (callee === "importlib.import_module" || callee === "import_module" || callee === "__import__") facts.unsupported.push(unsupportedAt(node, "dynamic import"));
+      else if (callee === "exec" || callee === "eval") facts.unsupported.push(unsupportedAt(node, `\`${callee}\` runs code archdiff cannot read`));
     }
 
     for (const c of node.namedChildren) walk(c);
@@ -998,12 +998,6 @@ function importAt(node: Node, source: string, bindings: ImportFact["bindings"], 
   return { source, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, text: at.text, bindings, reexport };
 }
 
-/** A hole at `node`, its text cut to the first line. */
-function unsupported(node: Node, reason: string): UnsupportedFact {
-  const at = located(node);
-
-  return { line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, text: at.text.split("\n")[0]!, reason };
-}
 
 /** How many value nodes one statement, decorator or parameter call records at most: a big data literal stays `other`. */
 const LITERAL_BUDGET = 2000;

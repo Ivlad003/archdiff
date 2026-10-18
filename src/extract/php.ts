@@ -23,7 +23,7 @@
 import { asciiLowerCase } from "../languages.ts";
 import type { ArgFact, AttributeFact, CallFact, ChainLinkFact, DeclFact, ExportRow, FieldFact, FileFacts, ImportFact, LiteralFact, MethodSigFact, ParamFact, PassFact, PropertyFact, ResultCallFact, ResultTypeFact, TypeRefFact, UnsupportedFact, ValueOfFact, ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, nonEmpty } from "./doc-comments.ts";
-import { errorLine, fingerprintFacts, located, startCol, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
+import { errorLine, fingerprintFacts, located, startCol, unsupportedAt, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
 
 /** Class names PHP gives a meaning of its own: never a class of the repository. */
 const SPECIAL_CLASSES = new Set(["self", "static", "parent"]);
@@ -186,7 +186,7 @@ class Collector {
 
     if (this.holes.has(key)) return;
     this.holes.add(key);
-    const fact = unsupported(node, reason);
+    const fact = unsupportedAt(node, reason);
 
     if (symbol) fact.symbol = symbol;
     this.unsupported.push(fact);
@@ -2273,9 +2273,3 @@ function fileDoc(root: Node): { doc: string; id: number } | null {
   return doc === null ? null : { doc, id: first.id };
 }
 
-/** A hole at `node`: its span, its first line of source, and why archdiff cannot follow it. */
-function unsupported(node: Node, reason: string): UnsupportedFact {
-  const at = located(node);
-
-  return { line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, text: firstLine(at.text), reason };
-}

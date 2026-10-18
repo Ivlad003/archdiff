@@ -9,9 +9,9 @@
 // resolvable symbol; a *pass* is a function handed to a call as a value.
 
 import { builtinModules } from "node:module";
-import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, TypeFieldFact, TypeRefFact, UnsupportedFact, ValueRefFact } from "./facts.ts";
+import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, TypeFieldFact, TypeRefFact, ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
-import { errorLine, fingerprintFacts, grammarFor, located, query, startCol, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Tree } from "./treesitter.ts";
+import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Tree } from "./treesitter.ts";
 import { collectTsMachines, collectTsStates, countBranches, guardsOf, TS_CONTROL } from "./control.ts";
 
 // Every call and `new`, whatever its callee: each becomes an edge or a hole, never nothing.
@@ -1141,7 +1141,7 @@ function classDecl(name: string, cls: Node, at: Node, exported: boolean, declCal
     if (!nameNode) continue;
 
     if (nameNode.type === "computed_property_name") {
-      facts.unsupported.push(unsupported(m, `unsupported construct \`computed class member\``));
+      facts.unsupported.push(unsupportedAt(m, `unsupported construct \`computed class member\``, "whole"));
       continue;
     }
 
@@ -1200,7 +1200,7 @@ function classDecl(name: string, cls: Node, at: Node, exported: boolean, declCal
 
   // Static initializers become a synthesized `static` member, unless the class already has one by that name.
   if (statics.length > 0) {
-    if (members.some((m) => m.name === "static")) for (const item of statics) facts.unsupported.push(unsupported(item.node, "static initializer of a class with a member named `static`"));
+    if (members.some((m) => m.name === "static")) for (const item of statics) facts.unsupported.push(unsupportedAt(item.node, "static initializer of a class with a member named `static`", "whole"));
     else members.push(initializer("static", statics));
   }
 
@@ -1617,7 +1617,7 @@ function collectDynamicImports(root: Node, facts: FileFacts): void {
       // `new URL("./w.ts", import.meta.url)` and similar module URLs; null means the specifier is computed.
       const specs = moduleUrlSpecs(node);
 
-      if (specs === null) facts.unsupported.push(unsupported(node, "computed specifier"));
+      if (specs === null) facts.unsupported.push(unsupportedAt(node, "computed specifier", "whole"));
 
       for (const spec of specs ?? []) add(node, spec.spec, spec.optional);
     }
@@ -1642,7 +1642,7 @@ function collectDynamicImports(root: Node, facts: FileFacts): void {
 
           if (spec) add(node, spec, false, isImport && inTypePosition(node));
         } else if (arg) {
-          facts.unsupported.push(unsupported(node, "computed specifier"));
+          facts.unsupported.push(unsupportedAt(node, "computed specifier", "whole"));
         }
       }
     }
@@ -1673,27 +1673,21 @@ function inTypePosition(node: Node): boolean {
 /** Namespace, `eval`, `new Function`, and a call through `obj[expr]` are coverage, not edges. */
 function collectUnsupported(root: Node, facts: FileFacts): void {
   walkNamed(root, (node) => {
-    if (node.type === "internal_module" || (node.type === "module" && parentOf(node)?.type !== "ambient_declaration")) facts.unsupported.push(unsupported(node, "unsupported construct `namespace`"));
+    if (node.type === "internal_module" || (node.type === "module" && parentOf(node)?.type !== "ambient_declaration")) facts.unsupported.push(unsupportedAt(node, "unsupported construct `namespace`", "whole"));
 
     if (node.type === "call_expression" || node.type === "new_expression") {
       const written = node.childForFieldName(node.type === "call_expression" ? "function" : "constructor");
       const fn = written ? unwrapValue(written) : null;
 
-      if (node.type === "call_expression" && fn?.type === "identifier" && fn.text === "eval") facts.unsupported.push(unsupported(fn, "unsupported construct `eval`"));
+      if (node.type === "call_expression" && fn?.type === "identifier" && fn.text === "eval") facts.unsupported.push(unsupportedAt(fn, "unsupported construct `eval`", "whole"));
 
-      if (fn?.type === "subscript_expression") facts.unsupported.push(unsupported(fn, "unsupported construct `computed call`"));
+      if (fn?.type === "subscript_expression") facts.unsupported.push(unsupportedAt(fn, "unsupported construct `computed call`", "whole"));
 
-      if (node.type === "new_expression" && fn?.type === "identifier" && fn.text === "Function") facts.unsupported.push(unsupported(fn, "unsupported construct `Function`"));
+      if (node.type === "new_expression" && fn?.type === "identifier" && fn.text === "Function") facts.unsupported.push(unsupportedAt(fn, "unsupported construct `Function`", "whole"));
     }
   });
 }
 
-/** An unsupported-construct fact at `node`'s span, with its text and the reason. */
-function unsupported(node: Node, reason: string): UnsupportedFact {
-  const at = located(node);
-
-  return { line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, text: at.text, reason };
-}
 
 /**
  * The callee of a call or a function value in an argument: `f`, `a.b`,
@@ -2961,10 +2955,6 @@ function heritage(n: Node): string | null {
   return h ? collapse(h.text) : null;
 }
 
-/** Whitespace runs collapsed to one space, trimmed. */
-function collapse(s: string): string {
-  return s.replace(/\s+/g, " ").trim();
-}
 
 /** Is this specifier a Node built-in (`fs`, `node:fs`)? */
 export function isNodeBuiltin(spec: string): boolean {

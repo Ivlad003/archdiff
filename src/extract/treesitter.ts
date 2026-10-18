@@ -4,7 +4,8 @@
 // The shared base of every language frontend (source → FileFacts): parsing
 // (`withTree`, `loadLanguage`, `query`), code-point positions (`located`,
 // `startCol`), syntax errors (`errorLine`) and the syntax fingerprints that
-// make a closure stale (`fingerprint`, `fingerprintFacts`, `valuesFingerprint`).
+// make a closure stale (`fingerprint`, `fingerprintFacts`, `valuesFingerprint`),
+// and the two helpers every frontend shares (`unsupportedAt`, `collapse`).
 
 import { createHash, type Hash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -12,6 +13,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Language, Parser, Query, type Node, type Tree } from "web-tree-sitter";
+import type { UnsupportedFact } from "./facts.ts";
 import { wasmFile, type Grammar } from "./grammars.ts";
 
 const require = createRequire(import.meta.url);
@@ -141,6 +143,18 @@ export function located(node: Node): Located {
 }
 
 /** The node's 1-based start column in code points (§7), as `located` gives it. */
+/** A construct the extractor does not turn into an edge, at a node: its range, its text (the first line, or all of it) and why. */
+export function unsupportedAt(node: Node, reason: string, text: "first line" | "whole" = "first line"): UnsupportedFact {
+  const at = located(node);
+
+  return { line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, text: text === "whole" ? at.text : at.text.split("\n")[0]!, reason };
+}
+
+/** A text on one line: every run of whitespace one space, the ends trimmed. */
+export function collapse(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export function startCol(node: Node): number {
   return codePointColumn(node.tree, node.startIndex, node.startPosition.column);
 }

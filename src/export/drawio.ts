@@ -7,10 +7,8 @@
 import type { Diagram, Shape } from "../diagram.ts";
 import { routeEdges } from "./excalidraw.ts";
 import { heatColour } from "./colour.ts";
+import { escapeXmlAttribute } from "./xml.ts";
 
-function escape(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\n/g, "&#xa;");
-}
 
 const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00", planned: "#1565c0" } as const;
 
@@ -53,7 +51,7 @@ export function toDrawio(diagram: Diagram): string {
     const id = next++;
     cellOf.set(`lane:${group.id}`, id);
     cells.push(
-      `<object label="${escape(group.label)}" archdiff_kind="lane" archdiff_id="${escape(group.id)}" id="${id}"><mxCell style="swimlane;horizontal=0;html=1;startSize=24;fillColor=#fafafa;strokeColor=#bdbdbd;" vertex="1" parent="1"><mxGeometry x="${group.x}" y="${group.y}" width="${group.w}" height="${group.h}" as="geometry"/></mxCell></object>`,
+      `<object label="${escapeXmlAttribute(group.label)}" archdiff_kind="lane" archdiff_id="${escapeXmlAttribute(group.id)}" id="${id}"><mxCell style="swimlane;horizontal=0;html=1;startSize=24;fillColor=#fafafa;strokeColor=#bdbdbd;" vertex="1" parent="1"><mxGeometry x="${group.x}" y="${group.y}" width="${group.w}" height="${group.h}" as="geometry"/></mxCell></object>`,
     );
   }
 
@@ -65,9 +63,9 @@ export function toDrawio(diagram: Diagram): string {
     // Inside a swimlane, geometry is relative to the lane.
     const x = group ? node.x - group.x : node.x;
     const y = group ? node.y - group.y : node.y;
-    const attributes = [`label="${escape(node.label)}"`, `archdiff_kind="${node.kind}"`, `archdiff_id="${escape(node.id)}"`];
+    const attributes = [`label="${escapeXmlAttribute(node.label)}"`, `archdiff_kind="${node.kind}"`, `archdiff_id="${escapeXmlAttribute(node.id)}"`];
 
-    if (node.ref?.file) attributes.push(`archdiff_file="${escape(node.ref.file)}"`);
+    if (node.ref?.file) attributes.push(`archdiff_file="${escapeXmlAttribute(node.ref.file)}"`);
 
     if (node.ref?.line !== undefined) attributes.push(`archdiff_line="${node.ref.line}"`);
 
@@ -89,9 +87,9 @@ export function toDrawio(diagram: Diagram): string {
     const bends = (edge.route ?? routes.get(edge) ?? []).slice(1, -1);
     const points = bends.length > 0 ? `<Array as="points">${bends.map((point) => `<mxPoint x="${Math.round(point.x)}" y="${Math.round(point.y)}"/>`).join("")}</Array>` : "";
     cells.push(
-      `<object label="${escape(edge.label ?? "")}" archdiff_kind="${edge.kind}" id="${id}"><mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;${dashed}${colour}" edge="1" parent="1" source="${from}" target="${to}"><mxGeometry relative="1" as="geometry">${points}</mxGeometry></mxCell></object>`,
+      `<object label="${escapeXmlAttribute(edge.label ?? "")}" archdiff_kind="${edge.kind}" id="${id}"><mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;${dashed}${colour}" edge="1" parent="1" source="${from}" target="${to}"><mxGeometry relative="1" as="geometry">${points}</mxGeometry></mxCell></object>`,
     );
   }
 
-  return `<mxfile host="archdiff" type="device"${diagram.stamp ? ` agent="archdiff commit ${escape(diagram.stamp.commit)}" modified="${escape(diagram.stamp.date)}"` : ""}><diagram name="${escape(diagram.title)}" id="archdiff-${escape(diagram.view)}"><mxGraphModel archdiff_view="${escape(diagram.view)}" grid="1" gridSize="10" page="1" pageWidth="1654" pageHeight="1169"><root>${cells.join("")}</root></mxGraphModel></diagram></mxfile>\n`;
+  return `<mxfile host="archdiff" type="device"${diagram.stamp ? ` agent="archdiff commit ${escapeXmlAttribute(diagram.stamp.commit)}" modified="${escapeXmlAttribute(diagram.stamp.date)}"` : ""}><diagram name="${escapeXmlAttribute(diagram.title)}" id="archdiff-${escapeXmlAttribute(diagram.view)}"><mxGraphModel archdiff_view="${escapeXmlAttribute(diagram.view)}" grid="1" gridSize="10" page="1" pageWidth="1654" pageHeight="1169"><root>${cells.join("")}</root></mxGraphModel></diagram></mxfile>\n`;
 }

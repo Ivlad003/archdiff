@@ -14,7 +14,7 @@
 // `LogicEdge`.
 
 import { headerOf, PY_CONTROL, short, TS_CONTROL, type ControlGrammar } from "./control.ts";
-import { grammarFor, withTree, type Grammar, type Node } from "./treesitter.ts";
+import { collapse, grammarFor, withTree, type Grammar, type Node } from "./treesitter.ts";
 
 /** One box of the flowchart. */
 export interface LogicStep {
@@ -132,9 +132,6 @@ function calleesIn(node: Node, grammar: LogicGrammar): string[] {
   return out.slice(0, 8);
 }
 
-function collapse(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
 
 /** The text of a statement on one line, cut short: `const order = make(id, total)`. */
 function statementText(node: Node): string {

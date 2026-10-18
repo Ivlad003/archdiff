@@ -11,9 +11,9 @@
 // unsupported fact or an unresolved call), value ref (a fn read as a value,
 // so something else may call it), pass (a fn path given as an argument).
 
-import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, PassFact, UnsupportedFact, ValueRefFact } from "./facts.ts";
+import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, PassFact, ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
-import { errorLine, fingerprintFacts, located, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
+import { errorLine, fingerprintFacts, located, unsupportedAt, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
 
 /** Macros of `std` and common logging: they expand to calls archdiff need not follow. */
 const KNOWN_MACROS = new Set(
@@ -119,7 +119,7 @@ function extractTree(path: string, root: Node): FileFacts {
         const type = baseType(node.childForFieldName("type"));
 
         if (!type) {
-          facts.unsupported.push(unsupported(node, "`impl` for a type archdiff cannot name"));
+          facts.unsupported.push(unsupportedAt(node, "`impl` for a type archdiff cannot name"));
 
           for (const item of members(node)) if (item.type === "function_item") detached(item.childForFieldName("body"), null);
           break;
@@ -149,13 +149,13 @@ function extractTree(path: string, root: Node): FileFacts {
       case "mod_item":
         // `mod x;` names the file `x.rs`; the dependency is whatever code uses from it.
         if (node.childForFieldName("body")) {
-          facts.unsupported.push(unsupported(node, `inline module \`${name ?? "?"}\` is not indexed`));
+          facts.unsupported.push(unsupportedAt(node, `inline module \`${name ?? "?"}\` is not indexed`));
           detached(node.childForFieldName("body"), null, false);
         }
 
         break;
       case "macro_invocation":
-        facts.unsupported.push(unsupported(node, `macro \`${macroName(node)}!\` at module level is not expanded`));
+        facts.unsupported.push(unsupportedAt(node, `macro \`${macroName(node)}!\` at module level is not expanded`));
         break;
     }
   }
@@ -168,7 +168,7 @@ function extractTree(path: string, root: Node): FileFacts {
 
     if (owner) owner.members.push(...impl.members.map((m) => m.decl));
     else {
-      facts.unsupported.push(unsupported(impl.node, `\`impl ${impl.type}\` for a type declared in another file`));
+      facts.unsupported.push(unsupportedAt(impl.node, `\`impl ${impl.type}\` for a type declared in another file`));
 
       for (const { item } of impl.members) detached(item.childForFieldName("body"), impl.type);
     }
@@ -277,7 +277,7 @@ function noteAttributes(node: Node, symbol: string, member: boolean, facts: File
     if (KEEPING_ATTRIBUTES.has(path) || /^(clippy|rustfmt|diagnostic)::/.test(path)) continue;
     // An unknown attribute: a hole for the fn, and a value ref, since the
     // macro holds the fn and a framework may call it.
-    facts.unsupported.push({ ...unsupported(prev, `attribute \`${path}\` may replace \`${symbol}\``), symbol });
+    facts.unsupported.push({ ...unsupportedAt(prev, `attribute \`${path}\` may replace \`${symbol}\``), symbol });
     const at = located(prev);
     facts.valueRefs.push(member ? { name: symbol.slice(symbol.lastIndexOf(".") + 1), member: true, line: at.line, col: at.col } : { name: symbol, line: at.line, col: at.col });
   }
@@ -502,7 +502,7 @@ function bodyCalls(body: Node, scope: CallScope, facts: FileFacts): CallFact[] {
       // `serde_json::json!` comes from another crate; a macro of this crate (`ui_message!`, `crate::m!`) hides calls.
       const foreign = name.includes("::") && !/^(crate|self|super)::/.test(name);
 
-      if (!KNOWN_MACROS.has(name) && !foreign) facts.unsupported.push(unsupported(node, `macro \`${name}!\` is not expanded`));
+      if (!KNOWN_MACROS.has(name) && !foreign) facts.unsupported.push(unsupportedAt(node, `macro \`${name}!\` is not expanded`));
     }
 
     // A nested `fn` runs only when something calls it, like a closure.
@@ -859,9 +859,3 @@ function macroName(node: Node): string {
   return node.childForFieldName("macro")?.text ?? node.namedChildren[0]?.text ?? "?";
 }
 
-/** A hole at `node`, its text cut to the first line. */
-function unsupported(node: Node, reason: string): UnsupportedFact {
-  const at = located(node);
-
-  return { line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, text: at.text.split("\n")[0]!, reason };
-}
