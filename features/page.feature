@@ -33,16 +33,24 @@ Feature: The page
     When mix is on and I tap a module
     Then the link holds "expand=" with that module
 
-  Scenario: Find, lanes, split, path and minimap
+  Scenario: Find, the keys, dim, lanes, split, the chain and the minimap
     Given the page open on "layer:lib"
     When I tap orders.ts and Shift+tap log.ts
-    Then the panel title is "Path: src/lib/orders.ts → src/lib/log.ts"
+    Then the panel title is "Chain: src/lib/orders.ts → src/lib/log.ts"
+    When I press "/"
+    Then find has the focus and nothing is typed into it
+    When I press Escape and "v"
+    Then the filter of the views has the focus
+    When I press "d" and tap orders.ts
+    Then everything but orders.ts and its neighbours fades
+    When I press "d" again
+    Then nothing is faded
     When I type "store" in find and press Enter
     Then the panel title is "src/db/store.ts"
     When I untick the routes lane
     Then the link holds "hide=routes"
-    When I press "map" and "split"
-    Then the minimap shows and a second picture opens embedded without the header
+    When I press "minimap" twice and "split"
+    Then the minimap hides and shows again, and a second picture opens embedded without the header
 
   Scenario: Sideways with the chips and the keys
     Given the page open on "modules"
@@ -68,7 +76,7 @@ Feature: The page
     Then the panel says "3 shapes selected" and the strip reads "3 selected"
     When I right-click orders.ts and choose "Focus: everything joined to it"
     Then the link holds "focus:src/lib/orders.ts"
-    When I press g
+    When I press p
     Then the project map opens with a dot per module
     When I click the dot of store.ts
     Then the map closes and the link holds "module:src/db/store.ts"

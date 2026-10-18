@@ -8,12 +8,17 @@ A drawn change becomes a task a coding agent builds, in this repository, from th
 
 ### Requirement: An agent is configured, never implied
 
-The system SHALL run Claude Code (`claude -p --output-format stream-json --verbose --permission-mode acceptEdits`), Cursor's CLI (`cursor-agent -p --output-format stream-json --trust`) or a custom command only when `--agent` or `archdiff.json` `agent` names it; every run SHALL start from a button or a command with the prompt as shown, and every prompt SHALL be saved under `.archdiff/tasks/`.
+The system SHALL run Claude Code (`claude -p --output-format stream-json --verbose --permission-mode acceptEdits`), Cursor's CLI (`cursor-agent -p --output-format stream-json --trust`) or a custom command only when `--agent` or `archdiff.json` `agent` names it; every run SHALL start from a button or a command with the prompt as shown, and every prompt sent to the agent — a run, a document to become the contract, the mocks of a flow — SHALL be saved under `.archdiff/tasks/` (`GET /api/tasks` lists them, newest first).
 
 #### Scenario: No agent
 
 - **WHEN** the page opens without an agent
 - **THEN** the Chat tab writes the task and says "no agent", and `/api/agent/run` answers 400
+
+#### Scenario: The prompt of the mocks is kept
+
+- **WHEN** the Flow tab asks the agent for the mocks of `calls:src/lib/orders.ts#placeOrder`
+- **THEN** `.archdiff/tasks/` holds a file named after the view with the prompt sent
 
 ### Requirement: The task comes from the drawing
 

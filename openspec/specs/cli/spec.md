@@ -8,7 +8,7 @@
 
 ### Requirement: The commands
 
-The system SHALL offer `analyze`, `views`, `diagram`, `metrics`, `run`, `layouts`, `flow`, `plan`, `new`, `import`, `intent`, `check`, `spec`, `coverage`, `review`, `branches`, `compare`, `history`, `web` and `--version`, as one table of commands from which `--help` is printed (each with its usage, help and flags); an unknown command, an unknown flag (with "did you mean" when a known flag is near), a missing required argument or an extra positional argument SHALL exit 2 with one plain line.
+The system SHALL offer `analyze`, `views`, `diagram`, `metrics`, `run`, `drawings` (also called `layouts`, its old name), `flow`, `plan`, `new` (`--no-git`: no repository and no first commit), `import`, `intent`, `check`, `spec` (`--tests [DIR]`: a test skeleton per Gherkin scenario, into `tests/` or `DIR`), `coverage`, `review`, `branches`, `compare`, `history`, `web` and `--version`, as one table of commands from which `--help` is printed (each with its usage, its other names, help and flags); an unknown command, an unknown flag (with "did you mean" when a known flag is near), a missing required argument or an extra positional argument SHALL exit 2 with one plain line.
 
 #### Scenario: An extra argument
 
@@ -20,23 +20,38 @@ The system SHALL offer `analyze`, `views`, `diagram`, `metrics`, `run`, `layouts
 - **WHEN** `archdiff diagram layers --dept 2` runs
 - **THEN** it exits 2 with `diagram: unknown flag --dept (did you mean --depth?)`
 
+#### Scenario: The old name of a command
+
+- **WHEN** `archdiff layouts` runs
+- **THEN** it lists the saved drawings as `archdiff drawings` does
+
 ### Requirement: Exit codes mean one thing
 
-The system SHALL exit 0 on success, 1 when a check found something (a new layer dependency in `review`, an import against the contract in `check`), and 2 on a wrong call or an I/O error.
+The system SHALL exit 0 on success, 1 when a check found something (a new layer dependency in `review` or `compare`, an import against the contract in `check`, a run that threw in `run`), and 2 on a wrong call or an I/O error — a view of a subject the code does not have, an entry `run` cannot run (unknown, a method, another language, not exported), a repository that is not one when git is needed.
 
 #### Scenario: A clean check
 
 - **WHEN** `archdiff check` runs on code that follows its contract
 - **THEN** it exits 0 and stderr says "the code follows the intent"
 
+#### Scenario: An entry that cannot run
+
+- **WHEN** `archdiff run calls:src/lib/orders.ts#nope` runs
+- **THEN** it exits 2 with `run: no function "src/lib/orders.ts#nope" (archdiff views lists the entry points)` and writes nothing to stdout
+
 ### Requirement: Output channels stay clean
 
-The system SHALL write the result of a command (Markdown, JSON, an export) to stdout or to `--out`, and every message, summary and progress line to stderr, so `--json` and `--format` output can be piped; `--out` SHALL refuse a directory and a file outside archdiff's own formats.
+The system SHALL write the result of a command (Markdown, JSON, an export) to stdout or to `--out`, and every message, summary and progress line to stderr, so `--json` and `--format` output can be piped; every command that writes a report SHALL take `--out FILE` and write a new file or one archdiff wrote before (its first line says so), refusing a directory and any other file.
 
 #### Scenario: JSON to a pipe
 
 - **WHEN** `archdiff analyze --json` runs
 - **THEN** stdout holds only JSON and the timing line goes to stderr
+
+#### Scenario: --out names a directory
+
+- **WHEN** `archdiff diagram layers --out /tmp` runs
+- **THEN** it exits 2 with `--out /tmp: a directory; name a file` and writes nothing
 
 ### Requirement: Validation names the field
 

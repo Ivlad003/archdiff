@@ -8,7 +8,7 @@ Each view is one picture that answers one architectural question, computed from 
 
 ### Requirement: Every view answers one question
 
-The system SHALL offer these views, each with a one-sentence question it answers: `layers`, `modules`, `layer:<name>`, `dir:<path>`, `module:<path>`, `inside:<path>`, `contract:<path>`, `calls:<path>#<fn>`, `sequence:<path>#<fn>`, `path:<path>#<fn>`, `type:<path>#<Type>`, `cycles`, `cycles:fns`, `cycle:<path>`, `cycle:<path>#<fn>`, `classes`, `classes:<scope>`, `matrix`, `matrix:<dir>`, `metrics`, `metrics:<layer>`, `machines`, `machine:<path>#<name>`, `focus:<path>`, `focus:<path>#<fn>`, `logic`, `logic:<path>#<fn>`, `events`, `tests`, `hotspots`, `packages`, `timeline`, `coverage`, `intent`. A view with a subject that does not exist SHALL be empty with a reason naming the subject.
+The system SHALL offer these views, each with a one-sentence question it answers: `layers`, `modules`, `layer:<name>`, `dir:<path>`, `module:<path>`, `inside:<path>`, `usage:<path>` (also read as `contract:<path>`, its old name), `calls:<path>#<fn>`, `sequence:<path>#<fn>`, `path:<path>#<fn>`, `type:<path>#<Type>`, `cycles`, `cycles:fns`, `cycle:<path>`, `cycle:<path>#<fn>`, `classes`, `classes:<scope>`, `matrix`, `matrix:<dir>`, `metrics`, `metrics:<layer>`, `machines`, `machine:<path>#<name>`, `focus:<path>`, `focus:<path>#<fn>`, `logic`, `logic:<path>#<fn>`, `events`, `tests`, `hotspots`, `packages`, `timeline`, `coverage`, `intent`, `review` and `compare` (the revisions of the link: a base, a head, the heads). A view with a subject that does not exist SHALL be empty with a reason naming the subject. Every shape SHALL say what a second tap on it opens — its kind's own view, or the view it names (`opens`: a folded directory, a package, a machine, a header of a matrix) — the same for the page and every export.
 
 #### Scenario: A module view
 
@@ -40,7 +40,7 @@ The system SHALL fold a picture with more shapes than the limit (40 by default, 
 
 ### Requirement: Hubs become badges
 
-The system SHALL take out of a module-level picture any module imported by at least a quarter of the picture's modules (at least 6, at most 40 importers) and write its name as a badge "+ name" on each importer, naming the hubs in the reason; the view's own subject is never a hub; `--no-hubs` draws them.
+The system SHALL take out of a module-level picture of eight modules or more any module imported by at least a quarter of the picture's modules (at least 6, at most 40 importers; `archdiff.json` `hubs` sets the `min`, the `share` and the `max`) and write its name as a badge "+ name" on each importer, naming the hubs in the reason; the view's own subject is never a hub, nor a module a review marked; `--no-hubs` draws them.
 
 #### Scenario: A logger everyone imports
 

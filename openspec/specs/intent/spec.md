@@ -31,7 +31,7 @@ The system SHALL draw the `intent` view with the contract's layers as lanes, its
 
 ### Requirement: check keeps the code to the contract
 
-The system SHALL, with `archdiff check`, exit 1 when the code imports between two of the contract's layers in a direction no arrow of the contract allows, naming the file, line and layers; and list what is planned and not built and what is built beyond the contract as news, exit 0. Without `ARCHITECTURE.md` it SHALL say so and exit 0.
+The system SHALL, with `archdiff check`, exit 1 when the code imports between two of the contract's layers in a direction no arrow of the contract allows, naming the file, line and layers; and list as news, exit 0, what is planned and not built, what is built beyond the contract, and the imports between modules the contract names that it draws no arrow for (the imports the intent does not name). Without `ARCHITECTURE.md` it SHALL say so and exit 0.
 
 #### Scenario: An import against the contract
 
@@ -49,12 +49,17 @@ The system SHALL fold a drawing's planned modules, functions, layers, arrows and
 
 ### Requirement: A document becomes the contract
 
-The system SHALL take, with `archdiff import <file>` or "from document" on the page, a Markdown document holding a flowchart as the contract; a document in prose SHALL go through the agent, which answers with the flowchart.
+The system SHALL take, with `archdiff import <file>` or "from document" on the page, a Markdown document holding a flowchart as the contract, with or without an agent; a document in prose SHALL go through the agent, which answers with the flowchart, and without an agent SHALL be refused (400, "no agent") with nothing written.
 
 #### Scenario: A design note with a flowchart
 
 - **WHEN** `archdiff import note.md` runs
 - **THEN** `ARCHITECTURE.md` holds the note's flowchart and `archdiff.json` the layers it implies
+
+#### Scenario: From document without an agent
+
+- **WHEN** a page whose server has no agent posts a note with a flowchart, then a note in prose
+- **THEN** the first becomes `ARCHITECTURE.md` (source "document"), the second is refused with "no agent"
 
 ### Requirement: A project starts from its contract
 
@@ -64,3 +69,12 @@ The system SHALL, with `archdiff new <dir> --lang ts|js --template blank|lib|cli
 
 - **WHEN** `archdiff new shop-api --lang ts --template api` runs
 - **THEN** the directory has the files, one commit, four layers (routes, services, domain, db), and `archdiff check` lists four planned modules
+
+### Requirement: The contract is seeded from the code
+
+The system SHALL, with `archdiff intent --init`, write `ARCHITECTURE.md` from the code (its layers, the modules that stand for them, the imports between the layers) and refuse to overwrite one that exists unless `--force` says so; `--layers` SHALL write the layers with a few modules each (the most imported, which name what the layer offers), which a repository of more than 60 modules SHALL get by itself.
+
+#### Scenario: A big repository
+
+- **WHEN** `archdiff intent --init` runs on a repository of 200 modules without a contract
+- **THEN** `ARCHITECTURE.md` holds every layer with a few modules each, and the arrows between the layers the code has

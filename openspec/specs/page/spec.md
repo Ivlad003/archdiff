@@ -8,7 +8,7 @@ One local web page (`archdiff web`) where a reader walks the pictures: one Excal
 
 ### Requirement: The server serves the page and an API on a local port
 
-The system SHALL listen on `--port`, or on 7080 or the next free port above it when none is named, refuse a Host header that is not the server's own, serve the page's files from `dist/web` only, and answer `/api/*` with JSON (an `error` field on failure) or server-sent events for streams.
+The system SHALL listen on `--port` (on `--host`, localhost by default), or on 7080 or the next free port above it when none is named, refuse a Host header that is not the server's own, serve the page's files from `dist/web` only, and answer `/api/*` with JSON (an `error` field on failure) or server-sent events for streams; besides the routes of the page, `GET /api/diagram` (a placed picture with its Markdown) and `GET /api/export` (a picture in any format) SHALL serve other tools, and `GET /api/history?path=` the commits that touched a file (a shape's page in a review).
 
 #### Scenario: The default port is taken
 
@@ -22,7 +22,7 @@ The system SHALL listen on `--port`, or on 7080 or the next free port above it w
 
 ### Requirement: Every option travels in the link
 
-The system SHALL keep the view, depth, fold limit, weight, hubs, packages, changes, only-changes, overlays, Mermaid type, expanded modules, hidden lanes, review, head and heads in the hash of the URL, so a link opens the same picture; a browser MAY remember defaults for the options a link leaves out.
+The system SHALL keep the view (a review and a comparison are views), the picture's options as `src/options.ts` names them (depth, fold limit, weight, hubs, packages, changes, only-changes, overlays, Mermaid type, expanded modules, hidden lanes, lanes), the base, the head and the heads in the hash of the URL, so a link opens the same picture; a browser MAY remember defaults for the options a link leaves out.
 
 #### Scenario: A shared link
 
@@ -54,7 +54,7 @@ The system SHALL, on a tap on a line, light it with its two ends and show its pa
 
 ### Requirement: The canvas has tools
 
-The system SHALL offer on the canvas: a picture select (the pictures of this subject, then the overviews), detail presets minimal / normal / full and depth −/+, mix (a tapped module opens in place), dim (all but a shape and its neighbours dims), the lanes menu, find (`/`, Enter centres the first match or opens the matching view), split (a second embedded picture), graph (the project map), a minimap (on by default, remembered when hidden; the shapes and lines small with the viewport as a box, moved by a tap or a drag), and the shortest path between two shapes on Shift+tap.
+The system SHALL offer on the canvas: a picture select (the pictures of this subject, then the overviews), detail presets minimal / normal / full and depth −/+, mix (a tapped module opens in place), dim (all but a shape and its neighbours dims), the lanes menu and lanes ↔ (rows or columns), find (`/`, Enter centres the first match or opens the matching view), split (a second embedded picture, stacked below 1520 pixels), project (the project map), a minimap (on by default, remembered when hidden; the shapes and lines small with the viewport as a box, moved by a tap or a drag), and the shortest chain of lines between two shapes on Shift+tap.
 
 #### Scenario: Mix
 
@@ -68,7 +68,7 @@ The system SHALL offer on the canvas: a picture select (the pictures of this sub
 
 ### Requirement: Several shapes can be selected, and every shape has a menu
 
-The system SHALL add a shape to the selection on a tap with Shift, Ctrl or Cmd held (and take it out on another), count the editor's own box selection the same way, light the selected shapes, show two as the shortest path between them and more as a list with the lines among them, and offer in a strip under the tabs *ask about them* (the Chat tab's question row with the shapes attached), *dim others* and *clear* (Escape). A right click SHALL open a menu: on a shape, its own view, its focus view, its logic (a function), the other pictures of its subject, adding it to the selection, asking the agent about it, dimming all but its neighbours, its code and its name to copy; on a line, where it leads and the chain onward; on the empty canvas, a question about the picture, the project map, fit, clear and edit.
+The system SHALL add a shape to the selection on a tap with Shift, Ctrl or Cmd held (and take it out on another), count the editor's own box selection the same way, light the selected shapes, show two as the shortest chain of lines between them and more as a list with the lines among them, and offer in a strip under the tabs *ask about them* (the Chat tab's question row with the shapes attached), *dim others* and *clear* (Escape). A right click SHALL open a menu: on a shape, its own view, its focus view, its logic (a function), the other pictures of its subject, adding it to the selection, asking the agent about it, dimming all but its neighbours, its code and its name to copy; on a line, where it leads and the chain onward; on the empty canvas, a question about the picture, the project map, fit, clear and edit.
 
 #### Scenario: Three shapes
 
@@ -82,7 +82,7 @@ The system SHALL add a shape to the selection on a tap with Shift, Ctrl or Cmd h
 
 ### Requirement: The project map shows where the picture sits
 
-The system SHALL open, on **graph** or `g`, a map of the whole repository over the canvas (`GET /api/graph`): a dot per module (per directory above 400 modules) coloured by layer and sized by lines, a line per import, laid out by forces; hover SHALL name a dot and light its neighbours, the dots of the current picture SHALL wear a ring, a click SHALL open the module's view, Shift+click its focus view, a double click its inside; layer chips SHALL hide layers and a search box SHALL find a module; Escape SHALL close it.
+The system SHALL open, on **project** or `p`, a map of the whole repository over the canvas (`GET /api/graph`): a dot per module (per directory above 400 modules) coloured by layer and sized by lines, a line per import, laid out by forces; hover SHALL name a dot and light its neighbours, the dots of the current picture SHALL wear a ring, a click SHALL open the module's view, Shift+click its focus view, a double click its inside; layer chips SHALL hide layers and a search box SHALL find a module; Escape SHALL close it.
 
 #### Scenario: A dot opens its module
 
@@ -114,7 +114,7 @@ The system SHALL copy, with one button beside the tabs, what the active tab show
 
 ### Requirement: Drawing is a mode, saved beside the repository
 
-The system SHALL switch the canvas to Excalidraw's full editor on `✎ edit`, save a drawing to `.archdiff/layouts/<view>.json` on `save`, follow the saved places in the live picture and every export, and merge a fresh picture of the code into the drawing on `re-layout` (shapes that still exist keep their place, strokes stay, stale shapes go).
+The system SHALL switch the canvas to Excalidraw's full editor on `✎ edit`, save a drawing to `.archdiff/layouts/<view>.json` on `save` (Ctrl+S), follow the saved places in the live picture and every export, and merge a fresh picture of the code into the drawing on `refresh` (shapes that still exist keep their place, strokes stay, stale shapes go); leaving the editor with unsaved changes SHALL ask first.
 
 #### Scenario: Leaving an untouched editor
 
@@ -123,18 +123,46 @@ The system SHALL switch the canvas to Excalidraw's full editor on `✎ edit`, sa
 
 ### Requirement: The page follows the code
 
-The system SHALL reload the picture when a source file changes (`--no-watch` turns this off) and after every agent run.
+The system SHALL reload the picture when a source file of any language the analysis reads changes (`--no-watch` turns this off) and after every agent run; a picture asked for after a change SHALL be drawn from the new analysis.
 
 #### Scenario: A file changes
 
 - **WHEN** a source file is saved while the page is open
 - **THEN** the picture reloads within a second and the reason names the file
 
+#### Scenario: A Python file is added
+
+- **WHEN** `src/lib/tool.py` is written while the page shows the lib layer
+- **THEN** `/api/changes` names it and the next picture of the layer holds it
+
 ### Requirement: The page's modules take the page as their context
 
-The system SHALL keep the page's tabs (chat, flow, spec, the review bars) in modules of their own that reach the canvas, the picture's shapes and lines, the views, the mode and the mocks through one bound context (`page.ts`), the way the server's routes take theirs; the Flow tab SHALL offer ▶ run, the Chat tab *run checks*, the toolbar *lanes ↔*, and the options the *instability* overlay.
+The system SHALL keep the page's parts in modules of their own — the title and the reason, the side panels, what a tap picks, the menu, the canvas and the drawing, the toolbar, the minimap, the options, the views list, the export menu, the review, the keys, and the tabs of the flow, the chat and the spec — that reach the current picture's shapes, lines and mocks, the canvas, the mode and the views through one bound context (`page.ts`); `app.ts` holds the current picture, loads it and hands the canvas's taps to the picking. The Flow tab SHALL offer ▶ run, the Chat tab *run checks*, and the options the *instability* overlay.
 
 #### Scenario: The page loads
 
 - **WHEN** the page opens on the sample repository
 - **THEN** the views list, the canvas and every tab work as before the split, and the page tests pass
+
+### Requirement: The keys
+
+The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or Cmd held: `/` focuses find, `v` the filter of the views (showing the left panel), `o` opens the options, `p` the project map, `0` fits, Backspace goes back, the arrows walk from the picked shape, Enter goes into it, `s` splits, `m` and `d` turn mix and dim on and off, `l` flips the lanes, `e` edits, Escape clears the selection (or closes the menu and the project map first); Ctrl+B and Ctrl+] SHALL fold the left and the right panel, Ctrl+S save a drawing. In a review or a comparison the keys of the tools (`p`, `s`, `m`, `d`, `e`) SHALL do nothing.
+
+#### Scenario: Find and filter
+
+- **WHEN** `/` is pressed on the canvas, then Escape, then `v`
+- **THEN** find has the focus with nothing typed into it, then the filter of the views has it
+
+#### Scenario: Dim from the keyboard
+
+- **WHEN** `d` is pressed and a shape is tapped, then `d` again
+- **THEN** all but the shape and its neighbours fade, then nothing is faded
+
+### Requirement: The browser remembers the reader's choices
+
+The system SHALL remember in the browser, and only there, the zoom and place of every view, the folded side panels, a hidden minimap, the theme (the system's at first) and the options kept with *remember as defaults*; the options menu SHALL offer the presets of who reads — reviewer (the changes and the tests overlay), newcomer (one step deep, thirty shapes) and architect (the heat, sixty shapes, lines of weight two) — and *reset* back to the built-in options. A private window without storage SHALL work the same, forgetting.
+
+#### Scenario: Back to a view
+
+- **WHEN** a reader zooms into a view, opens another and comes back
+- **THEN** the view opens at the zoom and place it was left

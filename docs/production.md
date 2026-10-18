@@ -58,11 +58,11 @@ An analysis of archdiff 0.1 on real repositories (keylang, 480 files; storefront
 
 **Bundle size.** Excalidraw with React is about 2.4 MB of JavaScript, loaded once; locales load on demand, fonts (0.5 MB, the CJK family left out) on demand. The package grows from 4 MB to about 10 MB unpacked. *State:* accepted for one canvas that reads and draws; a CDN is deliberately not used, so the page works offline.
 
-**Drawings in the repository.** `.archdiff/layouts/<view>.json` holds the whole scene, including pencil strokes; a view drawn heavily is a few hundred kilobytes. Committing it shares the drawing; `POST /api/layout` accepts up to 8 MB and refuses anything that is not a list of elements. A drawing is matched to its view by the exact view key, so a renamed module leaves an orphan file. *State:* known; a `layouts prune` command is a later step.
+**Drawings in the repository.** `.archdiff/layouts/<view>.json` holds the whole scene, including pencil strokes; a view drawn heavily is a few hundred kilobytes. Committing it shares the drawing; `POST /api/drawing` accepts up to 8 MB and refuses anything that is not a list of elements. A drawing is matched to its view by the exact view key, so a renamed module leaves an orphan file. *State:* `archdiff drawings --prune` deletes the drawings whose view the code no longer has.
 
-**Stale drawings.** The live diagram follows the saved places of shapes that still exist; shapes the code no longer has are dropped at the next re-layout, new ones are placed by the algorithm beside the kept ones (possibly overlapping a stroke). *State:* by design; re-layout is one click.
+**Stale drawings.** The live diagram follows the saved places of shapes that still exist; shapes the code no longer has are dropped at the next refresh, new ones are placed by the algorithm beside the kept ones (never on a shape placed by hand, possibly over a stroke). *State:* by design; refresh is one click.
 
-**Mocks are not execution.** The Flow tab carries values by name only. A reader may take a carried value for a proven one. *State:* the panel and the Markdown say so in their first line; real execution with substituted modules is a separate, optional, later step.
+**Mocks are not execution.** The Flow tab's prediction carries values by name only, and a reader may take a carried value for a proven one. *State:* the panel and the Markdown say so in their first line; **▶ run** (`archdiff run`) executes the entry for real with the storages mocked and sets what happened against the prediction.
 
 **Tapping in view mode** is read from pointer events; a drag over 6 scene pixels is a pan, not a tap. On a touch screen the second tap must land within half a second. *State:* works with a mouse; untested on touch.
 

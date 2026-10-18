@@ -40,7 +40,7 @@ The system SHALL list in the Markdown every path from the start to an exit (at m
 
 ### Requirement: The branching functions are listed
 
-The system SHALL list every function with branches in `archdiff views` (`logic:<path>#<fn>`, with its count) and draw them as the `logic` view, the most branching first, one shape per function in its module's lane, a tap opening its flowchart.
+The system SHALL list every function with branches in `archdiff views` (`logic:<path>#<fn>`, with its count) and draw the 60 most branching as the `logic` view, the most branching first, one shape per function in its module's lane, a tap opening its flowchart; when more have branches, the reason SHALL say how many more the views list holds.
 
 #### Scenario: The list
 

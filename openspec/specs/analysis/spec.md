@@ -59,7 +59,7 @@ The system SHALL cache the facts of every file in `.archdiff/facts.json.gz` keye
 
 ### Requirement: Layers come from the configuration or the directories
 
-The system SHALL place every module in a layer: the first glob of `archdiff.json` `layers` that matches, else the top directory (`src/<dir>` under `src/`), else the configured `otherLayer`. A wrong `archdiff.json` SHALL fail naming the file and the field.
+The system SHALL place every module in a layer: with `layers` in `archdiff.json` (or, without them, the layers of `ARCHITECTURE.md`), the first layer whose glob matches, else the layer `other` names (`other` by default); without layers, the top directory (`src/<dir>` under `src/`, `(root)` for a file at the root). A wrong `archdiff.json` SHALL fail naming the file and the field, and one that is not JSON naming the file.
 
 #### Scenario: Layers from archdiff.json
 
@@ -73,7 +73,7 @@ The system SHALL place every module in a layer: the first glob of `archdiff.json
 
 ### Requirement: Entry points are known from the code and the frameworks
 
-The system SHALL treat as entry points exported functions under `bin/`, functions named `main`, React Router route exports, SFCC cartridge hooks, the files a `package.json` names, the files `archdiff.json` `entries` names, and exported functions nothing in the repository calls.
+The system SHALL treat as entry points exported functions under `bin/`, functions named `main`, React Router route exports, SFCC cartridge hooks, the files a `package.json` names, the files `archdiff.json` `entries` names, exported functions nothing in the repository calls, and the public methods of a class in a module a framework calls into (a controller, handler, command, job, listener, middleware, route or resolver, by its path) that nothing in the repository calls and that call something themselves.
 
 #### Scenario: A React Router route module
 

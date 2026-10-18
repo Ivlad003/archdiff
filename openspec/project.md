@@ -13,7 +13,8 @@ Live architecture diagrams of a TypeScript, JavaScript, Python, Rust or PHP repo
 
 - Pipelines with explicit contracts: source files → `FileFacts` → `Graph` → views → placed `Diagram` → Markdown, Mermaid, draw.io, Excalidraw, ArchiMate.
 - Deterministic output: stable IDs, sorted order, relative POSIX paths; the same sources give the same picture.
-- Side effects at the edges (git, the file system, the agent process); the core is pure.
+- Side effects at the edges (git, the file system, the agent process): the edge layer (`picture.ts` draws every picture the one way, reading what a view needs from git or a file; `review.ts`, `spec.ts`, `run.ts`, `scaffold.ts`) and the commands; the views are pure functions of the analysis, and only `git.ts` runs git.
+- One word for each thing, as `CONTEXT.md` defines it (a shape, a line, a lane, a drawing, a chain, a rule…); the decisions behind the design are in `docs/adr/`.
 - Every picture explains itself: a `reason` when it is cut, folded or empty; a `question` it answers; the commit it was drawn from.
 - Nothing runs by itself: the agent starts from a button or a command, with the prompt as shown.
 
@@ -30,3 +31,4 @@ Live architecture diagrams of a TypeScript, JavaScript, Python, Rust or PHP repo
 - `metrics`: coupling and cohesion as numbers, the instability overlay.
 - `machines`: state machines, explicit and implicit, and the guards of calls.
 - `run`: a real run of an entry with the storages mocked.
+- `logic`: a function's body as a flowchart, its paths as rules.
