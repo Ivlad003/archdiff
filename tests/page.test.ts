@@ -251,6 +251,23 @@ test("an empty picture and one that cannot be drawn say why on the canvas; a sec
   assert.ok((await page!.evaluate("location.hash")) === "#view=metrics");
 });
 
+test("a double tap goes in though the page is still busy with its first tap", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/?fresh=busy#view=layer%3Alib`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`);
+  await page!.waitForTimeout(800);
+  const orders = await screenPointOf("src/lib/orders.ts");
+  await page!.mouse.move(orders.x, orders.y);
+  await page!.mouse.down();
+  await page!.mouse.up();
+  // The first tap's work keeps the page busy for most of a second (a big file's code, a big scene lit): the second
+  // tap, pressed a quarter of a second after the first, is handled only after it.
+  await page!.evaluate("setTimeout(() => { const start = performance.now(); while (performance.now() - start < 700); }, 0)");
+  await page!.waitForTimeout(250);
+  await page!.mouse.down();
+  await page!.mouse.up();
+  await page!.waitForFunction(`location.hash === "#view=inside%3Asrc%2Flib%2Forders.ts"`, undefined, { timeout: 5000 });
+});
+
 test("the editor opens and closes, and the Chat tab reads the task from the drawing", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.goto(`${base}/#view=module%3Asrc%2Flib%2Forders.ts`);
   await page!.waitForSelector(".excalidraw canvas");

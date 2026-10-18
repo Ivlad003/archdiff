@@ -263,18 +263,22 @@ function sceneUnits(api: ExcalidrawImperativeAPI, pixels: number): number {
 /**
  * Taps and right clicks in view mode, from the container's own pointer events (Excalidraw reports none of its own
  * there): a tap picks the shape under it, or the lines within reach; a second tap on a shape opens its view; a right
- * click asks for the page's menu.
+ * click asks for the page's menu. A second tap is one whose press comes within half a second of the first tap's
+ * release, by the events' own times: the page may still be busy with the first tap (a big file's code, a big scene
+ * lit) when the second is handled, long after it happened.
  */
 function listenForTaps(mounted: Mounted, events: CanvasEvents): void {
   const { container } = mounted;
-  let down: { x: number; y: number } | null = null;
+  let down: { x: number; y: number; at: number } | null = null;
   let lastTap: { id: string; at: number } | null = null;
 
   // Only the main button taps: a right click is the menu (below), and on Linux its press comes before its contextmenu.
   container.addEventListener(
     "pointerdown",
     (event) => {
-      if (mounted.mode === "view" && event.button === 0) down = scenePoint(mounted, event);
+      const point = mounted.mode === "view" && event.button === 0 ? scenePoint(mounted, event) : null;
+
+      if (point) down = { ...point, at: event.timeStamp };
     },
     true,
   );
@@ -292,7 +296,6 @@ function listenForTaps(mounted: Mounted, events: CanvasEvents): void {
       if (!at || Math.hypot(at.x - from.x, at.y - from.y) > sceneUnits(api, TAP_SLOP)) return;
       const scene = elementsOf(api);
       const hit = shapeAt(scene, at.x, at.y);
-      const now = Date.now();
       const extend = event.shiftKey || event.ctrlKey || event.metaKey;
 
       // No shape under the tap: the lines within a few screen pixels, when any; Shift follows the chain from the nearest.
@@ -307,14 +310,14 @@ function listenForTaps(mounted: Mounted, events: CanvasEvents): void {
         }
       }
 
-      if (hit && !extend && lastTap && lastTap.id === hit.id && now - lastTap.at < DOUBLE_TAP_MS) {
+      if (hit && !extend && lastTap && lastTap.id === hit.id && from.at - lastTap.at < DOUBLE_TAP_MS) {
         lastTap = null;
         events.open(hit.id, typeof hit.customData?.["view"] === "string" && hit.customData["view"] !== "" ? hit.customData["view"] : null);
 
         return;
       }
 
-      lastTap = hit ? { id: hit.id, at: now } : null;
+      lastTap = hit ? { id: hit.id, at: event.timeStamp } : null;
       events.pick(hit?.id ?? null, undefined, extend);
     },
     true,

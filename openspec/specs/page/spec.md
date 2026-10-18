@@ -41,7 +41,7 @@ The system SHALL keep the view (a review and a comparison are views), the pictur
 
 ### Requirement: A tap reads, a second tap goes in
 
-The system SHALL, on a tap on a shape, show its Markdown page (declarations folding open to their calls and code) and its code with the shape's lines highlighted (every line of a function, however long); on a second tap, open the shape's own view: a layer to its modules, a module to its inside, a function to its calls (the function a call tree starts from, whose own view is the picture already, to its logic); a second tap or Enter on a shape that opens nothing SHALL say so on the line under the picture. Breadcrumbs SHALL lead back up, Backspace back.
+The system SHALL, on a tap on a shape, show its Markdown page (declarations folding open to their calls and code) and its code with the shape's lines highlighted (every line of a function, however long); on a second tap, open the shape's own view: a layer to its modules, a module to its inside, a function to its calls (the function a call tree starts from, whose own view is the picture already, to its logic); a second tap or Enter on a shape that opens nothing SHALL say so on the line under the picture. A second tap SHALL be one pressed within half a second of the first tap's release, by the events' own times, so a page still busy with the first tap does not lose it. Breadcrumbs SHALL lead back up, Backspace back.
 
 #### Scenario: A long function
 
