@@ -9,7 +9,7 @@
 // Entry points: `coverageReport`, `CoverageReport`.
 
 import type { Analysis } from "./analyze.ts";
-import { BLIND_SPOT_REASONS, isBlindSpot, moduleOf, type Gap } from "./graph.ts";
+import { BLIND_SPOT_REASONS, GAP_REASONS, isBlindSpot, moduleOf, type Gap } from "./graph.ts";
 import { counted } from "./words.ts";
 
 /** Constructs read but not followed the Markdown lists, at most; the JSON has every one. */
@@ -47,18 +47,6 @@ export interface CoverageReport {
   modules: ModuleCoverage[];
   markdown: string;
 }
-
-const REASON_TEXT: Record<Gap["reason"], string> = {
-  dynamic: "a callee archdiff cannot name (a computed or passed value): a blind spot",
-  "unknown-member": "a member of a class, module or value of the repository archdiff cannot find (a member the class lacks, an object literal's function): a blind spot",
-  interface: "a call through an interface or type no class of the repository implements (an object literal's function, a value injected from outside): a blind spot",
-  unresolved: "a name an import binds that resolves to no file (the import is listed below): a blind spot",
-  "member-of-value": "a method of a local value whose type is not tracked (list.map, req.on): mostly built-ins",
-  global: "a bare name the file neither declares nor imports (setTimeout, JSON.parse): a global",
-  local: "a function of the caller's own body (a nested function, a local arrow): its calls are the caller's already",
-  external: "a package or a Node built-in",
-  "parse-error": "a syntax error in the file",
-};
 
 /** What the diagrams cannot show, by module: the blind spots by reason with examples, the unresolved imports, the syntax errors, the files left out, and the share of calls into the repository that were followed. */
 export function coverageReport(analysis: Analysis): CoverageReport {
@@ -114,7 +102,7 @@ export function coverageReport(analysis: Analysis): CoverageReport {
     "",
   ];
 
-  for (const [reason, n] of Object.entries(byReason).sort((a, b) => b[1] - a[1])) lines.push(`- ${n} × ${reason}: ${REASON_TEXT[reason as Gap["reason"]]}`);
+  for (const [reason, n] of Object.entries(byReason).sort((a, b) => b[1] - a[1])) lines.push(`- ${n} × ${reason}: ${GAP_REASONS[reason as Gap["reason"]].text}`);
 
   if (Object.keys(byReason).length === 0) lines.push("- none");
   lines.push("", "## Modules with gaps", "");

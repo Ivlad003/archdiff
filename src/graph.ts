@@ -88,20 +88,30 @@ export interface CallEdge {
 export interface Gap {
   from: string;
   callee: string;
-  /**
-   * `dynamic`: a callee archdiff cannot name; `global`: a bare name the file neither
-   * declares nor imports (`setTimeout`, `JSON.parse`); `member-of-value`: a member of a
-   * local value whose type archdiff does not track (`list.map`, `req.on`);
-   * `unknown-member`: a known class without that member; `interface`: a call through
-   * an interface or type no class of the repository implements; `unresolved`: a name
-   * an import binds that resolves to no file; `external`: a package or built-in;
-   * `local`: a function of the caller's own body (a nested function, a local arrow),
-   * whose calls are the caller's already; `parse-error`: the file did not parse. A
-   * call through a parameter is `dynamic`: what it holds is the caller's.
-   */
-  reason: "dynamic" | "global" | "member-of-value" | "unknown-member" | "interface" | "unresolved" | "external" | "local" | "parse-error";
+  /** Why, one of `GAP_REASONS`; a call through a parameter is `dynamic`: what it holds is the caller's. */
+  reason: GapReason;
   line: number;
 }
+
+/**
+ * Every reason a call is not followed, in one place: whether it is a blind
+ * spot — a call into the repository's own code the diagrams count against
+ * the calls they follow, as opposed to a call into a package or the
+ * language, or a syntax error — and what the coverage report says of it.
+ */
+export const GAP_REASONS = {
+  dynamic: { blind: true, text: "a callee archdiff cannot name (a computed or passed value): a blind spot" },
+  "unknown-member": { blind: true, text: "a member of a class, module or value of the repository archdiff cannot find (a member the class lacks, an object literal's function): a blind spot" },
+  interface: { blind: true, text: "a call through an interface or type no class of the repository implements (an object literal's function, a value injected from outside): a blind spot" },
+  unresolved: { blind: true, text: "a name an import binds that resolves to no file (the import is listed below): a blind spot" },
+  "member-of-value": { blind: false, text: "a method of a local value whose type is not tracked (list.map, req.on): mostly built-ins" },
+  global: { blind: false, text: "a bare name the file neither declares nor imports (setTimeout, JSON.parse): a global" },
+  local: { blind: false, text: "a function of the caller's own body (a nested function, a local arrow): its calls are the caller's already" },
+  external: { blind: false, text: "a package or a Node built-in" },
+  "parse-error": { blind: false, text: "a syntax error in the file" },
+} as const satisfies Record<string, { blind: boolean; text: string }>;
+
+export type GapReason = keyof typeof GAP_REASONS;
 
 /** A package or built-in the code imports. */
 export interface External {
@@ -125,8 +135,8 @@ export interface Graph {
   readonly resolvedExports: ReadonlyMap<string, ReadonlyMap<string, string>>;
 }
 
-/** The reasons of a blind spot: a call into the repository archdiff could not follow — a computed callee, an unknown member, an interface. */
-export const BLIND_SPOT_REASONS: ReadonlySet<Gap["reason"]> = new Set(["dynamic", "unknown-member", "interface", "unresolved"]);
+/** The reasons of a blind spot, as `GAP_REASONS` marks them. */
+export const BLIND_SPOT_REASONS: ReadonlySet<GapReason> = new Set((Object.keys(GAP_REASONS) as GapReason[]).filter((reason) => GAP_REASONS[reason].blind));
 
 /** A blind spot: a gap the diagrams count against the calls they follow (not a call into a package, not a syntax error). */
 export function isBlindSpot(gap: Gap): boolean {
