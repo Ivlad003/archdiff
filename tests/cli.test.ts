@@ -17,6 +17,16 @@ const require = (await import("node:module")).createRequire(import.meta.url);
 
 const fixture = join(root, "tests/fixtures/sample");
 
+/** git in `dir` as a test's author, failing the test when git refuses; its output, trimmed. */
+function gitIn(dir: string): (...args: string[]) => string {
+  return (...args) => {
+    const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+
+    return result.stdout.trim();
+  };
+}
+
 function archdiff(args: string[], cwd = root): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(process.execPath, [join(root, "bin/archdiff.js"), ...args], { cwd, encoding: "utf8" });
 
@@ -140,13 +150,10 @@ test("a wrong view, format or command exits 2 with a message on stderr", () => {
 test("review reports the architectural diff of the working tree against a base commit", () =>
   withTempDir("archdiff-review-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
-    const git = (...args: string[]): void => {
-      const result = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-    };
+    const git = gitIn(dir);
     git("init", "-q", "-b", "main");
-    git("-c", "user.email=t@example.com", "-c", "user.name=t", "add", ".");
-    git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "base");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
     // The change: the route imports the db directly (a new layer dependency), a function changes, one is added.
     writeFileSync(
       join(dir, "src/routes/checkout.tsx"),
@@ -179,7 +186,7 @@ export default function Checkout() {
     const json = JSON.parse(archdiff(["review", dir, "--base", "HEAD", "--format", "json"]).stdout) as { callsAdded: { from: string; to: string }[] };
     assert.ok(json.callsAdded.some((edge) => edge.from === "src/routes/checkout.tsx#action" && edge.to === "src/db/store.ts#readOrder"));
     // No change: exit 0 and an empty picture.
-    git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-am", "change");
+    git("commit", "-q", "-am", "change");
     const clean = archdiff(["review", dir, "--base", "HEAD"]);
     assert.equal(clean.status, 0);
     assert.ok(clean.stdout.includes("_no module, function, import or call changed_"));
@@ -219,12 +226,7 @@ test("a file over the size limit is left out and named by the coverage report", 
 test("review measures the change from the merge-base, not from the tip of main", () =>
   withTempDir("archdiff-mb-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
-    const git = (...args: string[]): string => {
-      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-
-      return result.stdout.trim();
-    };
+    const git = gitIn(dir);
     git("init", "-q", "-b", "main");
     git("add", ".");
     git("commit", "-q", "-m", "base");
@@ -284,12 +286,7 @@ test("plan refuses a view without a drawing and web --agent refuses an unknown a
 test("history lists the drift commit by commit, and review --head compares two refs", () =>
   withTempDir("archdiff-history-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
-    const git = (...args: string[]): string => {
-      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-
-      return result.stdout.trim();
-    };
+    const git = gitIn(dir);
     git("init", "-q", "-b", "main");
     git("add", ".");
     git("commit", "-q", "-m", "base");
@@ -515,10 +512,7 @@ test("cycles, events, tests, packages and timeline on a repository that has them
     // app declares lib and its test imports one file of it.
     assert.ok(packages.includes('acme_app -->|"declared, 1 imports"| acme_lib'), packages);
     // The timeline needs commits.
-    const git = (...args: string[]): void => {
-      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-    };
+    const git = gitIn(dir);
     git("init", "-q", "-b", "main");
     git("add", ".");
     git("commit", "-q", "-m", "base");
@@ -531,13 +525,25 @@ test("cycles, events, tests, packages and timeline on a repository that has them
     assert.ok(timeline.nodes.some((node) => node.id.startsWith("commit:") && node.label.includes("lib: extra")), JSON.stringify(timeline.nodes));
   }));
 
+test("review without --base measures from the merge-base with develop when the repository has no main", () =>
+  withTempDir("archdiff-develop-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    const git = gitIn(dir);
+    git("init", "-q", "-b", "develop");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "feature");
+    writeFileSync(join(dir, "src/lib/log.ts"), "export function log(message: string): void {\n  console.error(message);\n}\n");
+    git("commit", "-q", "-am", "feature: log to stderr");
+    const { status, stdout } = archdiff(["review", dir]);
+    assert.equal(status, 0, stdout);
+    assert.ok(stdout.includes("- fn `log` — src/lib/log.ts:1 (body)"), stdout);
+  }));
+
 test("branches lists the branches with the default base, and compare puts several heads against it", () =>
   withTempDir("archdiff-branches-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
-    const git = (...args: string[]): void => {
-      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-    };
+    const git = gitIn(dir);
     git("init", "-q", "-b", "develop");
     git("add", ".");
     git("commit", "-q", "-m", "base");
@@ -611,10 +617,7 @@ test("classes draws the class diagram with fields, methods, extends and implemen
 test("--changes lays the review's marks over any view", () =>
   withTempDir("archdiff-overlay-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
-    const git = (...args: string[]): void => {
-      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-    };
+    const git = gitIn(dir);
     git("init", "-q", "-b", "main");
     git("add", ".");
     git("commit", "-q", "-m", "base");
@@ -798,13 +801,10 @@ test("review against the contract: a new layer dependency ARCHITECTURE.md forbid
   withTempDir("archdiff-contract-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     writeFileSync(join(dir, "ARCHITECTURE.md"), "# Architecture\n\n```mermaid\nflowchart LR\n  subgraph routes\n    r[src/routes/checkout.tsx]\n  end\n  subgraph lib\n    o[src/lib/orders.ts]\n    l[src/lib/log.ts]\n  end\n  subgraph db\n    s[src/db/store.ts]\n  end\n  r --> o\n  o --> s\n  o --> l\n  s --> l\n```\n");
-    const git = (...args: string[]): void => {
-      const result = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-    };
+    const git = gitIn(dir);
     git("init", "-q", "-b", "main");
-    git("-c", "user.email=t@example.com", "-c", "user.name=t", "add", ".");
-    git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "base");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
     // Allowed by the contract (db → lib): news, exit 0.
     writeFileSync(join(dir, "src/db/store.ts"), `${readFileSync(join(dir, "src/db/store.ts"), "utf8")}import { log } from "../lib/log.ts";\nexport function note(): void { log("x"); }\n`);
     const allowed = archdiff(["review", dir, "--base", "HEAD"]);

@@ -34,9 +34,9 @@ export interface ComparisonResult {
 
 /**
  * The head (a ref, or the working tree when null) against the base, and
- * the diff between them. `base` null: the merge-base with the main
- * branch. `current`, when given, is the working tree's analysis already
- * made, so a review of the working tree does not read it twice.
+ * the diff between them. `base` null: the merge-base with develop, main
+ * or master. `current`, when given, is the working tree's analysis
+ * already made, so a review of the working tree does not read it twice.
  */
 export async function review(root: string, base: string | null, headRef: string | null = null, current: Analysis | null = null): Promise<ReviewResult> {
   const ref = base ?? mergeBase(root);

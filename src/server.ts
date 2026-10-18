@@ -32,7 +32,7 @@ export interface ServeOptions {
   /** The port to bind; null: the first free port from DEFAULT_PORT up. */
   port: number | null;
   host: string;
-  /** The base ref of the review panel; null: the merge-base with the main branch. */
+  /** The base ref of the review panel; null: the merge-base with develop, main or master. */
   base: string | null;
   /** The agent of `--agent`, over the config's; null: the config decides. */
   agent: AgentSpec | null;

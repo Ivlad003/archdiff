@@ -30,8 +30,8 @@ import { viewOf, type EdgeReads } from "./views.ts";
 
 /**
  * The revisions a picture is drawn against: the base (null: the
- * merge-base with the main branch; for a comparison develop, main or
- * master), the head (null: the working tree) and the heads of a
+ * merge-base with develop, main or master; for a comparison that branch
+ * itself), the head (null: the working tree) and the heads of a
  * comparison (`WORKTREE` for the working tree).
  */
 export interface Refs {
