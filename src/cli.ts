@@ -182,7 +182,7 @@ const COMMANDS: readonly Command[] = [
   },
   {
     name: "diagram",
-    usage: "<view> [dir] [--format F] [--out FILE] [--base REF --head REF] [picture options]",
+    usage: "<view> [dir] [--format F] [--out FILE] [--base REF] [--head REF] [--heads A,B] [picture options]",
     help: [
       "Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,",
       "drawio, excalidraw, archimate. Views: layers | layer:<name> | dir:<path> |",
@@ -191,8 +191,9 @@ const COMMANDS: readonly Command[] = [
       "cycle:<path> | classes | classes:<path|dir> | matrix | matrix:<dir> | events | tests |",
       "hotspots | packages | timeline [--base --head] | coverage | intent | modules | metrics |",
       "metrics:<layer> | cycles:fns | machines | machine:<path>#<name> | focus:<path>[#<fn>] |",
-      "logic | logic:<path>#<fn> (the function's body as a flowchart, with its paths as rules).",
-      "Every export names the commit it was drawn from. The picture options:",
+      "logic | logic:<path>#<fn> (the function's body as a flowchart, with its paths as rules) |",
+      "review [--base --head] | compare [--base --heads]. Every export names the commit it",
+      "was drawn from. The picture options:",
       ...pictureOptionsHelp().map((line) => `  ${line}`),
     ],
     arity: 2,

@@ -27,6 +27,11 @@ const mermaidSelect = element<HTMLSelectElement>("mermaid");
 const presetSelect = element<HTMLSelectElement>("preset");
 const overlayBoxes = (): HTMLInputElement[] => [...document.querySelectorAll<HTMLInputElement>("#options .overlay")];
 
+/** A value of the Mermaid select that the options table knows. */
+function isMermaidStyle(value: string): value is MermaidStyle {
+  return (MERMAID_STYLES as readonly string[]).includes(value);
+}
+
 /** The fields of the options as the link has them. */
 export function showOptions(state: Link): void {
   depthInput.value = state.depth === null ? "" : String(state.depth);
@@ -63,7 +68,7 @@ changesInput.addEventListener("change", () => setLink({ ...currentLink(), change
 limitInput.addEventListener("change", () => setLink({ ...currentLink(), limit: limitInput.value === "" ? null : Math.max(1, Number(limitInput.value)) }));
 mermaidSelect.addEventListener("change", () => {
   const value = mermaidSelect.value;
-  setLink({ ...currentLink(), mermaid: MERMAID_STYLES.includes(value as MermaidStyle) ? (value as MermaidStyle) : "auto" });
+  setLink({ ...currentLink(), mermaid: isMermaidStyle(value) ? value : "auto" });
 });
 weightInput.addEventListener("change", () => setLink({ ...currentLink(), weight: weightInput.value === "" || Number(weightInput.value) <= 1 ? null : Math.floor(Number(weightInput.value)) }));
 hubsInput.addEventListener("change", () => setLink({ ...currentLink(), hubs: hubsInput.checked }));
