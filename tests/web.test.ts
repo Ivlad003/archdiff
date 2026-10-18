@@ -7,8 +7,8 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { hostname, networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { startWeb, withOwnServer } from "./web-server.ts";
@@ -46,9 +46,9 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 /** A request with a Host header fetch would not let us set. */
-function rawRequest(path: string, host: string): Promise<number> {
+function rawRequest(path: string, host: string, origin = base): Promise<number> {
   return new Promise((resolve, reject) => {
-    const url = new URL(base);
+    const url = new URL(origin);
     const request = httpRequest({ host: url.hostname, port: url.port, path, headers: { host } }, (response) => {
       response.resume();
       resolve(response.statusCode ?? 0);
@@ -181,6 +181,70 @@ test("a foreign Host header and a path out of the page directory are refused", a
   assert.equal(page.status, 200);
   assert.ok((await page.text()).includes('<script type="module" src="app.js">'));
 });
+
+test("the server refuses what would hang or leak it: a body over the limit, a broken path, a link out of the repository", async () => {
+  // A body over 8 MB gets its 413, not a reset connection.
+  const big = await fetch(`${base}/api/drawing?view=layers`, { method: "POST", headers: { "content-type": "application/json" }, body: "x".repeat(9_000_000) });
+  assert.equal(big.status, 413);
+  assert.ok(((await big.json()) as { error: string }).error.startsWith("the body is over 8 MB"));
+  assert.equal(await rawRequest("/%E0%A4%A", "127.0.0.1"), 400);
+  // The flow's depth and subject are checked like the pictures'.
+  assert.equal((await fetch(`${base}/api/flow?view=${encodeURIComponent("calls:src/routes/checkout.tsx#action")}&depth=-5`)).status, 400);
+  assert.equal((await fetch(`${base}/api/flow?view=${encodeURIComponent("calls:src/lib/orders.ts#nope")}`)).status, 404);
+  // A symbolic link to a file outside the repository, or through a directory outside it, is no file of it.
+  const outside = mkdtempSync(join(tmpdir(), "archdiff-outside-"));
+
+  try {
+    writeFileSync(join(outside, "secret.txt"), "not yours\n");
+    symlinkSync(join(outside, "secret.txt"), join(dir, "notes-link.txt"));
+    symlinkSync(outside, join(dir, "up"));
+    assert.equal((await fetch(`${base}/api/file?path=notes-link.txt`)).status, 404);
+    assert.equal((await fetch(`${base}/api/file?path=${encodeURIComponent("up/secret.txt")}`)).status, 404);
+    assert.equal((await fetch(`${base}/api/file?path=tsconfig.json`)).status, 200);
+  } finally {
+    rmSync(join(dir, "notes-link.txt"), { force: true });
+    rmSync(join(dir, "up"), { force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("bound to every address, the server answers to this computer's name and addresses, and still to no other", async () => {
+  // An address of a network interface, when the computer has one beside the loopback.
+  const address = Object.values(networkInterfaces()).flatMap((addresses) => addresses ?? []).find((item) => item.family === "IPv4" && !item.internal)?.address;
+  const started = startWeb(dir, ["--no-watch", "--host", "0.0.0.0"]);
+
+  try {
+    const origin = (await started.origin).replace("0.0.0.0", "127.0.0.1");
+    assert.equal(await rawRequest("/api/views", "localhost", origin), 200);
+    assert.equal(await rawRequest("/api/views", hostname(), origin), 200);
+
+    if (address) assert.equal(await rawRequest("/api/views", `${address}:7080`, origin), 200);
+    assert.equal(await rawRequest("/api/views", "evil.example", origin), 421);
+  } finally {
+    started.server.kill();
+  }
+});
+
+test("one agent run at a time: the second is refused while the first works, and taken once it is done", () =>
+  withOwnServer(
+    "archdiff-one-run-",
+    (own) => writeFileSync(join(own, "archdiff.json"), JSON.stringify({ agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" } })),
+    async (origin) => {
+      const run = (prompt: string): Promise<Response> => fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt }) });
+      // The events of a run stream until it ends.
+      const ended = async (id: string): Promise<void> => void (await (await fetch(`${origin}/api/agent/events?id=${id}`)).text());
+      const first = await run("Take your time. wait-ms: 1500");
+      assert.equal(first.status, 200);
+      const { id } = (await first.json()) as { id: string };
+      const second = await run("Another task.");
+      assert.equal(second.status, 409);
+      assert.equal(((await second.json()) as { error: string }).error, `the agent is still running (${id}): stop it first`);
+      await ended(id);
+      const third = await run("Now.");
+      assert.equal(third.status, 200);
+      await ended(((await third.json()) as { id: string }).id);
+    },
+  ));
 
 test("the task drawn on a view is read from its saved scene, and the agent runs it from the page", async () => {
   const view = "module:src/lib/orders.ts";

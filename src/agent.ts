@@ -220,4 +220,9 @@ export class AgentRunner {
   stopAll(): void {
     for (const run of this.runs.values()) run.stop();
   }
+
+  /** The run still going, when there is one: a task's or a question's. */
+  running(): AgentRun | null {
+    return [...this.runs.values()].find((run) => !run.done) ?? null;
+  }
 }

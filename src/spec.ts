@@ -10,7 +10,7 @@
 // Sits at the edge beside intent.ts: the file system in, prompts out.
 // Entry points: `listSpecs`, `readSpec`, `specPrompt`, `validateSpecs`.
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import type { Analysis } from "./analyze.ts";
@@ -145,12 +145,25 @@ export function specSubject(view: View | null): string | null {
   return view.kind === "layer" ? `the layer ${view.subject}` : view.kind === "dir" ? `the directory ${view.subject}` : view.subject;
 }
 
-/** Runs the OpenSpec CLI's validation of the specs; the output, and whether it passed. Needs npm and the network for the first run. */
-export function validateSpecs(root: string): { ok: boolean; output: string } {
-  const result = spawnSync("npx", ["-y", "@fission-ai/openspec", "validate", "--specs", "--no-color"], { cwd: root, encoding: "utf8", timeout: 120_000 });
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-
-  if (result.error) return { ok: false, output: `openspec: ${result.error.message}` };
-
-  return { ok: result.status === 0, output: output || `exit ${result.status}` };
+/**
+ * Runs the OpenSpec CLI's validation of the specs; the output, and whether it passed. Needs npm and the network for
+ * the first run. A child process waited for, not blocked on: the server answers other requests meanwhile.
+ */
+export function validateSpecs(root: string): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolveResult) => {
+    const child = spawn("npx", ["-y", "@fission-ai/openspec", "validate", "--specs", "--no-color"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    // Two minutes at most: a first run downloads the CLI.
+    const timer = setTimeout(() => child.kill(), 120_000);
+    child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolveResult({ ok: false, output: `openspec: ${error.message}` });
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolveResult({ ok: code === 0, output: output.trim() || (signal ? `openspec: stopped (${signal}) after two minutes` : `exit ${code}`) });
+    });
+  });
 }

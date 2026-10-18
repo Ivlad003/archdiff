@@ -27,4 +27,9 @@ if (/ask the user/i.test(prompt) && at === -1) {
   line({ type: "assistant", message: { content: [{ type: "text", text: `Noted: ${prompt.slice(0, 40)}.` }] } });
 }
 
+// A prompt that asks the agent to take its time: a run still going when the next one is asked for.
+const wait = prompt.match(/wait-ms: (\d+)/);
+
+if (wait) await new Promise((resolve) => setTimeout(resolve, Number(wait[1])));
+
 line({ type: "result", result: "Done.", session_id: session });

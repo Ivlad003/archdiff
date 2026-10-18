@@ -22,6 +22,8 @@ export type { PictureOptions } from "../options.ts";
 export interface RouteContext {
   root: string;
   options: ServeOptions;
+  /** The names the Host header of a request may give (server.ts's `allowedHosts`): any other is refused. */
+  hosts: ReadonlySet<string>;
   /** The agent the page may run; null: the Chat tab only writes tasks. */
   agentSpec: AgentSpec | null;
   /** The analysis, shared by a burst of requests; `invalidate` after the repository changed. */

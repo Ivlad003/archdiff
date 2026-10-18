@@ -13,6 +13,7 @@
 
 import { existsSync, readFileSync, watch as watchFs } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
@@ -64,30 +65,45 @@ async function webDirectory(): Promise<string> {
 /** The largest drawing the page may save. */
 const MAX_BODY = 8_000_000;
 
-/** The whole body of a request as text, or null when it is over `limit` bytes. */
+/**
+ * The whole body of a request as text, or null when it is over `limit` bytes. A body over the limit is read to its
+ * end and dropped, not cut off: the client is still sending, and a closed socket would never get the 413.
+ */
 function readBody(request: IncomingMessage, limit: number): Promise<string | null> {
   return new Promise((resolveBody, reject) => {
-    const chunks: Buffer[] = [];
+    let chunks: Buffer[] | null = [];
     let size = 0;
     request.on("data", (chunk: Buffer) => {
       size += chunk.length;
 
-      if (size > limit) {
-        request.destroy();
-        resolveBody(null);
-
-        return;
-      }
-
-      chunks.push(chunk);
+      if (size > limit) chunks = null;
+      else chunks?.push(chunk);
     });
-    request.on("end", () => resolveBody(Buffer.concat(chunks).toString("utf8")));
+    request.on("end", () => resolveBody(chunks ? Buffer.concat(chunks).toString("utf8") : null));
     request.on("error", reject);
   });
 }
 
 /** Host headers a browser sends to a server on this computer. */
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+/**
+ * The names a request to this server may carry in its Host header: this computer's own (and `--host`'s); bound to
+ * every address (`--host 0.0.0.0`), also the computer's name and each address of its network interfaces. A page
+ * of another site that reaches the server through DNS rebinding sends its own name, which is none of these.
+ */
+function allowedHosts(host: string): ReadonlySet<string> {
+  const names = new Set([...ALLOWED_HOSTS, host]);
+
+  if (host === "0.0.0.0" || host === "::") {
+    names.add(hostname());
+    names.add(`${hostname()}.local`);
+
+    for (const addresses of Object.values(networkInterfaces())) for (const address of addresses ?? []) names.add(address.address);
+  }
+
+  return names;
+}
 
 const STATIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".map": "application/json", ".woff2": "font/woff2", ".ttf": "font/ttf", ".svg": "image/svg+xml", ".png": "image/png" };
 
@@ -218,14 +234,14 @@ async function handle(ctx: RouteContext, web: string, request: IncomingMessage, 
   // A page on another site cannot read the sources through DNS rebinding: the Host header must be this server's own name.
   const hostHeader = (request.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
 
-  if (!ALLOWED_HOSTS.has(hostHeader) && hostHeader !== ctx.options.host) return problem(response, 421, "unexpected Host header");
+  if (!ctx.hosts.has(hostHeader)) return problem(response, 421, "unexpected Host header");
   const url = new URL(request.url ?? "/", "http://localhost");
   const path = url.pathname;
 
   if (request.method === "POST") {
     const body = await readBody(request, MAX_BODY);
 
-    if (body === null) return problem(response, 413, `the body is over ${MAX_BODY / 1_000_000} MB`);
+    if (body === null) return problem(response, 413, `the body is over ${MAX_BODY / 1_000_000} MB (a drawing with big images: fewer or smaller ones)`);
     const handler = ROUTES[`POST ${path}`];
 
     return handler ? handler(ctx, { url, body, response, request }) : problem(response, 404, "no such API");
@@ -242,7 +258,14 @@ async function handle(ctx: RouteContext, web: string, request: IncomingMessage, 
 
 /** A static file of the page, from dist/web only: the page, its chunks and the editor's fonts; never a path that climbs out. */
 function sendStatic(web: string, path: string, response: ServerResponse): void {
-  const file = path === "/" ? "index.html" : decodeURIComponent(path.slice(1));
+  let file: string;
+
+  try {
+    file = path === "/" ? "index.html" : decodeURIComponent(path.slice(1));
+  } catch {
+    // A broken escape (`%E0%A4%A`) names no file.
+    return problem(response, 400, "a malformed path");
+  }
 
   if (file.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) return problem(response, 404, "not found");
   const full = join(web, ...file.split("/"));
@@ -323,6 +346,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     activeRunner: () => runner,
     changeListeners: changes.listeners,
     watching: { on: options.watch && watching === null, problem: watching },
+    hosts: allowedHosts(options.host),
     picture: (query) => pictureOf(query, options.base, pictureAnalysis),
     analysisFor,
   };

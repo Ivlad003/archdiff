@@ -35,7 +35,7 @@ export async function getSpecPrompt(ctx: RouteContext, { url, response }: RouteR
 }
 
 export async function postSpecValidate(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
-  return json(response, validateSpecs(ctx.root));
+  return json(response, await validateSpecs(ctx.root));
 }
 
 /** The handlers by `METHOD /path`. */

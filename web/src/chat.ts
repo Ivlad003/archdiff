@@ -25,7 +25,9 @@ export const runState = element<HTMLSpanElement>("run-state");
 export const transcript = element<HTMLDivElement>("transcript");
 const followup = element<HTMLInputElement>("followup");
 let agentName: string | null = null;
-let currentRun: { id: string; close: () => void; sessionId: string | null } | null = null;
+let currentRun: { id: string; close: () => void; sessionId: string | null; stopped: boolean } | null = null;
+/** Whether a run is going: a second one would write over the first's work (the server refuses it too), and the transcript follows one. */
+let running = false;
 
 /** The turn being written: the question's row, its steps folded under a summary, and the answer. */
 let turn: { steps: HTMLDetailsElement; summary: HTMLElement; count: number; answer: HTMLDivElement; lastText: string; answered: boolean } | null = null;
@@ -339,6 +341,9 @@ function showQuestion(text: string, run: { sessionId: string | null }): boolean 
 async function runCommand(command: "code" | "diagram" | "doc", argument: string): Promise<void> {
   const state = currentLink();
 
+  // "code this" folds the drawing into the contract before the run: not while another run edits the repository.
+  if (command !== "doc" && busy()) return;
+
   if (command === "doc") {
     const textarea = element<HTMLTextAreaElement>("document");
     const hidden = textarea.hidden;
@@ -378,11 +383,19 @@ async function runCommand(command: "code" | "diagram" | "doc", argument: string)
 
 /** Runs `written` on the agent; `shown` is what the transcript's own row says when the prompt wraps a shorter question. */
 /** The buttons of a run: while the agent works, run is off and stop on; after it, the follow-up opens once its session can be resumed. */
-function setRunning(running: boolean, resumable = false): void {
-  runButton.disabled = running;
-  runButton.classList.toggle("running", running);
-  stopButton.disabled = !running;
-  followup.disabled = running || !resumable;
+function setRunning(next: boolean, resumable = false): void {
+  running = next;
+  runButton.disabled = next;
+  runButton.classList.toggle("running", next);
+  stopButton.disabled = !next;
+  followup.disabled = next || !resumable;
+}
+
+/** A run is going: the run's line says so, and the caller starts nothing. */
+function busy(): boolean {
+  if (running) runState.textContent = `${agentName ?? "the agent"} is still running: stop it, or wait for its answer`;
+
+  return running;
 }
 
 /** A failure of the run or of a command, on the run's line. */
@@ -391,7 +404,7 @@ function showRunError(error: unknown): void {
 }
 
 export function runTask(written: string, resume: string | null, shown: string = written): void {
-  if (!agentName || written.trim() === "") return;
+  if (!agentName || written.trim() === "" || busy()) return;
   element<HTMLDivElement>("question").hidden = true;
 
   // A slash line is a command, not a task.
@@ -418,7 +431,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
     .then((prompt) => api.runAgent(state.view, prompt, resume))
     .then(({ id, task }) => {
       runState.textContent = `running ${agentName} (${id}); task saved to ${task}`;
-      const run = { id, sessionId: resume, close: () => {} };
+      const run = { id, sessionId: resume, stopped: false, close: () => {} };
       currentRun = run;
       run.close = api.agentEvents(
         id,
@@ -445,7 +458,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
         },
         () => {
           setRunning(false, run.sessionId !== null);
-          runState.textContent = element<HTMLDivElement>("question").hidden ? `${agentName} finished; the diagram is reloaded — compare with review, check against the contract` : `${agentName} asks a question`;
+          runState.textContent = run.stopped ? `${agentName} stopped; the diagram is reloaded with what it changed` : element<HTMLDivElement>("question").hidden ? `${agentName} finished; the diagram is reloaded — compare with review, check against the contract` : `${agentName} asks a question`;
           page.canvas()?.highlight([]);
           // The agent changed the code: the live diagram and the page.views() follow.
           void page.loadViews().then(() => page.load());
@@ -499,7 +512,9 @@ taskField.addEventListener("keydown", (event) => {
   }
 });
 stopButton.addEventListener("click", () => {
-  if (currentRun) void api.stopAgent(currentRun.id);
+  if (!currentRun) return;
+  currentRun.stopped = true;
+  void api.stopAgent(currentRun.id);
 });
 followup.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && followup.value.trim() !== "" && currentRun) {

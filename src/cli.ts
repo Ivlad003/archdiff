@@ -540,7 +540,7 @@ const COMMANDS: readonly Command[] = [
       }
 
       if (call.has("validate")) {
-        const result = validateSpecs(analysis.root);
+        const result = await validateSpecs(analysis.root);
         process.stdout.write(`${result.output}\n`);
 
         return result.ok ? 0 : 1;

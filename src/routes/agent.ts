@@ -49,6 +49,10 @@ export async function postAgentRun(ctx: RouteContext, { body, response, request 
   if (!isJsonObject(parsed) || !isJsonString(parsed["prompt"]) || parsed["prompt"].trim() === "") return problem(response, 400, '"prompt" is required');
   const resume = isJsonString(parsed["resume"]) ? parsed["resume"] : null;
   const runner = ctx.runner();
+  // One run at a time: two agents editing one repository would write over each other, and the page follows one.
+  const running = runner.running();
+
+  if (running) return problem(response, 409, `the agent is still running (${running.id}): stop it first`);
   // Every run carries the protocol: the contract file, how to ask the user; a resumed session already has it.
   const run = runner.start(resume ? parsed["prompt"] : `${parsed["prompt"].trimEnd()}\n\n${AGENT_PROTOCOL}\n`, resume);
   // The agent edits the repository: the next request analyses afresh, however soon it comes.
@@ -204,9 +208,14 @@ export async function getFlow(ctx: RouteContext, { url, response }: RouteRequest
   const view = parseView(key);
 
   if (!view || view.kind !== "calls") return problem(response, 400, "the flow needs a calls: view");
-  const analysis = await ctx.fresh();
   const depthText = url.searchParams.get("depth");
-  const flow = dataFlow(analysis, view.subject, readDrawing(root, key)?.mocks ?? [], depthText === null || depthText === "" ? 4 : Number(depthText));
+  const depth = depthText === null || depthText === "" ? 4 : Number(depthText);
+
+  if (!(Number.isInteger(depth) && depth >= 0)) return problem(response, 400, "depth must be a whole number, 0 or more");
+  const analysis = await ctx.fresh();
+
+  if (!analysis.graph.nodes.has(view.subject)) return problem(response, 404, `no function "${view.subject}"`);
+  const flow = dataFlow(analysis, view.subject, readDrawing(root, key)?.mocks ?? [], depth);
 
   return json(response, { flow, markdown: flowMarkdown(flow) });
 }

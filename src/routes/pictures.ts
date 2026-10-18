@@ -10,8 +10,8 @@
 // Entry point: `routes`, by `METHOD /path` (server.ts dispatches through
 // it).
 
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 import type { Analysis } from "../analyze.ts";
 import { coverageReport } from "../coverage.ts";
 import { dataFlow, flowMarkdown } from "../flow.ts";
@@ -223,7 +223,22 @@ export async function getFile(ctx: RouteContext, { url, response }: RouteRequest
 
   if (!analysis.facts.has(file) && !(existsSync(full) && statSync(full).isFile() && statSync(full).size <= 1_500_000)) return problem(response, 404, "not a file of the repository");
 
+  // A symbolic link that leads out of the repository (a file, or a directory on the way) is not its file.
+  if (!insideRoot(root, full)) return problem(response, 404, "not a file of the repository");
+
   return send(response, 200, "text/plain; charset=utf-8", readFileSync(full, "utf8"));
+}
+
+/** Whether a path, its symbolic links followed, is the root or under it. */
+function insideRoot(root: string, path: string): boolean {
+  try {
+    const real = realpathSync(path);
+    const top = realpathSync(root);
+
+    return real === top || real.startsWith(`${top}${sep}`);
+  } catch {
+    return false;
+  }
 }
 
 export async function getCoverage(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
