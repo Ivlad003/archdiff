@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+Three test passes over every feature — the CLI and the exports, the page and the API, the analysis — and what they found, fixed.
+
+- `drawings --prune` deleted drawings still in use: a drawing lived only while the views list named its view, so the drawing of an inside, a focus, a sequence, a usage or a path was an "orphan". It lives while its subject does.
+- `--out` wrote over any file with "archdiff" in its first 2000 characters — a package.json that depends on it, a README, ARCHITECTURE.md. It writes over a file with archdiff's generated mark only, where each format puts it, and over a command's JSON of the same shape (which it refused before: `metrics --json --out m.json` twice). `import` replaced a hand-written ARCHITECTURE.md, prose and all; it keeps one unless `--force`, as `intent --init` does.
+- On the page, staying in the editor when it asked "leave and lose them?" kept the new link while the canvas showed the old picture, so the next save wrote the drawing into the other view's file; the link goes back, and a save writes the drawing of the view the editor was opened on. Leaving and giving the changes up kept the strokes on the canvas; they go.
+- `/api/file` followed symbolic links out of the repository; a file whose links lead outside is refused. A body over 8 MB (a drawing with big images) reset the connection instead of getting its 413. `POST /api/spec/validate` blocked the whole server while npx ran. `--host 0.0.0.0` refused every request from the network, the Host check knowing only localhost; it knows the computer's name and addresses. A broken escape in a path was a 500; `/api/flow` took a negative depth and a function that does not exist.
+- A second agent run started while one ran: the transcript was wiped, the first run's answer showed under the second question, and the first one's end left the second without a stop button. One run at a time, on the page and in the server (409); a stopped run says it stopped, not that it finished.
+- A flag of a value took the next flag for it (`--out --json` wrote a file named `--json`, `--heads --base main` read a directory "main") and a bare one was ignored; it says it needs a value. `flow` of a function that does not exist and `spec --prompt` of a module that does not exist exited 0.
+- A review, history or comparison of a directory inside the repository read git's paths from the top, so the head's files were not found: modules added that were not, imports and calls missing. Git is read from the directory.
+- An ARCHITECTURE.md in prose only, or with an empty flowchart, turned the review's gate off: every new layer dependency read as allowed. Such a contract counts as none, and `check` says it has nothing to check against.
+- A git command that never answered hung the command and the server with it; it stops after five minutes with a plain error.
+
 The options of a picture, checked case by case on the page and fixed.
 
 - A depth has no ceiling (the page stopped at 12): past 12 the picture is drawn with a warning that it may be big and slow to draw, first in its reason and on stderr for the CLI, and the depth field turns orange; a view that goes no depth, like the layers, says nothing.

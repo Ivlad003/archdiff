@@ -13,7 +13,7 @@
 import { spawn } from "node:child_process";
 import type { AgentEvent } from "./agent.ts";
 import type { Analysis } from "./analyze.ts";
-import { checkIntent } from "./intent.ts";
+import { checkIntent, judgesLayers } from "./intent.ts";
 
 export interface CheckResult {
   command: string;
@@ -59,7 +59,8 @@ function runCommand(root: string, command: string): Promise<CheckResult> {
 export async function runChecks(analysis: Analysis): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
-  if (analysis.intent) {
+  if (analysis.intent && !judgesLayers(analysis.intent)) results.push({ command: "archdiff check", ok: true, output: "ARCHITECTURE.md names no layer: nothing to check against" });
+  else if (analysis.intent) {
     const report = checkIntent(analysis, analysis.intent);
     results.push({ command: "archdiff check", ok: report.ok, output: report.ok ? "the code follows ARCHITECTURE.md" : report.violations.map((violation) => `${violation.from}:${violation.line} imports ${violation.to}: ${violation.fromLayer} → ${violation.toLayer} is not in the contract`).join("\n") });
   }

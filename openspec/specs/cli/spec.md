@@ -50,7 +50,7 @@ The system SHALL exit 0 on success, 1 when a check found something (a new layer 
 
 ### Requirement: Output channels stay clean
 
-The system SHALL write the result of a command (Markdown, JSON, an export) to stdout or to `--out`, and every message, summary and progress line to stderr, so `--json` and `--format` output can be piped; every command that writes a report SHALL take `--out FILE` and write a new file or one archdiff wrote before (its first line says so), refusing a directory and any other file.
+The system SHALL write the result of a command (Markdown, JSON, an export) to stdout or to `--out`, and every message, summary and progress line to stderr, so `--json` and `--format` output can be piped; every command that writes a report SHALL take `--out FILE` and write a new file or one archdiff wrote before — the generated mark where its format puts it (the first line of Markdown and Mermaid, the head of draw.io, Excalidraw, ArchiMate and a picture's JSON), or a command's JSON of the same shape — refusing a directory and any other file, one that only mentions archdiff (a package.json, a README) included.
 
 #### Scenario: JSON to a pipe
 

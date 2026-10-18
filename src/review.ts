@@ -14,7 +14,7 @@ import { analyze, type Analysis } from "./analyze.ts";
 import { loadConfig } from "./config.ts";
 import { graphDiff, markContract, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
 import { changedFiles, commitOf, commitsBetween, defaultBase, forkPoint, mergeBase, treeAt as filesAt } from "./git.ts";
-import { INTENT_FILE } from "./intent.ts";
+import { INTENT_FILE, judgesLayers } from "./intent.ts";
 import type { Graph } from "./graph.ts";
 
 /** A revision as overrides of the working tree: its source files, and its contract, which its analysis is held to. */
@@ -59,9 +59,11 @@ export async function review(root: string, base: string | null, headRef: string 
   const head = headRef === null ? (current ?? (await analyze(root, { config }))) : await analyze(root, { overrides: treeAt(root, headRef), config });
   const baseAnalysis = await analyze(root, { overrides: treeAt(root, ref), config });
   const changed = changedFiles(root, ref, headRef);
-  const diff = markContract(graphDiff(baseAnalysis.graph, head.graph, headRef === null ? ref : `${ref}..${headRef}`, [...changed.base.keys()]), head.intent, head.graph);
+  // A contract that names no layer judges nothing: the review is as without one.
+  const contract = judgesLayers(head.intent) ? head.intent : null;
+  const diff = markContract(graphDiff(baseAnalysis.graph, head.graph, headRef === null ? ref : `${ref}..${headRef}`, [...changed.base.keys()]), contract, head.graph);
 
-  return { head, base: baseAnalysis, diff, contract: head.intent !== null };
+  return { head, base: baseAnalysis, diff, contract: contract !== null };
 }
 
 /**
@@ -97,7 +99,8 @@ export async function compareBranches(root: string, base: string | null, heads: 
     const { graph } = analysis;
     graphs.set(head, graph);
     const changed = head === "WORKTREE" ? [...changedFiles(root, since).base.keys()] : [...changedFiles(root, since, head).base.keys()];
-    compared.push({ head, since, diff: markContract(graphDiff(from, graph, `${since}..${head}`, changed), analysis.intent, graph), contract: analysis.intent !== null });
+    const contract = judgesLayers(analysis.intent) ? analysis.intent : null;
+    compared.push({ head, since, diff: markContract(graphDiff(from, graph, `${since}..${head}`, changed), contract, graph), contract: contract !== null });
   }
 
   return { base: baseRef, heads: compared, baseGraph, graphs, forks };

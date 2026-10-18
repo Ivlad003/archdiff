@@ -49,7 +49,7 @@ The system SHALL fold a drawing's planned modules, functions, layers, arrows and
 
 ### Requirement: A document becomes the contract
 
-The system SHALL take, with `archdiff import <file>` or "from document" on the page, a Markdown document holding a flowchart as the contract, with or without an agent; a document in prose SHALL go through the agent, which answers with the flowchart, and without an agent SHALL be refused (400, "no agent") with nothing written.
+The system SHALL take, with `archdiff import <file>` or "from document" on the page, a Markdown document holding a flowchart as the contract, with or without an agent; a document in prose SHALL go through the agent, which answers with the flowchart, and without an agent SHALL be refused (400, "no agent") with nothing written. `archdiff import` SHALL keep an `ARCHITECTURE.md` that exists unless `--force`, as `intent --init` does.
 
 #### Scenario: A design note with a flowchart
 

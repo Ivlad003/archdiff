@@ -14,7 +14,7 @@ The package is `@ivlad003/archdiff` on npm (npm refused the bare name as too clo
 | Command | What it does | Exit |
 | --- | --- | --- |
 | `archdiff new <dir> [--lang ts\|js] [--template blank\|lib\|cli\|api\|web] [--agent claude\|cursor] [--no-git]` | A project from scratch: the skeleton, `archdiff.json`, `ARCHITECTURE.md` with the template's intent, the first commit (`--no-git`: no repository) | 0 |
-| `archdiff import <file> [dir]` | A document's Mermaid flowchart becomes `ARCHITECTURE.md` (the contract) | 0 |
+| `archdiff import <file> [dir] [--force]` | A document's Mermaid flowchart becomes `ARCHITECTURE.md` (the contract); one that exists is kept unless `--force` | 0 |
 | `archdiff intent [dir] [--init [--force] [--layers]] [--view V] [--json]` | Print the contract; `--init` seeds it from the code (`--force` over an existing one; `--layers` the layers with a few modules each, which a repository over 60 modules gets by itself); `--view` folds a saved drawing into it | 0 |
 | `archdiff check [dir] [--json]` | The code against the contract: imports between layers it does not allow, what is planned and not built, what is built beyond it | 0 / 1 |
 | `archdiff analyze [dir] [--json] [--no-cache]` | Parse the repository and print its size: files, functions, imports, calls followed and gaps | 0 |
@@ -33,7 +33,7 @@ The package is `@ivlad003/archdiff` on npm (npm refused the bare name as too clo
 | `archdiff spec [dir] [--json] [--prompt V\|all\|update] [--validate] [--tests [DIR]]` | The specification: list it, print the agent's task, validate it, or write a test skeleton per Gherkin scenario (into `tests/`, or `DIR`) | 0 / 1 |
 | `archdiff web [dir] [--port N] [--host H] [--base REF] [--agent claude\|cursor] [--no-watch]` | The page: views on the left, one Excalidraw canvas (reading, and drawing on demand), and the Markdown, code, coverage and data flow of what is picked; without `--port` it takes 7080 or the next free port above it; `--host` binds another interface than localhost; `--no-watch` keeps the page as it is when a file changes | 0 |
 
-Exit code `2` is a wrong invocation or an I/O error. Every command that writes a report takes `--out FILE`: a new file, or one archdiff wrote before; never a directory or a file of someone else's.
+Exit code `2` is a wrong invocation or an I/O error. Every command that writes a report takes `--out FILE`: a new file, or one archdiff wrote before (its generated mark, or a command's JSON of the same shape); never a directory or a file of someone else's, though it mentions archdiff.
 
 ## Views and detail
 

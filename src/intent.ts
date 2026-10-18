@@ -438,6 +438,15 @@ export interface IntentReport {
  * the intent does not name are listed too, as news, not failures.
  */
 /** The layers the intent names, and the pairs of layers (`from\u0000to`) its arrows allow an import between. */
+/**
+ * Whether a contract says anything of the layers: a subgraph, or a module in one. ARCHITECTURE.md in prose only, or
+ * with an empty flowchart, allows and forbids nothing: a review then holds every new layer dependency against the
+ * change, as without a contract, and `check` says there is nothing to check against.
+ */
+export function judgesLayers(intent: Intent | null): intent is Intent {
+  return intent !== null && (intent.layers.length > 0 || intent.modules.some((module) => module.layer !== undefined));
+}
+
 export function allowedLayerPairs(intent: Intent, graph: Graph): { layers: Set<string>; allowed: Set<string> } {
   const layers = new Set([...intent.layers.map((layer) => layer.name), ...intent.modules.map((module) => module.layer).filter((layer): layer is string => layer !== undefined)]);
   const allowed = new Set<string>();
