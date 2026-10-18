@@ -182,6 +182,10 @@
             <button id="ask-go" title="Ask (Enter)">ask</button>
           </div>
           <div id="ask-about" class="muted" hidden></div>
+          <div class="row" id="agent-row">
+            <label id="agent-pick" title="The coding agent the tasks and the questions go to: the ones installed on this computer">agent <select id="agent-select"></select></label>
+            <span id="agent-name" class="muted"></span>
+          </div>
           <p class="muted">Draw the change on this view (✎ edit: a shape with a name is a new module or function, an arrow is an import or a call, a deleted shape is a removal, text is a note), save, then <em>code this</em>: the drawing goes into ARCHITECTURE.md (the contract) and the agent builds it. <em>improve the diagram</em> asks the agent to review the contract; <em>from document</em> turns a design note into it. The agent may ask you a question with options. Nothing runs by itself.</p>
           <div class="row">
             <button id="code-this" title="Fold the drawing of this view into ARCHITECTURE.md and have the agent build what is not built yet (/code)">code this</button>
@@ -189,7 +193,6 @@
             <button id="from-document" title="Paste a design note, an ISD or a spec; the agent writes the architecture from it (/doc)">from document</button>
             <button id="plan" class="small" title="Only read the task from the drawing, without touching the contract">read the task</button>
             <button id="checks" class="small" title="Run the contract check and the commands archdiff.json names in &quot;checks&quot; (npm test, …) now; they also run after every agent run">run checks</button>
-            <span id="agent-name" class="muted"></span>
           </div>
           <textarea id="document" hidden placeholder="Paste the document here (a design note, an ISD, a spec in prose, or Markdown with a Mermaid flowchart), then press Ctrl+Enter or the button below."></textarea>
           <div id="document-row" class="row" hidden>

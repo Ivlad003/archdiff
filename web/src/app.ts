@@ -21,7 +21,7 @@
 
 import { api, type Line, type Shape } from "./api.ts";
 import { canvasHandle, canvasMode, leaveEdit, showScene } from "./canvas.ts";
-import { loadTasks } from "./chat.ts";
+import { loadAgents, loadTasks } from "./chat.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
 import { loadFlow } from "./flow-tab.ts";
@@ -225,6 +225,7 @@ void (async () => {
     return;
   }
 
+  await loadAgents();
   await load();
   await loadCoverage();
   await loadTasks();

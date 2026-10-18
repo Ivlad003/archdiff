@@ -24,12 +24,17 @@ export interface RouteContext {
   options: ServeOptions;
   /** The names the Host header of a request may give (server.ts's `allowedHosts`): any other is refused. */
   hosts: ReadonlySet<string>;
-  /** The agent the page may run; null: the Chat tab only writes tasks. */
-  agentSpec: AgentSpec | null;
+  /** The agents the page may offer (the built-in ones and the configured one), each with whether it is installed here. */
+  agents(): { spec: AgentSpec; installed: boolean }[];
+  /**
+   * The agent a request names (its name), or the default one when it names none — the one given (`--agent`,
+   * archdiff.json's `agent`), else the first installed; the problem when it is unknown or not installed.
+   */
+  agentFor(name: string | null): { spec: AgentSpec } | { problem: string };
   /** The analysis, shared by a burst of requests; `invalidate` after the repository changed. */
   fresh(): Promise<Analysis>;
   invalidate(): void;
-  /** The agent runner, made on first use; throws without an agent. */
+  /** The agent runner (every run, of any agent), made on first use. */
   runner(): AgentRunner;
   /** The runner when one was made already (its runs), else null. */
   activeRunner(): AgentRunner | null;

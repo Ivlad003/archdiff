@@ -17,7 +17,7 @@ import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
-import { AgentRunner, type AgentSpec } from "./agent.ts";
+import { AgentRunner, installedAgents, type AgentSpec } from "./agent.ts";
 import { allowedToolsFor, checkEvents, runChecks } from "./checks.ts";
 import type { Config } from "./config.ts";
 import { isSourceFile } from "./files.ts";
@@ -82,6 +82,15 @@ function readBody(request: IncomingMessage, limit: number): Promise<string | nul
     request.on("end", () => resolveBody(chunks ? Buffer.concat(chunks).toString("utf8") : null));
     request.on("error", reject);
   });
+}
+
+/** Whether an Origin header names this server (a host it answers to); `null` (a sandboxed frame, a file) is none. */
+function ownOrigin(origin: string, hosts: ReadonlySet<string>): boolean {
+  try {
+    return hosts.has(new URL(origin).hostname.replace(/^\[|\]$/g, ""));
+  } catch {
+    return false;
+  }
 }
 
 /** Host headers a browser sends to a server on this computer. */
@@ -205,11 +214,21 @@ function watchSources(root: string, onChange: (path: string) => void): string | 
   }
 }
 
-/** The agent of the page: --agent wins, else archdiff.json; Claude Code may run the checks of archdiff.json (and archdiff) on its own. */
-function agentSpecOf(config: Config, given: AgentSpec | null): AgentSpec | null {
-  const chosen = given ?? config.agent;
+/** Claude Code may run the checks of archdiff.json (and archdiff) on its own; another agent follows its own rules. */
+function withAllowedTools(spec: AgentSpec, config: Config): AgentSpec {
+  return spec.name === "claude" ? { ...spec, allowedTools: allowedToolsFor(config.checks) } : spec;
+}
 
-  return chosen && chosen.name === "claude" ? { ...chosen, allowedTools: allowedToolsFor(config.checks) } : chosen;
+/** The agent a run names among those offered, or the default (the one given, else the first installed); why not, else. */
+function agentFor(offered: readonly { spec: AgentSpec; installed: boolean }[], given: AgentSpec | null, name: string | null): { spec: AgentSpec } | { problem: string } {
+  const named = name ?? given?.name ?? offered.find((choice) => choice.installed)?.spec.name ?? null;
+
+  if (named === null) return { problem: `no agent installed here: ${offered.map((choice) => choice.spec.label).join(", ")} (any of them, on the PATH)` };
+  const choice = offered.find((candidate) => candidate.spec.name === named);
+
+  if (!choice) return { problem: `no agent "${named}" (${offered.map((candidate) => candidate.spec.name).join(", ")})` };
+
+  return choice.installed ? { spec: choice.spec } : { problem: `${choice.spec.label} is not installed here (\`${choice.spec.command[0]}\` is not on the PATH)` };
 }
 
 /** The picture a query names, drawn on the code it is of; git's refusal (outside a repository, a bad ref) is the request's problem. */
@@ -237,6 +256,10 @@ async function handle(ctx: RouteContext, web: string, request: IncomingMessage, 
   if (!ctx.hosts.has(hostHeader)) return problem(response, 421, "unexpected Host header");
   const url = new URL(request.url ?? "/", "http://localhost");
   const path = url.pathname;
+
+  // A page of another site may send a POST here (a form, a fetch in no-cors mode) — to start an agent, to write a
+  // drawing — though it cannot read the answer. The browser names the page's origin: it must be this server's own.
+  if (request.method === "POST" && request.headers.origin !== undefined && !ownOrigin(request.headers.origin, ctx.hosts)) return problem(response, 403, "a request from another site");
 
   if (request.method === "POST") {
     const body = await readBody(request, MAX_BODY);
@@ -324,25 +347,26 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
   // Whether the page follows the code, and why not when it was asked to (`--no-watch` is no problem).
   const watching = options.watch ? watchSources(root, changes.notify) : null;
-  const agentSpec = agentSpecOf((await analyze(root)).config, options.agent);
-  // The agent's runner is made once the first run is asked for; every run ends with archdiff running the checks.
+  const config = (await analyze(root)).config;
+  // The agent given (--agent, archdiff.json): the default of the page, which offers every agent installed here.
+  const given = options.agent ?? config.agent;
+  const agents = (): { spec: AgentSpec; installed: boolean }[] => installedAgents(given).map(({ spec, installed }) => ({ spec: withAllowedTools(spec, config), installed }));
+  // The runner is made once the first run is asked for; every run ends with archdiff running the checks.
   let runner: AgentRunner | null = null;
   const ctx: RouteContext = {
     root,
     options,
-    agentSpec,
+    agents,
+    agentFor: (name) => agentFor(agents(), given, name),
     fresh: analyses.fresh,
     invalidate: analyses.invalidate,
-    runner: () => {
-      if (!agentSpec) throw new Error("no agent");
-
+    runner: () =>
       // After a run: the repository changed, so a fresh analysis, then the contract and the configured checks.
-      return (runner ??= new AgentRunner(root, agentSpec, async () => {
+      (runner ??= new AgentRunner(root, async () => {
         analyses.invalidate();
 
         return checkEvents(await runChecks(await analyses.fresh()));
-      }));
-    },
+      })),
     activeRunner: () => runner,
     changeListeners: changes.listeners,
     watching: { on: options.watch && watching === null, problem: watching },

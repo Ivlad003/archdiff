@@ -537,6 +537,56 @@ test("Cursor's stream-json (chat_id, --resume) is read like Claude's: the questi
     },
   ));
 
+/** The events of a run, read to its end. */
+async function eventsOf(origin: string, id: string): Promise<{ kind: string; text: string; sessionId?: string; files?: string[] }[]> {
+  return (await (await fetch(`${origin}/api/agent/events?id=${id}`)).text()).split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => JSON.parse(chunk.slice(6)) as { kind: string; text: string; sessionId?: string; files?: string[] });
+}
+
+test("Codex's and OpenCode's events read as Claude's: the session, the text, the files a tool wrote, the answer; a follow-up resumes", async () => {
+  for (const [name, script, protocol, resume, session, resumed] of [
+    ["codex-fake", "fake-codex.mjs", "codex", "resume", "0199aaaa-fake-thread-0001", "Resumed 0199aaaa-fake-thread-0001."],
+    ["opencode-fake", "fake-opencode.mjs", "opencode", "--session", "ses_fake0001", "continued ses_fake0001"],
+  ] as const) {
+    await withOwnServer(
+      `archdiff-${protocol}-`,
+      (own) => writeFileSync(join(own, "archdiff.json"), JSON.stringify({ agent: { name, command: [process.execPath, join(root, "tests/fixtures", script)], resume, protocol } })),
+      async (origin, own) => {
+        // The configured agent is offered beside the built-in ones, installed, and picked first.
+        const offered = (await (await fetch(`${origin}/api/agents`)).json()) as { agents: { name: string; label: string; installed: boolean }[]; default: string | null };
+        assert.deepEqual(offered.agents.map((agent) => agent.name), ["claude", "cursor", "codex", "opencode", name]);
+        assert.equal(offered.default, name);
+        assert.ok(offered.agents.find((agent) => agent.name === name)?.installed);
+        const run = async (body: Record<string, unknown>): Promise<{ id: string; agent: string }> => (await (await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", ...body }) })).json()) as { id: string; agent: string };
+        const first = await run({ agent: name, prompt: "write-file: src/lib/refunds.ts" });
+        assert.equal(first.agent, name);
+        const events = await eventsOf(origin, first.id);
+        assert.equal(events.find((event) => event.kind === "init")?.sessionId, session, protocol);
+        assert.ok(events.some((event) => event.kind === "tool" && event.files?.includes(join(own, "src/lib/refunds.ts"))), JSON.stringify(events));
+        assert.equal(events.find((event) => event.kind === "result")?.text, "done", JSON.stringify(events));
+        assert.ok(existsSync(join(own, "src/lib/refunds.ts")));
+        // The follow-up names the session: the agent goes on with it.
+        const second = await run({ agent: name, prompt: "and a test", resume: session });
+        assert.ok((await eventsOf(origin, second.id)).some((event) => event.text === resumed), protocol);
+        // An agent the server does not know is refused by name.
+        const unknown = await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "x", agent: "nope" }) });
+        assert.equal(unknown.status, 400);
+        assert.match(((await unknown.json()) as { error: string }).error, /^no agent "nope" \(claude, cursor, codex, opencode, /);
+      },
+    );
+  }
+});
+
+test("a POST from a page of another site is refused: its origin is not this server's", async () => {
+  const post = (origin: string | null): Promise<Response> => fetch(`${base}/api/drawing?view=layers`, { method: "POST", headers: { "content-type": "application/json", ...(origin ? { origin } : {}) }, body: JSON.stringify({ elements: [], mocks: [] }) });
+  const foreign = await post("http://evil.example");
+  assert.equal(foreign.status, 403);
+  assert.equal(((await foreign.json()) as { error: string }).error, "a request from another site");
+  assert.equal((await post("null")).status, 403);
+  assert.equal((await post(base)).status, 200);
+  // A tool without a browser sends no origin: it is no page of another site.
+  assert.equal((await post(null)).status, 200);
+});
+
 test("the Flow tab's run: POST /api/flow/run executes the entry with the saved mocks and reports the steps against the prediction", async () => {
   const view = "calls:src/lib/orders.ts#placeOrder";
   await fetch(`${base}/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: [], mocks: [{ id: "src/lib/orders.ts#placeOrder", kind: "input", value: '{"id": "web-1", "total": 7}' }] }) });

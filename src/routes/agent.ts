@@ -15,7 +15,8 @@ import { CACHE_DIRECTORY } from "../cache.ts";
 import { drawingSlug } from "../drawings.ts";
 import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "../intent.ts";
 import { readDrawing } from "../drawings.ts";
-import { isJsonObject, isJsonString, parseJson } from "../json.ts";
+import { isJsonObject, isJsonString, parseJson, type JsonValue } from "../json.ts";
+import type { AgentSpec } from "../agent.ts";
 import { parseView } from "../views.ts";
 import { checkEvents, runChecks } from "../checks.ts";
 import { runFlow, runMarkdown } from "../run.ts";
@@ -34,10 +35,22 @@ function saveTask(root: string, view: string, header: string, prompt: string): s
   return file;
 }
 
+/** The agent a request's body names (`agent`), else the default one; the problem as the request's when there is none. */
+function agentOf(ctx: RouteContext, parsed: JsonValue): { spec: AgentSpec } | { problem: string } {
+  return ctx.agentFor(isJsonObject(parsed) && isJsonString(parsed["agent"]) ? parsed["agent"] : null);
+}
+
+export async function getAgents(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
+  // The agents the Chat tab offers: each by its name and label, and whether its CLI is installed here; the default first picked.
+  const agents = ctx.agents();
+  const chosen = ctx.agentFor(null);
+
+  json(response, { agents: agents.map(({ spec, installed }) => ({ name: spec.name, label: spec.label, installed })), default: "spec" in chosen ? chosen.spec.name : null });
+}
+
 export async function postAgentRun(ctx: RouteContext, { body, response, request }: RouteRequest): Promise<void> {
-  const { root, agentSpec } = ctx;
-  // An explicit request from the page: the prompt as the user saw it; `resume` continues the agent's session.
-  if (!agentSpec) return problem(response, 400, "no agent: start with --agent claude|cursor or set \"agent\" in archdiff.json");
+  const { root } = ctx;
+  // An explicit request from the page: the prompt as the user saw it, the agent picked; `resume` continues the agent's session.
   let parsed;
 
   try {
@@ -47,6 +60,10 @@ export async function postAgentRun(ctx: RouteContext, { body, response, request 
   }
 
   if (!isJsonObject(parsed) || !isJsonString(parsed["prompt"]) || parsed["prompt"].trim() === "") return problem(response, 400, '"prompt" is required');
+  const agent = agentOf(ctx, parsed);
+
+  if ("problem" in agent) return problem(response, 400, agent.problem);
+  const spec = agent.spec;
   const resume = isJsonString(parsed["resume"]) ? parsed["resume"] : null;
   const runner = ctx.runner();
   // One run at a time: two agents editing one repository would write over each other, and the page follows one.
@@ -54,15 +71,15 @@ export async function postAgentRun(ctx: RouteContext, { body, response, request 
 
   if (running) return problem(response, 409, `the agent is still running (${running.id}): stop it first`);
   // Every run carries the protocol: the contract file, how to ask the user; a resumed session already has it.
-  const run = runner.start(resume ? parsed["prompt"] : `${parsed["prompt"].trimEnd()}\n\n${AGENT_PROTOCOL}\n`, resume);
+  const run = runner.start(spec, resume ? parsed["prompt"] : `${parsed["prompt"].trimEnd()}\n\n${AGENT_PROTOCOL}\n`, resume);
   // The agent edits the repository: the next request analyses afresh, however soon it comes.
   run.subscribe(0, (event) => {
     if (event.kind === "exit") ctx.invalidate();
   });
   // The task as sent, kept beside the drawings.
-  const file = saveTask(root, isJsonString(parsed["view"]) ? parsed["view"] : "chat", `task for ${agentSpec.name}, run ${run.id}`, parsed["prompt"]);
+  const file = saveTask(root, isJsonString(parsed["view"]) ? parsed["view"] : "chat", `task for ${spec.name}, run ${run.id}`, parsed["prompt"]);
 
-  return json(response, { id: run.id, agent: agentSpec.name, task: file });
+  return json(response, { id: run.id, agent: spec.name, task: file });
 }
 
 export async function postCode(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
@@ -93,7 +110,7 @@ export async function postCode(ctx: RouteContext, { body, response }: RouteReque
 }
 
 export async function postIntentDocument(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
-  const { root, agentSpec } = ctx;
+  const { root } = ctx;
   // A document that holds a flowchart is kept as it is; one in prose becomes the intent through the agent, which writes the Mermaid.
   let parsed;
 
@@ -106,14 +123,15 @@ export async function postIntentDocument(ctx: RouteContext, { body, response }: 
   if (!isJsonObject(parsed) || !isJsonString(parsed["text"]) || parsed["text"].trim() === "") return problem(response, 400, '"text" is required');
   const analysis = await ctx.fresh();
   const direct = parseIntent(parsed["text"]);
+  const agent = agentOf(ctx, parsed);
 
-  if (direct.modules.length === 0 && !agentSpec) return problem(response, 400, "no agent: the document holds no Mermaid flowchart to keep, and writing one from prose needs an agent (start with --agent claude|cursor or set \"agent\" in archdiff.json)");
+  if (direct.modules.length === 0 && "problem" in agent) return problem(response, 400, `no agent: the document holds no Mermaid flowchart to keep, and writing one from prose needs an agent — ${agent.problem}`);
   let intent = direct;
 
-  if (direct.modules.length === 0 && agentSpec) {
+  if (direct.modules.length === 0 && "spec" in agent) {
     const prompt = documentPrompt(parsed["text"], analysis.files.some((file) => file.endsWith(".ts")) ? "ts" : null);
-    saveTask(root, "intent", `task for ${agentSpec.name}: the contract from a document`, prompt);
-    intent = parseIntent(await ctx.runner().runToResult(prompt, 300_000));
+    saveTask(root, "intent", `task for ${agent.spec.name}: the contract from a document`, prompt);
+    intent = parseIntent(await ctx.runner().runToResult(agent.spec, prompt, 300_000));
   }
 
   if (intent.modules.length === 0) return problem(response, 502, "the agent gave no Mermaid flowchart; try again or write the block by hand");
@@ -122,12 +140,11 @@ export async function postIntentDocument(ctx: RouteContext, { body, response }: 
   writeIntent(root, final);
   ctx.invalidate();
 
-  return json(response, { file: INTENT_FILE, source: direct.modules.length > 0 || !agentSpec ? "document" : agentSpec.name, layers: final.layers.length, modules: final.modules.length, edges: final.edges.length, markdown: intentMarkdown(final) });
+  return json(response, { file: INTENT_FILE, source: direct.modules.length > 0 || !("spec" in agent) ? "document" : agent.spec.name, layers: final.layers.length, modules: final.modules.length, edges: final.edges.length, markdown: intentMarkdown(final) });
 }
 
 export async function postFlowMocks(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
-  const { agentSpec } = ctx;
-  // Mocks for a calls view: from the agent (with the user's description) when there is one and it answers JSON, else from the types.
+  // Mocks for a calls view: from the agent picked (with the user's description) when there is one and it answers JSON, else from the types.
   let parsed;
 
   try {
@@ -145,14 +162,16 @@ export async function postFlowMocks(ctx: RouteContext, { body, response }: Route
   const flow = dataFlow(analysis, view.subject, [], 4);
   const typed = mocksFromTypes(flow);
 
-  if (!agentSpec) return json(response, { source: "types", ...typed });
+  const agent = agentOf(ctx, parsed);
+
+  if ("problem" in agent) return json(response, { source: "types", ...typed });
   const prompt = mockPrompt(flow, description);
-  saveTask(ctx.root, key, `task for ${agentSpec.name}: mocks of the flow`, prompt);
-  const answer = jsonInAnswer(await ctx.runner().runToResult(prompt));
+  saveTask(ctx.root, key, `task for ${agent.spec.name}: mocks of the flow`, prompt);
+  const answer = jsonInAnswer(await ctx.runner().runToResult(agent.spec, prompt));
 
   if (!answer) return json(response, { source: "types", note: "the agent gave no JSON; the types did", ...typed });
 
-  return json(response, { source: agentSpec.name, input: answer.input ?? typed.input, storages: answer.storages ?? typed.storages });
+  return json(response, { source: agent.spec.name, input: answer.input ?? typed.input, storages: answer.storages ?? typed.storages });
 }
 
 export async function postFlowRun(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
@@ -277,6 +296,7 @@ export const routes: Record<string, (ctx: RouteContext, request: RouteRequest) =
   "POST /api/agent/stop": postAgentStop,
   "POST /api/checks": postChecks,
   "POST /api/flow/run": postFlowRun,
+  "GET /api/agents": getAgents,
   "GET /api/flow": getFlow,
   "GET /api/intent": getIntent,
   "GET /api/check": getCheck,

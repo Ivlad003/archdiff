@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+The coding agent is picked on the page.
+
+- The Chat tab offers the agents installed on this computer — Claude Code, Cursor, Codex (`codex exec --json`, in its workspace-write sandbox, a follow-up by `codex exec resume`) and OpenCode (`opencode run --format json --auto`) — and the one `archdiff.json` names; the ones not installed are greyed out, "none" only writes the tasks. The page remembers the pick, every run names its agent and a follow-up goes on with the one that holds the session. `archdiff web` needs no `--agent` any more: `--agent claude|cursor|codex|opencode` (or `"agent"` in archdiff.json) is the one picked first, else the first installed. `GET /api/agents` lists them. Codex's and OpenCode's events read like Claude's: the session, the messages, the files a tool wrote (lit on the canvas), the last message as the answer. A custom `"agent"` command says the `protocol` it prints (`stream-json`, `codex`, `opencode`).
+- A page of another site could send a POST to the server (a form, a fetch in no-cors mode) — to start an agent with its own prompt, to write a drawing — though it could not read the answer: a POST whose Origin is not the server's own is refused (403).
+
 Three test passes over every feature — the CLI and the exports, the page and the API, the analysis — and what they found, fixed.
 
 - `drawings --prune` deleted drawings still in use: a drawing lived only while the views list named its view, so the drawing of an inside, a focus, a sequence, a usage or a path was an "orphan". It lives while its subject does.

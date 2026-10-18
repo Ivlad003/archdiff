@@ -1574,3 +1574,14 @@ body.embed main {
 body.editing #project-map {
   display: none;
 }
+
+/* The agent of the Chat tab: a label and its picker on one line. */
+#agent-row {
+  align-items: center;
+}
+
+#agent-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

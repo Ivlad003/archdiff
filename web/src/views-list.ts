@@ -10,7 +10,6 @@
 // `focusViewSearch`, `listedHead`.
 
 import { api, type ViewEntry } from "./api.ts";
-import { setAgentName } from "./chat.ts";
 import { element } from "./dom.ts";
 import { codeHead, currentLink, setLink } from "./link.ts";
 import { togglePanel } from "./panel.ts";
@@ -82,7 +81,6 @@ export async function loadViews(): Promise<void> {
   const response = await api.views(head);
   listed = head;
   views = response.views;
-  setAgentName(response.agent);
   element("root").textContent = response.root;
   element("root").title = response.root;
   const s = response.stats;

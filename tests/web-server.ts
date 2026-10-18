@@ -6,17 +6,29 @@
 //
 // Entry points: `startWeb`, `withOwnServer`.
 
-import { spawn, type ChildProcess } from "node:child_process";
-import { cpSync } from "node:fs";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { cpSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withTempDir } from "./temp-dir.ts";
 
 const bin = join(import.meta.dirname, "..", "bin", "archdiff.js");
 const fixture = join(import.meta.dirname, "fixtures", "sample");
 
+/**
+ * The PATH of a test's server: a directory of its own holding node and git, and no coding agent installed on the
+ * computer the tests run on — the page offers the agents it finds there, and a test must never start a real one.
+ * The fake agents run by their path.
+ */
+const testBin = mkdtempSync(join(tmpdir(), "archdiff-test-bin-"));
+symlinkSync(process.execPath, join(testBin, "node"));
+symlinkSync(spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim() || "/usr/bin/git", join(testBin, "git"));
+process.on("exit", () => rmSync(testBin, { recursive: true, force: true }));
+export const TEST_PATH = testBin;
+
 /** archdiff web on `dir`, on a free port with the arguments given, and the origin it listens on once it says so. */
 export function startWeb(dir: string, args: readonly string[] = ["--no-watch"]): { server: ChildProcess; origin: Promise<string> } {
-  const server = spawn(process.execPath, [bin, "web", dir, "--port", "0", ...args], { stdio: ["ignore", "ignore", "pipe"] });
+  const server = spawn(process.execPath, [bin, "web", dir, "--port", "0", ...args], { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, PATH: TEST_PATH } });
 
   return { server, origin: originOf(server) };
 }

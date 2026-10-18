@@ -12,6 +12,7 @@
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import type { AgentName } from "./agent.ts";
 import { commitFirst } from "./git.ts";
 import { INTENT_FILE, intentMarkdown, type Intent } from "./intent.ts";
 
@@ -24,8 +25,8 @@ export type Template = (typeof TEMPLATES)[number];
 export interface ScaffoldOptions {
   lang: Language;
   template: Template;
-  /** The agent named in archdiff.json, so the page's Chat tab can run it; null: none. */
-  agent: "claude" | "cursor" | null;
+  /** The agent named in archdiff.json, the one the page's Chat tab picks first; null: none (the page offers what is installed). */
+  agent: AgentName | null;
   /** `git init` and the first commit; off in tests that only look at the files. */
   git: boolean;
 }

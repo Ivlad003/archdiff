@@ -534,7 +534,10 @@ test("the editor opens and closes, and the Chat tab reads the task from the draw
   await page!.click("#plan");
   await page!.waitForFunction(`(document.querySelector("#task")?.value ?? "").includes("# Task from the drawing")`);
   assert.ok((await page!.inputValue("#task")).includes("adds nothing to the code"));
-  assert.ok((await page!.textContent("#agent-name"))?.includes("no agent"));
+  // "none" picked (the tests' server finds no agent installed either): the task is only written, and the run button is off.
+  await page!.selectOption("#agent-select", "");
+  assert.match((await page!.textContent("#agent-name")) ?? "", /^no agent (picked|installed)/);
+  assert.ok(await page!.evaluate(`document.querySelector("#run").disabled`));
 });
 
 test("a reader who stays in the editor keeps the link of the picture drawn on; leaving drops the strokes not saved", { skip: !CHROME && "no Chrome installed" }, () =>
@@ -835,7 +838,8 @@ test("the agent's question shows its options; an answer resumes the session", { 
       await page!.goto(`${agentBase}/#view=layer%3Alib`);
       await page!.waitForSelector(".excalidraw canvas");
       await page!.click("#tabs button[data-tab='chat']");
-      await page!.waitForFunction(`(document.querySelector("#agent-name")?.textContent ?? "").includes("fake")`);
+      // The configured agent is picked first, beside the built-in ones.
+      await page!.waitForFunction(`document.querySelector("#agent-select")?.value === "fake" && [...document.querySelectorAll("#agent-select option")].map((option) => option.value).join(",") === "claude,cursor,codex,opencode,fake,"`);
       await page!.fill("#task", "Please ask the user which store to use.");
       await page!.click("#run");
       await page!.waitForFunction(`!document.querySelector("#question").hidden`, undefined, { timeout: 15_000 });

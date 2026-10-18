@@ -8,7 +8,7 @@
 // contract, and the previous tasks. Takes the page as its context
 // (page.ts).
 //
-// Entry points: `askAbout`, `runTask`, `setAgentName`, `agentNameOf`,
+// Entry points: `askAbout`, `runTask`, `setAgentName`, `agentNameOf`, `loadAgents`,
 // `loadTasks`, and the elements `taskField`, `runButton`, `runState`,
 // `transcript`.
 
@@ -25,7 +25,7 @@ export const runState = element<HTMLSpanElement>("run-state");
 export const transcript = element<HTMLDivElement>("transcript");
 const followup = element<HTMLInputElement>("followup");
 let agentName: string | null = null;
-let currentRun: { id: string; close: () => void; sessionId: string | null; stopped: boolean } | null = null;
+let currentRun: { id: string; close: () => void; sessionId: string | null; stopped: boolean; agent: string } | null = null;
 /** Whether a run is going: a second one would write over the first's work (the server refuses it too), and the transcript follows one. */
 let running = false;
 
@@ -369,7 +369,7 @@ async function runCommand(command: "code" | "diagram" | "doc", argument: string)
     runState.textContent = result.planned === 0 ? "the contract is built already; the task has nothing to build" : `${result.planned} planned items in the contract`;
 
     if (result.planned > 0 && agentName) runTask(result.markdown, null);
-    else if (!agentName) runState.textContent = "no agent: the task is in the box; start web with --agent claude to run it";
+    else if (!agentName) runState.textContent = "no agent picked: the task is in the box; pick an agent above to run it";
 
     return;
   }
@@ -393,7 +393,7 @@ function setRunning(next: boolean, resumable = false): void {
 
 /** A run is going: the run's line says so, and the caller starts nothing. */
 function busy(): boolean {
-  if (running) runState.textContent = `${agentName ?? "the agent"} is still running: stop it, or wait for its answer`;
+  if (running) runState.textContent = `${currentRun ? labelOf(currentRun.agent) : "the agent"} is still running: stop it, or wait for its answer`;
 
   return running;
 }
@@ -417,7 +417,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
   }
   const state = currentLink();
   setRunning(true);
-  runState.textContent = `running ${agentName}…`;
+  runState.textContent = `running ${labelOf(agentName)}…`;
 
   if (!resume) {
     transcript.replaceChildren();
@@ -428,10 +428,11 @@ export function runTask(written: string, resume: string | null, shown: string = 
   const touched = new Set<string>();
   let lightTimer: ReturnType<typeof setTimeout> | null = null;
   void withContext(written)
-    .then((prompt) => api.runAgent(state.view, prompt, resume))
-    .then(({ id, task }) => {
-      runState.textContent = `running ${agentName} (${id}); task saved to ${task}`;
-      const run = { id, sessionId: resume, stopped: false, close: () => {} };
+    // A follow-up resumes the session with the agent that holds it, whichever is picked now.
+    .then((prompt) => api.runAgent(state.view, prompt, resume, resume ? (currentRun?.agent ?? agentName) : agentName))
+    .then(({ id, task, agent }) => {
+      runState.textContent = `running ${labelOf(agent)} (${id}); task saved to ${task}`;
+      const run = { id, sessionId: resume, stopped: false, agent, close: () => {} };
       currentRun = run;
       run.close = api.agentEvents(
         id,
@@ -458,7 +459,8 @@ export function runTask(written: string, resume: string | null, shown: string = 
         },
         () => {
           setRunning(false, run.sessionId !== null);
-          runState.textContent = run.stopped ? `${agentName} stopped; the diagram is reloaded with what it changed` : element<HTMLDivElement>("question").hidden ? `${agentName} finished; the diagram is reloaded — compare with review, check against the contract` : `${agentName} asks a question`;
+          const who = labelOf(run.agent);
+          runState.textContent = run.stopped ? `${who} stopped; the diagram is reloaded with what it changed` : element<HTMLDivElement>("question").hidden ? `${who} finished; the diagram is reloaded — compare with review, check against the contract` : `${who} asks a question`;
           page.canvas()?.highlight([]);
           // The agent changed the code: the live diagram and the page.views() follow.
           void page.loadViews().then(() => page.load());
@@ -486,7 +488,7 @@ const documentGo = async (): Promise<void> => {
   element<HTMLButtonElement>("document-go").disabled = true;
 
   try {
-    const result = await api.intentFromDocument(text);
+    const result = await api.intentFromDocument(text, agentName);
     state.textContent = `${result.file}: ${result.layers} layers, ${result.modules} modules, ${result.edges} imports (from ${result.source})`;
     element<HTMLTextAreaElement>("document").hidden = true;
     element<HTMLDivElement>("document-row").hidden = true;
@@ -525,17 +527,78 @@ followup.addEventListener("keydown", (event) => {
 });
 
 
-/** The agent the server may run, as the views response named it; null without one. */
+/** The agent picked in the Chat tab (its name); null: none, the tasks are only written. */
 export function agentNameOf(): string | null {
   return agentName;
 }
 
-/** The agent the server may run: named over the task box, and the run button usable only with one. */
+/** What the page calls the agents it offers, by name. */
+const agentLabels = new Map<string, string>();
+/** Whether any agent is installed here: without one the picker says what to install. */
+let anyInstalled = false;
+
+/** An agent's label (Claude Code, Codex…), its name when the page does not know it. */
+function labelOf(name: string | null): string {
+  return name === null ? "the agent" : (agentLabels.get(name) ?? name);
+}
+
+/** The agent picked: the run button usable only with one, and a word beside the picker when there is none. */
 export function setAgentName(name: string | null): void {
   agentName = name;
   runButton.disabled = !name;
-  element("agent-name").textContent = name ? `agent: ${name}` : "no agent: start archdiff web --agent claude|cursor to run tasks";
+  element("agent-name").textContent = name ? "" : anyInstalled ? "no agent picked: the tasks are only written" : "no agent installed: Claude Code, Cursor, Codex or OpenCode on the PATH runs the tasks";
 }
+
+const agentSelect = element<HTMLSelectElement>("agent-select");
+
+/**
+ * The agents of the picker: each one the server offers, those not installed here greyed out, and "none" (the tasks
+ * only written). The one picked before in this browser when it is still installed, else the server's first.
+ */
+export async function loadAgents(): Promise<void> {
+  let offered: Awaited<ReturnType<typeof api.agents>>;
+
+  try {
+    offered = await api.agents();
+  } catch {
+    setAgentName(null);
+
+    return;
+  }
+
+  agentLabels.clear();
+  anyInstalled = offered.agents.some((agent) => agent.installed);
+  agentSelect.replaceChildren(
+    ...offered.agents.map((agent) => {
+      agentLabels.set(agent.name, agent.label);
+
+      return h("option", { value: agent.name, disabled: !agent.installed, title: agent.installed ? "" : "not installed on this computer" }, agent.installed ? agent.label : `${agent.label} — not installed`);
+    }),
+    h("option", { value: "" }, "none: write the tasks only"),
+  );
+  let remembered: string | null = null;
+
+  try {
+    remembered = localStorage.getItem("archdiff.agent");
+  } catch {
+    // Not remembered.
+  }
+
+  const usable = (name: string | null): boolean => name !== null && offered.agents.some((agent) => agent.name === name && agent.installed);
+  const picked = remembered === "" ? null : usable(remembered) ? remembered : offered.default;
+  agentSelect.value = picked ?? "";
+  setAgentName(picked);
+}
+
+agentSelect.addEventListener("change", () => {
+  setAgentName(agentSelect.value || null);
+
+  try {
+    localStorage.setItem("archdiff.agent", agentSelect.value);
+  } catch {
+    // Not remembered.
+  }
+});
 
 export async function loadTasks(): Promise<void> {
   try {

@@ -125,11 +125,13 @@ export async function getScene(ctx: RouteContext, { url, response }: RouteReques
 }
 
 export async function getViews(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
-  const { root, agentSpec } = ctx;
+  const { root } = ctx;
+  // The agent a run takes by default (the page offers every installed one: GET /api/agents).
+  const agent = ctx.agentFor(null);
   // The views of the code at the page's head (a branch has its own modules and entry points).
   const analysis = await codeOf(ctx, url.searchParams, response);
 
-  if (analysis) json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis), agent: agentSpec?.name ?? null, watching: ctx.watching });
+  if (analysis) json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis), agent: "spec" in agent ? agent.spec.name : null, watching: ctx.watching });
 }
 
 export async function getPlan(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {

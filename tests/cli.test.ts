@@ -290,6 +290,8 @@ test("a wrong call exits 2 with one plain line on stderr: the view, the format, 
     cpSync(fixture, dir, { recursive: true });
     writeFileSync(join(dir, "archdiff.json"), '{ "layers": { "lib": "src/lib/**" } }');
     refused(["analyze", dir], 'archdiff.json: "layers.lib" must be a list of strings');
+    writeFileSync(join(dir, "archdiff.json"), '{ "agent": 5 }');
+    refused(["analyze", dir], 'archdiff.json: agent: must be "claude", "cursor", "codex", "opencode" or { "command": ["…"], "resume": "--flag" }');
     writeFileSync(join(dir, "archdiff.json"), '{ "layers": ');
     assert.match(archdiff(["analyze", dir]).stderr, /^archdiff: archdiff\.json: not valid JSON \(/);
     rmSync(join(dir, "archdiff.json"));
@@ -477,7 +479,7 @@ test("plan refuses a view without a drawing and web --agent refuses an unknown a
   assert.ok(missing.stderr.includes("has no saved drawing"));
   const unknown = archdiff(["web", fixture, "--agent", "copilot"]);
   assert.equal(unknown.status, 2);
-  assert.ok(unknown.stderr.includes("not claude or cursor"));
+  assert.ok(unknown.stderr.includes(`"copilot" is not claude, cursor, codex or opencode`), unknown.stderr);
 });
 
 test("a repository with no commit yet says so: history and the timeline, and the branch checked out", () =>
@@ -1116,6 +1118,14 @@ test("agent events name the files a tool touches, for the page to light their sh
   assert.deepEqual(mockFromType("{ total: number; customer?: { name: string } }", "request"), { total: 1, customer: { name: "example" } });
   assert.equal(mockFromType("'a' | 'b'"), "a");
   assert.deepEqual(mockFromType("Order[]"), []);
+  // Codex resumes by another command (`codex exec resume <id>`): the session ID takes its place, and its events read the same.
+  const { AgentRunner, AGENTS } = await import("../src/agent.ts");
+  assert.deepEqual(AGENTS.codex.resumeCommand?.slice(0, 4), ["codex", "exec", "resume", "{session}"]);
+  const codex = { name: "codex-fake", label: "Codex", command: [process.execPath, join(root, "tests/fixtures/fake-codex.mjs")], resumeFlag: null, resumeCommand: [process.execPath, join(root, "tests/fixtures/fake-codex.mjs"), "resume", "{session}"], protocol: "codex" as const };
+  const runner = new AgentRunner(root);
+  const ended = (run: ReturnType<typeof runner.start>): Promise<string[]> => new Promise((resolve) => run.subscribe(0, (each) => each.kind === "exit" && resolve(run.events.map((one) => `${one.kind}: ${one.text}`))));
+  assert.deepEqual(await ended(runner.start(codex, "say done", null)), ["init: session 0199aaaa-fake-thread-0001", "text: Reading the task (8 chars).", "text: done", "result: done", "exit: exited with 0"]);
+  assert.ok((await ended(runner.start(codex, "again", "thread-9"))).includes("text: Resumed thread-9."));
 });
 
 test("classes draws the class diagram with fields, methods, extends and implements, as boxes and as Mermaid", () =>

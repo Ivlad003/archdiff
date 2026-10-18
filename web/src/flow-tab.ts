@@ -10,6 +10,7 @@ import { api } from "./api.ts";
 import { element } from "./dom.ts";
 import { page } from "./page.ts";
 import { currentLink } from "./link.ts";
+import { agentNameOf } from "./chat.ts";
 import { parseView } from "../../src/view-keys.ts";
 
 /** The entry point a calls view starts from (`calls:<path>#<fn>`), or null on any other view. */
@@ -137,7 +138,7 @@ async function generateMocks(): Promise<void> {
   flowSteps.prepend(Object.assign(document.createElement("div"), { className: "muted", id: "mock-note", textContent: "generating mocks…" }));
 
   try {
-    const result = await api.mocks(state.view, note.value);
+    const result = await api.mocks(state.view, note.value, agentNameOf());
     mockInput.value = JSON.stringify(result.input, null, 2);
 
     for (const { id, field } of mockStorages) if (result.storages[id] !== undefined) field.value = JSON.stringify(result.storages[id], null, 2);

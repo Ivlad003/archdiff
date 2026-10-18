@@ -17,8 +17,7 @@ import { dataFlow, flowMarkdown } from "./flow.ts";
 import { runFlow, runMarkdown } from "./run.ts";
 import { DRAWINGS_DIRECTORY, readDrawing, readDrawingFile } from "./drawings.ts";
 import { mergePlan, planFromScene, taskMarkdown } from "./plan.ts";
-import { agentFromConfig } from "./agent.ts";
-import { counted } from "./words.ts";
+import { agentFromConfig, AGENTS, type AgentName } from "./agent.ts";
 import { metricsMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
 import { historyMarkdown, reviewFindings } from "./diff.ts";
@@ -36,6 +35,7 @@ import { writeTestSkeletons } from "./gherkin.ts";
 import { FEATURES_DIRECTORY as FEATURES_DIRECTORY_NAME } from "./spec.ts";
 import { DEFAULT_PICTURE_OPTIONS, depthWarning, pictureFlags, pictureOptionsHelp, readPictureOptions, type PictureOptions } from "./options.ts";
 import { metricsOf } from "./metrics.ts";
+import { counted } from "./words.ts";
 
 /** A flag a command knows: its name after `--`, and whether a value follows it. */
 interface FlagSpec {
@@ -472,7 +472,7 @@ const COMMANDS: readonly Command[] = [
   },
   {
     name: "new",
-    usage: "<dir> [--lang ts|js] [--template blank|lib|cli|api|web] [--agent claude|cursor] [--no-git]",
+    usage: "<dir> [--lang ts|js] [--template blank|lib|cli|api|web] [--agent claude|cursor|codex|opencode] [--no-git]",
     help: ["A project from scratch: package.json, tsconfig, archdiff.json with the", "template's layers, ARCHITECTURE.md with its intent, the first commit.", "Then: web opens the intent view to draw in; the agent builds what is drawn"],
     arity: 1,
     flags: [flag("lang", true), flag("template", true), flag("agent", true), flag("no-git")],
@@ -488,17 +488,17 @@ const COMMANDS: readonly Command[] = [
       if (!TEMPLATES.includes(template as Template)) return fail(`new: --template must be one of ${TEMPLATES.join(", ")}`);
       const agentFlag = call.flags.get("agent");
 
-      if (agentFlag !== undefined && agentFlag !== "claude" && agentFlag !== "cursor") return fail("new: --agent must be claude or cursor");
+      if (agentFlag !== undefined && (typeof agentFlag !== "string" || !(agentFlag in AGENTS))) return fail("new: --agent must be claude, cursor, codex or opencode");
       let written: string[];
 
       try {
-        written = scaffold(resolve(target), { lang, template: template as Template, agent: (agentFlag as "claude" | "cursor" | undefined) ?? null, git: !call.has("no-git") });
+        written = scaffold(resolve(target), { lang, template: template as Template, agent: (agentFlag as AgentName | undefined) ?? null, git: !call.has("no-git") });
       } catch (error) {
         return fail(`new: ${error instanceof Error ? error.message : String(error)}`);
       }
 
       process.stdout.write(`${written.map((file) => `${target}/${file}`).join("\n")}\n`);
-      process.stderr.write(`archdiff new: ${template} (${lang}) in ${resolve(target)}${call.has("no-git") ? "" : ", committed on main"}. Next: cd ${target} && npx @ivlad003/archdiff web${agentFlag ? "" : " --agent claude"}\n`);
+      process.stderr.write(`archdiff new: ${template} (${lang}) in ${resolve(target)}${call.has("no-git") ? "" : ", committed on main"}. Next: cd ${target} && npx @ivlad003/archdiff web (the Chat tab offers the agents installed here)\n`);
 
       return 0;
     },
@@ -663,8 +663,8 @@ const COMMANDS: readonly Command[] = [
   },
   {
     name: "web",
-    usage: "[dir] [--port N] [--host H] [--base REF] [--agent claude|cursor] [--no-watch]",
-    help: ["Serve the diagrams in a browser: views, the canvas, the code and the", "Markdown of a shape, the review against REF. --agent (or \"agent\" in", "archdiff.json) lets the Chat tab hand a drawn task to Claude Code or", "Cursor's CLI, run in this repository; every run starts from a button.", "The page reloads when a source file changes (--no-watch: it does not).", "Without --port: 7080, or the next free port above it when it is taken"],
+    usage: "[dir] [--port N] [--host H] [--base REF] [--agent claude|cursor|codex|opencode] [--no-watch]",
+    help: ["Serve the diagrams in a browser: views, the canvas, the code and the", "Markdown of a shape, the review against REF. The Chat tab hands a drawn", "task or a question to the coding agent picked there — Claude Code, Cursor,", "Codex or OpenCode, whichever is installed — run in this repository; every", "run starts from a button. --agent (or \"agent\" in archdiff.json) is the one", "picked first. The page reloads when a source file changes (--no-watch: it", "does not). Without --port: 7080, or the next free port above it when it is taken"],
     arity: 1,
     flags: [flag("port", true), flag("host", true), flag("base", true), flag("agent", true), flag("no-watch")],
     async run(call) {
@@ -673,7 +673,7 @@ const COMMANDS: readonly Command[] = [
       if (port !== null && (!Number.isInteger(port) || port < 0 || port > 65535)) return fail("web: --port must be a port number");
       const agentFlag = call.flags.get("agent");
 
-      if (agentFlag === true) return fail("web: --agent needs claude or cursor");
+      if (agentFlag === true) return fail("web: --agent needs claude, cursor, codex or opencode");
       const agent = typeof agentFlag === "string" ? agentFromConfig(agentFlag) : null;
       await serve(call.dir(0), { port, host: call.text("host") ?? "127.0.0.1", base: call.text("base"), agent, watch: !call.has("no-watch") });
 

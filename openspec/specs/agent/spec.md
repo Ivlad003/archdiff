@@ -6,14 +6,19 @@ A drawn change becomes a task a coding agent builds, in this repository, from th
 
 ## Requirements
 
-### Requirement: An agent is configured, never implied
+### Requirement: The agent is picked on the page, never implied
 
-The system SHALL run Claude Code (`claude -p --output-format stream-json --verbose --permission-mode acceptEdits`), Cursor's CLI (`cursor-agent -p --output-format stream-json --trust`) or a custom command only when `--agent` or `archdiff.json` `agent` names it; every run SHALL start from a button or a command with the prompt as shown, and every prompt sent to the agent — a run, a document to become the contract, the mocks of a flow — SHALL be saved under `.archdiff/tasks/` (`GET /api/tasks` lists them, newest first).
+The system SHALL offer, in the Chat tab, the coding agents installed on this computer — Claude Code (`claude -p --output-format stream-json --verbose --permission-mode acceptEdits`), Cursor's CLI (`cursor-agent -p --output-format stream-json --trust`), Codex (`codex exec --json` in its workspace-write sandbox, resumed by `codex exec resume <id>`), OpenCode (`opencode run --format json --auto`, resumed by `--session <id>`) and a custom command of `archdiff.json` (`agent.command`, with the `protocol` it prints: `stream-json`, `codex` or `opencode`) — the ones not installed greyed out, and "none" (the tasks only written). `GET /api/agents` SHALL list them with whether each is installed, and the one picked first: `--agent` or `archdiff.json`'s `agent`, else the first installed; the page SHALL remember the pick in the browser. Every run SHALL name its agent, a follow-up the one that holds the session; an agent unknown or not installed SHALL be refused (400) by name. Every run SHALL start from a button or a command with the prompt as shown, and every prompt sent to an agent — a run, a document to become the contract, the mocks of a flow — SHALL be saved under `.archdiff/tasks/` (`GET /api/tasks` lists them, newest first). A POST whose Origin is not the server's own SHALL be refused (403): a page of another site cannot start an agent.
 
-#### Scenario: No agent
+#### Scenario: No agent picked
 
-- **WHEN** the page opens without an agent
-- **THEN** the Chat tab writes the task and says "no agent", and `/api/agent/run` answers 400
+- **WHEN** the reader picks "none", or no agent is installed
+- **THEN** the Chat tab writes the task, says why it does not run it, and the run button is off
+
+#### Scenario: Codex picked
+
+- **WHEN** the reader picks Codex and runs a task
+- **THEN** the run's events show its session, its messages, the files it wrote and its last message as the answer, and the follow-up resumes the same thread
 
 #### Scenario: The prompt of the mocks is kept
 
@@ -83,9 +88,9 @@ The system SHALL, when an agent's run ends, run the contract check and the comma
 - **WHEN** archdiff.json names a command that exits 0 and one that writes "boom" and exits 3, and a run ends
 - **THEN** the run's events hold "✔ archdiff check: the code follows ARCHITECTURE.md", a ✔ line for the first command and a ✘ line "(exit 3)" ending in "boom", then the exit
 
-### Requirement: Cursor's stream is read like Claude's
+### Requirement: Every agent's stream is read like Claude's
 
-The system SHALL read Cursor's stream-json (`chat_id` as the session, `--resume <chatId>` to continue) the way it reads Claude Code's, including the question protocol.
+The system SHALL read Cursor's stream-json (`chat_id` as the session, `--resume <chatId>` to continue) the way it reads Claude Code's, including the question protocol; Codex's events (`thread.started`, the `item.completed` of an agent message, a command, a file change, `turn.completed`) and OpenCode's (`text`, `tool_use`, the `sessionID` of every event) SHALL become the same kinds of events — the session, the text, the tool with the files it names, the answer, which for both is their last message.
 
 #### Scenario: A question through Cursor
 

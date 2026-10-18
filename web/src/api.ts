@@ -138,8 +138,8 @@ export const api = {
 
     return body.context;
   },
-  mocks: async (view: string, description: string): Promise<{ source: string; note?: string; input: Record<string, unknown>; storages: Record<string, unknown> }> => {
-    const response = await fetch("/api/flow/mocks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, description }) });
+  mocks: async (view: string, description: string, agent: string | null): Promise<{ source: string; note?: string; input: Record<string, unknown>; storages: Record<string, unknown> }> => {
+    const response = await fetch("/api/flow/mocks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, description, agent }) });
     const body = (await response.json()) as { source: string; note?: string; input: Record<string, unknown>; storages: Record<string, unknown> } | { error: string };
 
     if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : response.statusText);
@@ -167,11 +167,13 @@ export const api = {
   validateSpecs: () => post<{ ok: boolean; output: string }>("/api/spec/validate", {}),
   code: (view: string) => post<{ markdown: string; intent: string; planned: number }>("/api/code", { view }),
   intent: () => get<{ exists: boolean; markdown: string; file: string }>("/api/intent"),
-  intentFromDocument: (text: string) => post<{ file: string; source: string; layers: number; modules: number; edges: number; markdown: string }>("/api/intent/document", { text }),
+  intentFromDocument: (text: string, agent: string | null) => post<{ file: string; source: string; layers: number; modules: number; edges: number; markdown: string }>("/api/intent/document", { text, agent }),
+  /** The agents the Chat tab may offer, whether each is installed here, and the one picked first. */
+  agents: () => get<{ agents: { name: string; label: string; installed: boolean }[]; default: string | null }>("/api/agents"),
   check: () => get<{ exists: boolean; ok: boolean; markdown: string }>("/api/check"),
   plan: (view: string) => get<{ markdown: string; drawn: boolean; plan: { added: unknown[]; edges: unknown[]; removed: unknown[]; notes: string[] } }>(`/api/plan?view=${encodeURIComponent(view)}`),
-  runAgent: async (view: string, prompt: string, resume: string | null): Promise<{ id: string; agent: string; task: string }> => {
-    const response = await fetch("/api/agent/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, prompt, resume }) });
+  runAgent: async (view: string, prompt: string, resume: string | null, agent: string | null): Promise<{ id: string; agent: string; task: string }> => {
+    const response = await fetch("/api/agent/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, prompt, resume, agent }) });
     const body = (await response.json()) as { id: string; agent: string; task: string } | { error: string };
 
     if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : response.statusText);
