@@ -41,7 +41,7 @@ export interface ComparisonResult {
  * already made, so a review of the working tree does not read it twice.
  */
 export async function review(root: string, base: string | null, headRef: string | null = null, current: Analysis | null = null): Promise<ReviewResult> {
-  const ref = base ?? mergeBase(root);
+  const ref = base ?? mergeBase(root, headRef ?? "HEAD");
   const config = loadConfig(root);
   const head = headRef === null ? (current ?? (await analyze(root, { config }))) : await analyze(root, { overrides: treeAt(root, headRef), config });
   const baseAnalysis = await analyze(root, { overrides: treeAt(root, ref), config });

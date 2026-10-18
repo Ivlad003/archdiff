@@ -360,7 +360,7 @@ const COMMANDS: readonly Command[] = [
   {
     name: "review",
     usage: "[dir] [--base REF] [--head REF] [--format F] [--out FILE]",
-    help: ["The architectural diff of the working tree (or --head REF) against", "--base REF (default: the merge-base with develop, main or master): modules,", "imports and calls added, removed or changed, as Markdown with a Mermaid", "diagram (md, default), json (the diff), or any diagram format (the", "review view's picture). Exit 1 when a layer dependency appeared that", "ARCHITECTURE.md does not allow (any, without one)"],
+    help: ["The architectural diff of the working tree (or --head REF) against", "--base REF (default: where the head left develop, main or master): modules,", "imports and calls added, removed or changed, as Markdown with a Mermaid", "diagram (md, default), json (the diff), or any diagram format (the", "review view's picture). Exit 1 when a layer dependency appeared that", "ARCHITECTURE.md does not allow (any, without one)"],
     arity: 1,
     flags: [...REF_FLAGS, ...OUTPUT_FLAGS],
     async run(call) {
@@ -419,8 +419,8 @@ const COMMANDS: readonly Command[] = [
     flags: [...REF_FLAGS, flag("json"), flag("out", true)],
     async run(call) {
       const root = call.dir(0);
-      const base = call.text("base") ?? mergeBase(root);
       const head = call.text("head") ?? "HEAD";
+      const base = call.text("base") ?? mergeBase(root, head);
       const rows = await history(root, base, head);
 
       return writeOut(call.has("json") ? `${JSON.stringify(rows, null, 2)}\n` : historyMarkdown(rows, base, head), call.text("out"));

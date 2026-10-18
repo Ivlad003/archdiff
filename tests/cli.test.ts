@@ -367,6 +367,14 @@ test("review measures the change from the merge-base, not from the tip of main",
     assert.equal(status, 0, stdout);
     assert.ok(stdout.includes("- fn `log` — src/lib/log.ts:1 (body)"), stdout);
     assert.ok(!stdout.includes("extra"), stdout);
+    // Reviewing the branch from main: its own start, not the checkout's (which is main's tip): extra is still not its doing.
+    git("checkout", "-q", "main");
+    const other = archdiff(["review", dir, "--head", "feature"]);
+    assert.equal(other.status, 0, other.stdout);
+    assert.ok(other.stdout.includes("- fn `log` — src/lib/log.ts:1 (body)") && !other.stdout.includes("extra"), other.stdout);
+    // So do the commits of its range and its history.
+    const history = archdiff(["history", dir, "--head", "feature", "--json"]);
+    assert.deepEqual((JSON.parse(history.stdout) as { commit: { subject: string } }[]).map((row) => row.commit.subject), ["feature: log to stderr"]);
   }));
 
 test("flow lists the steps from an entry with their types, the storages, and the mocks carried by name", () =>

@@ -41,19 +41,23 @@ function assertRef(ref: string): void {
 }
 
 /**
- * The merge-base commit of HEAD with the main line (origin/HEAD, develop,
- * main, master, then their remote branches): the commit the change started
- * from, so commits that landed on the main line since are not read as this
- * change. On the main line itself, or without any such branch, HEAD: the
- * change is then the working tree. Throws with a hint when the repository
- * is shallow and no base can be found.
+ * The merge-base commit of a head (HEAD by default: the checkout) with the
+ * main line (origin/HEAD, develop, main, master, then their remote
+ * branches): the commit the change started from, so commits that landed on
+ * the main line since are not read as this change — for a review of
+ * another branch, that branch's own start, not the checkout's. On the main
+ * line itself, or without any such branch, the head: the change is then
+ * the working tree. Throws with a hint when the repository is shallow and
+ * no base can be found.
  */
-export function mergeBase(root: string): string {
+export function mergeBase(root: string, head = "HEAD"): string {
+  assertRef(head);
+
   for (const candidate of ["origin/HEAD", "develop", "main", "master", "origin/develop", "origin/main", "origin/master"]) {
     const exists = git(root, ["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`]);
 
     if (!exists.ok) continue;
-    const base = git(root, ["merge-base", "HEAD", candidate]);
+    const base = git(root, ["merge-base", head, candidate]);
 
     if (base.ok) return base.out.trim();
   }
@@ -62,7 +66,7 @@ export function mergeBase(root: string): string {
 
   if (shallow.ok && shallow.out.trim() === "true") throw new Error("no merge-base with develop, main or master in a shallow clone: fetch more history (git fetch --unshallow, or fetch-depth: 0 in CI) or pass --base <ref>");
 
-  return "HEAD";
+  return head;
 }
 
 /**

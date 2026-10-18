@@ -8,12 +8,17 @@ The architectural diff of a change, for reviewing pull requests: what a base and
 
 ### Requirement: review compares two revisions
 
-The system SHALL analyse the base (`--base`, default the merge-base with develop, main or master) and the head (`--head`, default the working tree), diff their graphs — modules, functions, imports, calls and layer couplings added, removed or changed — and write Markdown with a picture of the change; exit 1 SHALL mean a new dependency between layers.
+The system SHALL analyse the base (`--base`, default the merge-base of the head — the checkout's, or the branch `--head` names — with develop, main or master) and the head (`--head`, default the working tree), diff their graphs — modules, functions, imports, calls and layer couplings added, removed or changed — and write Markdown with a picture of the change; exit 1 SHALL mean a new dependency between layers.
 
 #### Scenario: A route reads the store directly
 
 - **WHEN** a change adds an import from a `routes` module to a `db` module
 - **THEN** `archdiff review` exits 1 and names `+routes→db`
+
+#### Scenario: Another branch, from main
+
+- **WHEN** main gained a module after `feature` left it, and `archdiff review --head feature` runs on main
+- **THEN** the review starts where `feature` left main, and the module main gained is not in it
 
 #### Scenario: Outside git
 

@@ -12,8 +12,8 @@ export async function getCommits(ctx: RouteContext, { url, response }: RouteRequ
   const { root, options } = ctx;
   // The commits of the review range, oldest first, for stepping through a branch.
   try {
-    const base = url.searchParams.get("base") || options.base || mergeBase(root);
     const head = url.searchParams.get("head") || "HEAD";
+    const base = url.searchParams.get("base") || options.base || mergeBase(root, head);
 
     return json(response, { base, head, commits: commitsBetween(root, base, head) });
   } catch (error) {

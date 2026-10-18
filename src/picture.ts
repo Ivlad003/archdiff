@@ -109,8 +109,8 @@ async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOpt
   const { root } = analysis;
 
   if (view.kind === "timeline") {
-    const base = refs.base ?? mergeBase(root);
     const head = refs.head ?? "HEAD";
+    const base = refs.base ?? mergeBase(root, head);
 
     return { reads: { timeline: { rows: await history(root, base, head), base, head } }, notes: [] };
   }
