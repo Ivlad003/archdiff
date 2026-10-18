@@ -2,7 +2,7 @@
 // shortest chain between two shapes, the chain onward from a line, the
 // neighbourhood of a shape (what the dim tool keeps), and the shapes a
 // search finds. Pure functions of the picture's shapes and lines, which
-// app.ts passes in.
+// picking.ts, shape-menu.ts and the toolbar pass in.
 //
 // Entry points: `chainBetween`, `chainFrom`, `neighbourhoodOf`, `findShapes`.
 

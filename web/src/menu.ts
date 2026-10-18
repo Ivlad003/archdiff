@@ -1,7 +1,7 @@
 // The context menu of the page: a list of actions at the pointer, opened
 // by a right click on a shape, a line or the empty canvas, closed by a
 // click anywhere else, Escape or a scroll. One menu element, filled per
-// opening; the callers (app.ts) say what the items are.
+// opening; shape-menu.ts says what the items are.
 
 import { h } from "./dom.ts";
 

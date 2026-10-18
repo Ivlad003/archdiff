@@ -18,7 +18,7 @@ flowchart LR
     n_src_routes_agent_ts["src/routes/agent.ts<br>the routes of the agent and the contract"]
   end
   subgraph n_page["page — the browser page (web/src), built by esbuild"]
-    n_web_src_app_ts["web/src/app.ts<br>the page: the canvas, the panels, the tools, the selection and the menu; reads only the types of the diagram"]
+    n_web_src_app_ts["web/src/app.ts<br>the page: the current picture, drawn again when the link or the code changes; the panels, the picking, the toolbar and the keys in modules beside it; reads only the types of the diagram"]
     n_web_src_project_map_ts["web/src/project-map.ts<br>the project map: the repository as dots laid out by forces"]
   end
   subgraph n_edge["edge — what a command reads from git and the files, and the processes it runs"]

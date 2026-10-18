@@ -6,7 +6,7 @@
 // links that leave an option out (kept as the query the table reads), and
 // the option sets of the presets (who is reading) and the detail buttons
 // (how much at once). Pure functions of `location` and `localStorage`;
-// app.ts renders from `currentLink()` and navigates with `setLink()`.
+// the page renders from `currentLink()` and navigates with `setLink()`.
 //
 // Entry points: `Link`, `currentLink`, `setLink`, `refsOf`, `reviewing`,
 // `readDefaults`, `rememberDefaults`, `forgetDefaults`, `PRESETS`,

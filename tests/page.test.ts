@@ -197,7 +197,7 @@ async function screenPointOf(view: string, elementId: string, extra = ""): Promi
   return { x: box.left + (target.x + target.width / 2 + scrollX) * zoom, y: box.top + (target.y + target.height / 2 + scrollY) * zoom };
 }
 
-test("find, lanes, split, the chain between two shapes and the minimap", { skip: !CHROME && "no Chrome installed" }, async () => {
+test("find (/), the views filter (v), lanes, split, the chain between two shapes and the minimap", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.evaluate("localStorage.clear()");
   await page!.goto(`${base}/?fresh=7#view=layer%3Alib`);
   await page!.waitForSelector(".excalidraw canvas");
@@ -213,6 +213,15 @@ test("find, lanes, split, the chain between two shapes and the minimap", { skip:
   await page!.keyboard.up("Shift");
   await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "Chain: src/lib/orders.ts → src/lib/log.ts"`, undefined, { timeout: 8000 });
   assert.ok((await page!.textContent("#markdown"))?.includes("src/lib/orders.ts → src/lib/log.ts"));
+  // The keys of the fields: `/` focuses find (nothing typed into it), `v` the filter of the views; Escape leaves a field.
+  await page!.keyboard.press("/");
+  assert.equal(await page!.evaluate("document.activeElement?.id"), "find");
+  assert.equal(await page!.inputValue("#find"), "");
+  await page!.keyboard.press("Escape");
+  await page!.keyboard.press("v");
+  assert.equal(await page!.evaluate("document.activeElement?.id"), "search");
+  await page!.keyboard.press("Escape");
+  assert.notEqual(await page!.evaluate("document.activeElement?.id"), "search");
   // Find: typing counts the matches, Enter centres the first and opens it (the viewport moves: taps by position come before this).
   await page!.fill("#find", "store");
   await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("1 shape matches")`);

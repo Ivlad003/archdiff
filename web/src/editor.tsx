@@ -9,7 +9,7 @@
 // `onLinkOpen`.
 //
 // Entry point: `mountCanvas` (returns a handle: scene, replace, mode,
-// screenshot, scrollToContent, unmount), used by app.ts.
+// screenshot, scrollToContent, unmount), used by canvas.ts.
 
 import { Excalidraw, exportToBlob, exportToSvg, restoreElements } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI, NormalizedZoomValue } from "@excalidraw/excalidraw/types";

@@ -506,9 +506,11 @@ export function agentNameOf(): string | null {
   return agentName;
 }
 
+/** The agent the server may run: named over the task box, and the run button usable only with one. */
 export function setAgentName(name: string | null): void {
   agentName = name;
   runButton.disabled = !name;
+  element("agent-name").textContent = name ? `agent: ${name}` : "no agent: start archdiff web --agent claude|cursor to run tasks";
 }
 
 export async function loadTasks(): Promise<void> {
