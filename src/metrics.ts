@@ -18,6 +18,7 @@ import type { Analysis } from "./analyze.ts";
 import { farFromMainSequence, SIZE, type Diagram, type PictureContent, type Shape, type LayerMetrics, type Metrics, type ModuleMetrics } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { unplaced } from "./nodes.ts";
+import { moduleOfShape } from "./shape-keys.ts";
 
 /** Union–find over the functions of a module, for the groups the cohesion counts. */
 class Groups {
@@ -256,7 +257,7 @@ export function overlayInstability(diagram: Diagram, analysis: Analysis): Diagra
   const byModule = new Map(metrics.modules.map((row) => [row.id, row]));
   let marked = 0;
   const nodes = diagram.nodes.map((node) => {
-    const module = node.kind === "module" || node.kind === "participant" ? (node.ref?.id ?? node.id) : node.kind === "fn" || node.kind === "class" ? moduleOf(node.ref?.id ?? node.id) : null;
+    const module = moduleOfShape(node);
     const row = module ? byModule.get(module) : undefined;
 
     if (!row) return node;

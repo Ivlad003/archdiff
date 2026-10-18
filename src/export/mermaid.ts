@@ -56,6 +56,7 @@ function shape(node: Shape, id: string): string {
     case "class":
       return `${id}[${label(node.label.split("\n")[0] ?? node.label)}]`;
     case "state":
+    case "machine":
       return `${id}([${text}])`;
     case "fragment":
       return `${id}[${text}]`;

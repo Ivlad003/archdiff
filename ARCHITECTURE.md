@@ -60,6 +60,7 @@ flowchart LR
     n_src_cache_ts["src/cache.ts<br>the fact cache, keyed by content hash and extractor version"]
     n_src_options_ts["src/options.ts<br>the options of a picture, described once for the CLI, the API and the page"]
     n_src_view_keys_ts["src/view-keys.ts<br>the kinds of view and their keys, read and written by one codec for the CLI, the API and the page"]
+    n_src_shape_keys_ts["src/shape-keys.ts<br>what a shape stands for and the view it opens, for the exports and the page"]
     n_src_run_hooks_ts["src/run-hooks.ts<br>the child process of a run: module hooks that trace and mock"]
     n_src_checks_ts["src/checks.ts<br>the contract check and the commands run after an agent"]
   end
@@ -99,6 +100,8 @@ flowchart LR
   n_src_routes_pictures_ts --> n_src_markdown_ts
   n_web_src_app_ts --> n_src_options_ts
   n_web_src_app_ts --> n_src_view_keys_ts
+  n_web_src_app_ts --> n_src_shape_keys_ts
+  n_src_export_excalidraw_ts --> n_src_shape_keys_ts
   n_src_cli_ts --> n_src_options_ts
   n_src_views_ts --> n_src_views_more_ts
   n_src_views_ts --> n_src_pipeline_ts
@@ -144,4 +147,4 @@ flowchart LR
   n_scripts_copy_wasm_mjs --> n_src_extract_grammars_ts
 ```
 
-The page (`web/src`) imports the two Node-free vocabularies of the core, bundled into it — the table of picture options (`src/options.ts`) and the kinds of view with their keys (`src/view-keys.ts`) — and only types from `src/diagram.ts` and `src/scene.ts`, which erase at build time. Tests import whatever they test. `src/routes/context.ts` imports the `ServeOptions` type back from `server.ts`: a type, inside one layer.
+The page (`web/src`) imports the Node-free vocabularies of the core, bundled into it — the table of picture options (`src/options.ts`), the kinds of view with their keys (`src/view-keys.ts`) and what a shape stands for and opens (`src/shape-keys.ts`, which the Excalidraw export shares) — and only types from `src/diagram.ts` and `src/scene.ts`, which erase at build time. Tests import whatever they test. `src/routes/context.ts` imports the `ServeOptions` type back from `server.ts`: a type, inside one layer.

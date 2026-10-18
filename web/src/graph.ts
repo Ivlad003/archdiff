@@ -6,6 +6,7 @@
 
 import type { Line, Shape } from "./api.ts";
 import type { PickedLine } from "./editor.tsx";
+import { lineElementId } from "../../src/shape-keys.ts";
 /** The shortest chain of lines from `from` to `to` along the arrows (else against them), breadth first; null when none. */
 export function pathBetween(edges: readonly Line[], from: string, to: string, directed: boolean): { edge: Line; index: number }[] | null {
   const previous = new Map<string, { edge: Line; index: number; node: string }>();
@@ -66,12 +67,6 @@ export function neighbourhoodOf(edges: readonly Line[], id: string): string[] {
   });
 
   return [...keep];
-}
-
-/** The page of a tapped line: what it joins and the imports and calls behind it. */
-/** The canvas element ID of a line, as the export names it (a message by its index, since one pair may exchange several). */
-export function lineElementId(edge: Line, index: number): string {
-  return `edge:${edge.from}->${edge.to}${edge.kind === "message" ? `:${index}` : ""}`;
 }
 
 /** The chain onward from a line: every line reachable from its target along the arrows, with the shapes on the way, breadth first, capped. */

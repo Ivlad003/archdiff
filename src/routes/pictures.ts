@@ -18,6 +18,7 @@ import { edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView, viewList } from "../views.ts";
 import { projectMap } from "../project-map.ts";
+import { standsFor } from "../shape-keys.ts";
 import { failed, json, optionsOf, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
 
 export async function postLayout(ctx: RouteContext, { url, body, response }: RouteRequest): Promise<void> {
@@ -71,7 +72,7 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
     const { diagram, markdown } = picture.value;
 
     if (kind === "module" || kind === "fn" || kind === "type") {
-      const node = diagram.nodes.find((candidate) => (candidate.ref?.id ?? candidate.id) === subject);
+      const node = diagram.nodes.find((candidate) => standsFor(candidate) === subject);
       sections.push(`### ${tag}\n\n${node ? nodeMarkdown(node, analysis, readSource) : markdown}`);
     } else sections.push(`### ${tag}\n\n${markdown}`);
   }

@@ -30,6 +30,7 @@ function style(node: Shape): string {
     package: "rounded=0;whiteSpace=wrap;html=1;fillColor=#e8eaf6;strokeColor=#3949ab;fontStyle=1;",
     class: "rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacingLeft=6;fontFamily=Courier New;fontSize=10;fillColor=#fff8e1;strokeColor=#4e342e;",
     state: "rounded=1;whiteSpace=wrap;html=1;arcSize=30;fillColor=#e8f5e9;strokeColor=#2e7d32;",
+    machine: "rounded=1;whiteSpace=wrap;html=1;arcSize=15;fillColor=#e8f5e9;strokeColor=#2e7d32;fontStyle=1;",
     fragment: "rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#9e9e9e;align=left;verticalAlign=top;spacingLeft=6;fontSize=11;",
     decision: "rhombus;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#6a1b9a;fontSize=11;",
     action: "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#424242;fontSize=11;",

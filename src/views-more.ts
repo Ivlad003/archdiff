@@ -90,9 +90,10 @@ export function matrixView(graph: Graph, scope: string | null = null, types = fa
   const max = Math.max(1, ...counts.values());
 
   order.forEach((item, row) => {
-    const ref = scope === null ? { id: item } : { id: item, file: item, line: 1 };
-    nodes.push({ id: `row:${item}`, kind: "cell", label: label(item), ref, x: 0, y: head + row * cell.h, w: head, h: cell.h });
-    nodes.push({ id: `col:${item}`, kind: "cell", label: label(item), ref, x: head + row * cell.w, y: head - cell.h, w: cell.w, h: cell.h });
+    // A header opens its layer, or its module's dependencies; a module's header points at its file too.
+    const header = scope === null ? { opens: `layer:${item}` } : { opens: `module:${item}`, ref: { id: item, file: item, line: 1 } };
+    nodes.push({ id: `row:${item}`, kind: "cell", label: label(item), ...header, x: 0, y: head + row * cell.h, w: head, h: cell.h });
+    nodes.push({ id: `col:${item}`, kind: "cell", label: label(item), ...header, x: head + row * cell.w, y: head - cell.h, w: cell.w, h: cell.h });
   });
 
   order.forEach((from, row) => {
@@ -471,7 +472,7 @@ export function packagesView(analysis: Analysis): PictureContent {
     if (owner) modulesOf.set(owner, (modulesOf.get(owner) ?? 0) + 1);
   }
 
-  const nodes = packages.map((candidate): Shape => ({ id: candidate.name, kind: "package", label: `${candidate.name}\n${candidate.dir || "."} · ${modulesOf.get(candidate.name) ?? 0} modules`, ref: { id: candidate.dir ? `dir:${candidate.dir}` : "layers", file: candidate.dir ? `${candidate.dir}/package.json` : "package.json", line: 1 }, count: modulesOf.get(candidate.name) ?? 0, x: 0, y: 0, w: 0, h: 0 }));
+  const nodes = packages.map((candidate): Shape => ({ id: candidate.name, kind: "package", label: `${candidate.name}\n${candidate.dir || "."} · ${modulesOf.get(candidate.name) ?? 0} modules`, opens: candidate.dir ? `dir:${candidate.dir}` : "layers", ref: { file: candidate.dir ? `${candidate.dir}/package.json` : "package.json", line: 1 }, count: modulesOf.get(candidate.name) ?? 0, x: 0, y: 0, w: 0, h: 0 }));
   const edges: Line[] = [];
   const seen = new Set<string>();
 
@@ -672,7 +673,7 @@ export function timelineDiagram(rows: readonly HistoryRow[], base: string, head:
     if (row.layerEdgesAdded.length > 0) bar.diff = "removed";
     else if (row.layerEdgesRemoved.length > 0) bar.diff = "added";
     nodes.push(bar);
-    nodes.push({ id: `commit:${row.commit.sha}`, kind: "cell", label: `${row.commit.short} ${row.commit.date}\n${row.commit.subject.slice(0, 28)}`, ref: { id: row.commit.sha }, x, y: 20 + chart + 10, w: column - 20, h: 48 });
+    nodes.push({ id: `commit:${row.commit.sha}`, kind: "cell", label: `${row.commit.short} ${row.commit.date}\n${row.commit.subject.slice(0, 28)}`, x, y: 20 + chart + 10, w: column - 20, h: 48 });
   });
 
   return unplaced(`Timeline ${base}..${head}: ${rows.length} commits`, nodes, [], [], { placed: true, reason: "bars: imports and functions moved; red: a coupling between layers appeared, green: one went" });

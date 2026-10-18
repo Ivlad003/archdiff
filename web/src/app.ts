@@ -19,8 +19,9 @@ import { loadSpecs, specTextOf } from "./spec-tab.ts";
 import "./theme.ts";
 import { closeMenu, menuOpen, openMenu, type MenuItem } from "./menu.ts";
 import { mapDots, mapSettled, projectMapOpen, refreshProjectMap, toggleProjectMap } from "./project-map.ts";
-import { chainFrom, findShapes, lineElementId, neighbourhoodOf, pathBetween } from "./graph.ts";
-import { crumbsOf, ownView, siblingViews, subjectOf, tagOf } from "./navigation.ts";
+import { chainFrom, findShapes, neighbourhoodOf, pathBetween } from "./graph.ts";
+import { crumbsOf, siblingViews } from "./navigation.ts";
+import { lineElementId, opensView, standsFor, subjectView, tagOf } from "../../src/shape-keys.ts";
 import { DETAIL, OVERVIEWS, PRESETS, forgetDefaults, refsOf, rememberDefaults, reviewing, setHash, stateFromHash, type State } from "./state.ts";
 import { parseView } from "../../src/view-keys.ts";
 import { MERMAID_STYLES, OVERLAYS, type MermaidStyle, type Overlay } from "../../src/options.ts";
@@ -347,7 +348,7 @@ function renderNeighbours(node: Shape | null): void {
     button.title = `${arrow === "→" ? "imported or called by this shape" : "imports or calls this shape"}: click picks it here, Shift+click opens its own view, ← → walk the neighbours`;
     button.addEventListener("click", (event) => {
       if (event.shiftKey) {
-        const own = nodes.has(id) ? ownView(nodes.get(id)!) : null;
+        const own = nodes.has(id) ? opensView(nodes.get(id)!) : null;
 
         if (own) setHash({ ...stateFromHash(), view: own });
       } else pickShape(id);
@@ -461,9 +462,9 @@ function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
   const node = id ? nodes.get(id) : undefined;
 
   if (node) {
-    const own = ownView(node);
-    const subject = subjectOf(node);
-    const target = node.ref?.id ?? node.id;
+    const own = opensView(node);
+    const subject = subjectView(node);
+    const target = standsFor(node);
     const fnLike = node.kind === "fn" || (node.kind === "action" && target.includes("#"));
     const tag = tagOf(node);
     const items: MenuItem[] = [];
@@ -934,7 +935,7 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
 
       // The mix tool: a module opens in place, an opened module's "rest" shape closes it.
       if (tools.mix && node && (node.kind === "module" || node.kind === "participant")) {
-        const module = node.ref?.id ?? node.id;
+        const module = standsFor(node);
         const now = stateFromHash();
         setHash({ ...now, expand: now.expand.includes(module) ? now.expand.filter((each) => each !== module) : [...now.expand, module] });
 
@@ -946,7 +947,8 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
       select(node ? [node.id] : []);
     },
     open: (id, link) => {
-      const key = link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : nodes.has(id) ? ownView(nodes.get(id)!) : null;
+      // The shape's own view, as the export wrote it into the scene; a shape of an older drawing by its link.
+      const key = nodes.has(id) ? opensView(nodes.get(id)!) : link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : null;
 
       if (key && mode === "view") setHash({ ...stateFromHash(), view: key });
     },
@@ -1339,7 +1341,7 @@ window.addEventListener("keydown", (event) => {
     walk(event.key);
   } else if (event.key === "Enter" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement) && !(event.target instanceof HTMLSelectElement) && !(event.target instanceof HTMLButtonElement) && mode === "view" && lastPicked && nodes.has(lastPicked)) {
     // Enter: into the picked shape's own view (deeper), as a second tap would.
-    const own = ownView(nodes.get(lastPicked)!);
+    const own = opensView(nodes.get(lastPicked)!);
 
     if (own) setHash({ ...stateFromHash(), view: own });
   } else if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) {

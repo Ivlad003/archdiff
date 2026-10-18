@@ -12,6 +12,8 @@ import type { Diagram, Line, Shape } from "./diagram.ts";
 import { farFromMainSequence, type Metrics } from "./diagram.ts";
 import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
 import { moduleOf } from "./graph.ts";
+import { standsFor } from "./shape-keys.ts";
+import { parseView } from "./view-keys.ts";
 
 function position(node: Shape): string {
   if (!node.ref?.file) return "";
@@ -194,7 +196,7 @@ export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file:
   if (node.doc) lines.push(node.doc, "");
 
   if (node.kind === "hole") lines.push(`Not followed: ${node.reason ?? "unknown"}.`, "");
-  const id = node.ref?.id ?? node.id;
+  const id = standsFor(node);
 
   if (node.kind === "fn") {
     const calls = graph.calls.filter((call) => call.from === id);
@@ -292,17 +294,17 @@ export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file:
 /** The modules a shape stands for: a module itself, a layer's modules, a folded directory's, a function's own module; none for an external. */
 function modulesBehind(node: Shape, analysis: Analysis): string[] {
   const { graph } = analysis;
-  const id = node.ref?.id ?? node.id;
+  const id = standsFor(node);
 
   if (node.kind === "layer") return [...graph.modules.values()].filter((module) => module.layer === node.id).map((module) => module.id);
 
+  // A folded tail and a package stand for the modules of the view they open: a directory's, or one module's.
   if (node.kind === "more" || node.kind === "package") {
-    const members = (node as Shape & { members?: string[] }).members;
+    const view = node.opens === undefined ? null : parseView(node.opens);
 
-    if (members && members.length > 0) return members.map(moduleOf);
-    const directory = id.startsWith("dir:") ? `${id.slice(4)}/` : null;
+    if (view?.kind === "dir") return [...graph.modules.keys()].filter((module) => module.startsWith(`${view.subject}/`));
 
-    return directory ? [...graph.modules.keys()].filter((module) => module.startsWith(directory)) : [];
+    return view?.kind === "module" ? [view.subject] : [];
   }
 
   if (node.kind === "external" || node.kind === "hole" || node.kind === "start" || node.kind === "event") return [];
@@ -349,8 +351,8 @@ export function edgeMarkdown(edge: Line, diagram: Diagram, analysis: Analysis): 
   }
 
   // Calls behind the line: between the two functions, or between the modules behind the two shapes.
-  const fromId = from.ref?.id ?? from.id;
-  const toId = to.ref?.id ?? to.id;
+  const fromId = standsFor(from);
+  const toId = standsFor(to);
   const calls = graph.calls.filter((call) =>
     from.kind === "fn" || from.kind === "class" || to.kind === "fn" || to.kind === "class"
       ? (from.kind === "fn" || from.kind === "class" ? call.from === fromId : sources.has(moduleOf(call.from))) && (to.kind === "fn" || to.kind === "class" ? call.to === toId : targets.has(moduleOf(call.to)))

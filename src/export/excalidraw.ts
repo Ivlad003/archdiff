@@ -6,6 +6,7 @@
 import type { Diagram, Line, Shape } from "../diagram.ts";
 import { heatColour } from "./colour.ts";
 import { routeFree } from "./route-free.ts";
+import { lineElementId, opensView } from "../shape-keys.ts";
 
 interface ExcalidrawElement {
   id: string;
@@ -95,39 +96,19 @@ function text(id: string, container: string | null, x: number, y: number, width:
 }
 
 function shapeOf(node: Shape): { type: string; fill: string; stroke: string; style: ExcalidrawElement["strokeStyle"]; width: number } {
-  const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "class" ? "#4e342e" : node.kind === "state" ? "#2e7d32" : node.kind === "fragment" ? "#9e9e9e" : node.kind === "decision" ? "#6a1b9a" : node.kind === "action" ? "#424242" : node.kind === "end" ? "#616161" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
-  const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : node.kind === "class" ? "#fff8e1" : node.kind === "state" ? "#e8f5e9" : node.kind === "fragment" ? "transparent" : node.kind === "decision" ? "#f3e5f5" : node.kind === "end" ? "#eeeeee" : "#ffffff";
+  const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "class" ? "#4e342e" : node.kind === "state" || node.kind === "machine" ? "#2e7d32" : node.kind === "fragment" ? "#9e9e9e" : node.kind === "decision" ? "#6a1b9a" : node.kind === "action" ? "#424242" : node.kind === "end" ? "#616161" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
+  const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : node.kind === "class" ? "#fff8e1" : node.kind === "state" || node.kind === "machine" ? "#e8f5e9" : node.kind === "fragment" ? "transparent" : node.kind === "decision" ? "#f3e5f5" : node.kind === "end" ? "#eeeeee" : "#ffffff";
   // Heat darkens the fill; a diff mark is the stroke, so both show at once.
   const fill = node.heat !== undefined && node.heat > 0 ? heatColour(node.heat) : plain;
 
   return { type: node.kind === "start" || node.kind === "external" || node.kind === "event" || node.kind === "end" ? "ellipse" : node.kind === "hole" || node.kind === "decision" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.diff === "planned" || node.kind === "hole" || node.kind === "fragment" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
 }
 
-/** The view a shape opens on the page (`customData.view`, read by the page on a second tap); not an Excalidraw link, whose icon would clutter every shape. */
+/** The view a shape opens on the page (`customData.view`, read on a second tap): shape-keys.ts's, as a link; not an Excalidraw link, whose icon would clutter every shape. */
 function viewLink(node: Shape): string | null {
-  const id = node.ref?.id ?? node.id;
+  const view = opensView(node);
 
-  if (node.kind === "more") return node.ref?.id ? `archdiff://view/${encodeURIComponent(node.ref.id)}` : null;
-
-  switch (node.kind) {
-    case "layer":
-      return `archdiff://view/${encodeURIComponent(`layer:${id}`)}`;
-    case "module":
-      return `archdiff://view/${encodeURIComponent(`module:${id}`)}`;
-    case "fn":
-      return `archdiff://view/${encodeURIComponent(`calls:${id}`)}`;
-    case "class":
-      return `archdiff://view/${encodeURIComponent(`inside:${id.slice(0, id.indexOf("#"))}`)}`;
-    case "participant":
-      return `archdiff://view/${encodeURIComponent(`inside:${id}`)}`;
-    case "state":
-      return node.ref?.id?.startsWith("machine:") ? `archdiff://view/${encodeURIComponent(node.ref.id)}` : null;
-    case "action":
-      // A step of a function's logic that calls one function of the repository opens that function's logic; a function of the logic list, its own.
-      return node.ref?.id?.includes("#") ? `archdiff://view/${encodeURIComponent(`logic:${node.ref.id}`)}` : null;
-    default:
-      return null;
-  }
+  return view === null ? null : `archdiff://view/${encodeURIComponent(view)}`;
 }
 
 /** A point of a route. */
@@ -387,7 +368,7 @@ export function toExcalidraw(diagram: Diagram): string {
     const target = boxes.get(edge.to);
 
     if (!source || !target) continue;
-    const id = `edge:${edge.from}->${edge.to}${edge.kind === "message" ? `:${diagram.edges.indexOf(edge)}` : ""}`;
+    const id = lineElementId(edge, diagram.edges.indexOf(edge));
     const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.diff === "warning" || edge.diff === "changed" ? "#ef6c00" : edge.diff === "planned" || edge.kind === "call" || edge.kind === "message" ? "#1565c0" : edge.kind === "lifeline" ? "#b0bec5" : edge.kind === "flow" ? "#424242" : edge.typeOnly ? "#9e9e9e" : "#616161";
     const route = edge.route ?? routes.get(edge) ?? [centre.get(edge.from)!, centre.get(edge.to)!];
     const start = route[0]!;

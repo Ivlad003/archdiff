@@ -1,84 +1,11 @@
-// Where a shape leads: the view a shape opens on a second tap (`ownView`),
-// the other pictures of the same subject (`siblingViews`), and the path
-// above a view for the breadcrumbs (`crumbsOf`). Pure functions of view
-// keys and the views list.
+// Where a view leads: the other pictures of the same subject
+// (`siblingViews`) and the path above a view for the breadcrumbs
+// (`crumbsOf`). Pure functions of view keys and the views list; where a
+// shape leads is src/shape-keys.ts's, shared with the exports.
 
-import type { Shape, ViewEntry } from "./api.ts";
+import type { ViewEntry } from "./api.ts";
 import { parseView } from "../../src/view-keys.ts";
 
-/** The view a shape opens: a layer its modules, a module its imports, a function its calls. */
-export function ownView(node: Shape): string | null {
-  const id = node.ref?.id ?? node.id;
-
-  switch (node.kind) {
-    case "layer":
-      return `layer:${id}`;
-    case "module":
-    case "participant":
-      return `inside:${id}`;
-    case "fn":
-      return `calls:${id}`;
-    case "more":
-      return node.ref?.id ?? null;
-    case "state":
-      return node.ref?.id?.startsWith("machine:") ? node.ref.id : null;
-    case "action":
-      // A function of the logic list, or a step that calls one function: its flowchart.
-      return node.ref?.id?.includes("#") ? `logic:${node.ref.id}` : null;
-    default:
-      return null;
-  }
-}
-
-/** The chat tag of a shape (`@module:…`, `@fn:…`), with the label the chip shows; null for a shape the agent cannot be asked about by name. */
-export function tagOf(node: Shape): { tag: string; label: string } | null {
-  const id = node.ref?.id ?? node.id;
-  const label = node.label.split("\n")[0] ?? id;
-
-  switch (node.kind) {
-    case "module":
-    case "participant":
-      return { tag: `@module:${id}`, label };
-    case "fn":
-    case "class":
-      return { tag: `@fn:${id}`, label };
-    case "layer":
-      return { tag: `@layer:${id}`, label };
-    case "action":
-      return id.includes("#") ? { tag: `@logic:${id}`, label } : null;
-    case "more":
-      return node.ref?.id?.startsWith("dir:") ? { tag: `@dir:${node.ref.id.slice(4)}`, label } : null;
-    case "state":
-      return node.ref?.id?.startsWith("machine:") ? { tag: `@view:${node.ref.id}`, label } : null;
-    default:
-      return null;
-  }
-}
-
-/** The view key of a shape's subject (`module:…`, `calls:…`), for the pictures of the same subject; null for a shape without one. */
-export function subjectOf(node: Shape): string | null {
-  const id = node.ref?.id ?? node.id;
-
-  switch (node.kind) {
-    case "module":
-    case "participant":
-      return `module:${id}`;
-    case "fn":
-      return `calls:${id}`;
-    case "class":
-      return `classes:${id.slice(0, id.indexOf("#"))}`;
-    case "action":
-      return id.includes("#") ? `calls:${id}` : null;
-    case "layer":
-      return `layer:${id}`;
-    case "more":
-      return node.ref?.id ?? null;
-    default:
-      return null;
-  }
-}
-
-/** The other pictures of the same subject: a module's dependencies or its inside, a function's call tree or its sequence. */
 export function siblingViews(key: string): { label: string; key: string }[] {
   const view = parseView(key);
 

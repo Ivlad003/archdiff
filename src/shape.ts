@@ -11,6 +11,7 @@ import { DEFAULT_HUBS, type HubThresholds } from "./config.ts";
 import type { Diagram, Line, Lane, Shape } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode } from "./nodes.ts";
+import { standsFor } from "./shape-keys.ts";
 /**
  * More shapes than this and a view folds the tail into one shape. Studies of
  * diagram reading put the comfortable count far lower (7–10 at a glance); 40
@@ -64,7 +65,7 @@ export function fold(diagram: Diagram, limit: number): Diagram {
     }
 
     if (node.kind === "fn") {
-      const module = moduleOf(node.ref?.id ?? node.id);
+      const module = moduleOf(standsFor(node));
 
       return { id: `more:${module}`, label: module, view: `module:${module}` };
     }
@@ -82,7 +83,7 @@ export function fold(diagram: Diagram, limit: number): Diagram {
     if (!shape) {
       shape = { id: group.id, kind: "more", label: group.label, count: 0, x: 0, y: 0, w: 0, h: 0, members: [] };
 
-      if (group.view) shape.ref = { id: group.view };
+      if (group.view) shape.opens = group.view;
 
       if (node.group !== undefined) shape.group = node.group;
       groups.set(group.id, shape);
@@ -251,7 +252,7 @@ export function expandInPlace(diagram: Diagram, graph: Graph, expand: readonly s
     } else if (toOpen) {
       // Into the module: the functions called from the source's module (or from the source function itself).
       const sourceModule = diagram.nodes.find((node) => node.id === edge.from);
-      const fromModule = sourceModule?.kind === "fn" ? moduleOf(sourceModule.ref?.id ?? edge.from) : edge.from;
+      const fromModule = sourceModule?.kind === "fn" ? moduleOf(standsFor(sourceModule)) : edge.from;
       const targets = new Set(graph.calls.filter((call) => moduleOf(call.from) === fromModule && fnsOf.get(edge.to)!.includes(call.to)).map((call) => call.to));
 
       if (targets.size === 0) push({ from: edge.from, to: restOf(edge.to), kind: edge.kind });
@@ -259,7 +260,7 @@ export function expandInPlace(diagram: Diagram, graph: Graph, expand: readonly s
     } else {
       // Out of the module: the functions that call into the target's module.
       const targetModule = diagram.nodes.find((node) => node.id === edge.to);
-      const toModule = targetModule?.kind === "fn" ? moduleOf(targetModule.ref?.id ?? edge.to) : edge.to;
+      const toModule = targetModule?.kind === "fn" ? moduleOf(standsFor(targetModule)) : edge.to;
       const sources = new Set(graph.calls.filter((call) => fnsOf.get(edge.from)!.includes(call.from) && (moduleOf(call.to) === toModule || call.to === toModule)).map((call) => call.from));
 
       if (sources.size === 0) push({ from: restOf(edge.from), to: edge.to, kind: edge.kind });

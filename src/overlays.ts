@@ -8,9 +8,10 @@
 // page apply them in order after the review's own overlay (diff.ts).
 
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, Shape } from "./diagram.ts";
+import type { Diagram } from "./diagram.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
+import { moduleOfShape, standsFor } from "./shape-keys.ts";
 import { overlayInstability } from "./metrics.ts";
 
 import { OVERLAYS, type Overlay } from "./options.ts";
@@ -20,21 +21,12 @@ export { OVERLAYS, type Overlay } from "./options.ts";
 /** A test module, by its path (the same rule as the tests view). */
 const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|[.\-_](test|spec|stories)\.[cm]?[jt]sx?$|_test\.(py|rs|php)$|(^|\/)tests?_[^/]*\.py$|Test\.php$/;
 
-/** The module a shape stands for, when it stands for a module or a function of one. */
-function moduleOfNode(node: Shape): string | null {
-  if (node.kind === "module" || node.kind === "participant") return node.ref?.id ?? node.id;
-
-  if (node.kind === "fn" || node.kind === "class") return moduleOf(node.ref?.id ?? node.id);
-
-  return null;
-}
-
 /** Modules no test file imports get a mark and a line in their label. */
 export function overlayTests(diagram: Diagram, graph: Graph): Diagram {
   const covered = new Set(graph.deps.filter((dep) => TEST_MODULE.test(dep.from) && !TEST_MODULE.test(dep.to)).map((dep) => dep.to));
   let untested = 0;
   const nodes = diagram.nodes.map((node) => {
-    const module = moduleOfNode(node);
+    const module = moduleOfShape(node);
 
     if (!module || TEST_MODULE.test(module) || covered.has(module) || !graph.modules.has(module)) return node;
     untested++;
@@ -50,7 +42,7 @@ export function overlayStorages(diagram: Diagram, analysis: Analysis): Diagram {
   const cache = new Map<string, string | null>();
   let found = 0;
   const nodes = diagram.nodes.map((node) => {
-    const module = moduleOfNode(node);
+    const module = moduleOfShape(node);
 
     if (!module) return node;
     let storage = cache.get(module);
@@ -85,7 +77,7 @@ export function overlayHeat(diagram: Diagram, graph: Graph): Diagram {
 
   const max = Math.max(1, ...intoModule.values());
   const nodes = diagram.nodes.map((node) => {
-    const id = node.ref?.id ?? node.id;
+    const id = standsFor(node);
     const count = node.kind === "module" || node.kind === "participant" ? intoModule.get(id) : node.kind === "fn" || node.kind === "class" ? intoNode.get(id) : undefined;
 
     // A diff mark of the review or the tests overlay stays; the shade sits under it.

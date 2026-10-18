@@ -32,19 +32,26 @@ export interface Shape {
    * to); `cell`: a box of a table or a bar of a chart, sized by the view;
    * `package`: a package of a monorepo; `class`: a class or interface box
    * of the class diagram, its label the fields and methods line by line;
-   * `state`: a state of a state machine (or a machine in the list of them);
+   * `state`: a state of a state machine; `machine`: a machine in the list
+   * of them;
    * `fragment`: a dashed frame of a sequence around the calls under one
    * guard (`opt`, `loop`), its label top left; `decision`: a branch of a
    * function's logic (a diamond: an `if`, a `switch`, a loop header, a
    * `try`); `action`: one or two plain statements of it; `end`: where a
    * path of it ends (`return`, `throw`, the end of the body).
    */
-  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package" | "class" | "state" | "fragment" | "decision" | "action" | "end";
+  kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package" | "class" | "state" | "machine" | "fragment" | "decision" | "action" | "end";
   /** How hot the shape is, 0–1 (a hotspot's calls in, a matrix cell's count): the fill darkens with it. */
   heat?: number;
   label: string;
-  /** The code the shape stands for: a graph ID and a position. */
+  /** The code the shape stands for: the ID of a declaration or a module (never a view's key), and where it is written. */
   ref?: { id?: string; file?: string; line?: number; endLine?: number };
+  /**
+   * The view a tap on the shape opens, when its kind and code do not say
+   * it (shape-keys.ts): a folded tail's directory or module, a package's
+   * directory, a machine, a header of a matrix.
+   */
+  opens?: string;
   /** A `fn`: its signature as written, for the properties panel. */
   signature?: string;
   /** The documentation comment of the code, for the properties panel. */
@@ -267,6 +274,7 @@ export const SIZE: Record<Shape["kind"], { w: number; h: number }> = {
   package: { w: 180, h: 60 },
   class: { w: 230, h: 80 },
   state: { w: 150, h: 50 },
+  machine: { w: 190, h: 56 },
   fragment: { w: 2, h: 2 },
   decision: { w: 230, h: 80 },
   action: { w: 230, h: 64 },

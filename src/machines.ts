@@ -115,7 +115,7 @@ export function machinesView(analysis: Analysis): PictureContent {
   const machines = machinesOf(analysis);
 
   if (machines.length === 0) return unplaced("State machines", [], [], [], { reason: "no state machine: no field or variable set to two or more literal states and read as one, and no createMachine / StateMachine / Machine(…)" });
-  const nodes: Shape[] = machines.map((machine) => ({ id: machine.id, kind: "state", label: `${machine.name}\n${machine.states.length} states · ${machine.transitions.length} transitions${machine.kind === "explicit" ? ` · ${machine.library}` : ""}`, ref: { id: machine.id, file: machine.module, line: machine.line }, group: machine.module, x: 0, y: 0, w: 0, h: 0 }));
+  const nodes: Shape[] = machines.map((machine) => ({ id: machine.id, kind: "machine", label: `${machine.name}\n${machine.states.length} states · ${machine.transitions.length} transitions${machine.kind === "explicit" ? ` · ${machine.library}` : ""}`, opens: machine.id, ref: { file: machine.module, line: machine.line }, group: machine.module, x: 0, y: 0, w: 0, h: 0 }));
   const explicit = machines.filter((machine) => machine.kind === "explicit").length;
 
   return unplaced(`State machines (${machines.length})`, nodes, [], [...new Set(machines.map((machine) => machine.module))].map(lane), { reason: `${explicit} declared by a library, ${machines.length - explicit} written with literals; tap one to see its states and transitions` });
@@ -137,13 +137,13 @@ export function machineView(analysis: Analysis, id: string): PictureContent {
   }
 
   for (const state of machine.states) {
-    const node: Shape = { id: stateId(state.name), kind: "state", label: state.assigned || machine.kind === "explicit" ? state.name : `${state.name}\n${state.declared ? "declared, never set" : "read, never set"}`, ref: { id: machine.id, file: machine.module, line: machine.line }, x: 0, y: 0, w: 0, h: 0 };
+    const node: Shape = { id: stateId(state.name), kind: "state", label: state.assigned || machine.kind === "explicit" ? state.name : `${state.name}\n${state.declared ? "declared, never set" : "read, never set"}`, ref: { file: machine.module, line: machine.line }, x: 0, y: 0, w: 0, h: 0 };
 
     if (!state.assigned && machine.kind === "implicit") node.diff = "planned";
     nodes.push(node);
   }
 
-  if (machine.transitions.some((transition) => transition.from === "*")) nodes.push({ id: stateId("*"), kind: "state", label: "any state", ref: { id: machine.id, file: machine.module, line: machine.line }, x: 0, y: 0, w: 0, h: 0 });
+  if (machine.transitions.some((transition) => transition.from === "*")) nodes.push({ id: stateId("*"), kind: "state", label: "any state", ref: { file: machine.module, line: machine.line }, x: 0, y: 0, w: 0, h: 0 });
   const seen = new Set<string>();
 
   for (const transition of machine.transitions) {

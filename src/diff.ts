@@ -16,6 +16,7 @@ import type { Diagram, Line, Shape, DiffMark, PictureContent } from "./diagram.t
 import { toMermaid } from "./export/mermaid.ts";
 import type { Graph, Declaration } from "./graph.ts";
 import { allowedLayerPairs, type Intent } from "./intent.ts";
+import { standsFor } from "./shape-keys.ts";
 
 export interface NodeChange {
   id: string;
@@ -473,7 +474,7 @@ export function overlayDiff(diagram: Diagram, diff: GraphDiff): Diagram {
   const calls = new Set(diff.callsAdded.map((edge) => `${edge.from}\u0000${edge.to}`));
   let marked = 0;
   const nodes = diagram.nodes.map((node) => {
-    const id = node.ref?.id ?? node.id;
+    const id = standsFor(node);
     const mark = marks.get(id) ?? (node.kind === "layer" ? undefined : marks.get(node.id));
 
     if (!mark) return node;

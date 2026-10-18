@@ -369,9 +369,10 @@ test("a package of a monorepo resolves imports through its own tsconfig, and ext
 test("dir views list directories with two modules, and a folded picture groups by directory", () => {
   const { stdout } = archdiff(["views", fixture]);
   assert.ok(stdout.includes("dir:src/lib\tsrc/lib/ (2)"), stdout);
-  const folded = JSON.parse(archdiff(["diagram", "layer:lib", fixture, "--format", "json", "--limit", "1"]).stdout) as { nodes: { id: string; kind: string; label: string; ref?: { id?: string } }[] };
+  const folded = JSON.parse(archdiff(["diagram", "layer:lib", fixture, "--format", "json", "--limit", "1"]).stdout) as { nodes: { id: string; kind: string; label: string; opens?: string; ref?: { id?: string } }[] };
   const groups = folded.nodes.filter((node) => node.kind === "more");
-  assert.ok(groups.some((node) => node.id === "more:src/lib" && node.label === "… 1 in src/lib/" && node.ref?.id === "dir:src/lib"), JSON.stringify(groups));
+  // A folded shape opens its directory's view; its `ref` is no view key.
+  assert.ok(groups.some((node) => node.id === "more:src/lib" && node.label === "… 1 in src/lib/" && node.opens === "dir:src/lib" && node.ref === undefined), JSON.stringify(groups));
   const dir = archdiff(["diagram", "dir:src/lib", fixture, "--format", "mermaid", "--depth", "0"]);
   assert.equal(dir.status, 0);
   assert.ok(dir.stdout.includes("src_lib_orders_ts --> src_lib_log_ts"), dir.stdout);

@@ -45,6 +45,8 @@ function elementType(node: Shape): string {
       return "DataObject";
     case "state":
       return "ApplicationEvent";
+    case "machine":
+      return "ApplicationProcess";
     case "fragment":
       return "Grouping";
     case "decision":

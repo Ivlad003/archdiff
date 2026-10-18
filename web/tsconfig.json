@@ -16,5 +16,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../src/diagram.ts", "../src/json.ts", "../src/export/excalidraw.ts", "../src/scene.ts", "../src/options.ts", "../src/result.ts", "../src/view-keys.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../src/diagram.ts", "../src/json.ts", "../src/export/excalidraw.ts", "../src/scene.ts", "../src/options.ts", "../src/result.ts", "../src/view-keys.ts", "../src/shape-keys.ts"]
 }
