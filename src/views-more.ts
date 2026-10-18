@@ -598,9 +598,13 @@ function classBoxes(analysis: Analysis, module: string): ClassBox[] {
 /**
  * The class diagram: every class, interface and object type of the scope
  * (the whole repository, a module, or a directory) as a box with its
- * fields and methods, `extends` and `implements` as lines to the boxes
- * they name — in the scope, or brought in from the modules the scope
- * imports. Lanes are modules; the Markdown carries a Mermaid classDiagram.
+ * fields and methods, and the lines between them: `extends` and
+ * `implements` as written, `has` for a field typed with another box's
+ * class, `uses` for the calls a class's methods make to another class
+ * (its members or its constructor). A box an `extends`, `implements` or
+ * `has` names outside the scope is brought in from the modules the scope
+ * imports; `uses` stays among the boxes drawn. Lanes are modules; the
+ * Markdown carries a Mermaid classDiagram.
  */
 export function classesView(analysis: Analysis, scope: string | null, limit: number): PictureContent {
   const { graph } = analysis;
@@ -635,6 +639,23 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
     return null;
   };
 
+  // The classes and types a field's type names (`repo: Repo`, `items: Order[]`, `by: Map<string, Order>`): the box of each.
+  const typedWith = (box: ClassBox): string[] => {
+    const named = new Set<string>();
+
+    for (const field of box.fields) {
+      const at = field.indexOf(": ");
+
+      for (const name of at === -1 ? [] : (field.slice(at + 2).match(/[A-Za-z_$][\w$]*/g) ?? [])) {
+        const target = resolveName(box.module, name);
+
+        if (target && target !== box.id) named.add(target);
+      }
+    }
+
+    return [...named];
+  };
+
   // Targets outside the scope are brought in as boxes of their own, so a line never points at nothing.
   const related = new Set<string>();
 
@@ -644,6 +665,8 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
 
       if (target && !boxes.has(target)) related.add(target);
     }
+
+    for (const target of typedWith(box)) if (!boxes.has(target)) related.add(target);
   }
 
   for (const id of related) {
@@ -679,9 +702,37 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
 
       if (target && kept.has(target)) edges.push({ from: box.id, to: target, kind: "ref", label: "implements" });
     }
+
+    for (const target of typedWith(box)) if (kept.has(target)) edges.push({ from: box.id, to: target, kind: "dependency", label: "has" });
   }
 
-  const classes = { boxes: all.map((box) => ({ id: box.id, name: box.name, kind: box.kind, fields: box.fields, methods: box.methods })), relations: edges.map((edge) => ({ from: edge.from, to: edge.to, kind: edge.label as "extends" | "implements" })) };
+  // `uses`: the calls from the methods (or the class body) of one box to the members or the constructor of another,
+  // counted per pair; a pair already joined by inheritance or by a field (`has`) says nothing new.
+  const joined = new Set(edges.map((edge) => `${edge.from}\0${edge.to}`));
+  const boxOf = (id: string): string | null => {
+    const hash = id.indexOf("#");
+
+    if (hash === -1) return null;
+    const dot = id.indexOf(".", hash);
+    const box = dot === -1 ? id : id.slice(0, dot);
+
+    return kept.has(box) ? box : null;
+  };
+  const uses = new Map<string, number>();
+
+  for (const call of graph.calls) {
+    const from = boxOf(call.from);
+    const to = call.kind === "call" ? boxOf(call.to) : null;
+
+    if (from && to && from !== to && !joined.has(`${from}\0${to}`)) uses.set(`${from}\0${to}`, (uses.get(`${from}\0${to}`) ?? 0) + 1);
+  }
+
+  for (const [pair, count] of [...uses].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    const [from, to] = pair.split("\0") as [string, string];
+    edges.push({ from, to, kind: "call", label: "uses", count });
+  }
+
+  const classes = { boxes: all.map((box) => ({ id: box.id, name: box.name, kind: box.kind, fields: box.fields, methods: box.methods })), relations: edges.map((edge) => ({ from: edge.from, to: edge.to, kind: edge.label as "extends" | "implements" | "has" | "uses" })) };
   const diagram = unplaced(scope === null ? `Classes (${all.length})` : `Classes of ${scope}`, nodes, edges, [...new Set(all.map((box) => box.module))].map(lane), { classes });
 
   if (boxes.size > limit) diagram.reason = `${boxes.size - limit} of ${counted(boxes.size, "class", "classes")} cut; --limit raises it, classes:<dir> narrows`;

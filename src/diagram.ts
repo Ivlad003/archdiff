@@ -150,7 +150,7 @@ export interface Diagram {
   /** A logic view: the function, and every path from its start to an exit as a rule (the Markdown's table); the Mermaid is a flowchart TB. */
   logic?: LogicData;
   /** A class view: the Mermaid export is a classDiagram. */
-  classes?: { boxes: { id: string; name: string; kind: "class" | "interface" | "type"; fields: string[]; methods: string[] }[]; relations: { from: string; to: string; kind: "extends" | "implements" }[] };
+  classes?: { boxes: { id: string; name: string; kind: "class" | "interface" | "type"; fields: string[]; methods: string[] }[]; relations: { from: string; to: string; kind: "extends" | "implements" | "has" | "uses" }[] };
 }
 
 /** What a view draws, before `viewOf` names it with the view's key (view-keys.ts): a picture without its `view`. */

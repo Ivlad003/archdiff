@@ -137,7 +137,7 @@ function stateMermaid(diagram: Diagram): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** A class view as Mermaid's classDiagram: a box per class with its fields and methods, inheritance and realisation arrows. */
+/** A class view as Mermaid's classDiagram: a box per class with its fields and methods; inheritance and realisation arrows, an association for a field's class (`has`), a dependency for the calls between classes (`uses`). */
 function classMermaid(diagram: Diagram): string {
   const classes = diagram.classes!;
   const ids = mermaidIds(diagram.nodes);
@@ -162,7 +162,11 @@ function classMermaid(diagram: Diagram): string {
     const from = ids.get(relation.from);
     const to = ids.get(relation.to);
 
-    if (from && to) lines.push(relation.kind === "extends" ? `  ${to} <|-- ${from}` : `  ${to} <|.. ${from}`);
+    if (!from || !to) continue;
+
+    if (relation.kind === "extends") lines.push(`  ${to} <|-- ${from}`);
+    else if (relation.kind === "implements") lines.push(`  ${to} <|.. ${from}`);
+    else lines.push(relation.kind === "has" ? `  ${from} --> ${to} : has` : `  ${from} ..> ${to} : uses`);
   }
 
   return `${lines.join("\n")}\n`;

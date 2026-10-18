@@ -1227,11 +1227,11 @@ test("agent events name the files a tool touches, for the page to light their sh
   assert.ok((await ended(runner.start(codex, "again", "thread-9"))).includes("text: Resumed thread-9."));
 });
 
-test("classes draws the class diagram with fields, methods, extends and implements, as boxes and as Mermaid", () =>
+test("classes draws the class diagram with fields, methods, extends, implements, has and uses, as boxes and as Mermaid", () =>
   withTempDir("archdiff-classes-", (dir) => {
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(join(dir, "src"), { recursive: true });
-    writeFileSync(join(dir, "src/repo.ts"), "export interface Repo {\n  save(o: Order): void;\n  readonly name: string;\n}\nexport type Order = { id: string; total: number };\n");
+    writeFileSync(join(dir, "src/repo.ts"), "export interface Repo {\n  save(o: Order): void;\n  readonly name: string;\n}\nexport type Order = { id: string; total: number };\nexport class Memory implements Repo {\n  readonly name = \"mem\";\n  save(o: Order): void {}\n}\n");
     writeFileSync(join(dir, "src/service.ts"), 'import type { Repo, Order } from "./repo.ts";\n\nexport abstract class Base {\n  abstract go(): void;\n  stop(): void {}\n}\n\nexport class Service extends Base implements Repo {\n  readonly name = "svc";\n  constructor(private readonly repo: Repo, public label?: string) {\n    super();\n  }\n  go(): void {\n    this.save({ id: "1", total: 1 });\n  }\n  save(o: Order): void {\n    this.repo.save(o);\n  }\n  get size(): number {\n    return 1;\n  }\n}\n');
     const md = archdiff(["diagram", "classes", dir]).stdout;
     assert.ok(md.includes("classDiagram"), md);
@@ -1240,6 +1240,10 @@ test("classes draws the class diagram with fields, methods, extends and implemen
     assert.ok(md.includes("+save(o: Order) → void") || md.includes("+save(o: Order) returns void"), md);
     assert.ok(md.includes("src_service_ts_Base <|-- src_service_ts_Service"), md);
     assert.ok(md.includes("src_repo_ts_Repo <|.. src_service_ts_Service"), md);
+    // A field typed with a class of the picture is a `has` line; a call from a method to another class's member (here through the interface, to the class implementing it) a `uses` line.
+    assert.ok(md.includes("src_service_ts_Service --> src_repo_ts_Repo : has"), md);
+    assert.ok(md.includes("src_service_ts_Service ..> src_repo_ts_Memory : uses"), md);
+    assert.ok(md.includes("- has `src/repo.ts#Repo`") && md.includes("- uses `src/repo.ts#Memory`"), md);
     assert.ok(md.includes("## «interface» Repo — src/repo.ts:1") && md.includes("- field `+name: string`"), md);
     const json = JSON.parse(archdiff(["diagram", "classes:src/service.ts", dir, "--format", "json"]).stdout) as { nodes: { id: string; kind: string; h: number; label: string }[]; edges: { label?: string }[]; groups: { id: string }[] };
     // The scope is one module; the interface it implements comes along from repo.ts, in its own lane.
@@ -1247,7 +1251,8 @@ test("classes draws the class diagram with fields, methods, extends and implemen
     const service = json.nodes.find((node) => node.id === "src/service.ts#Service")!;
     assert.equal(service.kind, "class");
     assert.ok(service.h > 100 && service.label.startsWith("Service\n"), service.label);
-    assert.deepEqual(json.edges.map((edge) => edge.label).sort(), ["extends", "implements"]);
+    // The interface the field is typed with comes along too; the class only used by a call stays out of a module's scope.
+    assert.deepEqual(json.edges.map((edge) => edge.label).sort(), ["extends", "has", "implements"]);
   }));
 
 test("--changes lays the review's marks over any view", () =>
