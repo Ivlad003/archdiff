@@ -112,7 +112,89 @@ test("a big view folds its tail into shapes by directory and says so", () => {
   assert.ok(diagram.reason?.includes("folded"));
 });
 
-test("every export format is well formed and byte-stable", () => {
+/**
+ * The first reason `xml` is not well-formed XML, or null: one root element, every tag closed in order, attribute
+ * values quoted with no `<` in them, `&` only in an entity. Enough for the files archdiff writes (no DTD, no CDATA).
+ */
+function xmlProblem(xml: string): string | null {
+  const body = xml.replace(/^<\?xml[^>]*\?>/, "").replace(/<!--[\s\S]*?-->/g, "");
+  const bareAmpersand = (text: string): boolean => text.replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);/g, "").includes("&");
+  const open: string[] = [];
+  let roots = 0;
+
+  for (const piece of body.match(/<[^>]*>|[^<]+/g) ?? []) {
+    if (!piece.startsWith("<")) {
+      if (bareAmpersand(piece)) return `a bare & in text: ${piece.slice(0, 60)}`;
+
+      if (open.length === 0 && piece.trim() !== "") return `text outside the root: ${piece.slice(0, 60)}`;
+      continue;
+    }
+
+    const tag = piece.match(/^<(\/?)([A-Za-z_][\w:.-]*)((?:\s+[A-Za-z_][\w:.-]*="[^"<]*")*)\s*(\/?)>$/);
+
+    if (!tag) return `not a tag: ${piece.slice(0, 80)}`;
+    const [, closing, name, attributes, selfClosing] = tag;
+
+    if (bareAmpersand(attributes ?? "")) return `a bare & in an attribute of <${name}>`;
+
+    if (closing) {
+      if (open.pop() !== name) return `</${name}> closes nothing open`;
+    } else {
+      if (open.length === 0) roots++;
+
+      if (!selfClosing) open.push(name!);
+    }
+  }
+
+  if (open.length > 0) return `<${open.at(-1)}> is never closed`;
+
+  return roots === 1 ? null : `${roots} root elements`;
+}
+
+test("every export is well formed: the XML parses, every Excalidraw ID is unique and a bound text's element exists", () => {
+  const machines = join(root, "tests/fixtures/machines");
+  const pictures: [string, string][] = [
+    ["layers", fixture],
+    ["modules", fixture],
+    ["module:src/lib/orders.ts", fixture],
+    ["inside:src/lib/orders.ts", fixture],
+    ["calls:src/routes/checkout.tsx#action", fixture],
+    ["sequence:src/checkout.ts#checkout", machines],
+    ["logic:src/order.ts#pay", machines],
+    ["machine:src/order.ts#status", machines],
+    ["classes", fixture],
+    ["matrix", fixture],
+    ["metrics", fixture],
+    ["hotspots", fixture],
+  ];
+
+  for (const [view, dir] of pictures) {
+    for (const format of ["drawio", "archimate"]) {
+      const { status, stdout } = archdiff(["diagram", view, dir, "--format", format]);
+      assert.equal(status, 0, `${view} ${format}`);
+      assert.equal(xmlProblem(stdout), null, `${view} as ${format}`);
+    }
+
+    const scene = JSON.parse(archdiff(["diagram", view, dir, "--format", "excalidraw"]).stdout) as { elements: { id: string; type: string; containerId?: string | null; boundElements: { id: string }[] | null }[] };
+    const ids = scene.elements.map((element) => element.id);
+    assert.equal(new Set(ids).size, ids.length, `${view}: an Excalidraw ID twice: ${ids.filter((id, i) => ids.indexOf(id) !== i).join(", ")}`);
+    const known = new Set(ids);
+
+    for (const element of scene.elements) {
+      if (element.containerId) assert.ok(known.has(element.containerId), `${view}: ${element.id} is bound to a missing ${element.containerId}`);
+
+      for (const bound of element.boundElements ?? []) assert.ok(known.has(bound.id), `${view}: ${element.id} names a missing bound element ${bound.id}`);
+    }
+  }
+
+  // The checker itself refuses what it should.
+  assert.equal(xmlProblem('<a x="1"><b/></a>'), null);
+  assert.notEqual(xmlProblem("<a><b></a></b>"), null);
+  assert.notEqual(xmlProblem('<a x="R&D"/>'), null);
+  assert.notEqual(xmlProblem("<a/><b/>"), null);
+});
+
+test("every export format is byte-stable and carries what it stands for", () => {
   const drawio = archdiff(["diagram", "layers", fixture, "--format", "drawio"]).stdout;
   assert.ok(drawio.startsWith('<mxfile host="archdiff"'));
   assert.ok(drawio.includes('archdiff_kind="layer" archdiff_id="lib"'));
@@ -562,6 +644,25 @@ test("review without --base measures from the merge-base with develop when the r
     assert.ok(stdout.includes("- fn `log` — src/lib/log.ts:1 (body)"), stdout);
   }));
 
+test("a sequence keeps twelve lifelines, the rest sharing one, and a call repeated in a row is one message ×N", () =>
+  withTempDir("archdiff-sequence-", (dir) => {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    const names = Array.from({ length: 12 }, (_, i) => `m${i + 1}`);
+
+    for (const name of names) writeFileSync(join(dir, `src/${name}.ts`), `export function ${name}(): number {\n  return 1;\n}\n`);
+    // Thirteen modules on the way: main and twelve it calls, the first twice in a row.
+    writeFileSync(join(dir, "src/main.ts"), `${names.map((name) => `import { ${name} } from "./${name}";`).join("\n")}\n\nexport function main(): void {\n  m1();\n  m1();\n${names.slice(1).map((name) => `  ${name}();`).join("\n")}\n}\n`);
+    const { status, stdout, stderr } = archdiff(["diagram", "sequence:src/main.ts#main", dir, "--format", "json"]);
+    assert.equal(status, 0, stderr);
+    const picture = JSON.parse(stdout) as { reason?: string; sequence: { participants: string[]; messages: { from: string; to: string; label: string; line: number; times?: number }[] }; edges: { kind: string; label?: string }[] };
+    assert.equal(picture.sequence.participants.length, 12);
+    assert.deepEqual(picture.sequence.participants.slice(-2), ["src/m10.ts", "… 2 more"]);
+    assert.deepEqual(picture.sequence.messages[0], { from: "src/main.ts", to: "src/m1.ts", label: "m1", line: 15, times: 2 });
+    assert.deepEqual(picture.sequence.messages.slice(-2).map((message) => message.to), ["… 2 more", "… 2 more"]);
+    assert.equal(picture.edges.find((edge) => edge.kind === "message")?.label, "1. m1() ×2");
+    assert.ok(picture.reason?.includes("2 modules share the last lifeline (at most 12)"), picture.reason);
+  }));
+
 test("branches lists the branches with the default base, and compare puts several heads against it", () =>
   withTempDir("archdiff-branches-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
@@ -801,6 +902,8 @@ test("metrics: coupling and cohesion by module and layer, as Markdown and JSON; 
   assert.equal(status, 0, stdout);
   assert.ok(stdout.includes("| **lib** | 2 | 1 | 1 | 0.50 |"), stdout);
   assert.ok(stdout.includes("| src/routes/checkout.tsx | routes | 0 | 1 | 1.00 | 0.00 | 0.00 |"), stdout);
+  // An isolated script (nothing imports it, it imports nothing of the repository): D is 1 and carries no ⚠.
+  assert.ok(stdout.includes("| cartridges/base/cartridge/scripts/hooks/basket.js | cartridge | 0 | 0 | 0.00 | 0.00 | 1.00 | 1.00 | 1 | 4 |"), stdout);
   const json = JSON.parse(archdiff(["metrics", fixture, "--json", "--layer", "db"]).stdout) as { modules: { id: string; ca: number; instability: number }[]; layers: { name: string }[] };
   assert.deepEqual(json.modules.map((row) => [row.id, row.ca, row.instability]), [["src/db/store.ts", 1, 0]]);
   assert.deepEqual(json.layers.map((layer) => layer.name), ["db"]);
@@ -846,7 +949,7 @@ test("review against the contract: a new layer dependency ARCHITECTURE.md forbid
     assert.ok(archdiff(["diagram", "layer:lib", dir, "--overlay", "storages"]).stdout.includes("⛁ the log file"));
   }));
 
-test("state machines: the implicit ones written with literals, the explicit ones a library declares, in TypeScript and Python", () => {
+test("state machines: the implicit ones written with literals, the explicit ones a library declares (XState, javascript-state-machine, transitions), in TypeScript, JavaScript and Python", () => {
   const machines = join(root, "tests/fixtures/machines");
   const views = archdiff(["views", machines]).stdout;
   assert.ok(views.includes("machine:src/order.ts#status\tstatus (src/order.ts) — 5 states"), views);
@@ -864,9 +967,15 @@ test("state machines: the implicit ones written with literals, the explicit ones
   // Python: `self.state` set in __init__ (initial), under an `if` and a `match`.
   const door = archdiff(["diagram", "machine:src/door.py#state", machines, "--format", "mermaid"]).stdout;
   assert.ok(door.includes("[*] --> s_closed") && door.includes("s_closed --> s_open: Door.open") && door.includes("s_closed --> s_locked: Door.lock"), door);
+  // javascript-state-machine: `init`, and a transition from a list of states.
+  const water = archdiff(["diagram", "machine:src/water.js#water", machines, "--format", "mermaid"]).stdout;
+  assert.ok(water.includes("%% declared with javascript-state-machine") && water.includes("[*] --> s_solid") && water.includes("s_solid --> s_liquid: melt") && water.includes("s_liquid --> s_solid: reset") && water.includes("s_gas --> s_solid: reset"), water);
+  // Python's `transitions`: a dictionary and a list per transition, and `add_transition` from two states folded in.
+  const ticket = archdiff(["diagram", "machine:src/ticket.py#machine", machines, "--format", "mermaid"]).stdout;
+  assert.ok(ticket.includes("[*] --> s_open") && ticket.includes("s_open --> s_assigned: assign") && ticket.includes("s_assigned --> s_closed: close") && ticket.includes("s_closed --> s_open: reopen") && ticket.includes("s_assigned --> s_open: reopen"), ticket);
   // The list of machines, and a machine that does not exist.
   const list = archdiff(["diagram", "machines", machines]).stdout;
-  assert.ok(list.includes("# State machines (3)") && list.includes("1 declared by a library, 2 written with literals"), list);
+  assert.ok(list.includes("# State machines (5)") && list.includes("3 declared by a library, 2 written with literals"), list);
   assert.equal(archdiff(["diagram", "machine:src/order.ts#nope", machines]).status, 2);
   // A sequence frames the calls under a loop, a branch, a try and a catch, nesting the branch inside the loop.
   const sequence = archdiff(["diagram", "sequence:src/checkout.ts#checkout", machines]).stdout;

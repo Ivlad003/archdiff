@@ -424,12 +424,15 @@ test("the project map lists every module with its layer and every import; a tag 
   assert.ok(node.markdown.startsWith("# order.total < 0"), node.markdown.slice(0, 80));
 });
 
-test("a changed source file of any language the analysis reads reaches the page through /api/changes", async () => {
+test("a changed source file of any language the analysis reads reaches the page through /api/changes, and the next picture is drawn anew", async () => {
   const controller = new AbortController();
   const response = await fetch(`${base}/api/changes`, { signal: controller.signal });
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   const file = join(dir, "src/lib/tool.py");
+  // The picture of the lib layer, drawn (and kept) before the change.
+  const shapesOfLib = async (): Promise<string[]> => (await getJson<{ diagram: { nodes: { id: string }[] } }>("/api/scene?view=layer%3Alib")).diagram.nodes.map((node) => node.id);
+  assert.ok(!(await shapesOfLib()).includes("src/lib/tool.py"));
 
   try {
     // A Python file: the watcher once listened to TypeScript and JavaScript only.
@@ -445,6 +448,8 @@ test("a changed source file of any language the analysis reads reaches the page 
     }
 
     assert.ok(text.includes(`data: ${JSON.stringify({ path: "src/lib/tool.py" })}`), `no change event for the Python file: ${text}`);
+    // The same picture asked again is drawn from the new analysis, not the one kept before the change.
+    assert.ok((await shapesOfLib()).includes("src/lib/tool.py"));
   } finally {
     controller.abort();
     rmSync(file, { force: true });
