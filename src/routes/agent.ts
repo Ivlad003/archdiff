@@ -6,11 +6,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dataFlow, flowMarkdown, jsonInAnswer, mockPrompt, mocksFromTypes } from "../flow.ts";
-import { planFromScene, planMarkdown } from "../plan.ts";
+import { mergePlan, planFromScene, planMarkdown } from "../plan.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { CACHE_DIRECTORY } from "../cache.ts";
 import { layoutSlug } from "../layouts.ts";
-import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, mergePlan, parseIntent, writeIntent } from "../intent.ts";
+import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, parseIntent, writeIntent } from "../intent.ts";
 import { readLayout } from "../layouts.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView } from "../views.ts";
@@ -77,26 +77,6 @@ export async function postCode(ctx: RouteContext, { body, response }: RouteReque
   const task = [planMarkdown(plan, after).trimEnd(), "", `## The contract`, "", `${INTENT_FILE} now holds what was drawn. Build what it names and the code does not have yet:`, "", ...report.planned.map((item) => `- \`${item}\``), ...report.plannedEdges.map((item) => `- ${item}`), "", "Keep every import within the arrows of the contract; add an arrow there when one is truly needed and say why."].join("\n");
 
   return json(response, { markdown: `${task}\n`, intent: intentMarkdown(intent), planned: report.planned.length + report.plannedEdges.length });
-}
-
-export async function postIntent(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
-  const { root } = ctx;
-  let parsed;
-
-  try {
-    parsed = parseJson(body);
-  } catch {
-    return problem(response, 400, "the body must be JSON");
-  }
-
-  if (!isJsonObject(parsed) || !isJsonString(parsed["markdown"])) return problem(response, 400, '"markdown" is required');
-  const intent = parseIntent(parsed["markdown"]);
-
-  if (intent.layers.length === 0 && intent.modules.length === 0) return problem(response, 400, "no Mermaid flowchart with layers or modules in the text");
-  writeIntent(root, intent);
-  ctx.invalidate();
-
-  return json(response, { file: INTENT_FILE, layers: intent.layers.length, modules: intent.modules.length, edges: intent.edges.length });
 }
 
 export async function postIntentDocument(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
@@ -264,7 +244,6 @@ export async function getTasks(ctx: RouteContext, { response }: RouteRequest): P
 export const routes: Record<string, (ctx: RouteContext, request: RouteRequest) => Promise<void>> = {
   "POST /api/agent/run": postAgentRun,
   "POST /api/code": postCode,
-  "POST /api/intent": postIntent,
   "POST /api/intent/document": postIntentDocument,
   "POST /api/flow/mocks": postFlowMocks,
   "POST /api/agent/stop": postAgentStop,

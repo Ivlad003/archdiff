@@ -71,7 +71,7 @@ test("the API lists the views and draws a placed diagram with its Markdown", asy
   assert.equal(page.drawn, false);
   assert.ok(page.diagram.nodes.every((node) => node.w > 0));
   assert.ok(page.markdown.includes("# src/lib/orders.ts"));
-  const node = await getJson<{ markdown: string }>("/api/node?view=module:src/lib/orders.ts&id=src/lib/orders.ts");
+  const node = await getJson<{ markdown: string }>("/api/shape?view=module:src/lib/orders.ts&id=src/lib/orders.ts");
   assert.ok(node.markdown.includes("## Declarations"));
   const file = await fetch(`${base}/api/file?path=src/lib/orders.ts`);
   assert.equal(file.status, 200);
@@ -109,9 +109,9 @@ test("a drawing saved by the editor places the shapes of the live diagram and me
 });
 
 test("a shape's page is asked for the picture the page shows: an opened module's function has a page, a package.json is a readable file", async () => {
-  const expanded = await getJson<{ markdown: string }>(`/api/node?view=${encodeURIComponent("layer:lib")}&id=${encodeURIComponent("src/lib/orders.ts#placeOrder")}&expand=${encodeURIComponent("src/lib/orders.ts")}`);
+  const expanded = await getJson<{ markdown: string }>(`/api/shape?view=${encodeURIComponent("layer:lib")}&id=${encodeURIComponent("src/lib/orders.ts#placeOrder")}&expand=${encodeURIComponent("src/lib/orders.ts")}`);
   assert.ok(expanded.markdown.startsWith("# placeOrder"), expanded.markdown.slice(0, 80));
-  assert.equal((await fetch(`${base}/api/node?view=${encodeURIComponent("layer:lib")}&id=${encodeURIComponent("src/lib/orders.ts#placeOrder")}`)).status, 404);
+  assert.equal((await fetch(`${base}/api/shape?view=${encodeURIComponent("layer:lib")}&id=${encodeURIComponent("src/lib/orders.ts#placeOrder")}`)).status, 404);
   const manifest = await fetch(`${base}/api/file?path=tsconfig.json`);
   assert.equal(manifest.status, 200);
   assert.ok((await manifest.text()).includes("compilerOptions"));
@@ -141,13 +141,13 @@ test("the specs are listed and read from openspec/ and features/ only; the promp
 });
 
 test("a line's page names its ends and the imports and calls behind it", async () => {
-  const edge = await getJson<{ markdown: string }>(`/api/edge?view=${encodeURIComponent("layer:lib")}&from=${encodeURIComponent("src/lib/orders.ts")}&to=${encodeURIComponent("src/db/store.ts")}&kind=dependency`);
+  const edge = await getJson<{ markdown: string }>(`/api/line?view=${encodeURIComponent("layer:lib")}&from=${encodeURIComponent("src/lib/orders.ts")}&to=${encodeURIComponent("src/db/store.ts")}&kind=dependency`);
   assert.ok(edge.markdown.startsWith("# src/lib/orders.ts → src/db/store.ts"), edge.markdown.slice(0, 80));
   assert.ok(edge.markdown.includes("- to: **src/db/store.ts** (module)"), edge.markdown);
   assert.ok(edge.markdown.includes("`src/lib/orders.ts:2` → src/db/store.ts") && edge.markdown.includes("placeOrder → src/db/store.ts#saveOrder"), edge.markdown);
-  const layers = await getJson<{ markdown: string }>(`/api/edge?view=layers&from=routes&to=lib`);
+  const layers = await getJson<{ markdown: string }>(`/api/line?view=layers&from=routes&to=lib`);
   assert.ok(layers.markdown.includes("routes imports lib") && layers.markdown.includes("src/routes/checkout.tsx:1"), layers.markdown);
-  assert.equal((await fetch(`${base}/api/edge?view=layers&from=lib&to=nowhere`)).status, 404);
+  assert.equal((await fetch(`${base}/api/line?view=layers&from=lib&to=nowhere`)).status, 404);
 });
 
 test("the scene takes the options of the page: limit, overlays, the Mermaid type", async () => {
@@ -234,8 +234,10 @@ test("branches and a multi-head comparison through the API", async () => {
   const branches = await fetch(`${base}/api/branches`);
   assert.equal(branches.status, 400);
   assert.ok(((await branches.json()) as { error: string }).error.includes("not a git repository"));
-  const compare = await fetch(`${base}/api/compare?heads=a,b`);
+  // A comparison is a picture like any other; outside git it is refused with git's words.
+  const compare = await fetch(`${base}/api/scene?view=compare&heads=a,b`);
   assert.equal(compare.status, 400);
+  assert.ok(((await compare.json()) as { error: string }).error.includes("not a git repository"));
 });
 
 test("chat tags are suggested and expanded into context; mocks come from the types when the agent gives no JSON", async () => {
@@ -428,6 +430,6 @@ test("the project map lists every module with its layer and every import; a tag 
   assert.ok(context.includes("### @view:layer:lib") && context.includes("# Layer lib"), context.slice(0, 300));
   assert.ok(context.includes("### @logic:src/lib/orders.ts#validate") && context.includes("Paths: the rules of the function") && context.includes("`order.total < 0: yes`"), context);
   // A shape of a logic view has a page like any other shape.
-  const node = await getJson<{ markdown: string }>(`/api/node?view=${encodeURIComponent("logic:src/lib/orders.ts#validate")}&id=n1`);
+  const node = await getJson<{ markdown: string }>(`/api/shape?view=${encodeURIComponent("logic:src/lib/orders.ts#validate")}&id=n1`);
   assert.ok(node.markdown.startsWith("# order.total < 0"), node.markdown.slice(0, 80));
 });

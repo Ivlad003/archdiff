@@ -21,22 +21,16 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
-import { layout } from "./diagram.ts";
-import { review, withTimeline } from "./diff.ts";
-import { withLogic } from "./logic.ts";
-import { mergeBase, revisionStamp } from "./git.ts";
 import { watch as watchFs } from "node:fs";
 import { AgentRunner, type AgentSpec } from "./agent.ts";
 import { allowedToolsFor, checkEvents, runChecks } from "./checks.ts";
-import { readPictureOptions, type PictureOptions } from "./options.ts";
-import type { Result } from "./result.ts";
-import { problem, send, type RouteContext } from "./routes/context.ts";
+import { drawPicture, type Picture } from "./picture.ts";
+import { ok, wrong, type Result } from "./result.ts";
+import { problem, requestOf, send, type RouteContext } from "./routes/context.ts";
 import { routes as pictureRoutes } from "./routes/pictures.ts";
 import { routes as agentRoutes } from "./routes/agent.ts";
 import { routes as gitRoutes } from "./routes/git.ts";
 import { routes as specRoutes } from "./routes/spec.ts";
-import { positionsOf, readLayout } from "./layouts.ts";
-import { parseView, viewOf, viewOptionsOf } from "./views.ts";
 
 export interface ServeOptions {
   /** The port to bind; null: the first free port from DEFAULT_PORT up. */
@@ -150,43 +144,17 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     return current;
   };
 
-  /** The options of a picture as the query names them (the table of options.ts), or the problem with one of them. */
-  const optionsOf = (url: URL): Result<PictureOptions> => {
-    const read = readPictureOptions((name) => url.searchParams.get(name), "param");
+  /** The picture a query names, drawn on the current analysis; git's refusal (outside a repository, a bad ref) is the request's problem. */
+  const picture = async (query: URLSearchParams): Promise<Result<Picture>> => {
+    const request = requestOf(query, options.base);
 
-    return read.ok ? { ok: true, value: read.value.options } : read;
-  };
+    if (!request.ok) return request;
 
-  // Placed pictures by analysis: the same view with the same options and the same saved drawing is laid out once per
-  // analysis, so switching pictures back and forth costs a lookup. A new analysis (a changed file) starts a new map.
-  const pictures = new WeakMap<Analysis, Map<string, ReturnType<typeof layout>>>();
-
-  /** The placed diagram of a view with the page's options, the saved drawing's positions and the revision stamp; null for an unknown view. */
-  const placed = async (analysis: Analysis, key: string, picked: PictureOptions, base: string | null = null, head: string | null = null): Promise<ReturnType<typeof layout> | null> => {
-    const view = parseView(key);
-
-    if (!view) return null;
-    const saved = readLayout(root, key);
-    const memo = pictures.get(analysis) ?? new Map<string, ReturnType<typeof layout>>();
-    pictures.set(analysis, memo);
-    const memoKey = JSON.stringify([key, picked, base, head, saved?.saved ?? null]);
-    const known = memo.get(memoKey);
-
-    if (known) return known;
-    const viewOptions = viewOptionsOf(picked);
-    let source = analysis;
-
-    // The timeline is built from the commits of a range and the logic of a function from its file; `changes` lays the review's
-    // marks over the view: all read git or the disk here, at the edge.
-    if (view.kind === "timeline") source = await withTimeline(analysis, base || options.base || mergeBase(root), head || "HEAD");
-    else if (view.kind === "logic" && view.subject !== null) source = await withLogic(analysis, view.subject);
-    else if (picked.changes) viewOptions.diff = (await review(root, base || options.base, head)).diff;
-    const diagram = layout(viewOf(source, view, viewOptions), positionsOf(saved?.elements ?? null));
-    const stamp = revisionStamp(root);
-    const picture = stamp ? { ...diagram, stamp } : diagram;
-    memo.set(memoKey, picture);
-
-    return picture;
+    try {
+      return ok(await drawPicture(await fresh(), request.value));
+    } catch (error) {
+      return wrong(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const routes = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes };
@@ -210,8 +178,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     },
     activeRunner: () => runner,
     changeListeners,
-    placed,
-    optionsOf,
+    picture,
   };
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {

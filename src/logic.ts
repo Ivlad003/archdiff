@@ -5,16 +5,14 @@
 // run of statements, an ellipse per exit — and lists every path from the
 // start to an exit as a rule: the conditions taken, the calls made, how
 // it ends. The flowchart is read from the file on demand (extract/logic.ts,
-// through `withLogic` at the edge), not kept in the facts.
+// by picture.ts at the edge), not kept in the facts.
 //
-// Pure functions of the analysis once `withLogic` attached the fact.
-// Entry points: `withLogic`, `logicView`, `logicList`.
+// Pure functions of the analysis and the fact read for the view. Entry
+// points: `logicView`, `logicList`.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
 import type { PictureContent, Line, Shape, LogicData, LogicPath } from "./diagram.ts";
-import { readLogic, type LogicFact, type LogicStep } from "./extract/logic.ts";
+import type { LogicFact, LogicStep } from "./extract/logic.ts";
 import { moduleOf, type Declaration } from "./graph.ts";
 import { lane, unplaced } from "./nodes.ts";
 
@@ -23,24 +21,6 @@ const MAX_PATHS = 64;
 
 /** Functions the `logic` list draws, at most, the most branching first. */
 const MAX_LISTED = 60;
-
-/** The analysis with the flowchart of the function `id` attached, read from its file now; `fact` null when the file or the function is not readable. */
-export async function withLogic(analysis: Analysis, id: string): Promise<Analysis> {
-  const node = analysis.graph.nodes.get(id);
-
-  if (!node || node.kind !== "fn") return { ...analysis, logic: { id, fact: null } };
-  let source: string;
-
-  try {
-    source = readFileSync(join(analysis.root, node.module), "utf8");
-  } catch {
-    return { ...analysis, logic: { id, fact: null } };
-  }
-
-  const fact = await readLogic(node.module, source, node.parent ? `${node.parent}.${node.name}` : node.name, node.line);
-
-  return { ...analysis, logic: { id, fact } };
-}
 
 /** The functions with branches in them, the most branching first; what the `logic` list draws and the views list names. */
 export function logicList(analysis: Analysis): Declaration[] {
@@ -116,14 +96,13 @@ function calleeOf(analysis: Analysis, fnId: string, step: LogicStep): string | n
 }
 
 /** One function's body as a flowchart; the `logic` list when `scope` is null. */
-export function logicView(analysis: Analysis, scope: string | null): PictureContent {
+export function logicView(analysis: Analysis, scope: string | null, fact: LogicFact | null | undefined): PictureContent {
   if (scope === null) return logicListView(analysis);
   const fn = analysis.graph.nodes.get(scope);
 
-  if (!fn || fn.kind !== "fn") return unplaced(scope, [], [], [], { reason: `no function "${scope}" (archdiff views lists them)`, missing: true });
+  if (!fn || fn.kind !== "fn") return unplaced(scope, [], [], [], { reason: `no function "${scope}"`, missing: true });
 
-  if (!analysis.logic || analysis.logic.id !== scope) return unplaced(`Logic of ${fnLabel(fn)}`, [], [], [], { reason: "the logic is read from the function's file (archdiff diagram logic:<path>#<fn> reads it)" });
-  const fact = analysis.logic.fact;
+  if (fact === undefined) return unplaced(`Logic of ${fnLabel(fn)}`, [], [], [], { reason: "the logic is read from the function's file when the picture is drawn (archdiff diagram logic:<path>#<fn>, or the page)" });
 
   if (!fact) return unplaced(`Logic of ${fnLabel(fn)}`, [], [], [], { reason: `the body of ${fnLabel(fn)} could not be read: ${fn.module} is not TypeScript, JavaScript or Python, or the function was not found at line ${fn.line}` });
   const nodes: Shape[] = fact.nodes.map((step) => {

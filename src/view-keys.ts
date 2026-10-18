@@ -10,7 +10,7 @@
 // pipeline.ts shapes them, the page and the CLI name views by them.
 //
 // Entry points: `VIEW_KINDS`, `View`, `ViewKind`, `parseView`, `viewKey`,
-// `questionOf`, `defaultDepth`, `isModuleView`.
+// `questionOf`, `defaultDepth`, `isModuleView`, `isMapView`.
 
 /** What one kind of view is: how its key is written, what it answers, how deep it goes by default. */
 interface KindSpec {
@@ -22,6 +22,8 @@ interface KindSpec {
   depth?: number;
   /** The shapes are modules: a module most of them import is a hub, drawn as a badge. */
   modules?: true;
+  /** A map of modules in many lanes, which reads better with the lanes as columns. */
+  map?: true;
   /** The subject is a directory (or a module path) that may be written with a trailing slash. */
   path?: true;
   /** The only subjects the kind takes (`cycles:fns`). */
@@ -30,8 +32,8 @@ interface KindSpec {
 
 export const VIEW_KINDS = {
   layers: { subject: "none", question: "which layers import which, and how much" },
-  layer: { subject: "required", question: "which modules of the layer import which, and what they touch outside it", depth: 1, modules: true },
-  dir: { subject: "required", question: "which modules of the directory import which, and their neighbours", depth: 1, modules: true, path: true },
+  layer: { subject: "required", question: "which modules of the layer import which, and what they touch outside it", depth: 1, modules: true, map: true },
+  dir: { subject: "required", question: "which modules of the directory import which, and their neighbours", depth: 1, modules: true, map: true, path: true },
   module: { subject: "required", question: "what the module imports and what imports it", depth: 1, modules: true },
   inside: { subject: "required", question: "which functions of the module call which, and what they call outside", depth: 1 },
   usage: { subject: "required", question: "which exports of the module are used, by whom" },
@@ -55,7 +57,9 @@ export const VIEW_KINDS = {
   timeline: { subject: "none", question: "how the coupling between layers drifted, commit by commit" },
   coverage: { subject: "none", question: "where the diagrams are blind: calls and imports archdiff could not follow" },
   intent: { subject: "none", question: "what was intended, what is built, and where the code went beyond the intent", modules: true },
-  modules: { subject: "none", question: "every module of the repository in its layer, and every import between them", modules: true },
+  modules: { subject: "none", question: "every module of the repository in its layer, and every import between them", modules: true, map: true },
+  review: { subject: "none", question: "what a change did to the architecture: the modules, imports and calls it added, removed or changed, and the new couplings between layers", modules: true },
+  compare: { subject: "none", question: "what each of several branches did to the architecture against one base, side by side", modules: true },
 } as const satisfies Record<string, KindSpec>;
 
 export type ViewKind = keyof typeof VIEW_KINDS;
@@ -106,6 +110,13 @@ export function defaultDepth(kind: ViewKind): number {
   const spec: KindSpec = VIEW_KINDS[kind];
 
   return spec.depth ?? 0;
+}
+
+/** The kinds that draw a map of modules in lanes, which reads better across (columns) when the lanes are many. */
+export function isMapView(kind: ViewKind): boolean {
+  const spec: KindSpec = VIEW_KINDS[kind];
+
+  return spec.map === true;
 }
 
 /** The kinds whose shapes are modules, where a module most of them import (a logger, the types) is noise rather than news. */

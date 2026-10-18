@@ -46,7 +46,7 @@ export async function loadFlow(): Promise<void> {
   const state = stateFromHash();
   flowMocks.replaceChildren();
   flowSteps.replaceChildren();
-  element("flow-tab").hidden = entryOf(state.view) === null || state.review;
+  element("flow-tab").hidden = entryOf(state.view) === null;
 
   if (element("flow-tab").hidden) return;
   const { flow, markdown } = await api.flow(state.view, state.depth);

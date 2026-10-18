@@ -1,31 +1,30 @@
-// The routes of the pictures: the views, a diagram and its scene, a shape's
-// and a line's page, a file, the exports, the coverage, the plan of a
-// drawing, the saved layouts, the chat tags, the expansion of a tag, and
-// the live-reload stream. Each handler takes the server's context and the
-// request; the table at the end names them by method and path.
+// The routes of the pictures: the views, a picture (its scene for the
+// canvas, or its diagram and Markdown), a shape's and a line's page, a
+// file, the exports, the coverage, the plan of a drawing, saving a
+// drawing, the chat tags and the expansion of a tag, the project map, and
+// the live-reload stream. Every picture is the one picture.ts draws for
+// the query (`view`, the options, the refs), so a shape's page is asked
+// of the picture the page shows. Each handler takes the server's context
+// and the request; the table at the end names them by method and path.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { coverageReport } from "../coverage.ts";
-import type { Shape } from "../diagram.ts";
-import { compareBranches, review } from "../diff.ts";
-import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "../export/index.ts";
+import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, type ExportFormat } from "../export/index.ts";
 import { toExcalidraw } from "../export/excalidraw.ts";
 import { planFromScene, planMarkdown } from "../plan.ts";
 import { mergeScene, parseLayout, readLayout, writeLayout, type SceneElement } from "../layouts.ts";
-import { diagramMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
+import { edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
-import { parseView, viewList, viewOf, viewOptionsOf, type View } from "../views.ts";
-import { withLogic } from "../logic.ts";
+import { parseView, viewList } from "../views.ts";
 import { projectMap } from "../project-map.ts";
-import { readPictureOptions } from "../options.ts";
-import { failed, json, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
+import { failed, json, optionsOf, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
 
 export async function postLayout(ctx: RouteContext, { url, body, response }: RouteRequest): Promise<void> {
   const { root } = ctx;
   const key = url.searchParams.get("view") ?? "";
 
-  if (!parseView(key) && !key.startsWith("review")) return problem(response, 400, "unknown view");
+  if (!parseView(key)) return problem(response, 400, "unknown view");
 
   try {
     const file = writeLayout(root, parseLayout(parseJson(body), key));
@@ -34,11 +33,6 @@ export async function postLayout(ctx: RouteContext, { url, body, response }: Rou
   } catch (error) {
     return problem(response, 400, error instanceof Error ? error.message : String(error));
   }
-}
-
-/** The analysis with what a view needs read at the edge: the logic of a function from its file. */
-async function sourceFor(analysis: Awaited<ReturnType<RouteContext["fresh"]>>, view: View): Promise<typeof analysis> {
-  return view.kind === "logic" && view.subject !== null ? withLogic(analysis, view.subject) : analysis;
 }
 
 export async function postExpand(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
@@ -54,9 +48,8 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
   }
 
   const text = isJsonObject(parsed) && isJsonString(parsed["text"]) ? parsed["text"] : "";
-  const query = new URLSearchParams(isJsonObject(parsed) && isJsonString(parsed["query"]) ? parsed["query"] : "");
-  const picked = readPictureOptions((name) => query.get(name), "param");
-  const pictureOptions = picked.ok ? viewOptionsOf(picked.value.options) : {};
+  // The picture's options (and refs) for @view: — the picture as the page shows it; the other tags take the defaults.
+  const shown = new URLSearchParams(isJsonObject(parsed) && isJsonString(parsed["query"]) ? parsed["query"] : "");
   const analysis = await ctx.fresh();
   const readSource = (file: string): string | null => (analysis.facts.has(file) ? readFileSync(join(root, file), "utf8") : null);
   const sections: string[] = [];
@@ -70,16 +63,17 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
     const kind = match[1]!;
     const subject = match[2]!.replace(/[.,;:)]+$/, "");
     const key = kind === "fn" ? `calls:${subject}` : kind === "flow" ? `calls:${subject}` : kind === "type" ? `type:${subject}` : kind === "view" ? subject : `${kind}:${subject}`;
-    const view = parseView(key);
+    const query = kind === "view" ? new URLSearchParams(shown) : new URLSearchParams();
+    query.set("view", key);
+    const picture = await ctx.picture(query);
 
-    if (!view) continue;
-    const source = await sourceFor(analysis, view);
-    const diagram = viewOf(source, view, kind === "view" ? pictureOptions : {});
+    if (!picture.ok) continue;
+    const { diagram, markdown } = picture.value;
 
     if (kind === "module" || kind === "fn" || kind === "type") {
       const node = diagram.nodes.find((candidate) => (candidate.ref?.id ?? candidate.id) === subject);
-      sections.push(`### ${tag}\n\n${node ? nodeMarkdown(node, analysis, readSource) : diagramMarkdown(diagram, analysis)}`);
-    } else sections.push(`### ${tag}\n\n${diagramMarkdown(diagram, analysis)}`);
+      sections.push(`### ${tag}\n\n${node ? nodeMarkdown(node, analysis, readSource) : markdown}`);
+    } else sections.push(`### ${tag}\n\n${markdown}`);
   }
 
   return json(response, { context: sections.length > 0 ? `## Context from the diagrams\n\n${sections.join("\n\n")}` : "" });
@@ -92,30 +86,15 @@ export async function getGraph(ctx: RouteContext, { response }: RouteRequest): P
   return json(response, projectMap(analysis.graph));
 }
 
-export async function getLayout(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
-  const { root } = ctx;
-  const key = url.searchParams.get("view") ?? "";
-  const saved = readLayout(root, key);
-
-  return json(response, saved ? { saved: saved.saved, mocks: saved.mocks, elements: saved.elements.length } : null);
-}
-
 export async function getScene(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
-  const { root } = ctx;
-  const key = url.searchParams.get("view") ?? "";
-  const analysis = await ctx.fresh();
-  const picked = ctx.optionsOf(url);
+  const picture = await ctx.picture(url.searchParams);
 
-  if (!picked.ok) return failed(response, picked);
-  const diagram = await ctx.placed(analysis, key, picked.value, url.searchParams.get("base"), url.searchParams.get("head"));
-
-  if (!diagram) return problem(response, 400, "unknown view");
+  if (!picture.ok) return failed(response, picture);
+  const { diagram, markdown, drawing, change } = picture.value;
   // The code's picture at the saved places, then the saved drawing's own elements (pencil, notes) on top.
   const generated = (JSON.parse(toExcalidraw(diagram)) as { elements: SceneElement[] }).elements;
-  const saved = readLayout(root, key);
-  const mermaid = (url.searchParams.get("mermaid") ?? "auto") as MermaidStyle;
 
-  return json(response, { elements: saved ? mergeScene(saved.elements, generated) : generated, mocks: saved?.mocks ?? [], diagram, markdown: diagramMarkdown(diagram, analysis, MERMAID_STYLES.includes(mermaid) ? mermaid : "auto"), drawn: saved !== null });
+  return json(response, { elements: drawing ? mergeScene(drawing.elements, generated) : generated, mocks: drawing?.mocks ?? [], diagram, markdown, drawn: drawing !== null, change: change ?? null });
 }
 
 export async function getViews(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
@@ -139,58 +118,44 @@ export async function getPlan(ctx: RouteContext, { url, response }: RouteRequest
 }
 
 export async function getDiagram(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
-  const { root } = ctx;
-  const view = parseView(url.searchParams.get("view") ?? "");
+  // The placed diagram of a picture with its Markdown, as JSON: what a script reads of a view.
+  const picture = await ctx.picture(url.searchParams);
 
-  if (!view) return problem(response, 400, "unknown view");
-  const analysis = await ctx.fresh();
-  const picked = ctx.optionsOf(url);
+  if (!picture.ok) return failed(response, picture);
+  const { diagram, markdown, drawing, change } = picture.value;
 
-  if (!picked.ok) return failed(response, picked);
-  const diagram = (await ctx.placed(analysis, url.searchParams.get("view") ?? "", picked.value, url.searchParams.get("base"), url.searchParams.get("head")))!;
-  const mermaid = (url.searchParams.get("mermaid") ?? "auto") as MermaidStyle;
-
-  return json(response, { diagram, markdown: diagramMarkdown(diagram, analysis, MERMAID_STYLES.includes(mermaid) ? mermaid : "auto"), drawn: readLayout(root, url.searchParams.get("view") ?? "") !== null });
+  return json(response, { diagram, markdown, drawn: drawing !== null, change: change ?? null });
 }
 
-export async function getNode(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
+export async function getShape(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
   const { root } = ctx;
-  const view = parseView(url.searchParams.get("view") ?? "");
   const id = url.searchParams.get("id") ?? "";
+  // The same picture the page shows — its expansions, hidden lanes, fold limit, weight, the review's marks — so a shape is where the page has it.
+  const picture = await ctx.picture(url.searchParams);
 
-  if (!view) return problem(response, 400, "unknown view");
+  if (!picture.ok) return failed(response, picture);
+  const node = picture.value.diagram.nodes.find((candidate) => candidate.id === id);
+
+  if (!node) return problem(response, 404, "no such shape in the picture");
   const analysis = await ctx.fresh();
-  const picked = ctx.optionsOf(url);
-
-  if (!picked.ok) return failed(response, picked);
-  // The same picture the page shows: with its expansions, hidden lanes, fold limit and weight, a shape is where the page has it.
-  const diagram = view.kind === "timeline" ? { nodes: [] as Shape[] } : viewOf(await sourceFor(analysis, view), view, viewOptionsOf(picked.value));
-  const node = diagram.nodes.find((candidate) => candidate.id === id);
-
-  if (!node) return problem(response, 404, "no such shape in the view");
-
   const readSource = (file: string): string | null => (analysis.facts.has(file) ? readFileSync(join(root, file), "utf8") : null);
 
   return json(response, { markdown: nodeMarkdown(node, analysis, readSource) });
 }
 
-export async function getEdge(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
-  const view = parseView(url.searchParams.get("view") ?? "");
+export async function getLine(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
   const from = url.searchParams.get("from") ?? "";
   const to = url.searchParams.get("to") ?? "";
   const kind = url.searchParams.get("kind");
+  const picture = await ctx.picture(url.searchParams);
 
-  if (!view) return problem(response, 400, "unknown view");
-  const analysis = await ctx.fresh();
-  const picked = ctx.optionsOf(url);
-
-  if (!picked.ok) return failed(response, picked);
-  const diagram = view.kind === "timeline" ? { view: "timeline", title: "", nodes: [], edges: [], groups: [] } : viewOf(await sourceFor(analysis, view), view, viewOptionsOf(picked.value));
+  if (!picture.ok) return failed(response, picture);
+  const { diagram } = picture.value;
   const edge = diagram.edges.find((candidate) => candidate.from === from && candidate.to === to && (kind === null || candidate.kind === kind));
 
-  if (!edge) return problem(response, 404, "no such line in the view");
+  if (!edge) return problem(response, 404, "no such line in the picture");
 
-  return json(response, { markdown: edgeMarkdown(edge, diagram, analysis) });
+  return json(response, { markdown: edgeMarkdown(edge, diagram, await ctx.fresh()) });
 }
 
 export async function getFile(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
@@ -247,47 +212,31 @@ export async function getTags(ctx: RouteContext, { url, response }: RouteRequest
 }
 
 export async function getExport(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
-  const { root, options } = ctx;
-  const format = url.searchParams.get("format") ?? "";
+  const format = EXPORT_FORMATS.find((candidate): candidate is Exclude<ExportFormat, "md"> => candidate !== "md" && candidate === url.searchParams.get("format"));
 
-  if (!EXPORT_FORMATS.includes(format as ExportFormat) || format === "md") return problem(response, 400, "unknown format");
-  const key = url.searchParams.get("view") ?? "";
-  const analysis = await ctx.fresh();
-  let diagram;
+  if (!format) return problem(response, 400, "unknown format");
+  const picture = await ctx.picture(url.searchParams);
 
-  if (key.startsWith("review")) {
-    const result = await review(root, url.searchParams.get("base") || options.base, url.searchParams.get("head") || null);
-    diagram = result.diagram;
-  } else if (key.startsWith("compare")) {
-    const result = await compareBranches(root, url.searchParams.get("base") || null, (url.searchParams.get("heads") ?? "WORKTREE").split(",").filter((head) => head !== ""));
-    diagram = result.diagram;
-  } else {
-    const picked = ctx.optionsOf(url);
+  if (!picture.ok) return failed(response, picture);
+  const { diagram } = picture.value;
+  const name = `${diagram.view.replace(/[^A-Za-z0-9._-]+/g, "_")}${EXPORT_EXTENSION[format]}`;
+  const options = optionsOf(url.searchParams);
+  const mermaid = options.ok ? options.value.mermaid : "auto";
+  response.writeHead(200, { "content-type": EXPORT_MEDIA_TYPE[format], "content-disposition": `attachment; filename="${name}"` });
 
-    if (!picked.ok) return failed(response, picked);
-    diagram = await ctx.placed(analysis, key, picked.value, url.searchParams.get("base"), url.searchParams.get("head"));
-
-    if (!diagram) return problem(response, 400, "unknown view");
-  }
-
-  const name = `${key.replace(/[^A-Za-z0-9._-]+/g, "_")}${EXPORT_EXTENSION[format as ExportFormat]}`;
-  const mermaid = (url.searchParams.get("mermaid") ?? "auto") as MermaidStyle;
-  response.writeHead(200, { "content-type": EXPORT_MEDIA_TYPE[format as ExportFormat], "content-disposition": `attachment; filename="${name}"` });
-
-  return void response.end(exportDiagram(diagram, format as Exclude<ExportFormat, "md">, MERMAID_STYLES.includes(mermaid) ? mermaid : "auto"));
+  return void response.end(exportDiagram(diagram, format, mermaid));
 }
 
 /** The handlers by `METHOD /path`. */
 export const routes: Record<string, (ctx: RouteContext, request: RouteRequest) => Promise<void>> = {
   "POST /api/layout": postLayout,
   "POST /api/expand": postExpand,
-  "GET /api/layout": getLayout,
   "GET /api/scene": getScene,
   "GET /api/views": getViews,
   "GET /api/plan": getPlan,
   "GET /api/diagram": getDiagram,
-  "GET /api/node": getNode,
-  "GET /api/edge": getEdge,
+  "GET /api/shape": getShape,
+  "GET /api/line": getLine,
   "GET /api/file": getFile,
   "GET /api/coverage": getCoverage,
   "GET /api/changes": getChanges,

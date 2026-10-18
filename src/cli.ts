@@ -14,22 +14,22 @@ import { coverageReport } from "./coverage.ts";
 import { dataFlow, flowMarkdown } from "./flow.ts";
 import { runFlow, runMarkdown } from "./run.ts";
 import { LAYOUTS_DIRECTORY, readLayout, readLayoutFile } from "./layouts.ts";
-import { planFromScene, planMarkdown } from "./plan.ts";
+import { mergePlan, planFromScene, planMarkdown } from "./plan.ts";
 import { agentFromConfig } from "./agent.ts";
-import { diagramMarkdown, metricsMarkdown } from "./markdown.ts";
+import { metricsMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
-import { compareBranches, comparisonMarkdown, history, historyMarkdown, reviewFindings, reviewMarkdown, review, withTimeline } from "./diff.ts";
-import { withLogic } from "./logic.ts";
+import { historyMarkdown, reviewFindings } from "./diff.ts";
+import { drawPicture, type Picture, type Refs } from "./picture.ts";
+import { history } from "./review.ts";
 import { defaultBase, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { serve } from "./server.ts";
-import { layout } from "./diagram.ts";
-import { parseView, viewOf, viewList, viewOptionsOf } from "./views.ts";
-import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, mergePlan, parseIntent, writeIntent } from "./intent.ts";
+import { parseView, viewList, type View } from "./views.ts";
+import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
 import { listSpecs, specPrompt, specSubject, validateSpecs } from "./spec.ts";
 import { writeTestSkeletons } from "./gherkin.ts";
 import { FEATURES_DIRECTORY as FEATURES_DIRECTORY_NAME } from "./spec.ts";
-import { pictureFlags, pictureOptionsHelp, readPictureOptions } from "./options.ts";
+import { DEFAULT_PICTURE_OPTIONS, pictureFlags, pictureOptionsHelp, readPictureOptions, type PictureOptions } from "./options.ts";
 import { metricsOf } from "./metrics.ts";
 
 /** A flag a command knows: its name after `--`, and whether a value follows it. */
@@ -67,6 +67,28 @@ const flag = (name: string, value = false): FlagSpec => ({ name, value });
 /** A flag of a ref (--base, --head): a value. */
 const REF_FLAGS = [flag("base", true), flag("head", true)];
 
+/** The refs of a picture from the flags: `--base`, `--head` and `--heads a,b` (a comparison's). */
+function refsOf(call: Call): Refs {
+  return { base: call.text("base"), head: call.text("head"), heads: (call.text("heads") ?? "").split(",").filter((head) => head !== "") };
+}
+
+/**
+ * Draws the picture of a view with picture.ts (the refs from the flags)
+ * and writes it in the chosen format: its Markdown page, an export of the
+ * placed diagram, or for `json` what `json` makes of it (the Diagram by
+ * default). A view whose subject does not exist is a wrong call (exit 2);
+ * git refusing (outside a repository, a shallow clone) throws, which
+ * `main` reports (exit 2). The picture comes back for the exit code.
+ */
+async function writePicture(call: Call, command: string, root: string, view: View, options: PictureOptions, format: ExportFormat | "md", json: (picture: Picture) => string = (picture) => exportDiagram(picture.diagram, "json")): Promise<{ code: number; picture: Picture | null }> {
+  const picture = await drawPicture(await analyze(root), { view, options, refs: refsOf(call) });
+
+  if (picture.diagram.missing) return { code: fail(`${command}: ${picture.diagram.reason} (archdiff views lists them)`), picture: null };
+  const text = format === "md" ? picture.markdown : format === "json" ? json(picture) : exportDiagram(picture.diagram, format, options.mermaid);
+
+  return { code: writeOut(text, call.text("out")), picture };
+}
+
 /** The formats a picture is written in: `--format F` and `--out FILE`. */
 const OUTPUT_FLAGS = [flag("format", true), flag("out", true)];
 
@@ -98,12 +120,13 @@ function writeOut(text: string, out: string | null): number {
   return 0;
 }
 
-/** `--format F` checked against the formats a command writes; `md` is the Markdown page. */
-function formatOf(call: Call, command: string, extra: readonly string[] = []): ExportFormat | "md" | "json" | null {
-  const format = call.text("format") ?? "md";
+/** `--format F` checked against the formats a picture is written in; `md` is the Markdown page. */
+function formatOf(call: Call, command: string): ExportFormat | null {
+  const written = call.text("format") ?? "md";
+  const format = EXPORT_FORMATS.find((candidate) => candidate === written);
 
-  if (format === "md" || extra.includes(format) || EXPORT_FORMATS.includes(format as ExportFormat)) return format as ExportFormat | "md" | "json";
-  fail(`${command}: unknown format "${format}" (${[...new Set(["md", ...extra, ...EXPORT_FORMATS])].join(", ")})`);
+  if (format) return format;
+  fail(`${command}: unknown format "${written}" (${EXPORT_FORMATS.join(", ")})`);
 
   return null;
 }
@@ -163,7 +186,7 @@ const COMMANDS: readonly Command[] = [
       ...pictureOptionsHelp().map((line) => `  ${line}`),
     ],
     arity: 2,
-    flags: [...OUTPUT_FLAGS, ...REF_FLAGS, ...pictureFlags().map((item) => flag(item.name, item.value))],
+    flags: [...OUTPUT_FLAGS, ...REF_FLAGS, flag("heads", true), ...pictureFlags().map((item) => flag(item.name, item.value))],
     async run(call) {
       const key = call.positional[0];
 
@@ -177,23 +200,10 @@ const COMMANDS: readonly Command[] = [
       const picture = readPictureOptions((name) => call.flags.get(name), "flag");
 
       if (!picture.ok) return fail(`diagram: ${picture.problem.message}`);
-      const options = viewOptionsOf(picture.value.options);
-      let analysis = await analyze(call.dir(1));
 
-      // The timeline reads the commits from --base (default the merge-base) to --head (default HEAD); the logic of a function reads its
-      // file; --changes lays the review's marks over the view.
-      if (view.kind === "timeline") analysis = await withTimeline(analysis, call.text("base") ?? mergeBase(analysis.root), call.text("head") ?? "HEAD");
-      else if (view.kind === "logic" && view.subject !== null) analysis = await withLogic(analysis, view.subject);
-      else if (picture.value.options.changes) options.diff = (await review(analysis.root, call.text("base"), call.text("head"))).diff;
-      let diagram = layout(viewOf(analysis, view, options));
-
-      if (diagram.missing) return fail(`diagram: ${diagram.reason} (archdiff views lists them)`);
-      const stamp = revisionStamp(analysis.root);
-
-      if (stamp) diagram = { ...diagram, stamp };
-      const mermaid = picture.value.options.mermaid;
-
-      return writeOut(format === "md" ? diagramMarkdown(diagram, analysis, mermaid) : exportDiagram(diagram, format as Exclude<ExportFormat, "md">, mermaid), call.text("out"));
+      // The timeline reads the commits from --base to --head, a review and a comparison the revisions, the logic of a
+      // function its file, --changes the review's marks: picture.ts reads them.
+      return (await writePicture(call, "diagram", call.dir(1), view, picture.value.options, format)).code;
     },
   },
   {
@@ -232,7 +242,8 @@ const COMMANDS: readonly Command[] = [
 
       for (const name of files) {
         const saved = readLayoutFile(resolve(directory, name));
-        const alive = saved !== null && (keys.has(saved.view) || saved.view.startsWith("review"));
+        // A drawing lives while its view does: one the views list names, or a view without a subject (a review, a comparison).
+        const alive = saved !== null && (keys.has(saved.view) || parseView(saved.view)?.subject === null);
         const line = `${LAYOUTS_DIRECTORY}/${name}\t${saved ? saved.view : "(unreadable)"}\t${alive ? "ok" : "orphan"}`;
 
         if (!alive && call.has("prune")) {
@@ -329,20 +340,20 @@ const COMMANDS: readonly Command[] = [
   {
     name: "review",
     usage: "[dir] [--base REF] [--head REF] [--format F] [--out FILE]",
-    help: ["The architectural diff of the working tree (or --head REF) against", "--base REF (default: the merge-base with the main branch): modules,", "imports and calls added, removed or changed, as Markdown with a Mermaid", "diagram (md, default), json, or any diagram format. Exit 1 when a layer", "dependency appeared that ARCHITECTURE.md does not allow (any, without one)"],
+    help: ["The architectural diff of the working tree (or --head REF) against", "--base REF (default: the merge-base with develop, main or master): modules,", "imports and calls added, removed or changed, as Markdown with a Mermaid", "diagram (md, default), json (the diff), or any diagram format (the", "review view's picture). Exit 1 when a layer dependency appeared that", "ARCHITECTURE.md does not allow (any, without one)"],
     arity: 1,
     flags: [...REF_FLAGS, ...OUTPUT_FLAGS],
     async run(call) {
-      const format = formatOf(call, "review", ["json"]);
+      const format = formatOf(call, "review");
 
       if (format === null) return 2;
-      const result = await review(call.dir(0), call.text("base"), call.text("head"));
-      const text = format === "md" ? reviewMarkdown(result) : format === "json" ? `${JSON.stringify(result.diff, null, 2)}\n` : exportDiagram(result.diagram, format as Exclude<ExportFormat, "md">);
-      const written = writeOut(text, call.text("out"));
 
-      if (written !== 0) return written;
+      // `json` is the diff itself; the exit code says whether a layer dependency appeared against the contract.
+      const { code, picture } = await writePicture(call, "review", call.dir(0), { kind: "review", subject: null }, DEFAULT_PICTURE_OPTIONS, format, ({ change }) => `${JSON.stringify(change?.kind === "review" ? change.diff : null, null, 2)}\n`);
 
-      return reviewFindings(result.diff, result.contract).length > 0 ? 1 : 0;
+      if (code !== 0 || picture?.change?.kind !== "review") return code;
+
+      return reviewFindings(picture.change.diff, picture.change.contract).length > 0 ? 1 : 0;
     },
   },
   {
@@ -369,17 +380,15 @@ const COMMANDS: readonly Command[] = [
     arity: 1,
     flags: [flag("base", true), flag("heads", true), ...OUTPUT_FLAGS],
     async run(call) {
-      const format = formatOf(call, "compare", ["json"]);
+      const format = formatOf(call, "compare");
 
       if (format === null) return 2;
-      const heads = (call.text("heads") ?? "WORKTREE").split(",").filter((head) => head !== "");
-      const result = await compareBranches(call.dir(0), call.text("base"), heads);
-      const text = format === "md" ? comparisonMarkdown(result) : format === "json" ? `${JSON.stringify({ base: result.base, heads: result.heads }, null, 2)}\n` : exportDiagram(result.diagram, format as Exclude<ExportFormat, "md">);
-      const written = writeOut(text, call.text("out"));
 
-      if (written !== 0) return written;
+      const { code, picture } = await writePicture(call, "compare", call.dir(0), { kind: "compare", subject: null }, DEFAULT_PICTURE_OPTIONS, format, ({ change }) => `${JSON.stringify(change?.kind === "compare" ? { base: change.base, heads: change.heads } : null, null, 2)}\n`);
 
-      return result.heads.some((head) => reviewFindings(head.diff, head.contract).length > 0) ? 1 : 0;
+      if (code !== 0 || picture?.change?.kind !== "compare") return code;
+
+      return picture.change.heads.some((head) => reviewFindings(head.diff, head.contract).length > 0) ? 1 : 0;
     },
   },
   {

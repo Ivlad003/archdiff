@@ -8,7 +8,7 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { api, type Line, type Shape, type ViewEntry } from "./api.ts";
+import { api, type ChangeSummary, type Line, type Shape, type ViewEntry } from "./api.ts";
 import { mountCanvas, VIEW_LINK, type CanvasHandle, type PickedLine } from "./editor.tsx";
 import { element, h, remember } from "./dom.ts";
 import { agentNameOf, askAbout, loadTasks, runButton, setAgentName, transcript } from "./chat.ts";
@@ -21,8 +21,9 @@ import { closeMenu, menuOpen, openMenu, type MenuItem } from "./menu.ts";
 import { mapDots, mapSettled, projectMapOpen, refreshProjectMap, toggleProjectMap } from "./project-map.ts";
 import { chainFrom, findShapes, lineElementId, neighbourhoodOf, pathBetween } from "./graph.ts";
 import { crumbsOf, ownView, siblingViews, subjectOf, tagOf } from "./navigation.ts";
-import { DETAIL, OVERVIEWS, PRESETS, forgetDefaults, rememberDefaults, setHash, stateFromHash, type State } from "./state.ts";
-import { MERMAID_STYLES, OVERLAYS, pictureQueryText, type MermaidStyle, type Overlay } from "../../src/options.ts";
+import { DETAIL, OVERVIEWS, PRESETS, forgetDefaults, refsOf, rememberDefaults, reviewing, setHash, stateFromHash, type State } from "./state.ts";
+import { parseView } from "../../src/view-keys.ts";
+import { MERMAID_STYLES, OVERLAYS, type MermaidStyle, type Overlay } from "../../src/options.ts";
 
 let views: ViewEntry[] = [];
 let diagramMarkdown = "";
@@ -78,12 +79,6 @@ function renderCrumbs(state: State): void {
   const box = element<HTMLSpanElement>("crumbs");
   box.replaceChildren();
 
-  if (state.review) {
-    box.append("review");
-
-    return;
-  }
-
   const crumbs = crumbsOf(views, state.view);
 
   for (const [i, crumb] of crumbs.entries()) {
@@ -94,7 +89,7 @@ function renderCrumbs(state: State): void {
     } else {
       const link = document.createElement("a");
       link.textContent = crumb.label;
-      link.addEventListener("click", () => setHash({ ...stateFromHash(), view: crumb.key, review: false }));
+      link.addEventListener("click", () => setHash({ ...stateFromHash(), view: crumb.key }));
       box.append(link);
     }
   }
@@ -103,7 +98,7 @@ function renderCrumbs(state: State): void {
 // ── The viewport of every view, remembered in this browser ──────────────────
 
 function viewportKey(state: State): string {
-  return `archdiff.viewport.${state.review ? "review" : state.view}`;
+  return `archdiff.viewport.${state.view}`;
 }
 
 function rememberViewport(): void {
@@ -304,29 +299,27 @@ async function showNode(id: string | null): Promise<void> {
     return;
   }
 
-  if (!state.review) {
-    try {
-      const { markdown } = await api.node(state.view, node.id, pictureQueryText(state));
-      setMarkdown(markdownPanel, markdown);
-    } catch (error) {
-      setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
-    }
-  } else {
-    // A review: what changed, and the commits that touched the file.
-    const file = node.ref?.file;
-    let history = "";
+  let markdown: string;
 
-    if (file) {
-      try {
-        const { commits } = await api.fileHistory(file);
-        history = commits.length > 0 ? `\n\n## Commits that touched it\n\n${commits.map((commit) => `- \`${commit.short}\` ${commit.date} ${commit.author}: ${commit.subject}`).join("\n")}` : "";
-      } catch {
-        history = "";
-      }
-    }
-
-    setMarkdown(markdownPanel, `# ${node.label.split("\n")[0]}\n\n${node.diff ?? "context"} — ${file ?? ""}${history}`);
+  try {
+    markdown = (await api.shape(state.view, node.id, state, refsOf(state))).markdown;
+  } catch (error) {
+    markdown = error instanceof Error ? error.message : String(error);
   }
+
+  // A review: what the change did to the shape, and the commits that touched its file.
+  const file = node.ref?.file;
+
+  if (reviewing(state.view) && file) {
+    try {
+      const { commits } = await api.fileHistory(file);
+      markdown += `\n\n_${node.diff ?? "context"} in this change._${commits.length > 0 ? `\n\n## Commits that touched it\n\n${commits.map((commit) => `- \`${commit.short}\` ${commit.date} ${commit.author}: ${commit.subject}`).join("\n")}` : ""}\n`;
+    } catch {
+      // Outside git: the shape's page alone.
+    }
+  }
+
+  setMarkdown(markdownPanel, markdown);
 
   showTab("markdown");
   renderNeighbours(node);
@@ -356,7 +349,7 @@ function renderNeighbours(node: Shape | null): void {
       if (event.shiftKey) {
         const own = nodes.has(id) ? ownView(nodes.get(id)!) : null;
 
-        if (own) setHash({ ...stateFromHash(), view: own, review: false });
+        if (own) setHash({ ...stateFromHash(), view: own });
       } else pickShape(id);
     });
 
@@ -464,7 +457,7 @@ function openLabel(key: string): string {
 /** The menu of a right click: on a shape (its views, the selection, the agent, its code), on a line, or on the empty canvas. */
 function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
   const now = stateFromHash();
-  const go = (key: string) => () => setHash({ ...now, view: key, review: false });
+  const go = (key: string) => () => setHash({ ...now, view: key });
   const node = id ? nodes.get(id) : undefined;
 
   if (node) {
@@ -699,7 +692,7 @@ minimap.addEventListener("pointercancel", () => (minimapDragging = false));
 function renderCanvasTools(state: State): void {
   const select = element<HTMLSelectElement>("picture");
   select.replaceChildren();
-  const siblings = state.review ? [] : siblingViews(state.view);
+  const siblings = siblingViews(state.view);
 
   if (siblings.length > 0) {
     const group = document.createElement("optgroup");
@@ -731,6 +724,25 @@ function renderCanvasTools(state: State): void {
 
 /** The lanes of the current picture, for the lanes menu. */
 let currentGroups: { id: string; label: string }[] = [];
+
+/** How the current picture's lanes lie, as the layout says: the lanes button flips it. */
+let currentLanes: "rows" | "columns" = "rows";
+
+/** What a review or a comparison found, for the title: the files changed and the new layer dependencies (against the contract, when there is one). */
+function changeTitle(change: ChangeSummary | null): string {
+  if (!change) return "";
+
+  if (change.kind === "compare") {
+    const warnings = change.heads.filter((head) => head.diff.layerEdgesAdded.length > 0).length;
+
+    return warnings > 0 ? ` — ⚠ ${warnings} head${warnings === 1 ? "" : "s"} add a layer dependency` : "";
+  }
+
+  const { diff, contract } = change;
+  const findings = contract ? diff.layerEdgesAdded.filter((edge) => edge.against) : diff.layerEdgesAdded;
+
+  return ` — ${diff.changedFiles.length} source files changed${findings.length > 0 ? ` — ⚠ ${findings.length} new layer dependencies${contract ? " against ARCHITECTURE.md" : ""}` : diff.layerEdgesAdded.length > 0 ? ` — ${diff.layerEdgesAdded.length} new layer dependencies, allowed by ARCHITECTURE.md` : ""}`;
+}
 
 /** Opens or closes the second picture beside the canvas: the same page, embedded, starting from the current link. */
 /** Two canvases side by side need the room Excalidraw's desktop layout wants; below it the split stacks. */
@@ -766,7 +778,7 @@ async function showEdge(lines: PickedLine[], follow: boolean): Promise<void> {
   let markdown: string;
 
   try {
-    markdown = (await api.edge(state.view, line.from, line.to, line.kind, pictureQueryText(state))).markdown;
+    markdown = (await api.line(state.view, line.from, line.to, line.kind, state, refsOf(state))).markdown;
   } catch (error) {
     markdown = error instanceof Error ? error.message : String(error);
   }
@@ -843,8 +855,8 @@ function renderViews(filter: string): void {
       const item = document.createElement("li");
       item.textContent = view.title;
       item.title = view.key;
-      item.classList.toggle("active", view.key === state.view && !state.review);
-      item.addEventListener("click", () => setHash({ ...state, view: view.key, review: false }));
+      item.classList.toggle("active", view.key === state.view);
+      item.addEventListener("click", () => setHash({ ...state, view: view.key }));
       viewsList.append(item);
     }
 
@@ -859,30 +871,18 @@ function renderViews(filter: string): void {
 
 search.addEventListener("input", () => renderViews(search.value));
 
-function renderExports(view: string, base: string | null, head: string | null = null, heads: string[] = []): void {
+/** The export menu: the picture as the link shows it (every option of options.ts, the refs) in every format, and the Mermaid types that fit the view. */
+function renderExports(state: State): void {
   exportLinks.replaceChildren();
+  const refs = refsOf(state);
 
-  const now = stateFromHash();
-  const extra = `${now.overlays.length > 0 ? `&overlay=${encodeURIComponent(now.overlays.join(","))}` : ""}${now.changes ? "&changes=1" : ""}${now.limit !== null ? `&limit=${now.limit}` : ""}${now.weight !== null ? `&weight=${now.weight}` : ""}${now.hubs ? "" : "&hubs=0"}${now.packages ? "&packages=1" : ""}`;
-
-  for (const format of ["mermaid", "drawio", "excalidraw", "archimate", "json"]) {
-    const link = document.createElement("a");
-    link.href = api.exportUrl(view, format, base, head, heads, `${extra}${format === "mermaid" && now.mermaid !== "auto" ? `&mermaid=${now.mermaid}` : ""}`);
-    link.textContent = format === "mermaid" && now.mermaid !== "auto" ? `mermaid (${now.mermaid})` : format;
-    link.title = `Download the diagram as ${format}`;
-    exportLinks.append(link);
-  }
+  for (const format of ["mermaid", "drawio", "excalidraw", "archimate", "json"]) exportLinks.append(h("a", { href: api.exportUrl(state.view, format, state, refs), title: `Download the diagram as ${format}` }, format === "mermaid" && state.mermaid !== "auto" ? `mermaid (${state.mermaid})` : format));
 
   // The Mermaid types that read better for some views.
-  const kind = view.slice(0, view.indexOf(":") === -1 ? view.length : view.indexOf(":"));
-  const styles: [string, string][] = kind === "hotspots" ? [["quadrant", "mermaid: quadrant chart"]] : kind === "layers" || kind === "packages" ? [["c4", "mermaid: C4 context"], ["pie", "mermaid: pie of modules"]] : kind === "dir" || kind === "layer" ? [["mindmap", "mermaid: mindmap"]] : [];
+  const kind = parseView(state.view)?.kind;
+  const styles: [MermaidStyle, string][] = kind === "hotspots" ? [["quadrant", "mermaid: quadrant chart"]] : kind === "layers" || kind === "packages" ? [["c4", "mermaid: C4 context"], ["pie", "mermaid: pie of modules"]] : kind === "dir" || kind === "layer" ? [["mindmap", "mermaid: mindmap"]] : [];
 
-  for (const [style, label] of styles) {
-    const link = document.createElement("a");
-    link.href = `${api.exportUrl(view, "mermaid", base, head, heads, extra)}&mermaid=${style}`;
-    link.textContent = label;
-    exportLinks.append(link);
-  }
+  for (const [style, label] of styles) exportLinks.append(h("a", { href: api.exportUrl(state.view, "mermaid", { ...state, mermaid: style }, refs) }, label));
 }
 
 // ── The canvas ───────────────────────────────────────────────────────────────
@@ -948,7 +948,7 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
     open: (id, link) => {
       const key = link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : nodes.has(id) ? ownView(nodes.get(id)!) : null;
 
-      if (key && mode === "view") setHash({ ...stateFromHash(), view: key, review: false });
+      if (key && mode === "view") setHash({ ...stateFromHash(), view: key });
     },
     changed: () => {
       if (mode === "edit") {
@@ -998,7 +998,7 @@ async function relayout(): Promise<void> {
   if (!canvas) return;
   await saveDrawing();
   const now = stateFromHash();
-  const scene = await api.scene(now.view, { ...now, onlyChanges: false, changes: false }, null, null);
+  const scene = await api.scene(now.view, { ...now, onlyChanges: false, changes: false }, refsOf(now));
   canvas.replace(scene.elements);
 }
 
@@ -1026,67 +1026,34 @@ async function load(): Promise<void> {
   for (const box of document.querySelectorAll<HTMLInputElement>("#options .overlay")) box.checked = state.overlays.includes(box.value as Overlay);
   renderViews(search.value);
   reason.textContent = "";
-  element<HTMLButtonElement>("edit").disabled = state.review;
-  element("chat-tab").hidden = state.review;
+  // A review and a comparison are read, not drawn on; the chat has nothing to build from them.
+  element<HTMLButtonElement>("edit").disabled = reviewing(state.view);
+  element("chat-tab").hidden = reviewing(state.view);
 
   try {
     renderCrumbs(state);
     headInput.value = state.head ?? "";
-    element("commits").hidden = !state.review;
+    element("commits").hidden = state.view !== "review";
+    element("branches").hidden = !reviewing(state.view);
+    const result = await api.scene(state.view, state, refsOf(state));
+    title.textContent = `${result.diagram.title}${changeTitle(result.change)}${result.drawn ? " (drawn by hand)" : ""}`;
+    diagramMarkdown = result.markdown;
+    nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
+    edges = result.diagram.edges;
+    currentGroups = result.diagram.groups.map((group) => ({ id: group.id, label: group.label }));
+    currentLanes = result.diagram.lanes ?? "rows";
+    renderLanes(state, currentGroups);
+    updateMinimap();
+    mocks = result.mocks;
+    await ensureCanvas(result.elements);
+    reason.textContent = result.diagram.reason ?? "";
+    reason.title = reason.textContent;
+    title.title = result.diagram.question ? `${result.diagram.question[0]!.toUpperCase()}${result.diagram.question.slice(1)}.` : "";
+    renderExports(state);
 
-    element("branches").hidden = !state.review;
+    if (state.view === "review") void loadCommits(state);
 
-    if (state.review && state.heads.length > 0) {
-      // Several heads against the base: the comparison picture, every module marked with the heads that touched it.
-      const result = await api.compare(baseInput.value.trim() || null, state.heads);
-      const warnings = result.heads.filter((head) => head.diff.layerEdgesAdded.length > 0).length;
-      title.textContent = `${result.diagram.title}${warnings > 0 ? ` — ⚠ ${warnings} head${warnings === 1 ? "" : "s"} add a layer dependency` : ""}`;
-      diagramMarkdown = result.markdown;
-      nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
-      edges = result.diagram.edges;
-      currentGroups = result.diagram.groups.map((group) => ({ id: group.id, label: group.label }));
-      renderLanes(state, currentGroups);
-      updateMinimap();
-      await ensureCanvas(result.elements);
-      reason.textContent = result.diagram.reason ?? "";
-      reason.title = reason.textContent;
-      title.title = result.diagram.question ? `${result.diagram.question[0]!.toUpperCase()}${result.diagram.question.slice(1)}.` : "";
-      renderExports("compare", baseInput.value.trim() || null, null, state.heads);
-      element("commits").hidden = true;
-      void loadBranches(state);
-    } else if (state.review) {
-      const result = await api.review(baseInput.value.trim() || null, state.head);
-      const findings = result.contract ? result.diff.layerEdgesAdded.filter((edge) => edge.against) : result.diff.layerEdgesAdded;
-      title.textContent = `${result.diagram.title} — ${result.diff.changedFiles.length} source files changed${findings.length > 0 ? ` — ⚠ ${findings.length} new layer dependencies${result.contract ? " against ARCHITECTURE.md" : ""}` : result.diff.layerEdgesAdded.length > 0 ? ` — ${result.diff.layerEdgesAdded.length} new layer dependencies, allowed by ARCHITECTURE.md` : ""}`;
-      diagramMarkdown = result.markdown;
-      nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
-      edges = result.diagram.edges;
-      currentGroups = result.diagram.groups.map((group) => ({ id: group.id, label: group.label }));
-      renderLanes(state, currentGroups);
-      updateMinimap();
-      await ensureCanvas(result.elements);
-      reason.textContent = result.diagram.reason ?? "";
-      reason.title = reason.textContent;
-      title.title = result.diagram.question ? `${result.diagram.question[0]!.toUpperCase()}${result.diagram.question.slice(1)}.` : "";
-      renderExports(`review:${result.diff.base}`, baseInput.value.trim() || null, state.head);
-      void loadCommits(state);
-      void loadBranches(state);
-    } else {
-      const result = await api.scene(state.view, state, state.view === "timeline" || state.changes ? baseInput.value.trim() || null : null, state.view === "timeline" || state.changes ? state.head : null);
-      title.textContent = `${result.diagram.title}${result.drawn ? " (drawn by hand)" : ""}`;
-      diagramMarkdown = result.markdown;
-      nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
-      edges = result.diagram.edges;
-      currentGroups = result.diagram.groups.map((group) => ({ id: group.id, label: group.label }));
-      renderLanes(state, currentGroups);
-      updateMinimap();
-      mocks = result.mocks;
-      await ensureCanvas(result.elements);
-      reason.textContent = result.diagram.reason ?? "";
-      reason.title = reason.textContent;
-      title.title = result.diagram.question ? `${result.diagram.question[0]!.toUpperCase()}${result.diagram.question.slice(1)}.` : "";
-      renderExports(state.view, null);
-    }
+    if (reviewing(state.view)) void loadBranches(state);
 
     setMarkdown(markdownPanel, diagramMarkdown);
     refreshProjectMap();
@@ -1136,7 +1103,7 @@ api.changes((path) => {
 // ── Controls ─────────────────────────────────────────────────────────────────
 
 element<HTMLButtonElement>("fit").addEventListener("click", () => canvas?.scrollToContent());
-element<HTMLSelectElement>("picture").addEventListener("change", () => setHash({ ...stateFromHash(), view: element<HTMLSelectElement>("picture").value, review: false, expand: [] }));
+element<HTMLSelectElement>("picture").addEventListener("change", () => setHash({ ...stateFromHash(), view: element<HTMLSelectElement>("picture").value, expand: [] }));
 
 for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) {
   button.addEventListener("click", () => applyOptions({ ...stateFromHash(), ...DETAIL[button.dataset["detail"]!] }));
@@ -1173,10 +1140,8 @@ window.addEventListener("resize", () => {
   if (document.body.classList.contains("split")) document.body.classList.toggle("stacked", window.innerWidth < SPLIT_SIDE_BY_SIDE);
 });
 element<HTMLButtonElement>("tool-lanes").addEventListener("click", () => {
-  // Rows ↔ columns; auto (the layout's own choice) counts as whatever the picture shows, so the first press flips it.
-  const now = stateFromHash();
-  const rows = now.lanes === "rows" || (now.lanes === "auto" && !(currentGroups.length > 6 && (now.view === "modules" || now.view.startsWith("layer:") || now.view.startsWith("dir:"))));
-  setHash({ ...now, lanes: rows ? "columns" : "rows" });
+  // Rows ↔ columns, from what the picture shows (the layout says how it laid the lanes), so the first press always flips it.
+  setHash({ ...stateFromHash(), lanes: currentLanes === "rows" ? "columns" : "rows" });
 });
 element<HTMLButtonElement>("tool-map").addEventListener("click", () => {
   minimapWanted = !(minimapWanted ?? true);
@@ -1205,7 +1170,7 @@ findInput.addEventListener("keydown", (event) => {
 
       if (entry) {
         reason.textContent = `not in this picture: opening ${entry.key}`;
-        setHash({ ...stateFromHash(), view: entry.key, review: false });
+        setHash({ ...stateFromHash(), view: entry.key });
       }
     }
   } else if (event.key === "Escape") {
@@ -1222,7 +1187,7 @@ findInput.addEventListener("keydown", (event) => {
 if (new URLSearchParams(location.search).get("embed") === "1") document.body.classList.add("embed");
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 element<HTMLButtonElement>("review").addEventListener("click", () => {
-  if (leaveEdit()) setHash({ ...stateFromHash(), review: true, head: headInput.value.trim() || null });
+  if (leaveEdit()) setHash({ ...stateFromHash(), view: "review", head: headInput.value.trim() || null, heads: [] });
 });
 element<HTMLButtonElement>("edit").addEventListener("click", () => (mode === "edit" ? leaveEdit() : setMode("edit")));
 saveButton.addEventListener("click", () => void saveDrawing().catch((error: unknown) => (reason.textContent = error instanceof Error ? error.message : String(error))));
@@ -1298,7 +1263,7 @@ element<HTMLButtonElement>("options-reset").addEventListener("click", () => {
   applyOptions({ ...stateFromHash(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false, weight: null, hubs: true, expand: [], lanes: "auto" });
 });
 baseInput.addEventListener("change", () => {
-  if (stateFromHash().review) setHash(stateFromHash());
+  if (reviewing(stateFromHash().view)) setHash(stateFromHash());
 });
 window.addEventListener("beforeunload", (event) => {
   if (dirty) event.preventDefault();
@@ -1342,7 +1307,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.key === "g" && !typing && mode === "view" && !stateFromHash().review) {
+  if (event.key === "g" && !typing && mode === "view" && !reviewing(stateFromHash().view)) {
     toggleProjectMap();
 
     return;
@@ -1376,17 +1341,17 @@ window.addEventListener("keydown", (event) => {
     // Enter: into the picked shape's own view (deeper), as a second tap would.
     const own = ownView(nodes.get(lastPicked)!);
 
-    if (own) setHash({ ...stateFromHash(), view: own, review: false });
+    if (own) setHash({ ...stateFromHash(), view: own });
   } else if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) {
     event.preventDefault();
     element<HTMLInputElement>("find").focus();
-  } else if (event.key === "s" && !stateFromHash().review && !document.body.classList.contains("embed")) {
+  } else if (event.key === "s" && !reviewing(stateFromHash().view) && !document.body.classList.contains("embed")) {
     toggleSplit();
-  } else if (event.key === "m" && !stateFromHash().review) {
+  } else if (event.key === "m" && !reviewing(stateFromHash().view)) {
     element<HTMLButtonElement>("tool-mix").click();
-  } else if (event.key === "f" && !stateFromHash().review) {
+  } else if (event.key === "f" && !reviewing(stateFromHash().view)) {
     element<HTMLButtonElement>("tool-focus").click();
-  } else if (event.key === "e" && !stateFromHash().review) {
+  } else if (event.key === "e" && !reviewing(stateFromHash().view)) {
     setMode("edit");
   } else if (event.key === "Escape") {
     select([]);

@@ -25,21 +25,8 @@ export interface ViewsResponse {
   views: ViewEntry[];
 }
 
-export interface DiagramResponse {
-  diagram: Diagram;
-  markdown: string;
-  /** The view has a saved drawing: the shapes sit where the user put them. */
-  drawn: boolean;
-}
-
-export interface ReviewResponse {
-  diff: { base: string; changedFiles: string[]; layerEdgesAdded: { from: string; to: string; against?: true }[] };
-  diagram: Diagram;
-  elements: import("../../src/scene.ts").SceneElement[];
-  markdown: string;
-  /** The head has ARCHITECTURE.md: only the layer dependencies against it are findings. */
-  contract: boolean;
-}
+// The answers are read as their types, not validated: the server is archdiff's own, started with the page, and its
+// types are shared by import (src/diagram.ts, src/options.ts), so the two cannot drift; a failed status throws its text.
 
 /** A JSON POST to the server; an `error` in the answer or a failed status throws its text. */
 async function post<T>(path: string, payload: unknown): Promise<T> {
@@ -51,6 +38,7 @@ async function post<T>(path: string, payload: unknown): Promise<T> {
   return body as T;
 }
 
+/** A JSON GET from the server; a failed status throws the `error` of the answer. */
 async function get<T>(url: string): Promise<T> {
   const response = await fetch(url);
   const body = (await response.json()) as T | { error: string };
@@ -60,6 +48,21 @@ async function get<T>(url: string): Promise<T> {
   return body as T;
 }
 
+/** The revisions a picture is drawn against, as the link holds them: the base (null: the default), the head (null: the working tree), the heads of a comparison. */
+export interface Refs {
+  base: string | null;
+  head: string | null;
+  heads: readonly string[];
+}
+
+/** What a review or a comparison found, as the page reads it for the title (the server sends the whole diff). */
+export type ChangeSummary = { kind: "review"; diff: { base: string; changedFiles: string[]; layerEdgesAdded: { from: string; to: string; against?: true }[] }; contract: boolean } | { kind: "compare"; base: string; heads: { head: string; diff: { layerEdgesAdded: { from: string; to: string }[] } }[] };
+
+/** The refs as query parameters, empty when there are none. */
+function refsQuery(refs: Refs): string {
+  return `${refs.base ? `&base=${encodeURIComponent(refs.base)}` : ""}${refs.head ? `&head=${encodeURIComponent(refs.head)}` : ""}${refs.heads.length > 0 ? `&heads=${encodeURIComponent(refs.heads.join(","))}` : ""}`;
+}
+
 export interface SceneResponse {
   elements: import("../../src/scene.ts").SceneElement[];
   mocks: { id: string; kind: "input" | "storage"; value: string }[];
@@ -67,6 +70,8 @@ export interface SceneResponse {
   markdown: string;
   /** The view has a saved drawing: the shapes sit where the user put them. */
   drawn: boolean;
+  /** A review or a comparison: what it found. */
+  change: ChangeSummary | null;
 }
 
 export interface FlowStep {
@@ -113,14 +118,6 @@ export interface Branch {
   current: boolean;
 }
 
-export interface CompareResponse {
-  base: string;
-  heads: { head: string; diff: { changedFiles: string[]; layerEdgesAdded: { from: string; to: string }[]; modulesAdded: string[]; modulesRemoved: string[]; nodesChanged: unknown[]; depsAdded: unknown[] } }[];
-  diagram: Diagram;
-  elements: import("../../src/scene.ts").SceneElement[];
-  markdown: string;
-}
-
 export const api = {
   tags: (q: string) => get<{ tags: { tag: string; title: string }[] }>(`/api/tags?q=${encodeURIComponent(q)}`),
   /** The context of the tags in `text`; `query` is the picture's options, for `@view:` (the picture as the page shows it). */
@@ -141,7 +138,6 @@ export const api = {
     return body;
   },
   branches: () => get<{ current: string | null; base: string | null; branches: Branch[] }>("/api/branches"),
-  compare: (base: string | null, heads: string[]) => get<CompareResponse>(`/api/compare?heads=${encodeURIComponent(heads.join(","))}${base ? `&base=${encodeURIComponent(base)}` : ""}`),
   commits: (base: string | null, head: string | null) => get<{ base: string; head: string; commits: Commit[] }>(`/api/commits?${base ? `base=${encodeURIComponent(base)}&` : ""}${head ? `head=${encodeURIComponent(head)}` : ""}`),
   fileHistory: (path: string) => get<{ path: string; commits: Commit[] }>(`/api/history?path=${encodeURIComponent(path)}`),
   tasks: () => get<{ tasks: { file: string; head: string }[] }>("/api/tasks"),
@@ -162,7 +158,6 @@ export const api = {
   validateSpecs: () => post<{ ok: boolean; output: string }>("/api/spec/validate", {}),
   code: (view: string) => post<{ markdown: string; intent: string; planned: number }>("/api/code", { view }),
   intent: () => get<{ exists: boolean; markdown: string; file: string }>("/api/intent"),
-  saveIntent: (markdown: string) => post<{ file: string; layers: number; modules: number; edges: number }>("/api/intent", { markdown }),
   intentFromDocument: (text: string) => post<{ file: string; source: string; layers: number; modules: number; edges: number; markdown: string }>("/api/intent/document", { text }),
   check: () => get<{ exists: boolean; ok: boolean; markdown: string }>("/api/check"),
   plan: (view: string) => get<{ markdown: string; drawn: boolean; plan: { added: unknown[]; edges: unknown[]; removed: unknown[]; notes: string[] } }>(`/api/plan?view=${encodeURIComponent(view)}`),
@@ -199,7 +194,8 @@ export const api = {
   flow: (view: string, depth: number | null) => get<FlowResponse>(`/api/flow?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
   /** A real run of the entry with the saved mocks: the functions entered, the storage calls, the result, against the prediction. */
   runFlow: (view: string) => post<{ run: { steps: { id: string; order: number }[]; storageCalls: { module: string; member: string; args: unknown[] }[]; result: unknown; error: string | null; ms: number; predicted: string[]; missed: string[]; unexpected: string[] }; markdown: string }>("/api/flow/run", { view }),
-  scene: (view: string, options: PictureOptions, base: string | null, head: string | null) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${pictureQueryText(options)}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}`),
+  /** The picture of a view with the link's options and refs: the canvas's scene, the diagram, its Markdown, what a review found. */
+  scene: (view: string, options: PictureOptions, refs: Refs) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${pictureQueryText(options)}${refsQuery(refs)}`),
   saveLayout: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
     const response = await fetch(`/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
     const body = (await response.json()) as { saved: string } | { error: string };
@@ -211,9 +207,10 @@ export const api = {
   views: () => get<ViewsResponse>("/api/views"),
   /** The whole repository for the project map: every module (or directory, folded) with its layer, every import between them. */
   graph: () => get<ProjectMap>("/api/graph"),
-  diagram: (view: string, depth: number | null) => get<DiagramResponse>(`/api/diagram?view=${encodeURIComponent(view)}${depth === null ? "" : `&depth=${depth}`}`),
-  edge: (view: string, from: string, to: string, kind: string, options = "") => get<{ markdown: string }>(`/api/edge?view=${encodeURIComponent(view)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&kind=${encodeURIComponent(kind)}${options}`),
-  node: (view: string, id: string, options = "") => get<{ markdown: string }>(`/api/node?view=${encodeURIComponent(view)}&id=${encodeURIComponent(id)}${options}`),
+  /** The page of a line of the picture the link shows. */
+  line: (view: string, from: string, to: string, kind: string, options: PictureOptions, refs: Refs) => get<{ markdown: string }>(`/api/line?view=${encodeURIComponent(view)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&kind=${encodeURIComponent(kind)}${pictureQueryText(options)}${refsQuery(refs)}`),
+  /** The page of a shape of the picture the link shows. */
+  shape: (view: string, id: string, options: PictureOptions, refs: Refs) => get<{ markdown: string }>(`/api/shape?view=${encodeURIComponent(view)}&id=${encodeURIComponent(id)}${pictureQueryText(options)}${refsQuery(refs)}`),
   file: async (path: string): Promise<string> => {
     const response = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
 
@@ -222,6 +219,6 @@ export const api = {
     return response.text();
   },
   coverage: () => get<{ markdown: string; ratio: number; gaps: number; calls: number }>("/api/coverage"),
-  review: (base: string | null, head: string | null) => get<ReviewResponse>(`/api/review?${base ? `base=${encodeURIComponent(base)}&` : ""}${head ? `head=${encodeURIComponent(head)}` : ""}`),
-  exportUrl: (view: string, format: string, base: string | null, head: string | null = null, heads: string[] = [], extra = "") => `/api/export?view=${encodeURIComponent(view)}&format=${format}${base ? `&base=${encodeURIComponent(base)}` : ""}${head ? `&head=${encodeURIComponent(head)}` : ""}${heads.length > 0 ? `&heads=${encodeURIComponent(heads.join(","))}` : ""}${extra}`,
+  /** The download of a picture in `format`, with the link's options and refs (the Mermaid type among the options). */
+  exportUrl: (view: string, format: string, options: PictureOptions, refs: Refs) => `/api/export?view=${encodeURIComponent(view)}&format=${format}${pictureQueryText(options)}${refsQuery(refs)}`,
 };

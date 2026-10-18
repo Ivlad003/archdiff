@@ -10,11 +10,13 @@
 // lanes say the layer of a shape; a planned import between layers that do
 // not touch yet is named as a warning, not refused.
 //
-// Pure: Analysis + view + scene → Plan → Markdown. Entry points:
-// `planFromScene`, `planMarkdown`, `Plan`.
+// Pure: Analysis + view + scene → Plan → Markdown, or → the intent with
+// the plan folded into it. Entry points: `planFromScene`, `planMarkdown`,
+// `mergePlan`, `Plan`.
 
 import type { Analysis } from "./analyze.ts";
-import { moduleOf } from "./graph.ts";
+import { moduleOf, type Graph } from "./graph.ts";
+import type { Intent, IntentModule } from "./intent.ts";
 import { isJsonObject, isJsonString } from "./json.ts";
 import type { SceneElement } from "./scene.ts";
 import { parseView } from "./views.ts";
@@ -355,4 +357,78 @@ export function planMarkdown(plan: Plan, analysis: Analysis): string {
   );
 
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/**
+ * The plan drawn on a view folded into the intent: new modules, functions
+ * and layers added, arrows as edges (their ends named in the intent too,
+ * with the layer the code gives them), removals taken out, notes kept
+ * under the block.
+ */
+export function mergePlan(intent: Intent, plan: Plan, graph: Graph | null = null): Intent {
+  const next: Intent = { ...intent, layers: [...intent.layers], modules: intent.modules.map((module) => ({ ...module, fns: [...module.fns] })), edges: [...intent.edges] };
+
+  const module = (id: string, layer?: string): IntentModule => {
+    let found = next.modules.find((candidate) => candidate.id === id);
+
+    if (!found) {
+      found = { id, fns: [] };
+
+      if (layer) found.layer = layer;
+      next.modules.push(found);
+    } else if (layer && !found.layer) found.layer = layer;
+
+    if (layer && !next.layers.some((candidate) => candidate.name === layer)) next.layers.push({ name: layer });
+
+    return found;
+  };
+
+  for (const node of plan.added) {
+    if (node.kind === "layer") {
+      if (!next.layers.some((layer) => layer.name === node.name)) next.layers.push({ name: node.name });
+    } else if (node.kind === "module") module(node.name, node.layer);
+    else if (node.module) {
+      const owner = module(node.module, node.layer);
+
+      if (!owner.fns.some((fn) => fn.name === node.name)) owner.fns.push({ name: node.name });
+    }
+  }
+
+  for (const edge of plan.edges) {
+    for (const end of [edge.from.label, edge.to.label]) {
+      const owner = moduleOf(end);
+      const layer = graph?.modules.get(owner)?.layer;
+      const found = module(owner, next.modules.find((candidate) => candidate.id === owner)?.layer ?? layer);
+
+      if (end.includes("#")) {
+        const fnName = end.slice(end.indexOf("#") + 1);
+
+        if (!found.fns.some((fn) => fn.name === fnName)) found.fns.push({ name: fnName });
+      }
+    }
+
+    if (!next.edges.some((candidate) => candidate.from === edge.from.label && candidate.to === edge.to.label)) next.edges.push({ from: edge.from.label, to: edge.to.label });
+  }
+
+  // A module drawn without a lane takes the layer the code gives it, when the code has it.
+  for (const candidate of next.modules) {
+    const layer = graph?.modules.get(candidate.id)?.layer;
+
+    if (!candidate.layer && layer) {
+      candidate.layer = layer;
+
+      if (!next.layers.some((known) => known.name === layer)) next.layers.push({ name: layer });
+    }
+  }
+
+  for (const removal of plan.removed) {
+    next.modules = next.modules.filter((candidate) => candidate.id !== removal.label);
+
+    for (const candidate of next.modules) candidate.fns = candidate.fns.filter((fn) => `${candidate.id}#${fn.name}` !== removal.label);
+    next.edges = next.edges.filter((edge) => edge.from !== removal.label && edge.to !== removal.label && moduleOf(edge.from) !== removal.label && moduleOf(edge.to) !== removal.label);
+  }
+
+  if (plan.notes.length > 0) next.after = `${next.after.trimEnd()}\n\n## Notes from the drawing\n\n${plan.notes.map((note) => `- ${note}`).join("\n")}\n`;
+
+  return next;
 }

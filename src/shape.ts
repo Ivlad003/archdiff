@@ -150,7 +150,8 @@ export function hubsAsBadges(diagram: Diagram, subject: string | null, threshold
 
   // At least `min` importers and `share` of the picture's modules, or `max` whatever its size (archdiff.json "hubs").
   const threshold = Math.max(thresholds.min, Math.min(thresholds.max, Math.ceil(modules.length * thresholds.share)));
-  const hubs = modules.filter((node) => node.id !== subject && (importers.get(node.id)?.size ?? 0) >= threshold).map((node) => node.id);
+  // A shape a review marked stays drawn: a changed logger is news, not noise.
+  const hubs = modules.filter((node) => node.id !== subject && node.diff === undefined && (importers.get(node.id)?.size ?? 0) >= threshold).map((node) => node.id);
 
   if (hubs.length === 0) return diagram;
   const hubSet = new Set(hubs);

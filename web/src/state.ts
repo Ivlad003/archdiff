@@ -8,16 +8,31 @@
 // app.ts renders from `stateFromHash()` and navigates with `setHash()`.
 
 import { DEFAULT_PICTURE_OPTIONS, readPictureOptions, writePictureParams, type PictureOptionKey, type PictureOptions } from "../../src/options.ts";
+import { parseView } from "../../src/view-keys.ts";
+import type { Refs } from "./api.ts";
 
 export type { PictureOptions } from "../../src/options.ts";
 
 export interface State extends PictureOptions {
   view: string;
-  review: boolean;
   /** The head of a review: a ref, or null for the working tree. */
   head: string | null;
-  /** The heads of a comparison (two or more branches, `WORKTREE` the working tree); empty: a plain review. */
+  /** The heads of a comparison (two or more branches, `WORKTREE` the working tree). */
   heads: string[];
+}
+
+/** A review of a change or a comparison of heads: the page shows the branch bar, and nothing is drawn on it. */
+export function reviewing(view: string): boolean {
+  const kind = parseView(view)?.kind;
+
+  return kind === "review" || kind === "compare";
+}
+
+/** The refs of the link: the base (the base field), the head, the heads. */
+export function refsOf(state: State): Refs {
+  const base = (document.getElementById("base") as HTMLInputElement | null)?.value.trim() || null;
+
+  return { base, head: state.head, heads: state.heads };
 }
 
 /** The options a link may leave out: remembered in this browser as defaults ("remember as defaults"). */
@@ -82,14 +97,16 @@ export function stateFromHash(): State {
   // A link without an option takes the remembered default; `packages=0`, `overlay=none`, `depth=` say "none" explicitly.
   for (const key of REMEMBERED) if (!picture.given.has(key)) (options as Record<string, unknown>)[key] = defaults[key];
 
-  return { ...options, view: params.get("view") ?? "layers", review: params.get("review") === "1", head: params.get("head") || null, heads: (params.get("heads") ?? "").split(",").filter((head) => head !== "") };
+  const heads = (params.get("heads") ?? "").split(",").filter((head) => head !== "");
+  // A link of an older page said `review=1` beside another view: the review, or the comparison of its heads.
+  const view = params.get("review") === "1" ? (heads.length > 1 ? "compare" : "review") : (params.get("view") ?? "layers");
+
+  return { ...options, view, head: params.get("head") || null, heads };
 }
 
 export function setHash(state: State): void {
   const params = new URLSearchParams();
   params.set("view", state.view);
-
-  if (state.review) params.set("review", "1");
   const base = (document.getElementById("base") as HTMLInputElement | null)?.value.trim() ?? "";
 
   if (base) params.set("base", base);

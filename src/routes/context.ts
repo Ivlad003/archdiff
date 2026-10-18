@@ -1,17 +1,18 @@
 // What every route handler gets: the server's context (the repository, the
 // options, the analysis cache, the agent, the live-reload listeners, the
-// placed-diagram helper) and the request (URL, body, response, request),
-// plus the three ways to answer. The handlers live in pictures.ts,
+// picture of a request) and the request (URL, body, response, request),
+// plus the ways to answer and to read a picture's request from a query. The handlers live in pictures.ts,
 // agent.ts and git.ts; server.ts builds the context and dispatches by
 // `METHOD /path`.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Analysis } from "../analyze.ts";
 import type { AgentRunner, AgentSpec } from "../agent.ts";
-import type { layout } from "../diagram.ts";
-import type { PictureOptions } from "../options.ts";
-import type { Result } from "../result.ts";
+import { readPictureOptions, type PictureOptions } from "../options.ts";
+import type { Picture, PictureRequest } from "../picture.ts";
+import { ok, wrong, type Result } from "../result.ts";
 import type { ServeOptions } from "../server.ts";
+import { parseView } from "../view-keys.ts";
 
 export type { PictureOptions } from "../options.ts";
 
@@ -29,10 +30,33 @@ export interface RouteContext {
   activeRunner(): AgentRunner | null;
   /** The responses waiting on `/api/changes`. */
   changeListeners: Set<ServerResponse>;
-  /** The placed diagram of a view with the picture's options; null for an unknown view. */
-  placed(analysis: Analysis, key: string, picked: PictureOptions, base?: string | null, head?: string | null): Promise<ReturnType<typeof layout> | null>;
-  /** The picture's options as the query names them (options.ts), or the problem with one of them. */
-  optionsOf(url: URL): Result<PictureOptions>;
+  /** The picture the query names (`requestOf`), drawn on the current analysis; the problem with the request, or git's when it refuses. */
+  picture(query: URLSearchParams): Promise<Result<Picture>>;
+}
+
+/**
+ * The picture a query names: `view=<key>`, the picture's options as
+ * options.ts names them, and the refs `base` (else `defaultBase`, the
+ * server's `--base`), `head` and `heads=a,b`. A problem names an unknown
+ * view or a wrong option.
+ */
+export function requestOf(query: URLSearchParams, defaultBase: string | null): Result<PictureRequest> {
+  const view = parseView(query.get("view") ?? "");
+
+  if (!view) return wrong("unknown view");
+  const read = readPictureOptions((name) => query.get(name), "param");
+
+  if (!read.ok) return read;
+  const heads = (query.get("heads") ?? "").split(",").filter((head) => head !== "");
+
+  return ok({ view, options: read.value.options, refs: { base: query.get("base") || defaultBase, head: query.get("head") || null, heads } });
+}
+
+/** The picture's options as a query names them, or the problem with one of them. */
+export function optionsOf(query: URLSearchParams): Result<PictureOptions> {
+  const read = readPictureOptions((name) => query.get(name), "param");
+
+  return read.ok ? ok(read.value.options) : read;
 }
 
 export interface RouteRequest {

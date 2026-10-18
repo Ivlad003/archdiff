@@ -30,38 +30,28 @@ import { MAX_SHAPES } from "./shape.ts";
 import { defaultDepth, viewKey, type View } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
 import { timelineDiagram } from "./views-more.ts";
-import type { GraphDiff } from "./diff.ts";
-import type { LaneMode, Overlay, PictureOptions } from "./options.ts";
+import { compareDiagram, diffDiagram, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
+import type { LogicFact } from "./extract/logic.ts";
+import { DEFAULT_PICTURE_OPTIONS, type PictureOptions } from "./options.ts";
 
 export { MAX_SHAPES } from "./shape.ts";
 export { parseView, viewKey, type View } from "./view-keys.ts";
 export { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 
-export interface ViewOptions {
-  /** How far from the subject the picture goes; each view has its default. */
-  depth?: number;
-  /** Draw the packages and built-ins a module imports (the module view); off by default: they crowd the picture. */
-  packages?: boolean;
-  /** At most this many shapes; the rest fold into one `more` shape. Default `MAX_SHAPES`. */
-  limit?: number;
-  /** Lines standing for fewer imports or calls than this are left out (the Markdown keeps them). Default 1: every line. */
-  weight?: number;
-  /** Modules most of a picture imports (a logger, the types) become a badge on their importers instead of a tangle of lines. Default on. */
-  hubs?: boolean;
-  /** Lanes (layers, or modules of an inside view) left out of the picture with their shapes. */
-  hideLanes?: readonly string[];
-  /** Modules opened in place: each becomes a lane of its functions, and the lines into and out of it land on the functions they concern (the mix of a module view and an inside view). */
-  expand?: readonly string[];
-  /** Overlays laid over the picture after the fold, in order (tests, storages, heat, instability). */
-  overlays?: readonly Overlay[];
-  /** The review's diff whose marks are laid over the picture (`--changes`). */
+/**
+ * What a view reads at the edge, besides the analysis: git and a file,
+ * read by picture.ts (the commits of a timeline, the two graphs of a
+ * review, the heads of a comparison, a function's body for its logic, the
+ * review's diff for `changes`), so the views stay pure functions.
+ */
+export interface EdgeReads {
+  /** `changes`: the review's diff whose marks are laid over the picture. */
   diff?: GraphDiff;
-  /** With `diff`: keep the marked shapes and their neighbours only. */
-  onlyChanges?: boolean;
-  /** Lanes as rows or columns; `auto` lets the layout decide by the number of lanes. */
-  lanes?: LaneMode;
-  /** Count type-only imports too (cycles, matrix), drawn dashed. */
-  types?: boolean;
+  timeline?: { rows: readonly HistoryRow[]; base: string; head: string };
+  /** The flowchart of the function of a `logic:` view; null when its body could not be read. */
+  logic?: LogicFact | null;
+  review?: { diff: GraphDiff; base: Graph; head: Graph };
+  compare?: { base: string; heads: readonly Compared[]; baseGraph: Graph; graphs: ReadonlyMap<string, Graph> };
 }
 
 export interface ViewEntry {
@@ -612,22 +602,15 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): P
 /** Lifelines a sequence keeps apart; beyond it the picture is a wall of arrows (the usual guidance says 10–12). */
 const MAX_PARTICIPANTS = 12;
 
-/** The view options a picture's options (options.ts) imply, as `viewOf` takes them. */
-export function viewOptionsOf(picture: PictureOptions): ViewOptions {
-  const options: ViewOptions = { packages: picture.packages, hubs: picture.hubs, expand: picture.expand, hideLanes: picture.hideLanes, overlays: picture.overlays, onlyChanges: picture.onlyChanges, lanes: picture.lanes, types: picture.types };
-
-  if (picture.depth !== null) options.depth = picture.depth;
-
-  if (picture.limit !== null) options.limit = picture.limit;
-
-  if (picture.weight !== null) options.weight = picture.weight;
-
-  return options;
-}
-
-/** The unplaced diagram of a view, folded to `limit` shapes. */
-export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}): Diagram {
+/**
+ * The picture of a view before `layout`: drawn from the analysis (and what
+ * the edge read for it), then shaped by the steps of pipeline.ts with the
+ * picture's options — hidden lanes, the mix, hubs, the fold, the weight,
+ * the review's marks, the overlays, the lanes.
+ */
+export function viewOf(analysis: Analysis, view: View, options: PictureOptions = DEFAULT_PICTURE_OPTIONS, reads: EdgeReads = {}): Diagram {
   const depth = options.depth ?? defaultDepth(view.kind);
+  const limit = options.limit ?? MAX_SHAPES;
   const { graph } = analysis;
 
   const full = (): PictureContent => {
@@ -639,7 +622,7 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
       case "dir":
         return dirView(graph, view.subject, depth);
       case "module":
-        return moduleView(graph, view.subject, depth, options.packages === true);
+        return moduleView(graph, view.subject, depth, options.packages);
       case "inside":
         return insideView(graph, view.subject, depth);
       case "usage":
@@ -647,21 +630,21 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
       case "calls":
         return callsView(graph, view.subject, depth);
       case "sequence":
-        return sequenceView(graph, view.subject, depth, options.limit ?? MAX_SHAPES);
+        return sequenceView(graph, view.subject, depth, limit);
       case "path":
         return pathView(analysis, view.subject, depth);
       case "type":
         return typeView(analysis, view.subject);
       case "cycles":
-        return cyclesView(graph, null, { types: options.types === true, fns: view.subject === "fns" });
+        return cyclesView(graph, null, { types: options.types, fns: view.subject === "fns" });
       case "cycle":
-        return cyclesView(graph, view.subject, { types: options.types === true, fns: view.subject.includes("#") });
+        return cyclesView(graph, view.subject, { types: options.types, fns: view.subject.includes("#") });
       case "classes":
-        return classesView(analysis, view.subject, options.limit ?? MAX_SHAPES);
+        return classesView(analysis, view.subject, limit);
       case "matrix":
-        return matrixView(graph, view.subject, options.types === true);
+        return matrixView(graph, view.subject, options.types);
       case "metrics":
-        return metricsView(analysis, view.subject, options.limit ?? MAX_SHAPES, options.types === true);
+        return metricsView(analysis, view.subject, limit, options.types);
       case "machines":
         return machinesView(analysis);
       case "machine":
@@ -669,7 +652,7 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
       case "focus":
         return focusView(graph, view.subject, depth);
       case "logic":
-        return logicView(analysis, view.subject);
+        return logicView(analysis, view.subject, reads.logic);
       case "events":
         return eventsView(analysis);
       case "tests":
@@ -679,8 +662,13 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
       case "packages":
         return packagesView(analysis);
       case "timeline":
-        // From the commits of a range, which the caller attaches with `withTimeline` (git is read at the edge, not here).
-        return analysis.timeline ? timelineDiagram(analysis.timeline.rows, analysis.timeline.base, analysis.timeline.head) : unplaced("Timeline", [], [], [], { placed: true, reason: "the timeline is built from the commits (archdiff diagram timeline --base --head)" });
+        // From the commits of a range, which picture.ts reads from git.
+        return reads.timeline ? timelineDiagram(reads.timeline.rows, reads.timeline.base, reads.timeline.head) : unplaced("Timeline", [], [], [], { placed: true, reason: "the timeline is built from the commits of a range (archdiff diagram timeline --base --head)" });
+      case "review":
+        // The analyses of the base and the head, which picture.ts reads from git.
+        return reads.review ? diffDiagram(reads.review.diff, reads.review.base, reads.review.head) : unplaced("Review", [], [], [], { reason: "a review is read from git (archdiff review, or the page's review)" });
+      case "compare":
+        return reads.compare ? compareDiagram(reads.compare.base, reads.compare.heads, reads.compare.baseGraph, reads.compare.graphs) : unplaced("Compare", [], [], [], { reason: "a comparison is read from git (archdiff compare --heads a,b)" });
       case "coverage":
         return coverageView(graph);
       case "intent":
@@ -693,7 +681,7 @@ export function viewOf(analysis: Analysis, view: View, options: ViewOptions = {}
   // The steps after a view — hidden lanes, the mix, hubs, the question, the fold, the weight, the review's marks, the
   // overlays — are the pipeline's data (pipeline.ts), each a pure Diagram → Diagram that explains itself in `reason`.
   // The view's key comes from the codec (view-keys.ts), never from the view function that drew the picture.
-  return runSteps({ view: viewKey(view), ...full() }, { analysis, graph, view, options, subject: view.subject });
+  return runSteps({ view: viewKey(view), ...full() }, { analysis, graph, view, options, reads, subject: view.subject });
 }
 
 

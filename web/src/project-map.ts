@@ -456,7 +456,7 @@ target.addEventListener("pointerup", (event) => {
   // A click on a dot: its view (Shift: everything joined to it); the map closes and the picture opens.
   const key = viewOfDot(was.id, event.shiftKey ? "focus" : "open");
   toggleProjectMap(false);
-  setHash({ ...stateFromHash(), view: key, review: false });
+  setHash({ ...stateFromHash(), view: key });
 });
 
 target.addEventListener("dblclick", (event) => {
@@ -464,7 +464,7 @@ target.addEventListener("dblclick", (event) => {
 
   if (!dot) return;
   toggleProjectMap(false);
-  setHash({ ...stateFromHash(), view: viewOfDot(dot.id, "inside"), review: false });
+  setHash({ ...stateFromHash(), view: viewOfDot(dot.id, "inside") });
 });
 
 target.addEventListener("pointerleave", () => {

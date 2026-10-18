@@ -5,7 +5,7 @@
 import { api } from "./api.ts";
 import { element } from "./dom.ts";
 import { page } from "./page.ts";
-import { setHash, stateFromHash, type State } from "./state.ts";
+import { reviewing, setHash, stateFromHash, type State } from "./state.ts";
 
 const commitList = element<HTMLSelectElement>("commit-list");
 let commits: import("./api.ts").Commit[] = [];
@@ -42,7 +42,7 @@ function reviewCommit(index: number): void {
   if (!commit) return;
   const previous = commits[index - 1];
   page.baseInput.value = previous ? previous.sha : "";
-  setHash({ ...stateFromHash(), review: true, head: commit.sha });
+  setHash({ ...stateFromHash(), view: "review", head: commit.sha, heads: [] });
 }
 
 commitList.addEventListener("change", () => {
@@ -50,7 +50,7 @@ commitList.addEventListener("change", () => {
 
   if (index === -1) {
     page.baseInput.value = "";
-    setHash({ ...stateFromHash(), review: true, head: null });
+    setHash({ ...stateFromHash(), view: "review", head: null, heads: [] });
   } else reviewCommit(index);
 });
 element<HTMLButtonElement>("commit-prev").addEventListener("click", () => {
@@ -63,7 +63,7 @@ element<HTMLButtonElement>("commit-next").addEventListener("click", () => {
 });
 // The head input itself is reached directly here: this listener is attached at import, before the page is bound.
 element<HTMLInputElement>("head").addEventListener("change", () => {
-  if (stateFromHash().review) setHash({ ...stateFromHash(), head: page.headInput.value.trim() || null });
+  if (reviewing(stateFromHash().view)) setHash({ ...stateFromHash(), head: page.headInput.value.trim() || null });
 });
 
 // ── The branches: a base and any number of heads to compare ────────────────
@@ -138,8 +138,8 @@ element<HTMLButtonElement>("compare").addEventListener("click", () => {
     return;
   }
 
-  // One head that is the working tree is the plain review; anything else is a comparison.
-  if (heads.length === 1 && heads[0] === "WORKTREE") setHash({ ...stateFromHash(), review: true, head: null, heads: [] });
-  else if (heads.length === 1) setHash({ ...stateFromHash(), review: true, head: heads[0]!, heads: [] });
-  else setHash({ ...stateFromHash(), review: true, head: null, heads });
+  // One head that is the working tree is the plain review; one ref its review; two or more a comparison.
+  if (heads.length === 1 && heads[0] === "WORKTREE") setHash({ ...stateFromHash(), view: "review", head: null, heads: [] });
+  else if (heads.length === 1) setHash({ ...stateFromHash(), view: "review", head: heads[0]!, heads: [] });
+  else setHash({ ...stateFromHash(), view: "compare", head: null, heads });
 });

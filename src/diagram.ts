@@ -114,7 +114,7 @@ export interface Diagram {
   direction?: "down";
   /** The shapes have their places already (a sequence view): `layout` keeps them, exports draw the routes given. */
   placed?: true;
-  /** How the lanes lie: bands down the picture (`rows`) or blocks across it (`columns`); absent: rows, or columns on a map of many lanes. */
+  /** How the lanes lie: bands down the picture (`rows`) or blocks across it (`columns`); the pipeline asks, `layout` writes what it did. */
   lanes?: "rows" | "columns";
   /** Some shapes sit where the user put them, not in the layout's columns: the lines are routed on a grid around every shape (route-free.ts). */
   freeform?: true;
@@ -285,9 +285,6 @@ const MAX_ROWS = 8;
 
 /** The gap between two lanes lying as columns. */
 const LANE_GAP = 24;
-
-/** More lanes than this on a map, and they lie as columns unless the picture says rows. */
-const COLUMNS_ABOVE = 6;
 
 /** The room kept around a shape the user placed by hand, so a computed shape never sits on it. */
 const MANUAL_MARGIN = 12;
@@ -555,12 +552,11 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
     return { ...group, x: 0, y: from, w: right, h: to - from };
   });
 
-  // Lanes as columns: a map of many layers reads across, each lane a block, in the order the lines flow.
-  const columnsWanted = diagram.lanes === "columns" || (diagram.lanes === undefined && groups.length > COLUMNS_ABOVE && /^(modules|layer:|dir:)/.test(diagram.view));
+  // Lanes as columns, when the picture asks (pipeline.ts decides): each lane a block, in the order the lines flow. A stack,
+  // a hand-placed drawing or a single lane lies as rows whatever was asked, and the picture says so.
+  if (diagram.lanes === "columns" && diagram.direction !== "down" && manualIds.size === 0 && groups.length > 1) return lanesAsColumns({ ...diagram, nodes, groups }, laneOf);
 
-  if (columnsWanted && diagram.direction !== "down" && manualIds.size === 0 && groups.length > 1) return lanesAsColumns({ ...diagram, nodes, groups }, laneOf);
-
-  return manualIds.size > 0 ? { ...diagram, nodes, groups, freeform: true } : { ...diagram, nodes, groups };
+  return manualIds.size > 0 ? { ...diagram, nodes, groups, lanes: "rows", freeform: true } : { ...diagram, nodes, groups, lanes: "rows" };
 }
 
 /** Shapes the user placed keep their place; a computed shape on top of one moves down its column until it is clear. */

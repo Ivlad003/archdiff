@@ -1,22 +1,20 @@
-// The architectural diff of a change (`archdiff review`): the working tree
-// against a base revision, without a checkout. Git names the files that
-// differ and gives their base content; the base analysis is the head one
-// with those files replaced, so only the changed files are parsed twice.
-// The diff is a pure function of the two graphs: modules, functions,
-// imports and calls added, removed or changed (by fingerprint or
-// signature), the layer dependencies that appeared, and the picture of it.
+// The architectural diff of a change, as a pure function of two graphs:
+// the modules, functions, imports and calls added, removed or changed (by
+// fingerprint or signature), the layer dependencies that appeared, marked
+// against the contract (ARCHITECTURE.md); the pictures of a review and of a
+// comparison of several heads; the review's marks laid over any picture;
+// and the Markdown of a review, a comparison and a history. The analyses
+// of the base and the heads are read by review.ts, at the edge.
 //
-// Pipeline: root + base ref → changed files + base content (git) →
-// two analyses → GraphDiff → Diagram + Markdown. Entry points: `review`,
-// `graphDiff`, `diffDiagram`, `reviewMarkdown`, `mergeBase`, `changedFiles`.
+// Pipeline: two graphs → GraphDiff → Diagram + Markdown. Entry points:
+// `graphDiff`, `diffDiagram`, `compareDiagram`, `markContract`,
+// `reviewFindings`, `reviewMarkdown`, `comparisonMarkdown`,
+// `historyMarkdown`, `overlayDiff`, `onlyChanged`.
 
-import { analyze, type Analysis } from "./analyze.ts";
-import { changedFiles, commitsBetween, defaultBase, mergeBase, treeAt, type Commit } from "./git.ts";
-import { loadConfig } from "./config.ts";
-import type { Diagram, Line, Shape, DiffMark } from "./diagram.ts";
-import { layout } from "./diagram.ts";
+import type { Commit } from "./git.ts";
+import type { Diagram, Line, Shape, DiffMark, PictureContent } from "./diagram.ts";
 import { toMermaid } from "./export/mermaid.ts";
-import { moduleOf, type Graph, type Declaration } from "./graph.ts";
+import type { Graph, Declaration } from "./graph.ts";
 import { allowedLayerPairs, type Intent } from "./intent.ts";
 
 export interface NodeChange {
@@ -52,15 +50,6 @@ export interface GraphDiff {
   layerEdgesRemoved: EdgeChange[];
   externalsAdded: string[];
   externalsRemoved: string[];
-}
-
-export interface ReviewResult {
-  /** The head has a contract (ARCHITECTURE.md): a new layer dependency is a finding only when it goes against it. */
-  contract: boolean;
-  head: Analysis;
-  base: Analysis;
-  diff: GraphDiff;
-  diagram: Diagram;
 }
 
 function edgeKey(from: string, to: string): string {
@@ -152,9 +141,11 @@ export function graphDiff(base: Graph, head: Graph, baseRef: string, changed: re
 /**
  * The picture of a diff at module level: the modules added, removed or
  * with a changed function, the modules they import or are imported by
- * where that import changed, and the imports themselves marked.
+ * where that import changed, and the imports themselves marked. The
+ * marked shapes come first, so a big change folds its context, not its
+ * news.
  */
-export function diffDiagram(diff: GraphDiff, base: Graph, head: Graph): Diagram {
+export function diffDiagram(diff: GraphDiff, base: Graph, head: Graph): PictureContent {
   const marks = new Map<string, Shape["diff"]>();
 
   for (const id of diff.modulesAdded) marks.set(id, "added");
@@ -207,27 +198,15 @@ export function diffDiagram(diff: GraphDiff, base: Graph, head: Graph): Diagram 
     }
   }
 
+  nodes.sort((a, b) => Number(b.diff !== undefined) - Number(a.diff !== undefined));
   const layers = [...new Set([...head.layers, ...base.layers])].sort();
   const used = new Set(nodes.map((node) => node.group));
   const groups = layers.filter((layer) => used.has(layer)).map((layer) => ({ id: layer, label: layer, kind: "lane" as const, x: 0, y: 0, w: 0, h: 0 }));
-  const diagram: Diagram = { view: `review:${diff.base}`, title: `Changes since ${diff.base}`, nodes, edges, groups };
+  const picture: PictureContent = { title: `Changes since ${diff.base}`, nodes, edges, groups };
 
-  if (nodes.length === 0) diagram.reason = "no module, function, import or call changed";
+  if (nodes.length === 0) picture.reason = "no module, function, import or call changed";
 
-  return diagram;
-}
-
-/** Analyses the head (a ref, or the working tree when null) and the base, and diffs them. `base` null: the merge-base with the main branch. */
-export async function review(root: string, base: string | null, headRef: string | null = null): Promise<ReviewResult> {
-  const ref = base ?? mergeBase(root);
-  const config = loadConfig(root);
-  const head = headRef === null ? await analyze(root, { config }) : await analyze(root, { overrides: treeAt(root, headRef), config });
-  const baseAnalysis = await analyze(root, { overrides: treeAt(root, ref), config });
-  const changed = changedFiles(root, ref, headRef);
-  const diff = markContract(graphDiff(baseAnalysis.graph, head.graph, headRef === null ? ref : `${ref}..${headRef}`, [...changed.base.keys()]), head.intent, head.graph);
-  const diagram = layout(diffDiagram(diff, baseAnalysis.graph, head.graph));
-
-  return { head, base: baseAnalysis, diff, diagram, contract: head.intent !== null };
+  return picture;
 }
 
 /** The new layer dependencies the contract forbids, marked; a diff without a contract is left as it is. */
@@ -256,28 +235,6 @@ export interface HistoryRow {
   externalsAdded: string[];
 }
 
-/** The architectural diff of every commit from `base` to `head`, one analysis per commit (the fact cache makes each cheap). */
-/** The analysis with the commits of a range attached, for the timeline view (`viewOf` reads them; git is read here, at the edge). */
-export async function withTimeline(analysis: Analysis, base: string, head: string): Promise<Analysis> {
-  return { ...analysis, timeline: { rows: await history(analysis.root, base, head), base, head } };
-}
-
-export async function history(root: string, base: string, head: string): Promise<HistoryRow[]> {
-  const commits = commitsBetween(root, base, head);
-  const config = loadConfig(root);
-  let previous = (await analyze(root, { overrides: treeAt(root, base), config })).graph;
-  const rows: HistoryRow[] = [];
-
-  for (const commit of commits) {
-    const current = (await analyze(root, { overrides: treeAt(root, commit.sha), config })).graph;
-    const diff = graphDiff(previous, current, commit.sha, []);
-    rows.push({ commit, modulesAdded: diff.modulesAdded.length, modulesRemoved: diff.modulesRemoved.length, fnsChanged: diff.nodesAdded.length + diff.nodesRemoved.length + diff.nodesChanged.length, depsAdded: diff.depsAdded.length, depsRemoved: diff.depsRemoved.length, layerEdgesAdded: diff.layerEdgesAdded, layerEdgesRemoved: diff.layerEdgesRemoved, externalsAdded: diff.externalsAdded });
-    previous = current;
-  }
-
-  return rows;
-}
-
 /** The history as a Markdown table: one row per commit, the layer couplings it added or removed named. */
 export function historyMarkdown(rows: HistoryRow[], base: string, head: string): string {
   const lines = [`<!-- archdiff:generated — history ${base}..${head} -->`, `# Architecture drift from ${base} to ${head}`, ""];
@@ -302,9 +259,8 @@ function fnLabel(change: NodeChange): string {
   return `${change.kind} \`${change.id.slice(change.module.length + 1)}\` — ${change.module}:${change.line}`;
 }
 
-/** The review as Markdown: the summary, the Mermaid picture, every change by kind. */
-export function reviewMarkdown(result: ReviewResult): string {
-  const { diff, diagram } = result;
+/** The review as Markdown: the summary, the Mermaid picture, every change by kind; `contract`: the head has ARCHITECTURE.md. */
+export function reviewMarkdown(diff: GraphDiff, diagram: Diagram, contract: boolean): string {
   const lines = [`<!-- archdiff:generated — review since ${diff.base} -->`, `# Architecture changes since ${diff.base}`, ""];
   const counts = [
     `${diff.changedFiles.length} source files changed`,
@@ -317,10 +273,10 @@ export function reviewMarkdown(result: ReviewResult): string {
   lines.push(counts.join("; ") + ".", "");
 
   if (diff.layerEdgesAdded.length > 0) {
-    const findings = reviewFindings(diff, result.contract);
+    const findings = reviewFindings(diff, contract);
     lines.push(findings.length > 0 ? "## ⚠ New dependencies between layers" : "## New dependencies between layers", "");
 
-    for (const edge of diff.layerEdgesAdded) lines.push(`- **${edge.from} → ${edge.to}**${result.contract ? (edge.against ? " — against ARCHITECTURE.md" : " — allowed by ARCHITECTURE.md") : ""}`);
+    for (const edge of diff.layerEdgesAdded) lines.push(`- **${edge.from} → ${edge.to}**${contract ? (edge.against ? " — against ARCHITECTURE.md" : " — allowed by ARCHITECTURE.md") : ""}`);
     lines.push("");
   }
 
@@ -357,8 +313,6 @@ export function reviewMarkdown(result: ReviewResult): string {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-export { moduleOf };
-
 /** One head of a comparison against the base: its diff and the graph it was computed on. */
 export interface Compared {
   /** The head has a contract: only the layer dependencies against it are findings. */
@@ -367,39 +321,8 @@ export interface Compared {
   diff: GraphDiff;
 }
 
-export interface ComparisonResult {
-  base: string;
-  heads: Compared[];
-  diagram: Diagram;
-}
-
-/**
- * Several heads (branches, tags, commits, or the working tree as `WORKTREE`)
- * against one base: each head's own diff, and one picture of them all —
- * every module a head added, removed or changed, marked with the heads
- * that did; a change only one head made and one every head made read
- * differently at a glance.
- */
-export async function compareBranches(root: string, base: string | null, heads: readonly string[]): Promise<ComparisonResult> {
-  const baseRef = base ?? defaultBase(root) ?? mergeBase(root);
-  const config = loadConfig(root);
-  const baseGraph = (await analyze(root, { overrides: treeAt(root, baseRef), config })).graph;
-  const compared: Compared[] = [];
-  const graphs = new Map<string, Graph>();
-
-  for (const head of heads) {
-    const analysis = head === "WORKTREE" ? await analyze(root, { config }) : await analyze(root, { overrides: treeAt(root, head), config });
-    const { graph } = analysis;
-    graphs.set(head, graph);
-    const changed = head === "WORKTREE" ? [...changedFiles(root, baseRef).base.keys()] : [...changedFiles(root, baseRef, head).base.keys()];
-    compared.push({ head, diff: markContract(graphDiff(baseGraph, graph, `${baseRef}..${head}`, changed), analysis.intent, graph), contract: analysis.intent !== null });
-  }
-
-  return { base: baseRef, heads: compared, diagram: layout(compareDiagram(baseRef, compared, baseGraph, graphs)) };
-}
-
 /** The picture of a comparison: the modules any head touched, in their layers, labelled with what each head did to them; the imports any head added or removed, labelled with the head. */
-export function compareDiagram(base: string, heads: readonly Compared[], baseGraph: Graph, graphs: ReadonlyMap<string, Graph>): Diagram {
+export function compareDiagram(base: string, heads: readonly Compared[], baseGraph: Graph, graphs: ReadonlyMap<string, Graph>): PictureContent {
   const marks = new Map<string, Map<string, DiffMark>>();
 
   const mark = (module: string, head: string, what: DiffMark): void => {
@@ -476,35 +399,35 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
   const layers = [...new Set([...baseGraph.layers, ...[...graphs.values()].flatMap((graph) => graph.layers)])].sort();
   const used = new Set(nodes.map((node) => node.group));
   const groups = layers.filter((layer) => used.has(layer)).map((layer) => ({ id: layer, label: layer, kind: "lane" as const, x: 0, y: 0, w: 0, h: 0 }));
-  const diagram: Diagram = { view: `compare:${base}..${heads.map((head) => head.head).join(",")}`, title: `${heads.length} heads against ${base}`, nodes, edges, groups };
+  const picture: PictureContent = { title: `${heads.length} heads against ${base}`, nodes, edges, groups };
 
-  if (nodes.length === 0) diagram.reason = "no head changed a module, function, import or call against the base";
+  if (nodes.length === 0) picture.reason = "no head changed a module, function, import or call against the base";
 
-  return diagram;
+  return picture;
 }
 
 /** The comparison as Markdown: a table of the heads, the picture, and each head's own review. */
-export function comparisonMarkdown(result: ComparisonResult): string {
-  const lines = [`<!-- archdiff:generated — compare ${result.base} .. ${result.heads.map((head) => head.head).join(", ")} -->`, `# ${result.heads.length} heads against ${result.base}`, "", "| head | files | modules | functions | imports | calls | layer couplings |", "| --- | --- | --- | --- | --- | --- | --- |"];
+export function comparisonMarkdown(base: string, heads: readonly Compared[], diagram: Diagram): string {
+  const lines = [`<!-- archdiff:generated — compare ${base} .. ${heads.map((head) => head.head).join(", ")} -->`, `# ${heads.length} heads against ${base}`, "", "| head | files | modules | functions | imports | calls | layer couplings |", "| --- | --- | --- | --- | --- | --- | --- |"];
 
-  for (const { head, diff, contract } of result.heads) {
+  for (const { head, diff, contract } of heads) {
     const couplings = diff.layerEdgesAdded.map((edge) => `${edge.against || !contract ? "⚠ " : ""}+${edge.from}→${edge.to}`).concat(diff.layerEdgesRemoved.map((edge) => `−${edge.from}→${edge.to}`)).join(" ");
     lines.push(`| ${head === "WORKTREE" ? "working tree" : head} | ${diff.changedFiles.length} | +${diff.modulesAdded.length} −${diff.modulesRemoved.length} | +${diff.nodesAdded.length} −${diff.nodesRemoved.length} ~${diff.nodesChanged.length} | +${diff.depsAdded.length} −${diff.depsRemoved.length} | +${diff.callsAdded.length} −${diff.callsRemoved.length} | ${couplings} |`);
   }
 
   lines.push("");
 
-  if (result.diagram.nodes.length > 0) lines.push("```mermaid", toMermaid(result.diagram).trimEnd(), "```", "");
-  else lines.push(`_${result.diagram.reason}_`, "");
+  if (diagram.nodes.length > 0) lines.push("```mermaid", toMermaid(diagram).trimEnd(), "```", "");
+  else lines.push(`_${diagram.reason}_`, "");
 
   // What every head shares and what only one has: the shape of the divergence.
   const touched = new Map<string, string[]>();
 
-  for (const { head, diff } of result.heads) for (const id of new Set([...diff.modulesAdded, ...diff.modulesRemoved, ...diff.nodesChanged.map((change) => change.module), ...diff.nodesAdded.map((change) => change.module)])) touched.set(id, [...(touched.get(id) ?? []), head]);
-  const shared = [...touched].filter(([, by]) => by.length === result.heads.length).map(([id]) => id);
+  for (const { head, diff } of heads) for (const id of new Set([...diff.modulesAdded, ...diff.modulesRemoved, ...diff.nodesChanged.map((change) => change.module), ...diff.nodesAdded.map((change) => change.module)])) touched.set(id, [...(touched.get(id) ?? []), head]);
+  const shared = [...touched].filter(([, by]) => by.length === heads.length).map(([id]) => id);
   const only = [...touched].filter(([, by]) => by.length === 1);
 
-  if (result.heads.length > 1) {
+  if (heads.length > 1) {
     lines.push("## Touched by every head", "", ...(shared.length > 0 ? shared.map((id) => `- ${id}`) : ["- none"]), "", "## Touched by one head only", "");
 
     for (const [id, by] of only) lines.push(`- ${id} — ${by[0] === "WORKTREE" ? "working tree" : by[0]}`);
@@ -513,7 +436,7 @@ export function comparisonMarkdown(result: ComparisonResult): string {
     lines.push("");
   }
 
-  for (const { head, diff, contract } of result.heads) {
+  for (const { head, diff, contract } of heads) {
     lines.push(`## ${head === "WORKTREE" ? "working tree" : head}`, "");
     const section = (title: string, items: string[]): void => {
       if (items.length > 0) lines.push(`### ${title}`, "", ...items.map((item) => `- ${item}`), "");

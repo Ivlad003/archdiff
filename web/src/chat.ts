@@ -11,7 +11,7 @@
 import { api } from "./api.ts";
 import { element, h } from "./dom.ts";
 import { page } from "./page.ts";
-import { setHash, stateFromHash } from "./state.ts";
+import { reviewing, setHash, stateFromHash } from "./state.ts";
 import { pictureQueryText } from "../../src/options.ts";
 
 export const taskField = element<HTMLTextAreaElement>("task");
@@ -161,7 +161,7 @@ function askQuestion(): void {
 
   if (question === "") return;
   const state = stateFromHash();
-  const picture = element<HTMLInputElement>("ask-picture").checked && !state.review;
+  const picture = element<HTMLInputElement>("ask-picture").checked && !reviewing(state.view);
   const about = askSubjects.length > 0 ? `\n\nIt is about: ${askSubjects.map((subject) => `${subject.label} (${subject.tag})`).join(", ")}.` : "";
   const prompt = `Answer the question below about this repository: read the code you need, and change no file.\n\nQuestion: ${question}${about}${picture ? `\n\nThe picture I am looking at: @view:${state.view}` : ""}`;
   askInput.value = "";
@@ -268,7 +268,7 @@ for (const field of [element<HTMLTextAreaElement>("task"), element<HTMLInputElem
 async function readTask(): Promise<void> {
   const state = stateFromHash();
 
-  if (state.review) return;
+  if (reviewing(state.view)) return;
 
   // The current drawing first, so an unsaved stroke counts.
   const canvas = page.canvas();
@@ -468,7 +468,7 @@ const documentGo = async (): Promise<void> => {
     state.textContent = `${result.file}: ${result.layers} layers, ${result.modules} modules, ${result.edges} imports (from ${result.source})`;
     element<HTMLTextAreaElement>("document").hidden = true;
     element<HTMLDivElement>("document-row").hidden = true;
-    setHash({ ...stateFromHash(), view: "intent", review: false });
+    setHash({ ...stateFromHash(), view: "intent" });
     void page.loadViews().then(() => page.load());
   } catch (error) {
     state.textContent = error instanceof Error ? error.message : String(error);

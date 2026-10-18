@@ -997,7 +997,8 @@ test("the mix puts a class's methods in a lane of the class; lanes lie as column
   // The lines flow forward: the routes lane (which imports) sits left of the lib lane (which it imports).
   const at = (id: string): number => columns.groups.find((group) => group.id === id)!.x;
   assert.ok(at("routes") < at("lib"), sorted.map((group) => `${group.id}@${group.x}`).join(" "));
-  assert.equal(JSON.parse(archdiff(["diagram", "modules", fixture, "--format", "json"]).stdout).lanes, undefined, "four lanes stay rows by default");
+  // The layout says how it laid the lanes: four lanes stay rows by default.
+  assert.equal(JSON.parse(archdiff(["diagram", "modules", fixture, "--format", "json"]).stdout).lanes, "rows", "four lanes stay rows by default");
 });
 
 test("run executes an entry for real with the storages mocked, traced function by function, writes and the network refused", () => {

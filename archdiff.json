@@ -16,6 +16,14 @@
     "page": [
       "web/**"
     ],
+    "edge": [
+      "src/picture.ts",
+      "src/review.ts",
+      "src/spec.ts",
+      "src/scaffold.ts",
+      "src/run.ts",
+      "src/gherkin.ts"
+    ],
     "views": [
       "src/views.ts",
       "src/views-more.ts",
@@ -27,15 +35,10 @@
       "src/flow.ts",
       "src/plan.ts",
       "src/coverage.ts",
-      "src/spec.ts",
-      "src/scaffold.ts",
       "src/pipeline.ts",
-      "src/view-keys.ts",
       "src/cycles.ts",
       "src/metrics.ts",
       "src/machines.ts",
-      "src/run.ts",
-      "src/gherkin.ts",
       "src/logic.ts",
       "src/project-map.ts"
     ],

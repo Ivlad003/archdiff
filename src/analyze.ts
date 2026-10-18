@@ -13,9 +13,7 @@ import { join } from "node:path";
 import { contentHash, FactCache } from "./cache.ts";
 import { loadConfig, type Config } from "./config.ts";
 import type { FileFacts } from "./extract/facts.ts";
-import type { LogicFact } from "./extract/logic.ts";
 import { readIntent, withIntentLayers, type Intent } from "./intent.ts";
-import type { HistoryRow } from "./diff.ts";
 import { extractAll } from "./extract/pool.ts";
 import { listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
 import { frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
@@ -53,10 +51,6 @@ export interface Analysis {
   /** The intended architecture (ARCHITECTURE.md), null without the file. */
   intent: Intent | null;
   stats: AnalysisStats;
-  /** The commits of a range, attached by the caller (`withTimeline`) for the timeline view; absent otherwise. */
-  timeline?: { rows: readonly HistoryRow[]; base: string; head: string };
-  /** The flowchart of one function, read from its file by the caller (`withLogic`) for the `logic:` view; `fact` null when it could not be read. */
-  logic?: { id: string; fact: LogicFact | null };
 }
 
 export interface AnalyzeOptions {
