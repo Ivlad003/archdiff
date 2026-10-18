@@ -254,6 +254,24 @@ test("coverage names what the diagrams cannot show, and counts only blind calls 
   assert.ok(report.markdown.includes("\n# Coverage: what the diagrams cannot show\n"));
 });
 
+test("a gap says why it is one: a long chain is a value's member, a Promise's resolve and a Map's method the language's, a call through a missing module a blind spot; the constructs not followed are listed", () =>
+  withTempDir("archdiff-gaps-", (dir) => {
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src/store.ts"), 'export const cache = new Map<string, number>();\nexport const NAMES = ["a", "b"];\nexport class Foo { constructor(n: number) {} run(): number { return n; } }\n');
+    writeFileSync(join(dir, "src/use.ts"), 'import { cache, NAMES, Foo } from "./store";\nimport { gone } from "./missing";\nexport function use(name: string): Promise<number> {\n  fetch("/api/a/very/long/path/that/goes/on/and/on", { method: "POST", headers: { "x-one": "1" } }).then(() => 1);\n  cache.get(name);\n  NAMES.includes(name);\n  gone();\n  eval("1");\n  return new Promise((resolve, reject) => (name ? resolve(new Foo(1).run()) : reject(new Error(name))));\n}\n');
+    const report = JSON.parse(archdiff(["coverage", dir, "--json"]).stdout) as { blind: number; byReason: Record<string, number>; unsupported: { module: string; line: number; reason: string }[]; markdown: string };
+    const gaps = archdiff(["coverage", dir]).stdout;
+    // The one blind spot is the call through the import that names no file; `new Foo(1).run()` is followed.
+    assert.equal(report.blind, 1, gaps);
+    assert.equal(report.byReason.unresolved, 1, gaps);
+    assert.equal(report.byReason.dynamic, undefined, gaps);
+    assert.ok(gaps.includes("- `gone` — unresolved (src/use.ts:7)"), gaps);
+    assert.ok(archdiff(["diagram", "calls:src/use.ts#use", dir, "--format", "mermaid", "--depth", "1"]).stdout.includes("src_use_ts_use ==> src_store_ts_Foo_run"));
+    // `eval` is read and not followed: the summary counts it and a section lists it.
+    assert.deepEqual(report.unsupported.map((fact) => [fact.module, fact.line, fact.reason]), [["src/use.ts", 8, "unsupported construct `eval`"]]);
+    assert.ok(gaps.includes("1 construct read but not followed.") && gaps.includes("## Constructs read but not followed\n\n- `eval` — unsupported construct `eval` (src/use.ts:8)"), gaps);
+  }));
+
 test("a wrong call exits 2 with one plain line on stderr: the view, the format, the command, an argument, a flag, --out, --port, archdiff.json, git", () =>
   withTempDir("archdiff-wrong-", (dir) => {
     /** The call exits 2 and says exactly this on stderr, nothing on stdout. */

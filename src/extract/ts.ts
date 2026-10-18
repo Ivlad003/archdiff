@@ -581,11 +581,14 @@ function variableDeclaration(x: Extraction, node: Node, exported: boolean): void
     } else if (fnValue && fnValue.type === "class") {
       facts.decls.push(classDecl(name, fnValue, d, exported, calls, facts));
     } else if (fnValue && node.children.some((c) => c.type === "const")) {
-      // `const store = new Store()`, `const db = createDb()`: a singleton, whose methods are called through its name.
+      // `const store = new Store()`, `const db = createDb()`: a singleton, whose methods are called through its name;
+      // `const LIMITS = ["a", "b"]`: a value of the language, whose methods are the language's.
       const made = fnValue.type === "new_expression" ? fnValue.childForFieldName("constructor") : null;
-      const of = made ? null : resultValue(fnValue, d, null, 0);
+      const literal = LITERAL_CLASSES.get(fnValue.type);
+      const of = made || literal ? null : resultValue(fnValue, d, null, 0);
 
       if (made && (made.type === "identifier" || made.type === "member_expression")) facts.instances = [...(facts.instances ?? []), { name, class: made.text }];
+      else if (literal) facts.instances = [...(facts.instances ?? []), { name, class: literal }];
       else if (of) facts.instances = [...(facts.instances ?? []), { name, of }];
     }
 
@@ -937,6 +940,24 @@ function localResult(from: Node, name: string, stop: Node, cls: ClassScope | nul
 /** How many locals made one from the next (`const a = f(); const b = a.g(); b.h()`) a receiver is followed through. */
 const MAX_RESULT_CHAIN = 4;
 
+/** A member callee too long to keep whole (`fetch(url, { … }).then`): its object cut short, then the member — still a member of a value to the graph, never a name. */
+function shortMember(n: Node): string {
+  const member = n.childForFieldName("property")?.text ?? "";
+  const object = (n.childForFieldName("object")?.text ?? "").replace(/\s+/g, "");
+
+  return `${object.slice(0, Math.max(MAX_CALLEE - member.length - 2, 16))}….${member}`;
+}
+
+/** Whether `name` at `from` is a parameter of the function a `new Promise(…)` runs: its `resolve` or `reject`, the language's. */
+function promiseExecutorParameter(from: Node, name: string, stop: Node): boolean {
+  const binding = declarationOf(from, name, stop);
+  const args = binding?.kind === "parameter" ? parentOf(binding.fn) : null;
+  const made = args?.type === "arguments" ? parentOf(args) : null;
+  const ctor = made?.type === "new_expression" ? made.childForFieldName("constructor") : null;
+
+  return binding?.kind === "parameter" && binding.index <= 1 && args?.namedChildren[0]?.id === binding.fn.id && ctor?.type === "identifier" && ctor.text === "Promise" && bindingOf(ctor, "Promise", stop) === null;
+}
+
 /**
  * The export a local names when a `require` or an awaited `import()` in the function binds it: `const { getSetting }
  * = await import("./features.js")` is `getSetting`, `const { a: b } = require("./x")` names `a` as `b`, `const mod =
@@ -1022,7 +1043,8 @@ function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact 
       // Node's `require(...)` is an import, read by the require query; a shadowed `require` is an ordinary call.
       if (n.text === "require" && parentOf(node)?.type === "call_expression" && requireKind(n) !== "shadowed") return null;
       // A callee named by a parameter or local is bound; through a local, it may be a hook with a default, or a
-      // module's export the function loads (`const { f } = await import("./x")`).
+      // module's export the function loads (`const { f } = await import("./x")`); through a parameter, the `resolve`
+      // of a `new Promise` executor.
       const fact = boundCall(callFact(n.text, n), bindingOf(n, n.text, body));
       const hook = fact.bound ? localHook(n, n.text, body) : null;
       const imported = fact.bound === "local" && !hook ? localImport(n, n.text, body) : null;
@@ -1030,6 +1052,8 @@ function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact 
       if (hook) fact.hook = hook;
 
       if (imported) fact.imported = imported;
+
+      if (fact.bound === "parameter" && promiseExecutorParameter(n, n.text, body)) fact.language = true;
 
       return fact;
     }
@@ -1040,10 +1064,11 @@ function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact 
       const fact = calleeFact(n, body, cls);
 
       if (fact) return fact;
-      // `a.b.c()`, `f().m()`, `super.m()`: the text keeps the head, which the graph resolves or leaves a gap.
+      // `a.b.c()`, `f().m()`, `super.m()`: the text keeps the head, which the graph resolves or leaves a gap; a chain too
+      // long to keep is cut short in its object, still a member of a value.
       const text = n.text.replace(/\s+/g, "");
 
-      return text.length < MAX_CALLEE ? callFact(text, n) : opaqueCall(n);
+      return callFact(text.length < MAX_CALLEE ? text : shortMember(n), n);
     }
 
     case "super":
@@ -1615,6 +1640,9 @@ export function unwrapValue(node: Node): Node {
 /** Expression node types that are a function value. */
 const FUNCTION_VALUES = new Set(["arrow_function", "function_expression", "function", "generator_function"]);
 
+/** Literals by the class of the language their value is: a method called on a constant holding one is that class's. */
+const LITERAL_CLASSES: ReadonlyMap<string, string> = new Map([["array", "Array"], ["string", "String"], ["template_string", "String"], ["number", "Number"], ["regex", "RegExp"]]);
+
 /** Wrappers that return the component they wrap; their `const` is the fn of the wrapped render. */
 const REACT_WRAPPERS = new Set(["memo", "forwardRef", "lazy"]);
 
@@ -1981,7 +2009,7 @@ function calleeFact(n: Node, stop: Node, cls: ClassScope | null, depth = 0): Cal
   const created = newClass(unwrapValue(obj));
   const text = collapse(n.text);
 
-  if (created && bindingOf(obj, created, stop) === null && text.length < MAX_CALLEE) return { ...callFact(text, n), receiver: created };
+  if (created && bindingOf(obj, created, stop) === null) return { ...callFact(text.length < MAX_CALLEE ? text : shortMember(n), n), receiver: created };
 
   return null;
 }

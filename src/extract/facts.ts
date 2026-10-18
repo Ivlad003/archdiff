@@ -48,8 +48,9 @@ export interface FileFacts {
   reexportsAll: string[];
   /**
    * Constants of the file's top level that hold an instance: made with `new` (`export const store = new Store()`, the
-   * class as written) or the result of a call (`export const db = createDb()`, read as `CallFact.on` is). A member
-   * called through the name — here or where it is imported — is the member of that class.
+   * class as written), a literal of the language (`["a", "b"]` is an `Array`, a string a `String`) or the result of a
+   * call (`export const db = createDb()`, read as `CallFact.on` is). A member called through the name — here or where
+   * it is imported — is the member of that class.
    */
   instances?: ({ name: string; class: string } | { name: string; of: ValueOfFact })[];
   /** Public names with their kinds. Empty only when the file exports nothing. */
@@ -547,10 +548,13 @@ export interface CallFact {
   callee: string;
   /**
    * The callee is an expression archdiff does not name (`f()()`, `(a || b)()`,
-   * `new (load())()`, a chain too long to read): never an edge, always a
-   * `dynamic` gap. Every call in the code is an edge or a gap.
+   * `new (load())()`): never an edge, always a `dynamic` gap. Every call in the
+   * code is an edge or a gap. A member of a chain too long to keep whole is cut
+   * short instead (`fetch(…….then`): a member of a value, no blind spot.
    */
   opaque?: true;
+  /** The callee is a function the language itself passes in: the `resolve` and `reject` of a `new Promise` executor. */
+  language?: true;
   /** The head of the callee is bound in a scope between the call and the module; for `this.m`, `this` is not the class. */
   bound?: "parameter" | "local";
   /**

@@ -1,13 +1,19 @@
 // The map of what the diagrams cannot show: per module, the imports that
-// resolve to nothing, the calls archdiff could not follow and why, and the
-// files whose syntax it could not parse. A pure function of the analysis
-// that gives the same report for the same graph, as JSON and as Markdown.
+// resolve to nothing, the calls archdiff could not follow and why, the
+// files whose syntax it could not parse, and the constructs it reads but
+// does not follow (an `eval`, a computed import). A pure function of the
+// analysis that gives the same report for the same graph, as JSON and as
+// Markdown.
 //
 // Sits after the graph, beside the views: Analysis → CoverageReport.
 // Entry points: `coverageReport`, `CoverageReport`.
 
 import type { Analysis } from "./analyze.ts";
 import { BLIND_SPOT_REASONS, isBlindSpot, moduleOf, type Gap } from "./graph.ts";
+import { counted } from "./words.ts";
+
+/** Constructs read but not followed the Markdown lists, at most; the JSON has every one. */
+const MAX_UNSUPPORTED = 40;
 
 export interface ModuleCoverage {
   module: string;
@@ -26,7 +32,7 @@ export interface CoverageReport {
   files: number;
   calls: number;
   gaps: number;
-  /** Calls into the repository hidden by a blind spot (`dynamic`, `unknown-member`). */
+  /** Calls into the repository hidden by a blind spot (`dynamic`, `unknown-member`, `interface`, `unresolved`). */
   blind: number;
   /** Followed calls over followed plus blind, 0–1. */
   ratio: number;
@@ -35,6 +41,8 @@ export interface CoverageReport {
   parseErrors: string[];
   /** Source files left out of the analysis (too large), with the reason. */
   skipped: { path: string; reason: string }[];
+  /** The constructs a frontend read but does not follow (an `eval`, a computed import, a decorator that may replace a function), by module and line. */
+  unsupported: { module: string; line: number; text: string; reason: string }[];
   /** Modules with at least one blind call, unresolved import or syntax error, the most first. */
   modules: ModuleCoverage[];
   markdown: string;
@@ -42,8 +50,9 @@ export interface CoverageReport {
 
 const REASON_TEXT: Record<Gap["reason"], string> = {
   dynamic: "a callee archdiff cannot name (a computed or passed value): a blind spot",
-  "unknown-member": "a known class or module without that member: a blind spot",
+  "unknown-member": "a member of a class, module or value of the repository archdiff cannot find (a member the class lacks, an object literal's function): a blind spot",
   interface: "a call through an interface or type no class of the repository implements (an object literal's function, a value injected from outside): a blind spot",
+  unresolved: "a name an import binds that resolves to no file (the import is listed below): a blind spot",
   "member-of-value": "a method of a local value whose type is not tracked (list.map, req.on): mostly built-ins",
   global: "a bare name the file neither declares nor imports (setTimeout, JSON.parse): a global",
   local: "a function of the caller's own body (a nested function, a local arrow): its calls are the caller's already",
@@ -94,11 +103,12 @@ export function coverageReport(analysis: Analysis): CoverageReport {
   const ratio = calls + blind === 0 ? 1 : calls / (calls + blind);
   // A call of a function of the caller's own body stays inside the caller: neither followed nor going out.
   const local = graph.gaps.filter((gap) => gap.reason === "local").length;
+  const unsupported = [...analysis.facts.values()].flatMap((file) => file.unsupported.map((fact) => ({ module: file.path, line: fact.line, text: fact.text, reason: fact.reason }))).sort((a, b) => (a.module < b.module ? -1 : a.module > b.module ? 1 : a.line - b.line));
   const lines = [
     "<!-- archdiff:generated — coverage -->",
     "# Coverage: what the diagrams cannot show",
     "",
-    `${analysis.files.length} files. Calls into the repository: ${calls} followed, ${blind} blind (${Math.round(ratio * 100)}% followed). ${gaps - blind - local} calls go out of it (packages, built-ins, globals, methods of untyped values)${local > 0 ? `, ${local} stay in their function (a nested function, a local arrow)` : ""}. ${graph.unresolvedImports.length} unresolved imports, ${parseErrors.length} files with syntax errors.`,
+    `${analysis.files.length} files. Calls into the repository: ${calls} followed, ${blind} blind (${Math.round(ratio * 100)}% followed). ${gaps - blind - local} calls go out of it (packages, built-ins, globals, methods of untyped values)${local > 0 ? `, ${local} stay in their function (a nested function, a local arrow)` : ""}. ${graph.unresolvedImports.length} unresolved imports, ${parseErrors.length} files with syntax errors${unsupported.length > 0 ? `, ${counted(unsupported.length, "construct")} read but not followed` : ""}.`,
     "",
     "## Why calls were not followed",
     "",
@@ -126,6 +136,16 @@ export function coverageReport(analysis: Analysis): CoverageReport {
     lines.push("");
   }
 
+  // What a frontend read and could not follow, so a picture without it is not read as proof there is none.
+  if (unsupported.length > 0) {
+    lines.push("## Constructs read but not followed", "");
+
+    for (const fact of unsupported.slice(0, MAX_UNSUPPORTED)) lines.push(`- \`${fact.text.replace(/\s+/g, " ").slice(0, 60)}\` — ${fact.reason} (${fact.module}:${fact.line})`);
+
+    if (unsupported.length > MAX_UNSUPPORTED) lines.push(`- … ${unsupported.length - MAX_UNSUPPORTED} more`);
+    lines.push("");
+  }
+
   // After the modules' own sections, so none of them reads as a file not analysed.
   if (analysis.skipped.length > 0) {
     lines.push("## Files not analysed", "");
@@ -134,5 +154,5 @@ export function coverageReport(analysis: Analysis): CoverageReport {
     lines.push("");
   }
 
-  return { files: analysis.files.length, calls, gaps, blind, ratio, byReason, unresolvedImports: graph.unresolvedImports.length, parseErrors, skipped: analysis.skipped, modules, markdown: `${lines.join("\n").trimEnd()}\n` };
+  return { files: analysis.files.length, calls, gaps, blind, ratio, byReason, unresolvedImports: graph.unresolvedImports.length, parseErrors, skipped: analysis.skipped, unsupported, modules, markdown: `${lines.join("\n").trimEnd()}\n` };
 }

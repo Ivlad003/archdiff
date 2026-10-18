@@ -89,12 +89,13 @@ export interface Gap {
    * declares nor imports (`setTimeout`, `JSON.parse`); `member-of-value`: a member of a
    * local value whose type archdiff does not track (`list.map`, `req.on`);
    * `unknown-member`: a known class without that member; `interface`: a call through
-   * an interface or type no class of the repository implements; `external`: a package
-   * or built-in; `local`: a function of the caller's own body (a nested function, a
-   * local arrow), whose calls are the caller's already; `parse-error`: the file did
-   * not parse. A call through a parameter is `dynamic`: what it holds is the caller's.
+   * an interface or type no class of the repository implements; `unresolved`: a name
+   * an import binds that resolves to no file; `external`: a package or built-in;
+   * `local`: a function of the caller's own body (a nested function, a local arrow),
+   * whose calls are the caller's already; `parse-error`: the file did not parse. A
+   * call through a parameter is `dynamic`: what it holds is the caller's.
    */
-  reason: "dynamic" | "global" | "member-of-value" | "unknown-member" | "interface" | "external" | "local" | "parse-error";
+  reason: "dynamic" | "global" | "member-of-value" | "unknown-member" | "interface" | "unresolved" | "external" | "local" | "parse-error";
   line: number;
 }
 
@@ -121,7 +122,7 @@ export interface Graph {
 }
 
 /** The reasons of a blind spot: a call into the repository archdiff could not follow — a computed callee, an unknown member, an interface. */
-export const BLIND_SPOT_REASONS: ReadonlySet<Gap["reason"]> = new Set(["dynamic", "unknown-member", "interface"]);
+export const BLIND_SPOT_REASONS: ReadonlySet<Gap["reason"]> = new Set(["dynamic", "unknown-member", "interface", "unresolved"]);
 
 /** A blind spot: a gap the diagrams count against the calls they follow (not a call into a package, not a syntax error). */
 export function isBlindSpot(gap: Gap): boolean {
@@ -144,7 +145,8 @@ interface Scope {
   /** Local name → node ID of a top-level declaration. */
   locals: Map<string, string>;
   /** Local name → where it was imported from, and the name there (`*` for a namespace, `default` for the default). */
-  imports: Map<string, { target: Resolution; imported: string }>;
+  /** `optional`: the specifier names a module only when it resolves to one (`new URL("./x", import.meta.url)`, a PHP class used by name). */
+  imports: Map<string, { target: Resolution; imported: string; optional?: true }>;
   /** The modules whose every public name is in scope with no binding of its own (`from m import *`, `use m::*`). */
   globs: string[];
 }
@@ -371,7 +373,9 @@ function bindImports(b: Building): void {
       const whole = target.kind === "file" && target.whole === true;
 
       for (const binding of fact.bindings) {
-        scope.imports.set(binding.local, { target, imported: binding.kind === "named" && !whole ? binding.imported : binding.kind === "default" ? "default" : "*" });
+        const imported = binding.kind === "named" && !whole ? binding.imported : binding.kind === "default" ? "default" : "*";
+
+        scope.imports.set(binding.local, fact.optional ? { target, imported, optional: true } : { target, imported });
       }
 
       if (fact.glob && target.kind === "file") scope.globs.push(target.path);
@@ -458,6 +462,9 @@ class CallResolver {
       return { gap: "global" };
     }
 
+    // An import of the repository that resolves to no file hides what it calls; an optional specifier may name a package.
+    if (imported.target.kind === "unresolved" && !imported.optional) return { gap: "unresolved" };
+
     if (imported.target.kind !== "file") return { gap: "external" };
     // `const express = require("..")` then `express()`: the module binding stands for the module's default.
     const found = this.exports.find(imported.target.path, imported.imported === "*" ? "default" : imported.imported);
@@ -478,14 +485,17 @@ class CallResolver {
     if (call.opaque) return { gap: "dynamic" };
     const callee = call.callee;
 
-    if (callee.startsWith("new ")) return this.constructedTarget(module, callee.slice(4));
-
-    // The extractor names the receiver's type when it can see it: a local made with `new X()` (and `(new X())->m()`), a
-    // parameter typed `X`, a class field typed `X`. The member is then looked up on that class, interface or type.
+    // The extractor names the receiver's type when it can see it: `new X(…).m()` (and `(new X())->m()`), a local made
+    // with `new X()`, a parameter or a field typed `X`. The member is then looked up on that class, interface or type.
     if (call.receiver) return this.receiverTarget(module, call.receiver, callee.slice(callee.lastIndexOf(".") + 1));
+
+    if (callee.startsWith("new ")) return this.constructedTarget(module, callee.slice(4));
 
     // `const { f } = await import("./x"); f()`, `const x = require("./x"); x.f()`: the export of the module the function loads.
     if (call.imported) return this.loadedTarget(module, call.imported);
+
+    // The `resolve` and `reject` a `new Promise` executor receives: the language's own functions.
+    if (call.language) return { gap: "external" };
 
     // Python's `super().m()`: the member of the class the enclosing one extends.
     const parentCall = /^super\(\)\.([\w$]+)$/.exec(callee);
@@ -516,7 +526,9 @@ class CallResolver {
   private loadedTarget(module: string, imported: { source: string; name: string }): CallTarget {
     const resolution = this.b.resolve(module, imported.source);
 
-    // A package's, or a module archdiff could not find (the unresolved import names it).
+    // A module archdiff could not find (the unresolved import names it) hides what it calls; a package's is the package's.
+    if (resolution.kind === "unresolved") return { gap: "unresolved" };
+
     if (resolution.kind !== "file") return { gap: "external" };
     const found = this.exports.find(resolution.path, imported.name === "*" ? "default" : imported.name);
 
@@ -542,15 +554,16 @@ class CallResolver {
     return this.externalAncestor(parent.id) ? { gap: "external" } : { gap: "unknown-member" };
   }
 
-  /** `new X()` lands on X; `new X().m` on the member of X. */
+  /** `new X()` lands on X; `new X(…).m` on the member of X. */
   private constructedTarget(module: string, constructed: string): CallTarget {
-    const [head, ...rest] = constructed.replace(/\(\)/g, "").split(".");
-    const target = this.nameTarget(module, head!);
+    const head = constructed.split(/[.(]/)[0]!;
+    const member = constructed.includes(".") ? constructed.slice(constructed.lastIndexOf(".") + 1) : null;
+    const target = this.nameTarget(module, head);
 
-    if (!("id" in target) || rest.length === 0) return target;
-    const member = this.memberOf(target.id, rest[rest.length - 1]!);
+    if (!("id" in target) || member === null) return target;
+    const found = this.memberOf(target.id, member);
 
-    return member ? { id: member } : { gap: "unknown-member" };
+    return found ? { id: found } : { gap: "unknown-member" };
   }
 
   /**
@@ -707,7 +720,7 @@ class CallResolver {
     const space = !imported || imported.target.kind !== "file" ? null : imported.imported === "*" ? imported.target.path : this.exports.namespaceOf(imported.target.path, imported.imported);
 
     if (imported && (imported.imported === "*" || space !== null)) {
-      if (space === null) return { gap: "external" };
+      if (space === null) return { gap: imported.target.kind === "unresolved" && !imported.optional ? "unresolved" : "external" };
       const found = this.exports.find(space, member);
 
       return found ? { id: found } : { gap: "unknown-member" };
@@ -746,7 +759,10 @@ class CallResolver {
     if (own) {
       const made = this.nameTarget(module, own.class);
 
-      return "id" in made && this.b.nodes.get(made.id)?.kind === "class" ? made : null;
+      // A value of the language's (`new Map()`, an array) or of a package's class: its members are theirs.
+      if (!("id" in made)) return made.gap === "global" ? { gap: "member-of-value" } : made.gap === "external" ? made : null;
+
+      return this.b.nodes.get(made.id)?.kind === "class" ? made : null;
     }
 
     const imported = this.b.scopes.get(module)?.imports.get(name);
