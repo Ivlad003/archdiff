@@ -20,6 +20,8 @@ interface KindSpec {
   question: string;
   /** How far from the subject the picture goes without `--depth`; 0 when absent. */
   depth?: number;
+  /** How many shapes the picture keeps before its tail folds by directory, without `--limit`; `FOLD` when absent. */
+  fold?: number;
   /** The shapes are modules: a module most of them import is a hub, drawn as a badge. */
   modules?: true;
   /** A map of modules in many lanes, which reads better with the lanes as columns. */
@@ -57,7 +59,8 @@ export const VIEW_KINDS = {
   timeline: { subject: "none", question: "how the coupling between layers drifted, commit by commit" },
   coverage: { subject: "none", question: "where the diagrams are blind: calls and imports archdiff could not follow" },
   intent: { subject: "none", question: "what was intended, what is built, and where the code went beyond the intent", modules: true },
-  modules: { subject: "none", question: "every module of the repository in its layer, and every import between them", modules: true, map: true },
+  // The whole map shows every module of all but a big repository (the fold of `full`); the project map has the rest.
+  modules: { subject: "none", question: "every module of the repository in its layer, and every import between them", modules: true, map: true, fold: 200 },
   review: { subject: "none", question: "what a change did to the architecture: the modules, imports and calls it added, removed or changed, and the new couplings between layers", modules: true },
   compare: { subject: "none", question: "what each of several branches did to the architecture against one base, side by side", modules: true },
 } as const satisfies Record<string, KindSpec>;
@@ -103,6 +106,20 @@ export function viewKey(view: View): string {
 /** The one question the pictures of a kind answer. */
 export function questionOf(kind: ViewKind): string {
   return VIEW_KINDS[kind].question;
+}
+
+/**
+ * More shapes than this and a view folds the tail into one shape per directory. Studies of diagram reading put the
+ * comfortable count far lower (7–10 at a glance); 40 keeps a lane grid readable while a folded shape still opens on a
+ * tap.
+ */
+export const FOLD = 40;
+
+/** How many shapes a picture of the kind keeps before its tail folds, without `--limit`. */
+export function foldLimit(kind: ViewKind): number {
+  const spec: KindSpec = VIEW_KINDS[kind];
+
+  return spec.fold ?? FOLD;
 }
 
 /** How far from the subject a picture of the kind goes without `--depth`. */

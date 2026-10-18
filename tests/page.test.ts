@@ -237,6 +237,24 @@ test("a picture is fitted clear of the toolbar and the minimap, again when the c
   await assertPictureClear("a stale place");
 });
 
+test("a picture bigger than the canvas even at the smallest zoom starts from its beginning and says so", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-long-",
+    (dir) => {
+      // Sixty early returns in a row: a flowchart some sixteen thousand units wide, ten times the canvas at the smallest zoom.
+      writeFileSync(join(dir, "src/lib/long.ts"), `export function long(x: number): number {\n${Array.from({ length: 60 }, (_, i) => `  if (x === ${i}) return ${i * 2};`).join("\n")}\n  return -1;\n}\n`);
+    },
+    async (origin) => {
+      await page!.goto(`${origin}/#view=${encodeURIComponent("logic:src/lib/long.ts#long")}`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "logic:src/lib/long.ts#long"`, undefined, { timeout: 20_000 });
+      await page!.waitForTimeout(800);
+      const { picture, canvas, zoom } = await pictureBoxes();
+      // The flow starts at the canvas's left edge (its margin), and the rest runs off to the right.
+      assert.ok(zoom < 0.11 && Math.abs(picture.left - (canvas.left + 32)) < 2 && picture.right > canvas.right, JSON.stringify({ picture, canvas, zoom }));
+      assert.match((await page!.textContent("#reason")) ?? "", /bigger than the canvas even at the smallest zoom/);
+    },
+  ));
+
 test("an empty picture and one that cannot be drawn say why on the canvas; a second tap opens deeper or says nothing opens", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.goto(`${base}/?fresh=empty#view=machines`);
   await page!.waitForFunction(`window.archdiff.drawn() === "machines"`);

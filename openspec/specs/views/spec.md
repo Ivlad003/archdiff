@@ -36,12 +36,17 @@ The system SHALL draw, as `focus:<path>#<fn>`, the function with the functions t
 
 ### Requirement: Big pictures fold by directory
 
-The system SHALL fold a picture with more shapes than the limit (40 by default, `--limit`) by directory into "… N in dir/" shapes, merging the lines into each folded shape with a count, and say so in the reason; the Markdown SHALL list everything.
+The system SHALL fold a picture with more shapes than the limit (40 by default, 200 for the whole map `modules`, `--limit`) by directory into "… N in dir/" shapes, merging the lines into each folded shape with a count, and say so in the reason; the Markdown SHALL list everything.
 
 #### Scenario: A directory with hundreds of modules
 
 - **WHEN** a `dir:` view would hold 300 modules
 - **THEN** the picture holds at most the limit plus the folded shapes, the reason says how many were folded, and a tap on a folded shape opens that directory
+
+#### Scenario: The whole map of fifty modules
+
+- **WHEN** `archdiff diagram modules` runs on a repository of fifty modules
+- **THEN** the picture holds every module, none folded, and `--limit 40` folds it
 
 ### Requirement: Hubs become badges
 

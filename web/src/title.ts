@@ -76,10 +76,29 @@ export function renderCrumbs(state: Link): void {
   }
 }
 
-/** The picture's reason under the title, kept as its tooltip so a notice can give way back to it. */
-export function setReason(text: string): void {
+/** The reason of the picture shown, and whether it is bigger than the canvas even at the smallest zoom (said after the reason). */
+let pictureReason = "";
+let overflowing = false;
+
+/** The line under the canvas: the reason, then the overflow's note; kept as its tooltip so a notice can give way back to it. */
+function showReason(): void {
+  const text = [pictureReason, overflowing ? "bigger than the canvas even at the smallest zoom: it starts from its beginning; drag along it or use the minimap" : ""].filter(Boolean).join("; ");
   reason.textContent = text;
   reason.title = text;
+}
+
+/** The picture's reason under the title; a new reason is a new picture, which the fit says again whether it overflows. */
+export function setReason(text: string): void {
+  pictureReason = text;
+  overflowing = false;
+  showReason();
+}
+
+/** Whether the fit left part of the picture off the canvas (it is bigger than the canvas at the smallest zoom). */
+export function setOverflow(on: boolean): void {
+  if (on === overflowing) return;
+  overflowing = on;
+  showReason();
 }
 
 /** A notice under the title for a moment: a tool's hint, a count of matches, a save, a file that changed. */

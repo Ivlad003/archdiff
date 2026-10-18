@@ -15,7 +15,7 @@ import { notice, noticeAfterLoad } from "./title.ts";
 import { PRESETS, currentLink, forgetDefaults, rememberDefaults, setLink, type Link } from "./link.ts";
 import { page } from "./page.ts";
 import { DEFAULT_PICTURE_OPTIONS, MERMAID_ONLY_FOR, MERMAID_STYLES, OVERLAYS, depthWarning, type MermaidStyle, type Overlay } from "../../src/options.ts";
-import { defaultDepth, parseView, usesDepth } from "../../src/view-keys.ts";
+import { FOLD, defaultDepth, foldLimit, parseView, usesDepth } from "../../src/view-keys.ts";
 
 const menu = element<HTMLDetailsElement>("options-menu");
 const depthInput = element<HTMLInputElement>("depth");
@@ -52,6 +52,8 @@ export function showOptions(state: Link): void {
   packagesInput.checked = state.packages;
   changesInput.checked = state.changes;
   limitInput.value = state.limit === null ? "" : String(state.limit);
+  // The view's own fold, as the placeholder: the whole map keeps more shapes than the others.
+  limitInput.placeholder = String(kind === undefined ? FOLD : foldLimit(kind));
   weightInput.value = state.weight === null ? "" : String(state.weight);
   hubsInput.checked = state.hubs;
   element<HTMLInputElement>("only-changes").checked = state.onlyChanges;

@@ -17,9 +17,9 @@ import type { Diagram } from "./diagram.ts";
 import { onlyChanged, overlayDiff } from "./diff.ts";
 import type { Graph } from "./graph.ts";
 import { applyOverlays } from "./overlays.ts";
-import { dropLightLines, expandInPlace, fold, hideLanes, hubsAsBadges, MAX_SHAPES } from "./shape.ts";
+import { dropLightLines, expandInPlace, fold, hideLanes, hubsAsBadges } from "./shape.ts";
 import { depthWarning, type PictureOptions } from "./options.ts";
-import { isMapView, isModuleView, questionOf, usesDepth, type View } from "./view-keys.ts";
+import { foldLimit, isMapView, isModuleView, questionOf, usesDepth, type View } from "./view-keys.ts";
 import type { EdgeReads } from "./views.ts";
 
 export interface StepContext {
@@ -53,7 +53,7 @@ export const STEPS: readonly Step[] = [
   { name: "open in place", applies: ({ options, view }) => options.expand.length > 0 && isModuleView(view.kind), run: (diagram, { graph, options }) => expandInPlace(diagram, graph, options.expand) },
   { name: "hubs as badges", applies: ({ options, view }) => options.hubs && isModuleView(view.kind), run: (diagram, { subject, analysis }) => hubsAsBadges(diagram, subject, analysis.config.hubs) },
   { name: "question", applies: (_ctx, diagram) => !diagram.question, run: (diagram, { view }) => ({ ...diagram, question: questionOf(view.kind) }) },
-  { name: "fold", applies: (_ctx, diagram) => !diagram.placed && !diagram.classes && !diagram.logic, run: (diagram, { options }) => fold(diagram, options.limit ?? MAX_SHAPES) },
+  { name: "fold", applies: (_ctx, diagram) => !diagram.placed && !diagram.classes && !diagram.logic, run: (diagram, { options, view }) => fold(diagram, options.limit ?? foldLimit(view.kind)) },
   { name: "light lines", applies: ({ options }) => (options.weight ?? 1) > 1, run: (diagram, { options }) => dropLightLines(diagram, options.weight ?? 1) },
   { name: "changes", applies: ({ reads, view }) => reads.diff !== undefined && view.kind !== "timeline" && view.kind !== "review" && view.kind !== "compare", run: (diagram, { reads }) => overlayDiff(diagram, reads.diff!) },
   { name: "only changes", applies: (ctx) => ctx.options.onlyChanges && marked(ctx), run: (diagram) => onlyChanged(diagram) },

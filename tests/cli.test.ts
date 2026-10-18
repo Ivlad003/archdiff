@@ -112,6 +112,26 @@ test("a big view folds its tail into shapes by directory and says so", () => {
   assert.ok(diagram.reason?.includes("folded"));
 });
 
+test("the whole map keeps every module up to 200 where the other views fold above 40", () =>
+  withTempDir("archdiff-map-", (dir) => {
+    // Fifty modules in a chain, each importing the next.
+    mkdirSync(join(dir, "src"));
+
+    for (let i = 0; i < 50; i++) writeFileSync(join(dir, `src/m${String(i).padStart(2, "0")}.ts`), i < 49 ? `import { f${i + 1} } from "./m${String(i + 1).padStart(2, "0")}";\n\nexport function f${i}(): number {\n  return f${i + 1}() + 1;\n}\n` : `export function f${i}(): number {\n  return ${i};\n}\n`);
+    const shapes = (...args: string[]): { kinds: string[]; reason?: string } => {
+      const diagram = JSON.parse(archdiff(["diagram", ...args, dir, "--format", "json"]).stdout) as { nodes: { kind: string }[]; reason?: string };
+
+      return { kinds: diagram.nodes.map((node) => node.kind), ...(diagram.reason ? { reason: diagram.reason } : {}) };
+    };
+    const directory = shapes("dir:src");
+    assert.ok(directory.kinds.includes("more") && (directory.reason ?? "").includes("folded"), JSON.stringify(directory));
+    const map = shapes("modules");
+    assert.equal(map.kinds.filter((kind) => kind === "module").length, 50);
+    assert.ok(!map.kinds.includes("more"), JSON.stringify(map));
+    // A limit given still folds it.
+    assert.ok(shapes("modules", "--limit", "40").kinds.includes("more"));
+  }));
+
 /**
  * The first reason `xml` is not well-formed XML, or null: one root element, every tag closed in order, attribute
  * values quoted with no `<` in them, `&` only in an entity. Enough for the files archdiff writes (no DTD, no CDATA).

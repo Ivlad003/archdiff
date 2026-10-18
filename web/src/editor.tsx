@@ -153,6 +153,8 @@ interface Mounted {
   versions: SceneVersions | null;
   cover: () => CanvasCover;
   placed: { by: "fit"; at: Viewport } | { by: "given" } | null;
+  /** Told after every fit whether the whole scene is on the canvas (a picture too big even at the smallest zoom is not). */
+  fitted: (whole: boolean) => void;
 }
 
 interface CanvasProps {
@@ -398,15 +400,21 @@ function boundsOf(elements: readonly SceneElement[]): { minX: number; minY: numb
   return bounds;
 }
 
-/** The scene centred in a rectangle of the canvas (screen pixels from its corner), as large as fits there but never above 1; with where its right and bottom edges land. */
-function placeIn(bounds: NonNullable<ReturnType<typeof boundsOf>>, area: { left: number; top: number; right: number; bottom: number }): Viewport & { right: number; bottom: number } {
+/**
+ * The scene in a rectangle of the canvas (screen pixels from its corner), as large as fits there but never above 1:
+ * centred, and — where it is bigger than the rectangle even at the smallest zoom — from its beginning (its left or top
+ * edge at the rectangle's), where a flow starts; with where its right and bottom edges land, and whether it is whole.
+ */
+function placeIn(bounds: NonNullable<ReturnType<typeof boundsOf>>, area: { left: number; top: number; right: number; bottom: number }): Viewport & { right: number; bottom: number; whole: boolean } {
   const width = Math.max(1, bounds.maxX - bounds.minX);
   const height = Math.max(1, bounds.maxY - bounds.minY);
   const zoom = Math.max(MIN_ZOOM, Math.min(1, (area.right - area.left) / width, (area.bottom - area.top) / height));
-  const centreX = (area.left + area.right) / 2;
-  const centreY = (area.top + area.bottom) / 2;
+  const across = width * zoom <= area.right - area.left + 0.5;
+  const down = height * zoom <= area.bottom - area.top + 0.5;
+  const left = across ? (area.left + area.right) / 2 - (width * zoom) / 2 : area.left;
+  const top = down ? (area.top + area.bottom) / 2 - (height * zoom) / 2 : area.top;
 
-  return { zoom, scrollX: centreX / zoom - (bounds.minX + width / 2), scrollY: centreY / zoom - (bounds.minY + height / 2), right: centreX + (width * zoom) / 2, bottom: centreY + (height * zoom) / 2 };
+  return { zoom, scrollX: left / zoom - bounds.minX, scrollY: top / zoom - bounds.minY, right: left + width * zoom, bottom: top + height * zoom, whole: across && down };
 }
 
 /**
@@ -427,15 +435,19 @@ function fitScene(mounted: Mounted): void {
   let place = placeIn(bounds, area);
   const corner = cover.corner;
 
-  if (corner && place.right > corner.left - FIT_GAP && place.bottom > corner.top - FIT_GAP) {
+  // A whole scene that would reach under the corner's box goes beside it or above it; one too big for the canvas stays from its beginning.
+  if (corner && place.whole && place.right > corner.left - FIT_GAP && place.bottom > corner.top - FIT_GAP) {
     const beside = placeIn(bounds, { ...area, right: Math.min(area.right, corner.left - FIT_GAP) });
     const above = placeIn(bounds, { ...area, bottom: Math.min(area.bottom, corner.top - FIT_GAP) });
-    place = beside.zoom >= above.zoom ? beside : above;
+    const best = beside.zoom >= above.zoom ? beside : above;
+
+    if (best.whole) place = best;
   }
 
   const at = { scrollX: place.scrollX, scrollY: place.scrollY, zoom: place.zoom };
   api.updateScene({ appState: { scrollX: at.scrollX, scrollY: at.scrollY, zoom: { value: asZoom(at.zoom) } } });
   mounted.placed = { by: "fit", at };
+  mounted.fitted(place.whole);
 }
 
 /** Whether a place of the viewport shows a good part of the scene: a quarter of what the canvas shows, or of the scene when the scene is the smaller. */
@@ -553,12 +565,13 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
 
 /**
  * Mounts the canvas with its first scene. `cover` says what the page lays over the canvas (the fit keeps clear of
- * it); `place` is where the reader left the view, kept when it still shows the scene.
+ * it); `place` is where the reader left the view, kept when it still shows the scene; `fitted` hears after every fit
+ * whether the whole scene is on the canvas.
  */
-export function mountCanvas(container: HTMLElement, elements: SceneElement[], events: CanvasEvents, options: { cover?: () => CanvasCover; place?: Viewport | null } = {}): Promise<CanvasHandle> {
+export function mountCanvas(container: HTMLElement, elements: SceneElement[], events: CanvasEvents, options: { cover?: () => CanvasCover; place?: Viewport | null; fitted?: (whole: boolean) => void } = {}): Promise<CanvasHandle> {
   return new Promise((resolve) => {
     let root: Root | null = createRoot(container);
-    const mounted: Mounted = { container, api: null, mode: "view", versions: null, cover: options.cover ?? (() => ({ top: 0, bottom: 0, corner: null })), placed: null };
+    const mounted: Mounted = { container, api: null, mode: "view", versions: null, cover: options.cover ?? (() => ({ top: 0, bottom: 0, corner: null })), placed: null, fitted: options.fitted ?? (() => {}) };
     const listeners = new Set<(mode: "view" | "edit") => void>();
     const modeState: CanvasProps["modeState"] = [
       mounted.mode,

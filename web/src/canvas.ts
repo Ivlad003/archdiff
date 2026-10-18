@@ -13,7 +13,7 @@
 import { api } from "./api.ts";
 import { element } from "./dom.ts";
 import { mountCanvas, type CanvasCover, type CanvasEvents, type CanvasHandle, type Viewport } from "./editor.tsx";
-import { notice } from "./title.ts";
+import { notice, setOverflow } from "./title.ts";
 import { currentLink, refsOf } from "./link.ts";
 import { page } from "./page.ts";
 import type { SceneElement } from "../../src/scene.ts";
@@ -125,7 +125,7 @@ export async function showScene(view: string, elements: SceneElement[], events: 
           saveButton.classList.add("dirty");
         },
       },
-      { cover: coveredEdges, place: rememberedViewport(view) },
+      { cover: coveredEdges, place: rememberedViewport(view), fitted: (whole) => setOverflow(!whole) },
     );
     canvas = await mounting;
 

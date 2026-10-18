@@ -26,15 +26,13 @@ import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
 import { logicList, logicView } from "./logic.ts";
 import { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
-import { MAX_SHAPES } from "./shape.ts";
-import { defaultDepth, viewKey, type View } from "./view-keys.ts";
+import { defaultDepth, foldLimit, viewKey, type View } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
 import { timelineDiagram } from "./views-more.ts";
 import { compareDiagram, diffDiagram, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
 import type { LogicFact } from "./extract/logic.ts";
 import { DEFAULT_PICTURE_OPTIONS, type PictureOptions } from "./options.ts";
 
-export { MAX_SHAPES } from "./shape.ts";
 export { parseView, viewKey, type View } from "./view-keys.ts";
 export { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 
@@ -690,7 +688,7 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): P
  */
 export function viewOf(analysis: Analysis, view: View, options: PictureOptions = DEFAULT_PICTURE_OPTIONS, reads: EdgeReads = {}): Diagram {
   const depth = options.depth ?? defaultDepth(view.kind);
-  const limit = options.limit ?? MAX_SHAPES;
+  const limit = options.limit ?? foldLimit(view.kind);
   const { graph } = analysis;
 
   const full = (): PictureContent => {

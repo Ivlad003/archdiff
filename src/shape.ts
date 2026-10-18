@@ -5,19 +5,13 @@
 // itself in `reason`; `viewOf` applies them in that order.
 //
 // Entry points: `hubsAsBadges`, `hideLanes`, `expandInPlace`, `fold`,
-// `dropLightLines`, `MAX_SHAPES`.
+// `dropLightLines`.
 
 import { DEFAULT_HUBS, type HubThresholds } from "./config.ts";
 import type { Diagram, Line, Lane, Shape } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode } from "./nodes.ts";
 import { standsFor } from "./shape-keys.ts";
-/**
- * More shapes than this and a view folds the tail into one shape. Studies of
- * diagram reading put the comfortable count far lower (7–10 at a glance); 40
- * keeps a lane grid readable while a folded shape still opens on a tap.
- */
-export const MAX_SHAPES = 40;
 
 /** The deepest directory holding every path; "" when they share none. */
 function commonDirectory(paths: readonly string[]): string {

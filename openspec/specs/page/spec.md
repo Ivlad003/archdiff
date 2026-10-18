@@ -78,12 +78,17 @@ The system SHALL draw the picture of the link on one canvas, however fast the li
 
 ### Requirement: A picture is fitted where nothing covers it
 
-The system SHALL fit a picture whole into the canvas at a zoom of at most 1: below the toolbar, above the row of the zoom buttons and the reason, and beside the minimap or above it, whichever leaves the picture larger; and fit it again when the canvas changes size (the window, a folded panel) until the reader moves it.
+The system SHALL fit a picture whole into the canvas at a zoom of at most 1: below the toolbar, above the row of the zoom buttons and the reason, and beside the minimap or above it, whichever leaves the picture larger; and fit it again when the canvas changes size (the window, a folded panel) until the reader moves it. A picture bigger than the canvas even at the smallest zoom SHALL start from its beginning (its left and top edges), and the line under it SHALL say so.
 
 #### Scenario: A short window
 
 - **WHEN** the whole map fills the height of the canvas
 - **THEN** no shape sits under the toolbar or the minimap, and a taller window fits the map again, larger
+
+#### Scenario: A flowchart ten canvases wide
+
+- **WHEN** the logic of a function with sixty early returns is opened
+- **THEN** its start sits at the canvas's left edge, the rest runs off to the right, and the line under the picture says it is bigger than the canvas
 
 ### Requirement: The canvas has tools
 
