@@ -48,6 +48,9 @@ const LITERAL_CALLS = new Set(["setGlobalPrefix"]);
 /** Members whose first argument names an event (`CallFact.nameArg`): emitters (`emit('order.created')`, `publish`, `dispatch`) and listeners (`on`, `once`, `addEventListener`, `subscribe`). */
 const NAME_ARG_CALLS = new Set(["emit", "emitAsync", "publish", "dispatch", "trigger", "fire", "on", "once", "addListener", "addEventListener", "subscribe", "listen"]);
 
+/** Members (or a bare name) that send a message: the `type` of the object literal among the arguments names it (`port.postMessage({ type: 'ping' })`, `chrome.tabs.sendMessage(tabId, { type: 'x' })`, `send({ type: 'status' })`). */
+const MESSAGE_CALLS = new Set(["postMessage", "sendMessage", "send"]);
+
 /**
  * Import type expressions — `import("./scene.ts").SceneElement`,
  * `typeof import("./x.ts")` — are not in the tree-sitter grammar, and one of
@@ -421,6 +424,16 @@ function declarationCalls(x: Extraction, body: Node, cls: ClassScope | null = nu
 
       if (LITERAL_CALLS.has(member)) fact.literal = value;
       else fact.nameArg = { literal: value, text: collapse(first.text).slice(0, MAX_CALLEE) };
+    }
+
+    // A message sent with a `type`: the events view pairs it with the functions that switch on that type.
+    if (!fact.nameArg && call?.type === "call_expression" && fact.form.kind !== "opaque" && MESSAGE_CALLS.has(member)) {
+      const message = call.childForFieldName("arguments")?.namedChildren.find((a) => a.type === "object");
+      const pair = message?.namedChildren.find((p) => p.type === "pair" && p.childForFieldName("key") !== null && memberName(p.childForFieldName("key")!) === "type");
+      const written = pair?.childForFieldName("value");
+      const type = written ? (stringValue(unwrapValue(written)) ?? templateValue(unwrapValue(written))) : null;
+
+      if (message && type !== null) fact.nameArg = { literal: type, text: collapse(message.text).slice(0, MAX_CALLEE) };
     }
 
     // Functions the call receives as values (`later(save)`), and whether the call sits in a closure.

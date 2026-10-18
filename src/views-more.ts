@@ -322,6 +322,9 @@ export function usageView(analysis: Analysis, id: string): PictureContent {
 
 const EMITTERS = new Set(["emit", "emitAsync", "publish", "dispatch", "trigger", "fire"]);
 
+/** Members that send a message whose `type` names the event (`port.postMessage({ type: 'ping' })`, `chrome.tabs.sendMessage`, `send`). */
+const MESSAGE_SENDS = new Set(["postMessage", "sendMessage", "send"]);
+
 const LISTENERS = new Set(["on", "once", "addListener", "addEventListener", "subscribe", "listen"]);
 
 /**
@@ -365,7 +368,7 @@ export function eventsView(analysis: Analysis): PictureContent {
 
       if (!name || !call.callee.includes(".")) return;
 
-      if (EMITTERS.has(member)) {
+      if (EMITTERS.has(member) || MESSAGE_SENDS.has(member)) {
         ownerNode(owner);
         add({ from: owner, to: eventNode(name), kind: "call", label: member });
       } else if (LISTENERS.has(member)) {
@@ -392,9 +395,22 @@ export function eventsView(analysis: Analysis): PictureContent {
     for (const call of file.moduleCalls) record(file.path, call);
   }
 
+  // A message sent with a `type` is handled wherever a function compares or switches on a `type` with that value (the
+  // page's `msg.type === 'pong'`, the host's `case 'ping':`), in any module; a value no message is sent with is no event.
+  const sent = new Set(edges.filter((edge) => edge.kind === "call").map((edge) => edge.to));
+
+  for (const file of facts.values()) {
+    for (const state of file.states ?? []) {
+      if (state.kind === "assign" || !/(^|\.)type$/.test(state.subject) || !sent.has(`event:${state.value}`)) continue;
+      const receiver = state.within ? `${file.path}#${state.within}` : file.path;
+      ownerNode(receiver);
+      add({ from: `event:${state.value}`, to: receiver, kind: "ref", label: "handles" });
+    }
+  }
+
   const drawn = [...nodes.values()].filter((node) => node.kind === "event" || graph.nodes.has(node.id) || graph.modules.has(node.id));
 
-  if (drawn.length === 0) return unplaced("Events", [], [], [], { reason: "no emit/publish/dispatch or on/subscribe call with a literal event name" });
+  if (drawn.length === 0) return unplaced("Events", [], [], [], { reason: "no emit/publish/dispatch or on/subscribe call with a literal event name, and no message sent with a type" });
 
   return unplaced("Events: emitters → events → listeners", drawn, edges.filter((edge) => nodes.has(edge.from) && nodes.has(edge.to)), lanesOf(graph, drawn));
 }

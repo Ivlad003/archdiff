@@ -1421,6 +1421,19 @@ test("a browser extension's listeners are entry points, labelled with the role m
   assert.ok(tree.includes("background_js_onConnect ==> background_js_fromPanel"), tree);
 });
 
+test("a message sent with a type is an event: from the sender to every function that switches on that type", () => {
+  const extension = join(root, "tests/fixtures/extension");
+  const mermaid = archdiff(["diagram", "events", extension, "--format", "mermaid"]).stdout;
+  // The panel's top level sends `ping`; the background's `fromPanel` handles it and answers `pong`, which the panel's listener handles.
+  assert.ok(mermaid.includes('panel_js ==>|"postMessage"| event_ping') && mermaid.includes('event_ping -.->|"handles"| background_js_fromPanel'), mermaid);
+  assert.ok(mermaid.includes('background_js_fromPanel ==>|"postMessage"| event_pong') && mermaid.includes('event_pong -.->|"handles"| panel_js_onMessage'), mermaid);
+  // `chrome.tabs.sendMessage(tabId, { type })` names its message in the second argument; the content script handles it.
+  assert.ok(mermaid.includes('background_js_fromPanel ==>|"sendMessage"| event_highlight') && mermaid.includes('event_highlight -.->|"handles"| content_js_onMessage'), mermaid);
+  // A type nothing sends is no event: `msg.type === 'x'` alone draws nothing.
+  const json = JSON.parse(archdiff(["diagram", "events", extension, "--format", "json"]).stdout) as { nodes: { id: string }[] };
+  assert.deepEqual(json.nodes.filter((node) => node.id.startsWith("event:")).map((node) => node.id).sort(), ["event:highlight", "event:ping", "event:pong"]);
+});
+
 test("a file named by a URL — a worker, a child process, a registered hook — is a dashed `loads` line, not an import", () =>
   withTempDir("archdiff-loads-", (dir) => {
     mkdirSync(join(dir, "src"), { recursive: true });

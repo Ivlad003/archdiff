@@ -648,10 +648,12 @@ export interface CallFact {
   passes?: PassFact[];
   /**
    * The first argument of a call a framework reads as a name (Magento
-   * `$eventManager->dispatch('checkout_submit_all_after', …)`): `literal` is its
-   * value when it is a string literal without interpolation, else null, and
-   * `text` is its source (at most 80 characters). Recorded only for the members
-   * `NAME_ARG_MEMBERS` lists.
+   * `$eventManager->dispatch('checkout_submit_all_after', …)`, `emit('x')`,
+   * `on('x', f)`): `literal` is its value when it is a string literal without
+   * interpolation, else null, and `text` is its source (at most 80 characters).
+   * Recorded only for the members `NAME_ARG_MEMBERS` lists. For a message sent
+   * with a `type` (`port.postMessage({ type: 'ping' })`, `sendMessage`, `send`),
+   * the `type`'s value, with the message as the text.
    */
   nameArg?: { literal: string | null; text: string };
   /** The call sits in a function nested in the declaration: it runs when that value is called. */

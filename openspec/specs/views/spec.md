@@ -43,6 +43,15 @@ The system SHALL draw, as `focus:<path>#<fn>`, the function with the functions t
 - **WHEN** `archdiff diagram focus:src/lib/orders.ts#placeOrder` runs
 - **THEN** the picture holds `placeOrder` with `OrderService.place` calling it and `validate`, `saveOrder` and `log` called by it, in the lanes of their modules, and the reason counts the calls in and out
 
+### Requirement: Messages sent with a type are events
+
+The system SHALL draw, in `events`, a message sent with a `type` — `postMessage`, `sendMessage` or `send` of an object literal whose `type` is a string — as an event of that type from the sender (the function, or the module for a call at its top level), handled by every function of the repository that compares or switches on a `type` with that value; a value no message is sent with SHALL be no event.
+
+#### Scenario: A side panel, its service worker and a content script
+
+- **WHEN** the panel's top level runs `port.postMessage({ type: 'ping' })`, the service worker's `fromPanel` has `if (msg.type === 'ping') port.postMessage({ type: 'pong' })` and `chrome.tabs.sendMessage(tabId, { type: 'highlight' })`, and the content script's `onMessage` has `if (msg.type === 'highlight')`
+- **THEN** the picture has `panel.js → ping → fromPanel`, `fromPanel → pong → panel.js#onMessage` and `fromPanel → highlight → content.js#onMessage`, and no event for a type nothing sends
+
 ### Requirement: The class diagram joins its boxes
 
 The system SHALL draw, as `classes` (`classes:<module|dir>` for a scope), every class, interface and object type as a box with its fields and methods, and the lines between the boxes: `extends` and `implements` as written; `has` from a box to the class or interface a field of it is typed with; `uses` from a box to another whose members or constructor its methods call, counted, left out where the pair is joined by inheritance or a field already. A box an `extends`, `implements` or `has` names outside the scope SHALL be brought in from the modules the scope imports; `uses` SHALL stay among the boxes drawn. The Mermaid SHALL be a `classDiagram` with `<|--`, `<|..`, `--> : has` and `..> : uses`.
