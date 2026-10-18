@@ -80,6 +80,8 @@ const CANVAS_EVENTS = {
 let loads = 0;
 /** The view whose picture the canvas shows, once its load drew it: for the browser tests. */
 let drawn: string | null = null;
+/** The link (the hash) of the picture the canvas shows: where a reader who stays in the editor is taken back. */
+let shownHash = location.hash;
 
 /**
  * Draws the picture the link names: the fields and bars from the link, then the scene, the title, the page and the
@@ -90,6 +92,7 @@ async function load(): Promise<void> {
   const generation = ++loads;
   const overtaken = (): boolean => generation !== loads;
   const state = currentLink();
+  const hash = location.hash;
 
   // Another head (a branch, a commit picked in the header): the views, the coverage and the map of its code.
   if (codeHead(state) !== listedHead()) {
@@ -136,6 +139,7 @@ async function load(): Promise<void> {
     if (overtaken()) return;
     shown = true;
     drawn = state.view;
+    shownHash = hash;
     // Nothing on the canvas (no shape, no stroke of a drawing): it says why in the middle, not a blank canvas.
     showEmpty(result.elements.length === 0 ? { head: "Nothing to draw here", why: result.diagram.reason || "the picture has no shapes" } : null);
     updateMinimap();
@@ -166,6 +170,7 @@ async function load(): Promise<void> {
 
       if (overtaken()) return;
       drawn = state.view;
+      shownHash = hash;
       showEmpty({ head: "This picture could not be drawn", why: message });
       updateMinimap();
     }
@@ -187,7 +192,10 @@ api.changes((path) => {
 });
 
 window.addEventListener("hashchange", () => {
-  if (leaveEdit()) void load();
+  // A drawing with changes keeps the reader when asked: the link goes back to the picture being drawn on, so the
+  // address, the title and the next save all name that picture.
+  if (leaveEdit(true)) void load();
+  else history.replaceState(null, "", shownHash);
 });
 
 // Embedded in a split pane: no header, no side panels, just the picture and its toolbar.

@@ -24,6 +24,8 @@ let canvas: CanvasHandle | null = null;
 /** The canvas while it mounts: a scene that comes meanwhile waits for it, so the page has one Excalidraw. */
 let mounting: Promise<CanvasHandle> | null = null;
 let mode: "view" | "edit" = "view";
+/** The view the editor was opened on: what a save writes to, whatever the link says meanwhile. */
+let editedView: string | null = null;
 /** The drawing changed since it was saved or the editor opened. */
 let dirty = false;
 
@@ -142,6 +144,7 @@ export async function showScene(view: string, elements: SceneElement[], events: 
 
 export function setMode(next: "view" | "edit"): void {
   mode = next;
+  editedView = next === "edit" ? currentLink().view : null;
   canvas?.setMode(next);
   document.body.classList.toggle("editing", next === "edit");
   element("edit-tools").hidden = next !== "edit";
@@ -156,20 +159,35 @@ export function setMode(next: "view" | "edit"): void {
 /** Saves the scene and the flow's mocks as the view's drawing. */
 export async function saveDrawing(): Promise<void> {
   if (!canvas) return;
-  const { saved } = await api.saveDrawing(currentLink().view, canvas.scene(), page.mocks());
+  const { saved } = await api.saveDrawing(editedView ?? currentLink().view, canvas.scene(), page.mocks());
   dirty = false;
   saveButton.classList.remove("dirty");
   notice(`saved to ${saved}`);
 }
 
-/** Leaves the editor, asking first when the drawing has unsaved changes; false when the reader stays. */
-export function leaveEdit(): boolean {
+/**
+ * Leaves the editor, asking first when the drawing has unsaved changes; false when the reader stays. The changes
+ * given up go: the picture is drawn again from the code and the saved drawing — unless `next`, a new picture that
+ * the link already names, takes the canvas anyway.
+ */
+export function leaveEdit(next = false): boolean {
   if (mode !== "edit") return true;
+  const given = dirty ? editedView : null;
 
   if (dirty && !confirm("The drawing has unsaved changes. Leave the editor and lose them?")) return false;
   setMode("view");
 
+  if (given !== null && !next) void redraw(given);
+
   return true;
+}
+
+/** The picture of `view` as the code and the saved drawing have it, over whatever the canvas holds, where it is. */
+async function redraw(view: string): Promise<void> {
+  if (!canvas) return;
+  const now = currentLink();
+  const scene = await api.scene(view, now, refsOf(now));
+  canvas.replace(scene.elements, canvas.viewport());
 }
 
 /** A fresh picture of the code merged into the drawing: shapes that still exist keep their place, the strokes stay, stale shapes go. */

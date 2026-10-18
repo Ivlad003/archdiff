@@ -469,6 +469,47 @@ test("the editor opens and closes, and the Chat tab reads the task from the draw
   assert.ok((await page!.textContent("#agent-name"))?.includes("no agent"));
 });
 
+test("a reader who stays in the editor keeps the link of the picture drawn on; leaving drops the strokes not saved", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-editor-",
+    () => {},
+    async (origin, dir) => {
+      await page!.goto(`${origin}/#view=layer%3Alib`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`, undefined, { timeout: 20_000 });
+      await page!.click("#edit");
+      await page!.waitForSelector("body.editing");
+      // A rectangle drawn with the editor's own tool, below the picture.
+      const strokes = `window.archdiff.canvas().scene().filter((element) => !element.isDeleted && !element.customData?.archdiff).length`;
+      const box = (await page!.locator(".excalidraw__canvas.interactive").boundingBox())!;
+      const rectangle = (): Promise<void> => page!.click(".excalidraw [data-testid='toolbar-rectangle']", { force: true });
+      await rectangle();
+      await page!.mouse.move(box.x + 120, box.y + box.height - 160);
+      await page!.mouse.down();
+      await page!.mouse.move(box.x + 220, box.y + box.height - 90, { steps: 5 });
+      await page!.mouse.up();
+      await page!.waitForFunction(`${strokes} > 0 && document.querySelector("#save")?.classList.contains("dirty")`);
+      // Another view asked for, and the reader stays: the link goes back to the picture drawn on, and a save writes its drawing.
+      await page!.evaluate(`window.confirm = () => false`);
+      await page!.evaluate(`location.hash = "view=module%3Asrc%2Flib%2Flog.ts"`);
+      await page!.waitForFunction(`location.hash === "#view=layer%3Alib"`);
+      assert.ok(await page!.evaluate(`document.body.classList.contains("editing")`));
+      await page!.keyboard.press("Control+s");
+      await page!.waitForFunction(`!document.querySelector("#save")?.classList.contains("dirty")`);
+      assert.ok(existsSync(join(dir, ".archdiff/layouts/layer_lib.json")));
+      assert.ok(!existsSync(join(dir, ".archdiff/layouts/module_src_lib_log.ts.json")));
+      // One more stroke, given up on leaving: it goes, the saved one stays.
+      await rectangle();
+      await page!.mouse.move(box.x + 260, box.y + box.height - 160);
+      await page!.mouse.down();
+      await page!.mouse.move(box.x + 330, box.y + box.height - 90, { steps: 5 });
+      await page!.mouse.up();
+      await page!.waitForFunction(`${strokes} > 1`);
+      await page!.evaluate(`window.confirm = () => true`);
+      await page!.click("#exit");
+      await page!.waitForFunction(`!document.body.classList.contains("editing") && ${strokes} === 1`, undefined, { timeout: 10_000 });
+    },
+  ));
+
 test("the options panel sets the overlays and the fold limit, writes them to the link and remembers them as defaults", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.evaluate("localStorage.clear()");
   await page!.goto(`${base}/?fresh=2#view=layer%3Alib`);
