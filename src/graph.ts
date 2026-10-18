@@ -85,9 +85,11 @@ export interface Gap {
    * local value whose type archdiff does not track (`list.map`, `req.on`);
    * `unknown-member`: a known class without that member; `interface`: a call through
    * an interface or type no class of the repository implements; `external`: a package
-   * or built-in; `parse-error`: the file did not parse.
+   * or built-in; `local`: a function of the caller's own body (a nested function, a
+   * local arrow), whose calls are the caller's already; `parse-error`: the file did
+   * not parse. A call through a parameter is `dynamic`: what it holds is the caller's.
    */
-  reason: "dynamic" | "global" | "member-of-value" | "unknown-member" | "interface" | "external" | "parse-error";
+  reason: "dynamic" | "global" | "member-of-value" | "unknown-member" | "interface" | "external" | "local" | "parse-error";
   line: number;
 }
 
@@ -260,6 +262,8 @@ interface Building {
   facts: readonly FileFacts[];
   config: Config;
   resolve: (from: string, specifier: string) => Resolution;
+  /** Whether a file's compiler keeps an import of type-only names (`import { type A } from`) as a runtime import. */
+  keepsTypeImports: (file: string) => boolean;
   modules: Map<string, Module>;
   nodes: Map<string, Declaration>;
   deps: Dependency[];
@@ -318,16 +322,20 @@ function bindImports(b: Building): void {
         scope.imports.set(binding.local, { target, imported: binding.kind === "named" ? binding.imported : binding.kind === "default" ? "default" : "*" });
       }
 
-      if (target.kind === "self") continue;
+      // The file itself, or a file that is no source (JSON, a stylesheet): no module to draw, nothing missing.
+      if (target.kind === "self" || target.kind === "asset") continue;
+      // `import type`, or `import { type A }` that the compiler erases (it keeps it under `verbatimModuleSyntax`).
+      const typeOnly = fact.typeOnly === true || (fact.inlineTypeOnly === true && !b.keepsTypeImports(file.path));
 
       if (target.kind === "file") {
-        b.deps.push({ from: file.path, to: target.path, typeOnly: fact.typeOnly === true, reexport: fact.reexport, line: fact.line });
+        b.deps.push({ from: file.path, to: target.path, typeOnly, reexport: fact.reexport, line: fact.line });
       } else if (target.kind === "package" || target.kind === "builtin") {
         const id = `${target.kind === "package" ? "pkg" : "node"}:${target.name}`;
 
         if (!b.externals.has(id)) b.externals.set(id, { id, kind: target.kind, name: target.name });
-        b.deps.push({ from: file.path, to: id, typeOnly: fact.typeOnly === true, reexport: fact.reexport, line: fact.line });
-      } else {
+        b.deps.push({ from: file.path, to: id, typeOnly, reexport: fact.reexport, line: fact.line });
+      } else if (!fact.optional) {
+        // An optional specifier (`new URL("./assets", import.meta.url)`) names a module only when it resolves to one.
         b.unresolvedImports.push({ from: file.path, specifier: fact.source, reason: target.reason, line: fact.line });
       }
     }
@@ -400,9 +408,19 @@ class CallResolver {
     // a class field typed `X`. The member is then looked up on that class, interface or type.
     if (call.receiver && !callee.includes("(")) return this.receiverTarget(module, call.receiver, callee.slice(callee.lastIndexOf(".") + 1));
 
+    // Python's `super().m()`: the member of the class the enclosing one extends.
+    const parentCall = /^super\(\)\.([\w$]+)$/.exec(callee);
+
+    if (parentCall) return this.superMemberTarget(enclosingClass, parentCall[1]!);
+
     // `expect(x).toBe`, `vi.mocked(f).mockReturnValue`: a method of a call's result, whose type is not tracked.
     if (callee.includes("(")) return { gap: "member-of-value" };
     const parts = callee.split(".");
+
+    // A name bound between the call and the module — a parameter, a local, a nested function, a caught error — is not
+    // the module's declaration of that name, though it is spelled so: never an edge to it. A parameter holds what the
+    // caller passes (a blind spot); a local function's own calls are the enclosing function's already.
+    if (call.bound) return parts.length > 1 ? { gap: "member-of-value" } : call.bound === "parameter" ? { gap: "dynamic" } : { gap: "local" };
 
     if (parts.length === 1) return this.nameTarget(module, callee);
 
@@ -410,7 +428,28 @@ class CallResolver {
     if (parts.length > 2 || parts[0]!.startsWith("[") || parts[0]!.startsWith("{")) return { gap: "member-of-value" };
     const [head, member] = parts as [string, string];
 
-    return head === "this" || head === "super" ? this.ownMemberTarget(enclosingClass, member) : this.memberTarget(module, head, member);
+    if (head === "super") return this.superMemberTarget(enclosingClass, member);
+
+    return head === "this" ? this.ownMemberTarget(enclosingClass, member) : this.memberTarget(module, head, member);
+  }
+
+  /** `super.m()`, PHP's `parent::m()`: the member of the class the enclosing class extends, up its chain — not the method that overrides it. */
+  private superMemberTarget(enclosingClass: string | null, member: string): CallTarget {
+    const owner = enclosingClass ? this.b.nodes.get(enclosingClass) : undefined;
+
+    if (!owner) return { gap: "dynamic" };
+    const base = this.declarationOf(owner, "class")?.base;
+
+    if (!base) return { gap: "unknown-member" };
+    const parent = this.nameTarget(owner.module, base.replace(/<.*$/, ""));
+
+    // A base of a package's (`extends Component`): its member is the package's.
+    if (!("id" in parent)) return parent.gap === "global" ? { gap: "unknown-member" } : parent;
+    const found = this.memberOf(parent.id, member);
+
+    if (found) return { id: found };
+
+    return this.externalAncestor(parent.id) ? { gap: "external" } : { gap: "unknown-member" };
   }
 
   /** `new X()` lands on X; `new X().m` on the member of X. */
@@ -445,7 +484,7 @@ class CallResolver {
     return { gap: this.b.nodes.get(owner.id)?.kind === "type" ? "interface" : "unknown-member" };
   }
 
-  /** `this.m()` or `super.m()`: the member of the enclosing class, up its `extends` chain. */
+  /** `this.m()`: the member of the enclosing class, up its `extends` chain. */
   private ownMemberTarget(enclosingClass: string | null, member: string): CallTarget {
     if (!enclosingClass) return { gap: "dynamic" };
     const found = this.memberOf(enclosingClass, member);
@@ -580,8 +619,8 @@ function classOf(b: Building, id: string): string | null {
 }
 
 /** Builds the graph of the repository from the facts of every file: three passes over the files in path order. */
-export function buildGraph(facts: readonly FileFacts[], config: Config, resolve: (from: string, specifier: string) => Resolution): Graph {
-  const b: Building = { facts: [...facts].sort((a, c) => (a.path < c.path ? -1 : a.path > c.path ? 1 : 0)), config, resolve, modules: new Map(), nodes: new Map(), deps: [], calls: [], externals: new Map(), gaps: [], unresolvedImports: [], scopes: new Map() };
+export function buildGraph(facts: readonly FileFacts[], config: Config, resolve: (from: string, specifier: string) => Resolution, keepsTypeImports: (file: string) => boolean = () => false): Graph {
+  const b: Building = { facts: [...facts].sort((a, c) => (a.path < c.path ? -1 : a.path > c.path ? 1 : 0)), config, resolve, keepsTypeImports, modules: new Map(), nodes: new Map(), deps: [], calls: [], externals: new Map(), gaps: [], unresolvedImports: [], scopes: new Map() };
   declareModules(b);
   bindImports(b);
   const exports = new ExportTable(b.facts, b.nodes, resolve);

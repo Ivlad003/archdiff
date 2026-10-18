@@ -26,6 +26,9 @@ import { isPythonStdlib } from "./python-stdlib.ts";
 // Source roots for absolute imports, tried in order: the repository root wins.
 const ROOTS = ["", "src"];
 
+/** The files that make a directory a Python project's root: its absolute imports start there. */
+const PROJECT_MARKERS = ["pyproject.toml", "setup.py", "setup.cfg", "manage.py"];
+
 /** Resolves Python import specs (`a.b.x`, `..m.x`, `m.*`) to repository files or to stdlib/external packages. */
 export class PythonResolver implements SourceResolver {
   private readonly root: string;
@@ -37,6 +40,8 @@ export class PythonResolver implements SourceResolver {
   private readonly pythonDirs: ReadonlySet<string>;
   /** A file on disk, spelled exactly so: `existsSync` alone finds `User.py` through `user.py` on APFS and NTFS. */
   private readonly onDisk: (file: string) => boolean;
+  /** Whether a directory holds a project marker, asked once. */
+  private readonly marked = new Map<string, boolean>();
 
   constructor(root: string, sources: ReadonlySet<string> = new Set(), fs: ExactFs = nodeFs) {
     this.root = root;
@@ -73,7 +78,7 @@ export class PythonResolver implements SourceResolver {
 
     // Absolute import: the first root whose top-level segment is Python code
     // owns the import; later roots are not tried once one claims it.
-    for (const root of this.roots) {
+    for (const root of [...this.roots, ...this.projectRoots(fromFile)]) {
       const head = posix.join(root, segments[0]!);
       // A directory is a package only with Python code in it (a PEP 420 namespace package
       // without `__init__.py` too); `redis/` with a Dockerfile hides neither pip's `redis` nor `src/redis`.
@@ -93,6 +98,24 @@ export class PythonResolver implements SourceResolver {
 
     // Not in the repository: stdlib by name, else an installed package.
     return isPythonStdlib(segments[0]!) ? { kind: "stdlib" } : { kind: "external", pkg: segments[0]! };
+  }
+
+  /** The project directories above a file — those with a pyproject.toml, setup.py, setup.cfg or manage.py — and their `src/`: a Python project in a directory of the repository (`backend/`) imports from there. */
+  private projectRoots(fromFile: string): string[] {
+    const roots: string[] = [];
+
+    for (let directory = posix.dirname(fromFile); directory !== "."; directory = posix.dirname(directory)) {
+      let marked = this.marked.get(directory);
+
+      if (marked === undefined) {
+        marked = PROJECT_MARKERS.some((name) => this.onDisk(posix.join(directory, name)));
+        this.marked.set(directory, marked);
+      }
+
+      if (marked) roots.push(directory, ...(this.isDir(posix.join(directory, "src")) ? [posix.join(directory, "src")] : []));
+    }
+
+    return roots;
   }
 
   /** The longest prefix of `segments` of at least `least` segments under `base` that is a module. */

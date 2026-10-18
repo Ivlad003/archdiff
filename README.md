@@ -121,7 +121,7 @@ Imports resolve per language: TypeScript/JavaScript like the compiler (relative 
 
 ## What the diagrams cannot show
 
-A call is followed when its callee is a declaration of the same file, an import of a repository file, a member of a class the file declares or imports, or `this.m` inside a class. Everything else is a gap with a reason: `dynamic` (a computed callee) and `unknown-member` (a known class without that member) are blind spots inside the repository; `member-of-value` (`list.map`, `req.on`, `expect(x).toBe`), `global` and `external` are calls out of it. `archdiff coverage` and the Coverage tab of the page list them by module, so an empty diagram is never read as proof.
+A call is followed when its callee is a declaration of the same file, an import of a repository file, a member of a class the file declares or imports, or `this.m` inside a class. Everything else is a gap with a reason: `dynamic` (a computed callee, or a call through a parameter) and `unknown-member` (a known class without that member) are blind spots inside the repository; `member-of-value` (`list.map`, `req.on`, `expect(x).toBe`), `global` and `external` are calls out of it; `local` is a call of a function of the caller's own body (a nested function, a local arrow), whose calls are the caller's already. A parameter or a local spelled like a function of the module is never taken for it. `archdiff coverage` and the Coverage tab of the page list them by module, so an empty diagram is never read as proof.
 
 ## Which Mermaid type where
 

@@ -290,7 +290,9 @@ export function usageView(analysis: Analysis, id: string): PictureContent {
         const name = binding.kind === "named" ? binding.imported : binding.kind === "default" ? "default" : null;
         const target = name === null ? null : (byName.get(name) ?? (name === "default" ? (graph.resolvedExports.get(id)?.get("default") ?? null) : null));
 
-        if (target && used.has(target) && graph.deps.some((dep) => dep.from === importer && dep.to === id)) used.get(target)!.add(importer);
+        // The binding is of this import only when the statement imports this module: a name of another module's
+        // (`import { format } from "./b"`) is no use of this one's `format`.
+        if (target && used.has(target) && graph.deps.some((dep) => dep.from === importer && dep.to === id && dep.line === fact.line)) used.get(target)!.add(importer);
       }
     }
   }
@@ -349,43 +351,59 @@ export function eventsView(analysis: Analysis): PictureContent {
     return id;
   };
 
+  // The shape of what emits or listens: a function, or the module itself for a call at its top level.
+  const ownerNode = (id: string): void => {
+    if (graph.nodes.has(id)) nodes.set(id, fnNode(graph, id));
+    else if (graph.modules.has(id)) nodes.set(id, moduleNode(graph, id));
+  };
+
   for (const file of facts.values()) {
+    const record = (owner: string, call: (typeof file.moduleCalls)[number]): void => {
+      const member = call.callee.slice(call.callee.lastIndexOf(".") + 1);
+      const name = call.nameArg?.literal;
+
+      if (!name || !call.callee.includes(".")) return;
+
+      if (EMITTERS.has(member)) {
+        ownerNode(owner);
+        add({ from: owner, to: eventNode(name), kind: "call", label: member });
+      } else if (LISTENERS.has(member)) {
+        // The handler passed to the listener, when it is a function of this file; else the registering function (or module).
+        const handler = call.passes?.find((pass) => graph.nodes.has(`${file.path}#${pass.callee}`));
+        const receiver = handler ? `${file.path}#${handler.callee}` : owner;
+
+        ownerNode(receiver);
+        add({ from: eventNode(name), to: receiver, kind: "ref", label: member });
+      }
+    };
+
     const walk = (decl: (typeof file.decls)[number], parent: string | null): void => {
       const owner = `${file.path}#${parent ? `${parent}.` : ""}${decl.name}`;
 
-      for (const call of decl.calls) {
-        const member = call.callee.slice(call.callee.lastIndexOf(".") + 1);
-        const name = call.nameArg?.literal;
-
-        if (!name || !call.callee.includes(".")) continue;
-
-        if (EMITTERS.has(member)) {
-          if (graph.nodes.has(owner)) nodes.set(owner, fnNode(graph, owner));
-          add({ from: owner, to: eventNode(name), kind: "call", label: member });
-        } else if (LISTENERS.has(member)) {
-          // The handler passed to the listener, when it is a function of this file; else the registering function.
-          const handler = call.passes?.find((pass) => graph.nodes.has(`${file.path}#${pass.callee}`));
-          const receiver = handler ? `${file.path}#${handler.callee}` : owner;
-
-          if (graph.nodes.has(receiver)) nodes.set(receiver, fnNode(graph, receiver));
-          add({ from: eventNode(name), to: receiver, kind: "ref", label: member });
-        }
-      }
+      for (const call of decl.calls) record(owner, call);
 
       for (const child of decl.members) walk(child, parent ? `${parent}.${decl.name}` : decl.name);
     };
 
     for (const decl of file.decls) walk(decl, null);
+
+    // `bus.on("order:shipped", onShipped)` at the top level of a module registers as surely as one in a function.
+    for (const call of file.moduleCalls) record(file.path, call);
   }
 
-  const drawn = [...nodes.values()].filter((node) => node.kind === "event" || graph.nodes.has(node.id));
+  const drawn = [...nodes.values()].filter((node) => node.kind === "event" || graph.nodes.has(node.id) || graph.modules.has(node.id));
 
   if (drawn.length === 0) return unplaced("Events", [], [], [], { reason: "no emit/publish/dispatch or on/subscribe call with a literal event name" });
 
   return unplaced("Events: emitters → events → listeners", drawn, edges.filter((edge) => nodes.has(edge.from) && nodes.has(edge.to)), lanesOf(graph, drawn));
 }
 
-const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|[.\-_](test|spec|stories)\.[cm]?[jt]sx?$|_test\.(py|rs|php)$|(^|\/)tests?_[^/]*\.py$|Test\.php$/;
+/**
+ * A test file, by the conventions of each language: a `tests/` or `__tests__/` directory, `x.test.ts`,
+ * `x.spec.js` or `x_test.js`, `test_x.py`, Django's `tests.py`, `conftest.py`, `x_test.rs`, `XTest.php`. Not a
+ * module whose name only contains the word (`ab-test.ts`, an A/B test).
+ */
+const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$|_test\.(py|rs|php)$|(^|\/)tests?(_[^/]*)?\.py$|(^|\/)conftest\.py$|Test\.php$/;
 
 /** Which modules the tests import: every non-test module in its layer's lane, with the number of test files importing it; one no test imports is marked. */
 export function testsView(graph: Graph): PictureContent {

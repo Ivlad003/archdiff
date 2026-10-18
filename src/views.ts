@@ -66,7 +66,15 @@ export interface ViewEntry {
 }
 
 /** Modules whose public methods a framework calls: controllers, handlers, commands, jobs, listeners, middleware, routes. */
-const HANDLER_MODULE = /(controller|handler|command|job|listener|subscriber|middleware|route|resolver|consumer|action)s?[/.]|[/.](controllers?|handlers?|commands?|jobs?|listeners?|middlewares?|routes?|actions?)\//i;
+/**
+ * A module of handlers, by its name: the word at a boundary (`user.controller.ts`, `routes/`, `jobs/send.ts`) or a
+ * PascalCase suffix (`UserController.php`), never inside another word (`fraction.ts`, `interaction.ts`).
+ */
+const HANDLER_MODULE = {
+  word: /(^|[/._-])(controller|handler|command|job|listener|subscriber|middleware|route|resolver|consumer|action)s?[/.]/i,
+  suffix: /[a-z0-9](Controller|Handler|Command|Job|Listener|Subscriber|Middleware|Route|Resolver|Consumer|Action)s?[/.]/,
+  test: (path: string): boolean => HANDLER_MODULE.word.test(path) || HANDLER_MODULE.suffix.test(path),
+};
 
 /** A function execution starts from, with how it is known. */
 export interface EntryPoint {

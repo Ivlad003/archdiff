@@ -53,20 +53,22 @@ export function fnNode(graph: Graph, id: string): Shape {
 
 /** Module-level dependencies between the given modules (and to externals when `externals`), one edge per pair with its count. */
 export function depEdges(graph: Graph, members: ReadonlySet<string>, externals: boolean): Line[] {
-  const counts = new Map<string, number>();
+  // Per pair, the imports that run and those of types only (`import type`): a pair of types only is a dashed line.
+  const counts = new Map<string, { runs: number; types: number }>();
 
   for (const dep of graph.deps) {
     if (!members.has(dep.from)) continue;
 
     if (!(members.has(dep.to) || (externals && graph.externals.has(dep.to)))) continue;
     const key = `${dep.from}\u0000${dep.to}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const count = counts.get(key) ?? { runs: 0, types: 0 };
+    counts.set(key, dep.typeOnly ? { ...count, types: count.types + 1 } : { ...count, runs: count.runs + 1 });
   }
 
-  return [...counts].map(([key, count]) => {
+  return [...counts].map(([key, { runs, types }]): Line => {
     const [from, to] = key.split("\u0000") as [string, string];
 
-    return { from, to, kind: "dependency", count };
+    return runs > 0 ? { from, to, kind: "dependency", count: runs } : { from, to, kind: "dependency", count: types, typeOnly: true };
   });
 }
 

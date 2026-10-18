@@ -554,6 +554,91 @@ test("drawings lists the drawings and --prune deletes the orphans", () =>
     assert.ok(archdiff(["--version"]).stdout.trim().match(/^\d+\.\d+\.\d+$/));
   }));
 
+test("facts never guessed: a parameter or a local spelled like a function, super, imports of types only, another module's name, assets, top-level listeners", () =>
+  withTempDir("archdiff-facts-", (dir) => {
+    const write = (path: string, text: string): void => {
+      mkdirSync(join(dir, path, ".."), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    };
+    write("src/a.ts", "function save() {}\nexport function run(save: () => void) { save(); }\nexport function run2() { const save = () => 1; save(); }\nexport function run3() { try { run2(); } catch (save) { save(); } }\n");
+    write("src/k.ts", "export class Base { save(): number { return 1; } }\nexport class Child extends Base { save(): number { return super.save() + 1; } }\n");
+    write("src/ta.ts", 'import { type B } from "./tb";\nexport function makeA(): number { return 1; }\nexport const use = (b: B) => b;\n');
+    write("src/tb.ts", 'import { makeA, type A } from "./ta";\nexport interface B { a: number }\nexport const x = makeA();\n');
+    write("src/ua.ts", 'export function format(): string { return "a"; }\nexport function parse(): string { return "p"; }\n');
+    write("src/ub.ts", 'export function format(): string { return "b"; }\n');
+    write("src/user.ts", 'import { parse } from "./ua";\nimport { format } from "./ub";\nexport function both(): string { return parse() + format(); }\n');
+    write("src/assets.ts", 'import data from "./data.json";\nimport "./styles.css";\nconst dir = new URL("./assetsdir", import.meta.url);\nexport const all = [data, dir];\n');
+    write("src/data.json", '{"a":1}\n');
+    write("src/styles.css", "a {}\n");
+    write("src/assetsdir/x.txt", "x\n");
+    write("src/bus.ts", 'import { EventEmitter } from "node:events";\nexport const bus = new EventEmitter();\nexport function onShipped(): void {}\nbus.on("order:shipped", onShipped);\n');
+    write("src/fraction.ts", "export class Fraction { add(): number { return helper(); } }\nfunction helper(): number { return 1; }\n");
+    write("src/ab-test.ts", 'export function variant(): string { return "a"; }\n');
+    write("polls/__init__.py", "");
+    write("polls/models.py", "class Poll:\n    pass\n");
+    write("polls/tests.py", "from polls.models import Poll\ndef test_poll():\n    assert Poll()\n");
+    write("py/__init__.py", "");
+    write("py/a.py", "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from py.b import B\ndef make_a():\n    return 1\n");
+    write("py/b.py", "from py.a import make_a\nclass B:\n    pass\nx = make_a()\n");
+    const mermaid = (view: string): string => archdiff(["diagram", view, dir, "--format", "mermaid"]).stdout;
+    // A parameter, a local, a caught error named `save` are not the module's save: holes, never an edge to it.
+    for (const fn of ["run", "run2", "run3"]) assert.ok(!mermaid(`calls:src/a.ts#${fn}`).includes("==> src_a_ts_save"), fn);
+    assert.ok(mermaid("calls:src/a.ts#run").includes("src_a_ts_run ==> hole_src_a_ts_run_save"));
+    // super.save() is the base class's, not the method calling itself.
+    assert.ok(mermaid("calls:src/k.ts#Child.save").includes("src_k_ts_Child_save ==> src_k_ts_Base_save"));
+    // `import { type B }` is erased without verbatimModuleSyntax, and an import under `if TYPE_CHECKING:` never runs: no cycles.
+    assert.ok(mermaid("cycles").includes("no import cycles"), mermaid("cycles"));
+    assert.ok(mermaid("module:src/ta.ts").includes("src_ta_ts -.-> src_tb_ts"), "a line of types only is dashed");
+    // The format of another module is no use of this one's.
+    assert.ok(mermaid("usage:src/ua.ts").includes("format<br/>(unused outside)"), mermaid("usage:src/ua.ts"));
+    // A JSON or a stylesheet of the repository is no missing module, nor is an optional URL of a directory.
+    const coverage = JSON.parse(archdiff(["coverage", dir, "--json"]).stdout) as { unresolvedImports: number };
+    assert.equal(coverage.unresolvedImports, 0);
+    // A listener at a module's top level is drawn with the function it registers.
+    assert.ok(mermaid("events").includes('event_order_shipped -.->|"on"| src_bus_ts_onShipped'), mermaid("events"));
+    // Django's tests.py is a test, an A/B test module is none; a word inside a name makes no handler module.
+    assert.ok(archdiff(["diagram", "tests", dir]).stdout.includes("# Tests: 1 test files cover 1 of"), archdiff(["diagram", "tests", dir]).stdout.slice(0, 300));
+    assert.ok(!archdiff(["views", dir]).stdout.includes("uncalled method of a handler"));
+  }));
+
+test("imports resolve as the tools resolve them: baseUrl, a jsconfig, the longest paths pattern, a missing alias, a monorepo's own packages, a Python project in a directory", () =>
+  withTempDir("archdiff-resolve-", (dir) => {
+    const write = (path: string, text: string): void => {
+      mkdirSync(join(dir, path, ".."), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    };
+    const edges = (view: string): string[] => archdiff(["diagram", view, dir, "--format", "mermaid", "--packages"]).stdout.split("\n").filter((line) => line.includes("-->")).map((line) => line.trim());
+    write("web/src/lib/util/deep.ts", "export const deep = 1;\n");
+    write("web/src/util/deep.ts", "export const deep = 2;\n");
+    write("web/src/lib/u.ts", "export const u = 1;\n");
+    write("web/src/main.ts", 'import { deep } from "util/deep";\nimport { u } from "lib/u";\nimport { m } from "@/nope";\nexport const all = [deep, u, m];\n');
+    // TypeScript takes the pattern with the longest prefix; a bare specifier is a file under baseUrl too.
+    write("web/tsconfig.json", '{ "compilerOptions": { "baseUrl": ".", "paths": { "*": ["src/*"], "util/*": ["src/lib/util/*"], "@/*": ["src/missing/*"] } } }');
+    assert.deepEqual(edges("module:web/src/main.ts"), ["web_src_main_ts --> web_src_lib_util_deep_ts", "web_src_main_ts --> web_src_lib_u_ts"]);
+    // An alias whose file is missing is no package (none is named `@/nope`): unresolved, with the pattern.
+    const coverage = JSON.parse(archdiff(["coverage", dir, "--json"]).stdout) as { unresolvedImports: number; markdown: string };
+    assert.equal(coverage.unresolvedImports, 1);
+    assert.ok(coverage.markdown.includes("- import `@/nope` — no file for the tsconfig path @/*: @/nope (web/src/main.ts:3)"), coverage.markdown);
+    // A JavaScript project's jsconfig.json reads the same.
+    rmSync(join(dir, "web/tsconfig.json"));
+    write("web/jsconfig.json", '{ "compilerOptions": { "baseUrl": "src" } }');
+    assert.ok(edges("module:web/src/main.ts").includes("web_src_main_ts --> web_src_lib_u_ts"));
+    // A monorepo's package imported by its name is its source: the entry its package.json names, built or not.
+    write("packages/core/package.json", '{ "name": "@acme/core", "main": "dist/index.js" }');
+    write("packages/core/src/index.ts", "export function core(): number {\n  return 1;\n}\n");
+    write("packages/core/src/utils.ts", "export const helper = 2;\n");
+    write("packages/app/package.json", '{ "name": "@acme/app", "dependencies": { "@acme/core": "*" } }');
+    write("packages/app/src/index.ts", 'import { core } from "@acme/core";\nimport { helper } from "@acme/core/utils";\nexport function app(): number {\n  return core() + helper;\n}\n');
+    assert.deepEqual(edges("module:packages/app/src/index.ts"), ["packages_app_src_index_ts --> packages_core_src_index_ts", "packages_app_src_index_ts --> packages_core_src_utils_ts"]);
+    assert.ok(archdiff(["diagram", "packages", dir, "--format", "mermaid"]).stdout.includes('acme_app -->|"declared, 2 imports"| acme_core'));
+    // A Python project in a directory of the repository imports from that directory.
+    write("backend/pyproject.toml", "[project]\nname = 'app'\n");
+    write("backend/app/__init__.py", "");
+    write("backend/app/models.py", "def load():\n    return 1\n");
+    write("backend/app/api.py", "from app.models import load\n\ndef run():\n    return load()\n");
+    assert.ok(archdiff(["diagram", "calls:backend/app/api.py#run", dir, "--format", "mermaid"]).stdout.includes("backend_app_api_py_run ==> backend_app_models_py_load"));
+  }));
+
 test("Python, Rust and PHP are read with the same graph: imports resolve and calls are followed", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");
   const stats = JSON.parse(archdiff(["analyze", polyglot, "--json", "--no-cache"]).stdout) as { files: number; unresolvedImports: number; calls: number };

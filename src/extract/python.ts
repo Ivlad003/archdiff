@@ -916,18 +916,27 @@ function enclosingFn(node: Node): string | null {
 function importsIn(root: Node, reexported: (local: string | null) => boolean): ImportFact[] {
   const out: ImportFact[] = [];
 
-  // Depth-first over the whole tree; an import statement holds no other import.
-  const walk = (node: Node): void => {
+  // Depth-first over the whole tree; an import statement holds no other import. Under `if TYPE_CHECKING:` an
+  // import is for the type checker only: it never runs, so it forms no cycle that runs (its `else:` does run).
+  const walk = (node: Node, typesOnly: boolean): void => {
     if (node.type === "import_statement" || node.type === "import_from_statement") {
-      out.push(...importsOf(node, reexported));
+      for (const fact of importsOf(node, reexported)) out.push(typesOnly ? { ...fact, typeOnly: true } : fact);
 
       return;
     }
 
-    for (const c of node.namedChildren) walk(c);
+    if (node.type === "if_statement" && /^(\w+\.)?TYPE_CHECKING$/.test(node.childForFieldName("condition")?.text ?? "")) {
+      const consequence = node.childForFieldName("consequence");
+
+      for (const c of node.namedChildren) walk(c, typesOnly || c.id === consequence?.id);
+
+      return;
+    }
+
+    for (const c of node.namedChildren) walk(c, typesOnly);
   };
 
-  walk(root);
+  walk(root, false);
 
   return out;
 }

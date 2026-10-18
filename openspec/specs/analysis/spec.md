@@ -22,7 +22,7 @@ The system SHALL parse every TypeScript, JavaScript, Python, Rust and PHP source
 
 ### Requirement: Imports resolve per language
 
-The system SHALL resolve relative and aliased imports to files (TypeScript `paths` from the nearest `tsconfig.json`, `.js` to `.ts`, index files; Python packages; Rust modules and facade re-exports; PHP namespaces) and name packages and built-ins as externals. An import that resolves to nothing SHALL be listed as unresolved with its reason, never guessed.
+The system SHALL resolve relative and aliased imports to files (TypeScript `paths` and `baseUrl` from the nearest `tsconfig.json` or `jsconfig.json` with its `extends` merged as the compiler merges them, the pattern with the longest prefix taken; `.js` to `.ts`, index files; a package of a monorepo imported by its name to its source; Python packages, from the repository's root, `src/` and a project directory with a pyproject.toml, setup.py, setup.cfg or manage.py; Rust modules and facade re-exports; PHP namespaces) and name packages and built-ins as externals. An import that resolves to nothing SHALL be listed as unresolved with its reason, never guessed: an alias whose file is missing is no package. A file of the repository that is no source (JSON, a stylesheet) SHALL be neither a module nor unresolved, nor an optional specifier that names no source. `import { type A }` SHALL be of types only unless the tsconfig sets `verbatimModuleSyntax`, and so SHALL a Python import under `if TYPE_CHECKING:`; a line of types only is drawn dashed.
 
 #### Scenario: A tsconfig path alias
 
@@ -36,7 +36,7 @@ The system SHALL resolve relative and aliased imports to files (TypeScript `path
 
 ### Requirement: Calls resolve through declarations, exports and types
 
-The system SHALL resolve a call to the function it names through the file's local declarations, its import bindings (including re-exports, `export *`, CommonJS `module.exports`), receiver types, interface implementers and class ancestors. A call it cannot name SHALL be a gap with one of the reasons `dynamic`, `global`, `member-of-value`, `unknown-member`, `interface`, `external`, `parse-error`.
+The system SHALL resolve a call to the function it names through the file's local declarations, its import bindings (including re-exports, `export *`, CommonJS `module.exports`), receiver types, interface implementers and class ancestors. A call it cannot name SHALL be a gap with one of the reasons `dynamic`, `global`, `member-of-value`, `unknown-member`, `interface`, `external`, `local`, `parse-error`. A callee bound between the call and the module — a parameter, a local, a nested function, a caught error — SHALL never be read as the module's declaration of the same name: through a parameter it is `dynamic` (a blind spot: what the caller passes), a function of the caller's own body is `local` (its calls are the caller's already). `super.m()` (PHP `parent::m()`, Python `super().m()`) SHALL resolve to the member of the class the enclosing class extends.
 
 #### Scenario: A call through an interface
 

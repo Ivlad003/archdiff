@@ -46,6 +46,7 @@ const REASON_TEXT: Record<Gap["reason"], string> = {
   interface: "a call through an interface or type no class of the repository implements (injected from outside): a blind spot",
   "member-of-value": "a method of a local value whose type is not tracked (list.map, req.on): mostly built-ins",
   global: "a bare name the file neither declares nor imports (setTimeout, JSON.parse): a global",
+  local: "a function of the caller's own body (a nested function, a local arrow): its calls are the caller's already",
   external: "a package or a Node built-in",
   "parse-error": "a syntax error in the file",
 };
@@ -91,11 +92,13 @@ export function coverageReport(analysis: Analysis): CoverageReport {
   const calls = graph.calls.filter((call) => call.kind === "call").length;
   const parseErrors = graph.gaps.filter((gap) => gap.reason === "parse-error").map((gap) => moduleOf(gap.from)).sort();
   const ratio = calls + blind === 0 ? 1 : calls / (calls + blind);
+  // A call of a function of the caller's own body stays inside the caller: neither followed nor going out.
+  const local = graph.gaps.filter((gap) => gap.reason === "local").length;
   const lines = [
     "<!-- archdiff:generated — coverage -->",
     "# Coverage: what the diagrams cannot show",
     "",
-    `${analysis.files.length} files. Calls into the repository: ${calls} followed, ${blind} blind (${Math.round(ratio * 100)}% followed). ${gaps - blind} calls go out of it (packages, built-ins, globals, methods of untyped values). ${graph.unresolvedImports.length} unresolved imports, ${parseErrors.length} files with syntax errors.`,
+    `${analysis.files.length} files. Calls into the repository: ${calls} followed, ${blind} blind (${Math.round(ratio * 100)}% followed). ${gaps - blind - local} calls go out of it (packages, built-ins, globals, methods of untyped values)${local > 0 ? `, ${local} stay in their function (a nested function, a local arrow)` : ""}. ${graph.unresolvedImports.length} unresolved imports, ${parseErrors.length} files with syntax errors.`,
     "",
     "## Why calls were not followed",
     "",

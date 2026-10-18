@@ -13,7 +13,7 @@
 
 import { readFileSync } from "node:fs";
 import { join, posix } from "node:path";
-import { isJsonObject, isJsonString, parseJson } from "./json.ts";
+import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
 
 /** A function a framework calls: its module, its export name and how the framework names it. */
 export interface DeclaredEntry {
@@ -116,11 +116,52 @@ export interface RepositoryPackage {
   /** The directory, "" for the root. */
   dir: string;
   dependencies: string[];
+  /** The source file an import of the package by its name lands on (a workspace of a monorepo); null when none is found. */
+  entry: string | null;
+}
+
+/** The extensions a written entry may leave out, in TypeScript's order of preference for a source. */
+const ENTRY_EXTENSIONS = ["", ".ts", ".tsx", ".mts", ".js", ".jsx", ".mjs", ".cjs"];
+
+/**
+ * The source file a package's own name stands for, among `files`: what its package.json names (`source`, the `.`
+ * export, `module`, `main`, `types`), as written or as the source it was built from (`dist/index.js` from
+ * `src/index.ts`), else an index file at its top or in its `src/`.
+ */
+function packageEntry(directory: string, manifest: Record<string, JsonValue>, files: ReadonlySet<string>): string | null {
+  const probe = (written: string): string | null => {
+    const base = posix.normalize(posix.join(directory, written.replace(/^\.\//, ""))).replace(/\.(d\.ts|[cm]?js|jsx)$/, "");
+    const stems = [base, posix.join(base, "index")];
+
+    for (const stem of stems) for (const extension of ENTRY_EXTENSIONS) if (files.has(stem + extension)) return stem + extension;
+
+    return null;
+  };
+  const exportsField = manifest["exports"];
+  const dot = isJsonString(exportsField) ? exportsField : isJsonObject(exportsField) ? exportsField["."] : undefined;
+  const written = [manifest["source"], ...(isJsonObject(dot) ? [dot["source"], dot["types"], dot["import"], dot["default"], dot["require"]] : [dot]), manifest["module"], manifest["main"], manifest["types"], manifest["typings"]].filter(isJsonString);
+
+  for (const entry of written) {
+    const found = probe(entry);
+
+    if (found) return found;
+    // A built output names the source it was built from: `dist/index.js` from `src/index.ts`.
+    const built = /^(\.\/)?(dist|build|lib|out)\//.exec(entry);
+
+    if (built) {
+      const source = probe(entry.replace(/^(\.\/)?(dist|build|lib|out)\//, "src/"));
+
+      if (source) return source;
+    }
+  }
+
+  return probe("src/index") ?? probe("index");
 }
 
 /** Every package.json of the repository, read for its name and dependency names, sorted by directory. */
 export function repositoryPackages(root: string, allFiles: readonly string[]): RepositoryPackage[] {
   const packages: RepositoryPackage[] = [];
+  const files = new Set(allFiles);
 
   for (const manifest of allFiles.filter((path) => /(^|\/)package\.json$/.test(path) && !path.includes("node_modules/")).sort()) {
     let parsed;
@@ -140,7 +181,8 @@ export function repositoryPackages(root: string, allFiles: readonly string[]): R
       if (isJsonObject(list)) dependencies.push(...Object.keys(list));
     }
 
-    packages.push({ name: parsed["name"], dir: posix.dirname(manifest) === "." ? "" : posix.dirname(manifest), dependencies: [...new Set(dependencies)].sort() });
+    const dir = posix.dirname(manifest) === "." ? "" : posix.dirname(manifest);
+    packages.push({ name: parsed["name"], dir, dependencies: [...new Set(dependencies)].sort(), entry: packageEntry(dir, parsed, files) });
   }
 
   return packages;

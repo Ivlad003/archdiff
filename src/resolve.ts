@@ -11,7 +11,7 @@
 // Entry points: `createResolver`, `packageName`, `readTsconfigPaths`,
 // `tsconfigResolver`.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { join, posix } from "node:path";
 import type { FileFacts } from "./extract/facts.ts";
@@ -29,13 +29,27 @@ export type Resolution =
   | { kind: "builtin"; name: string }
   /** The importing file itself (Rust `use self::Kind::*`, a Python relative import of the package's own module): no dependency, nothing unresolved. */
   | { kind: "self" }
+  /** A file of the repository that is no source (JSON, a stylesheet, an image): no module to draw, nothing unresolved. */
+  | { kind: "asset"; path: string }
   | { kind: "unresolved"; reason: string };
 
-/** The `paths` of a tsconfig, patterns to candidate prefixes, resolved against `baseUrl` (or the config's directory). */
+/** A package of the repository that an import may name (a workspace): its name, its directory and its entry file. */
+export interface Workspace {
+  name: string;
+  dir: string;
+  entry: string | null;
+}
+
+/** What archdiff reads of a tsconfig (or a jsconfig), its `extends` followed: the module options that name files. */
 export interface TsconfigPaths {
+  /** Where `paths` targets resolve from: `baseUrl` when set, else the directory of the config that declares `paths`. */
   baseDir: string;
   /** `@/*` → [`src/*`]; a pattern without `*` maps exactly. */
   paths: { pattern: string; targets: string[] }[];
+  /** `baseUrl`, as a path: a bare specifier is a file under it too (after `paths`, before the packages). */
+  baseUrl: string | null;
+  /** `verbatimModuleSyntax`: `import { type A } from` stays in the code as `import {} from`, a runtime import; else it is erased. */
+  verbatimModuleSyntax: boolean;
 }
 
 const BUILTINS = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
@@ -82,54 +96,102 @@ function parseJsonc(text: string): JsonValue {
 }
 
 /**
- * The `paths` of a tsconfig (following `extends`: a relative file, or a
- * package's config under node_modules), or null without any. `root` is
- * the directory holding node_modules for a package `extends`.
+ * A tsconfig's module options, its `extends` chain followed (a relative file, or a package's config under
+ * node_modules; `root` holds the node_modules of the latter), as TypeScript merges them: the nearest config that
+ * sets an option wins, `baseUrl` is relative to the config that sets it, and `paths` without a `baseUrl` to the
+ * config that declares them. Null when the file is missing or no JSON.
  */
 export function readTsconfigPaths(root: string, file = join(root, "tsconfig.json")): TsconfigPaths | null {
-  const read = (file: string, depth: number): TsconfigPaths | null => {
-    if (!existsSync(file) || depth > 5) return null;
+  // The chain from the config itself to its farthest parent.
+  const chain: { directory: string; options: Record<string, JsonValue> }[] = [];
+  const read = (file: string, depth: number): void => {
+    if (!existsSync(file) || depth > 5) return;
     let config: JsonValue;
 
     try {
       config = parseJsonc(readFileSync(file, "utf8"));
     } catch {
-      return null;
+      return;
     }
 
-    if (!isJsonObject(config)) return null;
+    if (!isJsonObject(config)) return;
     const options = config["compilerOptions"];
-    const own = isJsonObject(options) ? options : {};
     const directory = posix.dirname(file.split("\\").join("/"));
-    const baseUrl = isJsonString(own["baseUrl"]) ? posix.join(directory, own["baseUrl"]) : directory;
-    const paths = own["paths"];
-
-    if (isJsonObject(paths)) {
-      const entries: TsconfigPaths["paths"] = [];
-
-      for (const [pattern, targets] of Object.entries(paths)) {
-        if (Array.isArray(targets)) entries.push({ pattern, targets: targets.filter(isJsonString) });
-      }
-
-      return { baseDir: baseUrl, paths: entries };
-    }
-
+    chain.push({ directory, options: isJsonObject(options) ? options : {} });
     const parent = config["extends"];
 
-    if (isJsonString(parent)) {
-      if (parent.startsWith(".")) return read(posix.join(directory, parent.endsWith(".json") ? parent : `${parent}.json`), depth + 1);
-      // `extends: "@tsconfig/node20/tsconfig.json"` or a package name: its config under node_modules, from the config's directory up to the root.
-      const candidates = [posix.join(directory, "node_modules", parent), posix.join(root.split("\\").join("/"), "node_modules", parent)];
+    if (!isJsonString(parent)) return;
 
-      for (const candidate of candidates) {
-        for (const resolved of [candidate, `${candidate}.json`, posix.join(candidate, "tsconfig.json")]) if (existsSync(resolved)) return read(resolved, depth + 1);
-      }
+    if (parent.startsWith(".")) return read(posix.join(directory, parent.endsWith(".json") ? parent : `${parent}.json`), depth + 1);
+    // `extends: "@tsconfig/node20/tsconfig.json"` or a package name: its config under node_modules, from the config's directory up to the root.
+    const candidates = [posix.join(directory, "node_modules", parent), posix.join(root.split("\\").join("/"), "node_modules", parent)];
+
+    for (const candidate of candidates) {
+      for (const resolved of [candidate, `${candidate}.json`, posix.join(candidate, "tsconfig.json")]) if (existsSync(resolved)) return read(resolved, depth + 1);
     }
+  };
+
+  read(file.split("\\").join("/"), 0);
+
+  if (chain.length === 0) return null;
+  // The nearest config that sets an option.
+  const nearest = (name: string): { directory: string; value: JsonValue } | null => {
+    for (const link of chain) if (link.options[name] !== undefined) return { directory: link.directory, value: link.options[name]! };
 
     return null;
   };
+  const baseUrlSet = nearest("baseUrl");
+  const baseUrl = baseUrlSet && isJsonString(baseUrlSet.value) ? posix.join(baseUrlSet.directory, baseUrlSet.value) : null;
+  const pathsSet = nearest("paths");
+  const paths: TsconfigPaths["paths"] = [];
 
-  return read(file.split("\\").join("/"), 0);
+  if (pathsSet && isJsonObject(pathsSet.value)) {
+    for (const [pattern, targets] of Object.entries(pathsSet.value)) if (Array.isArray(targets)) paths.push({ pattern, targets: targets.filter(isJsonString) });
+  }
+
+  const verbatim = nearest("verbatimModuleSyntax");
+
+  return { baseDir: baseUrl ?? pathsSet?.directory ?? chain[0]!.directory, paths, baseUrl, verbatimModuleSyntax: verbatim?.value === true };
+}
+
+/**
+ * The `paths` pattern TypeScript takes for a specifier: one written without `*` that equals it, else, of those
+ * whose prefix and suffix fit around it, the one with the longest prefix; and what the `*` stands for.
+ */
+function bestPattern(paths: TsconfigPaths["paths"], specifier: string): { pattern: string; targets: string[]; matched: string } | null {
+  let best: { pattern: string; targets: string[]; matched: string } | null = null;
+
+  for (const { pattern, targets } of paths) {
+    const star = pattern.indexOf("*");
+
+    if (star === -1) {
+      if (pattern === specifier) return { pattern, targets, matched: "" };
+      continue;
+    }
+
+    const prefix = pattern.slice(0, star);
+    const suffix = pattern.slice(star + 1);
+
+    if (specifier.length < prefix.length + suffix.length || !specifier.startsWith(prefix) || !specifier.endsWith(suffix)) continue;
+
+    if (!best || prefix.length > best.pattern.indexOf("*")) best = { pattern, targets, matched: specifier.slice(prefix.length, specifier.length - suffix.length) };
+  }
+
+  return best;
+}
+
+/** Whether a repository-relative path is a file on disk (an asset a module imports). */
+function isFileIn(root: string, path: string): boolean {
+  try {
+    return statSync(posix.join(root, path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** A name npm would take for a package (`react`, `@scope/name`): an alias like `@/lib`, `~/x` or `$lib` is none. */
+function packageLike(name: string): boolean {
+  return /^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/i.test(name);
 }
 
 /**
@@ -138,17 +200,19 @@ export function readTsconfigPaths(root: string, file = join(root, "tsconfig.json
  * directory. Falls back to the root's.
  */
 export function tsconfigResolver(root: string, _files: Iterable<string>): (from: string) => TsconfigPaths | null {
-  const present = new Map<string, boolean>();
-  const has = (directory: string): boolean => {
+  // A directory's config: its tsconfig.json, else its jsconfig.json (a JavaScript project's, the same options).
+  const present = new Map<string, string | null>();
+  const configIn = (directory: string): string | null => {
     let known = present.get(directory);
 
     if (known === undefined) {
-      known = existsSync(join(root, directory, "tsconfig.json"));
+      known = ["tsconfig.json", "jsconfig.json"].find((name) => existsSync(join(root, directory, name))) ?? null;
       present.set(directory, known);
     }
 
     return known;
   };
+  const has = (directory: string): boolean => configIn(directory) !== null;
 
   const ownerOf = new Map<string, string | null>();
   const configs = new Map<string, TsconfigPaths | null>();
@@ -182,7 +246,7 @@ export function tsconfigResolver(root: string, _files: Iterable<string>): (from:
 
     if (owner === null) return null;
 
-    if (!configs.has(owner)) configs.set(owner, readTsconfigPaths(root, join(root, owner, "tsconfig.json")));
+    if (!configs.has(owner)) configs.set(owner, readTsconfigPaths(root, join(root, owner, configIn(owner)!)));
 
     return configs.get(owner)!;
   };
@@ -214,10 +278,10 @@ function fromLanguage(resolution: LanguageResolution, specifier: string): Resolu
  * facts: its imports name declarations). `from` and the files are POSIX
  * paths relative to `root`.
  */
-export function createResolver(root: string, files: Iterable<string>, facts: readonly FileFacts[] = [], tsconfigOf: (from: string) => TsconfigPaths | null = tsconfigResolver(root, files)): (from: string, specifier: string) => Resolution {
+export function createResolver(root: string, files: Iterable<string>, facts: readonly FileFacts[] = [], tsconfigOf: (from: string) => TsconfigPaths | null = tsconfigResolver(root, files), workspaces: readonly Workspace[] = []): (from: string, specifier: string) => Resolution {
   const known = new Set(files);
   const factsByPath = new Map(facts.map((file) => [file.path, file]));
-  const ecmascript = createEcmascriptResolver(root, known, tsconfigOf);
+  const ecmascript = createEcmascriptResolver(root, known, tsconfigOf, new Map(workspaces.map((workspace) => [workspace.name, workspace])));
   let python: SourceResolver | null = null;
   let rust: SourceResolver | null = null;
   let php: SourceResolver | null = null;
@@ -278,7 +342,7 @@ export function createResolver(root: string, files: Iterable<string>, facts: rea
 }
 
 /** The TypeScript/JavaScript resolver: relative paths, `.js` for `.ts`, index files, tsconfig `paths`, packages, built-ins. */
-function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsconfigOf: (from: string) => TsconfigPaths | null): (from: string, specifier: string) => Resolution {
+function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsconfigOf: (from: string) => TsconfigPaths | null, workspaces: ReadonlyMap<string, Workspace>): (from: string, specifier: string) => Resolution {
   const rootPosix = root.split("\\").join("/");
 
   // A repository-relative candidate, as written or with an extension or index file added.
@@ -316,29 +380,47 @@ function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsco
       if (candidate.startsWith("..")) return { kind: "unresolved", reason: `outside the repository: ${specifier}` };
       const found = probe(candidate);
 
-      return found ? { kind: "file", path: found } : { kind: "unresolved", reason: `no such file: ${specifier}` };
+      if (found) return { kind: "file", path: found };
+
+      // A file of the repository that is no source — JSON, a stylesheet, an image a bundler imports: nothing to draw, nothing missing.
+      return isFileIn(rootPosix, candidate) ? { kind: "asset", path: candidate } : { kind: "unresolved", reason: `no such file: ${specifier}` };
     }
 
     if (BUILTINS.has(clean)) return { kind: "builtin", name: clean.replace(/^node:/, "") };
     const tsconfig = tsconfigOf(from);
 
     if (tsconfig) {
-      for (const { pattern, targets } of tsconfig.paths) {
-        const star = pattern.indexOf("*");
-        const matched = star === -1 ? (clean === pattern ? "" : null) : clean.startsWith(pattern.slice(0, star)) && clean.endsWith(pattern.slice(star + 1)) ? clean.slice(star, clean.length - (pattern.length - star - 1)) : null;
+      // `paths`: the pattern TypeScript takes (an exact one, else the longest prefix), its targets in order.
+      const best = bestPattern(tsconfig.paths, clean);
 
-        if (matched === null) continue;
+      for (const target of best?.targets ?? []) {
+        const found = probe(posix.normalize(relativeToRoot(posix.join(tsconfig.baseDir, target.replace("*", best!.matched)))));
 
-        for (const target of targets) {
-          const filled = target.replace("*", matched);
-          const found = probe(posix.normalize(posix.join(relativeToRoot(posix.join(tsconfig.baseDir, filled)))));
-
-          if (found) return { kind: "file", path: found };
-        }
+        if (found) return { kind: "file", path: found };
       }
+
+      // `baseUrl`: a bare specifier names a file under it too (`lib/util` → `src/lib/util.ts` with `baseUrl: "src"`).
+      if (tsconfig.baseUrl !== null) {
+        const found = probe(posix.normalize(relativeToRoot(posix.join(tsconfig.baseUrl, clean))));
+
+        if (found) return { kind: "file", path: found };
+      }
+
+      // An alias of the repository whose file is not there: no package is named `@/lib` or `~/x`.
+      if (best && best.pattern !== "*" && !packageLike(packageName(clean))) return { kind: "unresolved", reason: `no file for the tsconfig path ${best.pattern}: ${specifier}` };
     }
 
     if (clean === "") return { kind: "unresolved", reason: "empty specifier" };
+
+    // A package of the repository (a workspace of a monorepo), by its name: its source, not a package from outside.
+    const workspace = workspaces.get(packageName(clean));
+
+    if (workspace) {
+      const rest = clean.slice(workspace.name.length + 1);
+      const found = rest === "" ? workspace.entry : (probe(posix.join(workspace.dir, rest)) ?? probe(posix.join(workspace.dir, "src", rest)));
+
+      return found ? { kind: "file", path: found } : { kind: "unresolved", reason: `no source of the repository's package ${workspace.name} for ${specifier}` };
+    }
 
     return { kind: "package", name: packageName(clean) };
   };

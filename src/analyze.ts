@@ -19,7 +19,7 @@ import { extractAll } from "./extract/pool.ts";
 import { listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
 import { frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
 import { buildGraph, type Graph } from "./graph.ts";
-import { createResolver } from "./resolve.ts";
+import { createResolver, tsconfigResolver } from "./resolve.ts";
 
 export interface AnalysisStats {
   files: number;
@@ -113,10 +113,13 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
 
   const extracted = performance.now();
   cache?.save();
-  const graph = buildGraph([...facts.values()], config, createResolver(root, [...facts.keys()], [...facts.values()]));
   const allFiles = listAllFiles(root);
-  const declaredEntries = frameworkEntries(root, files, allFiles);
+  // The packages of a monorepo first: an import of one by its name is an import of its source, not of a package.
   const packages = repositoryPackages(root, allFiles);
+  // One reading of the tsconfigs for both: the paths to resolve, and whether `import { type A }` stays in the code.
+  const tsconfigOf = tsconfigResolver(root, [...facts.keys()]);
+  const graph = buildGraph([...facts.values()], config, createResolver(root, [...facts.keys()], [...facts.values()], tsconfigOf, packages), (file) => tsconfigOf(file)?.verbatimModuleSyntax === true);
+  const declaredEntries = frameworkEntries(root, files, allFiles);
   const built = performance.now();
   const kinds = [...graph.nodes.values()].reduce((counts, node) => ({ ...counts, [node.kind]: (counts[node.kind] ?? 0) + 1 }), {} as Record<string, number>);
   const stats: AnalysisStats = {
