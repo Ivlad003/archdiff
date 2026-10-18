@@ -60,7 +60,7 @@ The system SHALL resolve a call to the function it names through the file's loca
 
 ### Requirement: The analysis is cached by content
 
-The system SHALL cache the facts of every file in `.archdiff/facts.json.gz` keyed by the file's content hash and the extractor version, so a second run parses only what changed; a cache of another version SHALL be ignored and rewritten.
+The system SHALL cache the facts of every file in `.archdiff/facts.json.gz` keyed by the file's content hash and the extractor version, so a second run parses only what changed; a cache of another version SHALL be ignored and rewritten. The files of other revisions (a review's base, a history's commits, a comparison's heads) SHALL be cached apart, many versions of a file at once, the most recently read kept, in `.archdiff/revisions.json.gz`, read only when a revision is analysed.
 
 #### Scenario: A second run
 

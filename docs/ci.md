@@ -36,4 +36,4 @@ npx @ivlad003/archdiff review --base origin/main --out archdiff-review.md   # 0 
 npx @ivlad003/archdiff history --base origin/main --head HEAD              # the drift commit by commit
 ```
 
-Persist `.archdiff/facts.json.gz` between runs (a cache keyed by the lockfile is enough) and the review is sub-second after the first run.
+Persist `.archdiff/facts.json.gz` and `.archdiff/revisions.json.gz` between runs (a cache keyed by the lockfile is enough) and the review is sub-second after the first run; the second file holds the base's and the history's files.

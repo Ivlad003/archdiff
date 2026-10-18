@@ -537,6 +537,9 @@ test("history lists the drift commit by commit, and review --head compares two r
     assert.ok(rows[0]!.includes("add extra | ") && rows[0]!.includes("| +1 −0 | +1 −0 ~0 |"), rows[0]);
     assert.ok(rows[1]!.includes("route reads the store") && rows[1]!.includes("+routes→db"), rows[1]);
     assert.ok(rows[2]!.includes("the store reads no file") && rows[2]!.includes("| −node:fs |"), rows[2]);
+    // The commits' files are cached apart from the working tree's, which a history run leaves whole.
+    assert.ok(existsSync(join(dir, ".archdiff/revisions.json.gz")));
+    assert.equal((JSON.parse(archdiff(["analyze", dir, "--json"]).stdout) as { cacheMisses: number }).cacheMisses, 0);
     git("checkout", "-q", "feature");
     // Two refs: the first commit alone adds a module and no coupling.
     const first = archdiff(["review", dir, "--base", "main", "--head", "feature~2"]);

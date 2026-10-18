@@ -16,7 +16,7 @@ import { loadConfig, type Config } from "./config.ts";
 import type { FileFacts } from "./extract/facts.ts";
 import { INTENT_FILE, parseIntent, readIntent, withIntentLayers, type Intent } from "./intent.ts";
 import { extractAll } from "./extract/pool.ts";
-import { listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
+import { isSourceFile, listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
 import { frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
 import { buildGraph, type Graph } from "./graph.ts";
 import { createResolver, tsconfigResolver } from "./resolve.ts";
@@ -55,12 +55,47 @@ export interface Analysis {
 }
 
 export interface AnalyzeOptions {
-  /** Read and write `.archdiff/facts.json`; default true. */
+  /** Read and write the fact cache (`.archdiff/facts.json.gz`, and `revisions.json.gz` for other revisions' files); default true. */
   cache?: boolean;
   /** Content of files at another revision: a string replaces the disk, null drops the file; a path not on disk is added when a string. */
   overrides?: ReadonlyMap<string, string | null>;
   /** A config to use instead of the repository's. */
   config?: Config;
+}
+
+/** The facts of the jobs, parsed in parallel; on one thread when worker threads are refused (a sandbox, a memory limit). */
+async function extractEvery(jobs: readonly { path: string; content: string }[]): Promise<FileFacts[]> {
+  try {
+    return await extractAll(jobs);
+  } catch (error) {
+    process.stderr.write(`archdiff: parallel extraction failed (${error instanceof Error ? error.message : String(error)}); parsing on one thread\n`);
+
+    return extractAll(jobs, 1);
+  }
+}
+
+/**
+ * Parses, in one parallel batch, the files of several revisions (overrides as `analyze` takes them: a history's
+ * commits) the cache does not hold yet: each analysis that follows finds its files cached, where alone it would parse
+ * its few changed files on one thread.
+ */
+export async function prepareRevisions(root: string, revisions: readonly ReadonlyMap<string, string | null>[]): Promise<void> {
+  const cache = FactCache.of(root);
+  const jobs = new Map<string, { path: string; content: string; hash: string }>();
+
+  for (const revision of revisions) {
+    for (const [path, content] of revision) {
+      if (content === null || !isSourceFile(path)) continue;
+      const hash = contentHash(content);
+
+      if (!jobs.has(`${path}\0${hash}`) && cache.lookup(path, hash, true) === null) jobs.set(`${path}\0${hash}`, { path, content, hash });
+    }
+  }
+
+  const list = [...jobs.values()];
+  const fresh = await extractEvery(list);
+
+  for (let i = 0; i < list.length; i++) cache.store(list[i]!.path, list[i]!.hash, fresh[i]!, true);
 }
 
 /** Analyses the repository at `root`. */
@@ -75,34 +110,29 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
   const listed0 = listSourceFiles(root, config.exclude);
   const files = [...new Set([...listed0.files, ...[...overrides.keys()].filter((path) => path !== INTENT_FILE && overrides.get(path) !== null)])].filter((path) => overrides.get(path) !== null).sort();
   const listed = performance.now();
-  const cache = options.cache === false ? null : new FactCache(root);
+  // One cache per repository and process: the analyses of a history or a comparison share what each extracts.
+  const cache = options.cache === false ? null : FactCache.of(root);
   const facts = new Map<string, FileFacts>();
-  const jobs: { path: string; content: string; hash: string }[] = [];
+  const jobs: { path: string; content: string; hash: string; revision: boolean }[] = [];
 
-  // Cache hits first; the misses go to the extractors together, in parallel.
+  // Cache hits first; the misses go to the extractors together, in parallel. A file the overrides give is another
+  // revision's, cached apart from the working tree's.
   for (const path of files) {
-    const content = overrides.get(path) ?? readFileSync(join(root, path), "utf8");
+    const override = overrides.get(path);
+    const content = override ?? readFileSync(join(root, path), "utf8");
     const hash = contentHash(content);
-    const cached = cache?.lookup(path, hash) ?? null;
+    const cached = cache?.lookup(path, hash, override !== undefined) ?? null;
 
     if (cached) facts.set(path, cached);
-    else jobs.push({ path, content, hash });
+    else jobs.push({ path, content, hash, revision: override !== undefined });
   }
 
-  let fresh: FileFacts[];
-
-  try {
-    fresh = await extractAll(jobs);
-  } catch (error) {
-    // Worker threads refused (a sandbox, a memory limit): the main thread parses alone rather than failing the run.
-    process.stderr.write(`archdiff: parallel extraction failed (${error instanceof Error ? error.message : String(error)}); parsing on one thread\n`);
-    fresh = await extractAll(jobs, 1);
-  }
+  const fresh = await extractEvery(jobs);
 
   for (let i = 0; i < jobs.length; i++) {
     const job = jobs[i]!;
     facts.set(job.path, fresh[i]!);
-    cache?.store(job.path, job.hash, fresh[i]!);
+    cache?.store(job.path, job.hash, fresh[i]!, job.revision);
   }
 
   // A file too large to parse is still a module of the repository: imports of it resolve, its own content stays unknown (opaque).
@@ -112,7 +142,8 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
   }
 
   const extracted = performance.now();
-  cache?.save();
+  // An analysis of the working tree looked every file up: what it did not is gone.
+  cache?.save(overrides.size === 0);
   const allFiles = listAllFiles(root);
   // The packages of a monorepo first: an import of one by its name is an import of its source, not of a package.
   const packages = repositoryPackages(root, allFiles);
@@ -132,8 +163,8 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
     calls: graph.calls.length,
     gaps: graph.gaps.length,
     unresolvedImports: graph.unresolvedImports.length,
-    cacheHits: cache?.hits ?? 0,
-    cacheMisses: cache?.misses ?? files.length,
+    cacheHits: cache ? files.length - jobs.length : 0,
+    cacheMisses: cache ? jobs.length : files.length,
     ms: { list: Math.round(listed - started), extract: Math.round(extracted - listed), graph: Math.round(built - extracted), total: Math.round(built - started) },
   };
 

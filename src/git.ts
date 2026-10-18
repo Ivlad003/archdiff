@@ -157,6 +157,54 @@ function contentAt(root: string, ref: string, path: string): string | null {
 }
 
 /**
+ * The contents of several files at `ref` in one git process (`git cat-file --batch`), by path; null for a file the
+ * ref does not have. A path a batch line cannot carry (a line break in it) is read alone, and so is every path when
+ * the batch fails.
+ */
+function contentsAt(root: string, ref: string, paths: readonly string[]): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  const batched = paths.filter((path) => !/[\n\r]/.test(path));
+
+  for (const path of paths) if (/[\n\r]/.test(path)) out.set(path, contentAt(root, ref, path));
+
+  if (batched.length === 0) return out;
+  const result = spawnSync("git", ["-C", root, "cat-file", "--batch"], { input: batched.map((path) => `${ref}:./${path}\n`).join(""), maxBuffer: 1024 * 1024 * 1024, timeout: GIT_TIMEOUT });
+
+  if (result.error || result.status !== 0) {
+    for (const path of batched) out.set(path, contentAt(root, ref, path));
+
+    return out;
+  }
+
+  // Per file: a header `<sha> <type> <size>`, the content, a line break; or `<name> missing` for a file the ref lacks.
+  const data = result.stdout;
+  let at = 0;
+
+  for (const path of batched) {
+    const end = data.indexOf(0x0a, at);
+
+    if (end < 0) {
+      out.set(path, contentAt(root, ref, path));
+      continue;
+    }
+
+    const header = /^[0-9a-f]+ (\w+) (\d+)$/.exec(data.subarray(at, end).toString("utf8"));
+    at = end + 1;
+
+    if (!header) {
+      out.set(path, null);
+      continue;
+    }
+
+    const size = Number(header[2]);
+    out.set(path, header[1] === "blob" ? data.subarray(at, at + size).toString("utf8") : null);
+    at += size + 1;
+  }
+
+  return out;
+}
+
+/**
  * The source files that differ between `base` and `head` (a ref, or the
  * working tree when null: tracked changes and untracked files), as the
  * overrides of each side's analysis: the base's content, and the head's
@@ -198,13 +246,16 @@ export function changedFiles(root: string, base: string, head: string | null = n
 
   const baseSide = new Map<string, string | null>();
   const headSide = new Map<string, string | null>();
+  const sources = [...changed].filter(([path]) => isSourceFile(path));
+  // Each side's files read in one git process.
+  const baseContents = contentsAt(root, base, sources.filter(([, marker]) => marker !== null).map(([path]) => path));
+  const headContents = head !== null ? contentsAt(root, head, sources.map(([path]) => path)) : null;
 
-  for (const [path, marker] of changed) {
-    if (!isSourceFile(path)) continue;
+  for (const [path, marker] of sources) {
     // Added since the base: the base does not have it.
-    baseSide.set(path, marker === null ? null : contentAt(root, base, path));
+    baseSide.set(path, marker === null ? null : (baseContents.get(path) ?? null));
 
-    if (head !== null) headSide.set(path, contentAt(root, head, path));
+    if (headContents) headSide.set(path, headContents.get(path) ?? null);
   }
 
   // A head ref: every source file the working tree has but the head does not (or the reverse) must be read from the head too,
@@ -222,7 +273,7 @@ export function treeAt(root: string, ref: string, also: readonly string[] = []):
   const diff = git(root, ["diff", "--relative", "--name-status", "-z", "-M", ref, "--"]);
 
   if (!diff.ok) throw new Error(diff.error);
-  const overrides = new Map<string, string | null>();
+  const changed: string[] = [];
   const parts = diff.out.split("\0").filter((part) => part !== "");
 
   for (let i = 0; i < parts.length; ) {
@@ -230,14 +281,20 @@ export function treeAt(root: string, ref: string, also: readonly string[] = []):
     const paths = status.startsWith("R") || status.startsWith("C") ? [parts[i + 1]!, parts[i + 2]!] : [parts[i + 1]!];
     i += 1 + paths.length;
 
-    for (const path of paths) if (path && (isSourceFile(path) || also.includes(path))) overrides.set(path, contentAt(root, ref, path));
+    for (const path of paths) if (path && (isSourceFile(path) || also.includes(path)) && !changed.includes(path)) changed.push(path);
   }
 
   // A file of `also` git does not compare (one the working tree has untracked, or the ref has and the tree not): as the ref has it.
-  for (const path of also) {
-    if (overrides.has(path)) continue;
+  const unlisted = also.filter((path) => !changed.includes(path));
+  // Every file read from the ref in one git process: a history reads a tree per commit.
+  const contents = contentsAt(root, ref, [...changed, ...unlisted]);
+  const overrides = new Map<string, string | null>();
+
+  for (const path of changed) overrides.set(path, contents.get(path) ?? null);
+
+  for (const path of unlisted) {
     const here = existsSync(join(root, path)) ? readFileSync(join(root, path), "utf8") : null;
-    const there = contentAt(root, ref, path);
+    const there = contents.get(path) ?? null;
 
     if (here !== there) overrides.set(path, there);
   }

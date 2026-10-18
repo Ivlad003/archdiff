@@ -154,7 +154,7 @@ export function scaffold(dir: string, options: ScaffoldOptions): string[] {
     write("tsconfig.json", `${JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, allowImportingTsExtensions: true, rewriteRelativeImportExtensions: true, skipLibCheck: true, types: ["node"] }, include: ["src", "bin", "tests"] }, null, 2)}\n`);
   }
 
-  write(".gitignore", "node_modules/\ndist/\n.archdiff/facts.json.gz\n.archdiff/tasks/\n");
+  write(".gitignore", "node_modules/\ndist/\n.archdiff/facts.json.gz\n.archdiff/revisions.json.gz\n.archdiff/tasks/\n");
   const config: Record<string, unknown> = { layers };
 
   if (options.agent) config["agent"] = options.agent;

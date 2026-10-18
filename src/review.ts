@@ -10,7 +10,7 @@
 // Entry points: `review`, `compareBranches`, `history`, `analysisAt`,
 // `ReviewResult`, `ComparisonResult`.
 
-import { analyze, type Analysis } from "./analyze.ts";
+import { analyze, prepareRevisions, type Analysis } from "./analyze.ts";
 import { loadConfig } from "./config.ts";
 import { graphDiff, historyRow, markContract, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
 import { changedFiles, commitOf, commitsBetween, defaultBase, forkPoint, mergeBase, treeAt as filesAt } from "./git.ts";
@@ -110,11 +110,14 @@ export async function compareBranches(root: string, base: string | null, heads: 
 export async function history(root: string, base: string, head: string): Promise<HistoryRow[]> {
   const commits = commitsBetween(root, base, head);
   const config = loadConfig(root);
-  let previous = (await analyze(root, { overrides: treeAt(root, base), config })).graph;
+  // Every commit's tree first, their files parsed together; then one analysis per commit, from the cache.
+  const trees = [treeAt(root, base), ...commits.map((commit) => treeAt(root, commit.sha))];
+  await prepareRevisions(root, trees);
+  let previous = (await analyze(root, { overrides: trees[0]!, config })).graph;
   const rows: HistoryRow[] = [];
 
-  for (const commit of commits) {
-    const current = (await analyze(root, { overrides: treeAt(root, commit.sha), config })).graph;
+  for (const [i, commit] of commits.entries()) {
+    const current = (await analyze(root, { overrides: trees[i + 1]!, config })).graph;
     rows.push(historyRow(commit, graphDiff(previous, current, commit.sha, [])));
     previous = current;
   }

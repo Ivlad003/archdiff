@@ -22,7 +22,9 @@ export interface ExtractJob {
   content: string;
 }
 
+/** A worker's answer to the job of index `id` (a path may come twice, in two versions). */
 interface WorkerReply {
+  id: number;
   path: string;
   facts?: FileFacts;
   error?: string;
@@ -47,7 +49,6 @@ export async function extractAll(jobs: readonly ExtractJob[], threads = Math.max
   }
 
   const results = new Array<FileFacts | undefined>(jobs.length);
-  const index = new Map(jobs.map((job, i) => [job.path, i]));
   let next = 0;
   const url = workerUrl();
 
@@ -62,8 +63,9 @@ export async function extractAll(jobs: readonly ExtractJob[], threads = Math.max
           return;
         }
 
-        const job = jobs[next++]!;
-        worker.postMessage(job);
+        const id = next++;
+        const job = jobs[id]!;
+        worker.postMessage({ id, path: job.path, content: job.content });
       };
 
       worker.on("message", (reply: WorkerReply) => {
@@ -74,7 +76,7 @@ export async function extractAll(jobs: readonly ExtractJob[], threads = Math.max
           return;
         }
 
-        results[index.get(reply.path)!] = reviveFacts(reply.facts!);
+        results[reply.id] = reviveFacts(reply.facts!);
         feed();
       });
       worker.on("error", reject);
