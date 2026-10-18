@@ -140,6 +140,9 @@ interface Scope {
   imports: Map<string, { target: Resolution; imported: string }>;
 }
 
+/** How many re-exports, `extends` or aliases a lookup follows before it gives up: a cycle, or a chain no code writes. */
+const MAX_HOPS = 8;
+
 /** The exports of every module: exported name → node ID, following re-exports. */
 class ExportTable {
   private readonly rows = new Map<string, Map<string, { local: string | null; from: string | null; form: string | undefined }>>();
@@ -172,7 +175,7 @@ class ExportTable {
 
   /** The node `name` exported by `module`, or null; `*` names the module itself. */
   find(module: string, name: string, depth = 0): string | null {
-    if (name === "*" || depth > 8) return null;
+    if (name === "*" || depth > MAX_HOPS) return null;
     const row = this.rows.get(module)?.get(name);
 
     if (row) {
@@ -217,7 +220,7 @@ class ExportTable {
   allOf(module: string, depth = 0): Map<string, string> {
     const out = new Map<string, string>();
 
-    if (depth > 8) return out;
+    if (depth > MAX_HOPS) return out;
 
     for (const name of this.rows.get(module)?.keys() ?? []) {
       const found = this.find(module, name);
@@ -338,14 +341,40 @@ type CallTarget = { id: string } | { ids: string[] } | { gap: Gap["reason"] };
  * The resolver of calls: what a local name of a module stands for (a
  * declaration, or an import followed to its export), the member of a
  * class up its `extends` chain, the classes implementing a type, and
- * `resolveCall` itself, in the order the module header describes.
+ * `resolve` itself, one method per form of callee.
  */
-function callResolver(b: Building, exports: ExportTable): (module: string, enclosingClass: string | null, call: CallFact) => CallTarget {
-  const { facts, nodes, scopes } = b;
+class CallResolver {
+  private readonly b: Building;
+  private readonly exports: ExportTable;
+  /** The classes implementing or extending a type or class, by the names written on `implements`/`extends`, resolved in each class's own file. */
+  private readonly implementers = new Map<string, string[]>();
 
-  // The node a local name of `module` stands for: a declaration, or an import followed to its export.
-  const nameTarget = (module: string, name: string): { id: string } | { gap: Gap["reason"] } => {
-    const scope = scopes.get(module)!;
+  constructor(b: Building, exports: ExportTable) {
+    this.b = b;
+    this.exports = exports;
+
+    for (const file of b.facts) {
+      const walkClasses = (decl: DeclFact, parent?: string): void => {
+        if (decl.kind === "class") {
+          const own = nodeId(file.path, decl.name, parent);
+
+          for (const name of [...(decl.implements ?? []), ...(decl.base ? [decl.base] : [])]) {
+            const target = this.nameTarget(file.path, name.replace(/<.*$/, ""));
+
+            if ("id" in target) this.implementers.set(target.id, [...(this.implementers.get(target.id) ?? []), own]);
+          }
+        }
+
+        for (const member of decl.members) walkClasses(member, parent ? `${parent}.${decl.name}` : decl.name);
+      };
+
+      for (const decl of file.decls) walkClasses(decl);
+    }
+  }
+
+  /** The node a local name of `module` stands for: a declaration, or an import followed to its export. */
+  nameTarget(module: string, name: string): { id: string } | { gap: Gap["reason"] } {
+    const scope = this.b.scopes.get(module)!;
     const local = scope.locals.get(name);
 
     if (local) return { id: local };
@@ -355,158 +384,156 @@ function callResolver(b: Building, exports: ExportTable): (module: string, enclo
 
     if (imported.target.kind !== "file") return { gap: "external" };
     // `const express = require("..")` then `express()`: the module binding stands for the module's default.
-    const found = exports.find(imported.target.path, imported.imported === "*" ? "default" : imported.imported);
+    const found = this.exports.find(imported.target.path, imported.imported === "*" ? "default" : imported.imported);
 
     return found ? { id: found } : { gap: "unknown-member" };
-  };
-
-  // The member `member` of class node `classId`, searching the class and the classes it extends.
-  const memberOf = (classId: string, member: string, depth = 0): string | null => {
-    const owner = nodes.get(classId);
-
-    if (!owner || depth > 8) return null;
-
-    // `type Alias = Repo`: the member of what the alias names.
-    if (owner.kind === "type" && owner.signature?.startsWith("= ")) {
-      const target = nameTarget(owner.module, owner.signature.slice(2).replace(/<.*$/, "").trim());
-
-      return "id" in target ? memberOf(target.id, member, depth + 1) : null;
-    }
-    const direct = nodeId(owner.module, member, owner.parent ? `${owner.parent}.${owner.name}` : owner.name);
-
-    if (nodes.has(direct)) return direct;
-    // The base class: the extractor records it by name on the class declaration.
-    const base = facts.find((file) => file.path === owner.module)?.decls.find((decl) => decl.name === owner.name)?.base;
-
-    if (!base) return null;
-    const baseTarget = nameTarget(owner.module, base);
-
-    return "id" in baseTarget ? memberOf(baseTarget.id, member, depth + 1) : null;
-  };
-
-  // The classes implementing or extending a type or class, by the names written on `implements`/`extends`, resolved in each class's own file.
-  const implementerIndex = new Map<string, string[]>();
-
-  for (const file of facts) {
-    const walkClasses = (decl: DeclFact, parent?: string): void => {
-      if (decl.kind === "class") {
-        const own = nodeId(file.path, decl.name, parent);
-
-        for (const name of [...(decl.implements ?? []), ...(decl.base ? [decl.base] : [])]) {
-          const target = nameTarget(file.path, name.replace(/<.*$/, ""));
-
-          if ("id" in target) implementerIndex.set(target.id, [...(implementerIndex.get(target.id) ?? []), own]);
-        }
-      }
-
-      for (const member of decl.members) walkClasses(member, parent ? `${parent}.${decl.name}` : decl.name);
-    };
-
-    for (const decl of file.decls) walkClasses(decl);
   }
 
-  const implementers = (id: string): string[] => implementerIndex.get(id) ?? [];
-
-  // Whether a class (or a class up its `extends` chain) extends something outside the repository: a member not found on it is the package's.
-  const externalAncestor = (classId: string, depth = 0): boolean => {
-    const owner = nodes.get(classId);
-
-    if (!owner || depth > 8) return false;
-    const base = facts.find((file) => file.path === owner.module)?.decls.find((decl) => decl.name === owner.name && decl.kind === "class")?.base;
-
-    if (!base) return false;
-    const target = nameTarget(owner.module, base.replace(/<.*$/, ""));
-
-    return "id" in target ? externalAncestor(target.id, depth + 1) : target.gap === "external";
-  };
-
-  return (module, enclosingClass, call) => {
+  /** Where a call lands, by the form of its callee: `new X().m`, a member of a typed receiver, a plain name, `this.m`, `ns.f` or `x.m`. */
+  resolve(module: string, enclosingClass: string | null, call: CallFact): CallTarget {
     if (call.opaque) return { gap: "dynamic" };
     const callee = call.callee;
 
-    if (callee.startsWith("new ")) {
-      // `new X().m`: the member of X.
-      const [head, ...rest] = callee.slice(4).replace(/\(\)/g, "").split(".");
-      const target = nameTarget(module, head!);
-
-      if (!("id" in target)) return target;
-
-      if (rest.length === 0) return target;
-      const member = memberOf(target.id, rest[rest.length - 1]!);
-
-      return member ? { id: member } : { gap: "unknown-member" };
-    }
+    if (callee.startsWith("new ")) return this.constructedTarget(module, callee.slice(4));
 
     // The extractor names the receiver's type when it can see it: a local made with `new X()`, a parameter typed `X`,
     // a class field typed `X`. The member is then looked up on that class, interface or type.
-    if (call.receiver && !callee.includes("(")) {
-      const parts = callee.split(".");
-      const member = parts[parts.length - 1]!;
-      const owner = nameTarget(module, call.receiver);
-
-      // A receiver typed with a package's class (`req: Request` of express) is a call out of the repository, not a blind spot.
-      if (!("id" in owner)) return owner.gap === "global" ? { gap: "member-of-value" } : owner;
-      const found = memberOf(owner.id, member);
-
-      if (found) return { id: found };
-      // An interface or abstract class: the member of every class of the repository that implements or extends it.
-      const dispatched = implementers(owner.id).map((id) => memberOf(id, member)).filter((id): id is string => id !== null);
-
-      if (dispatched.length > 0) return { ids: dispatched };
-
-      if (externalAncestor(owner.id)) return { gap: "external" };
-
-      return { gap: nodes.get(owner.id)?.kind === "type" ? "interface" : "unknown-member" };
-    }
+    if (call.receiver && !callee.includes("(")) return this.receiverTarget(module, call.receiver, callee.slice(callee.lastIndexOf(".") + 1));
 
     // `expect(x).toBe`, `vi.mocked(f).mockReturnValue`: a method of a call's result, whose type is not tracked.
     if (callee.includes("(")) return { gap: "member-of-value" };
     const parts = callee.split(".");
 
-    if (parts.length === 1) return nameTarget(module, callee);
+    if (parts.length === 1) return this.nameTarget(module, callee);
 
     // `s.app.idle`, `this.state.records.at`, `[a].map`: a property of a property, or of a literal — a value whose type is not tracked.
     if (parts.length > 2 || parts[0]!.startsWith("[") || parts[0]!.startsWith("{")) return { gap: "member-of-value" };
-
-    if (parts[0] === "this" || parts[0] === "super") {
-      if (!enclosingClass) return { gap: "dynamic" };
-      const member = memberOf(enclosingClass, parts[1]!);
-
-      if (member) return { id: member };
-
-      // `$this->assertSame()` in a test extending PHPUnit's TestCase, `this.setState()` in a React component: the package's member.
-      return externalAncestor(enclosingClass) ? { gap: "external" } : { gap: "unknown-member" };
-    }
-
     const [head, member] = parts as [string, string];
-    const scope = scopes.get(module)!;
-    const imported = scope.imports.get(head);
 
-    // `ns.f` of a namespace import: the export `f`.
+    return head === "this" || head === "super" ? this.ownMemberTarget(enclosingClass, member) : this.memberTarget(module, head, member);
+  }
+
+  /** `new X()` lands on X; `new X().m` on the member of X. */
+  private constructedTarget(module: string, constructed: string): CallTarget {
+    const [head, ...rest] = constructed.replace(/\(\)/g, "").split(".");
+    const target = this.nameTarget(module, head!);
+
+    if (!("id" in target) || rest.length === 0) return target;
+    const member = this.memberOf(target.id, rest[rest.length - 1]!);
+
+    return member ? { id: member } : { gap: "unknown-member" };
+  }
+
+  /**
+   * A member of a receiver whose type the extractor saw: found on the type, else dispatched to every class of the
+   * repository implementing or extending it (an interface, an abstract class), else a package's or a blind spot.
+   */
+  private receiverTarget(module: string, receiver: string, member: string): CallTarget {
+    const owner = this.nameTarget(module, receiver);
+
+    // A receiver typed with a package's class (`req: Request` of express) is a call out of the repository, not a blind spot.
+    if (!("id" in owner)) return owner.gap === "global" ? { gap: "member-of-value" } : owner;
+    const found = this.memberOf(owner.id, member);
+
+    if (found) return { id: found };
+    const dispatched = (this.implementers.get(owner.id) ?? []).map((id) => this.memberOf(id, member)).filter((id): id is string => id !== null);
+
+    if (dispatched.length > 0) return { ids: dispatched };
+
+    if (this.externalAncestor(owner.id)) return { gap: "external" };
+
+    return { gap: this.b.nodes.get(owner.id)?.kind === "type" ? "interface" : "unknown-member" };
+  }
+
+  /** `this.m()` or `super.m()`: the member of the enclosing class, up its `extends` chain. */
+  private ownMemberTarget(enclosingClass: string | null, member: string): CallTarget {
+    if (!enclosingClass) return { gap: "dynamic" };
+    const found = this.memberOf(enclosingClass, member);
+
+    if (found) return { id: found };
+
+    // `$this->assertSame()` in a test extending PHPUnit's TestCase, `this.setState()` in a React component: the package's member.
+    return this.externalAncestor(enclosingClass) ? { gap: "external" } : { gap: "unknown-member" };
+  }
+
+  /** `ns.f` of a namespace import (the export `f`), or `x.m` of a declaration or an import (its member). */
+  private memberTarget(module: string, head: string, member: string): CallTarget {
+    const imported = this.b.scopes.get(module)!.imports.get(head);
+
     if (imported && imported.imported === "*") {
       if (imported.target.kind !== "file") return { gap: "external" };
-      const found = exports.find(imported.target.path, member);
+      const found = this.exports.find(imported.target.path, member);
 
       return found ? { id: found } : { gap: "unknown-member" };
     }
 
-    const owner = nameTarget(module, head);
+    const owner = this.nameTarget(module, head);
 
     // `list.map`, `req.on`: the head is a value of the function, not a declaration or import.
     if (!("id" in owner)) return owner.gap === "global" ? { gap: "member-of-value" } : owner;
-    const found = memberOf(owner.id, member);
+    const found = this.memberOf(owner.id, member);
 
     if (found) return { id: found };
 
-    return externalAncestor(owner.id) ? { gap: "external" } : { gap: "unknown-member" };
-  };
+    return this.externalAncestor(owner.id) ? { gap: "external" } : { gap: "unknown-member" };
+  }
+
+  /** The member `member` of class node `classId`, searching the class and the classes it extends (and what a type alias names). */
+  private memberOf(classId: string, member: string, depth = 0): string | null {
+    const owner = this.b.nodes.get(classId);
+
+    if (!owner || depth > MAX_HOPS) return null;
+
+    // `type Alias = Repo`: the member of what the alias names.
+    if (owner.kind === "type" && owner.signature?.startsWith("= ")) {
+      const target = this.nameTarget(owner.module, owner.signature.slice(2).replace(/<.*$/, "").trim());
+
+      return "id" in target ? this.memberOf(target.id, member, depth + 1) : null;
+    }
+
+    const direct = nodeId(owner.module, member, owner.parent ? `${owner.parent}.${owner.name}` : owner.name);
+
+    if (this.b.nodes.has(direct)) return direct;
+    // The base class: the extractor records it by name on the class declaration.
+    const base = this.declarationOf(owner)?.base;
+
+    if (!base) return null;
+    const baseTarget = this.nameTarget(owner.module, base);
+
+    return "id" in baseTarget ? this.memberOf(baseTarget.id, member, depth + 1) : null;
+  }
+
+  /** Whether a class (or a class up its `extends` chain) extends something outside the repository: a member not found on it is the package's. */
+  private externalAncestor(classId: string, depth = 0): boolean {
+    const owner = this.b.nodes.get(classId);
+
+    if (!owner || depth > MAX_HOPS) return false;
+    const base = this.declarationOf(owner, "class")?.base;
+
+    if (!base) return false;
+    const target = this.nameTarget(owner.module, base.replace(/<.*$/, ""));
+
+    return "id" in target ? this.externalAncestor(target.id, depth + 1) : target.gap === "external";
+  }
+
+  /** The top-level declaration fact of a node, by its module and name (of a kind, when given). */
+  private declarationOf(node: Declaration, kind?: DeclFact["kind"]): DeclFact | undefined {
+    return this.b.facts.find((file) => file.path === node.module)?.decls.find((decl) => decl.name === node.name && (kind === undefined || decl.kind === kind));
+  }
+
+  /** A function read as a value is looked up like the head of a call, with no member; a dispatched call stands for its first target. */
+  valueTarget(module: string, name: string): { id: string } | { gap: Gap["reason"] } {
+    const target = this.resolve(module, null, { callee: name, line: 0, col: 0, endLine: 0, endCol: 0 });
+
+    return "id" in target ? target : "ids" in target ? { id: target.ids[0]! } : target;
+  }
 }
 
 /** Pass 3: the calls of every node (and of the module's top level) resolved against the scopes; a call not followed is a gap, a function read as a value a `ref`. */
-function resolveCalls(b: Building, resolveCall: ReturnType<typeof callResolver>, nameOf: (module: string, name: string) => { id: string } | { gap: Gap["reason"] }): void {
+function resolveCalls(b: Building, resolver: CallResolver): void {
   for (const file of b.facts) {
     const record = (from: string, call: CallFact): void => {
-      const target = resolveCall(file.path, from.includes("#") ? classOf(b, from) : null, call);
+      const target = resolver.resolve(file.path, from.includes("#") ? classOf(b, from) : null, call);
       const edge = (to: string): CallEdge => (call.guards ? { from, to, kind: "call", line: call.line, guards: call.guards } : { from, to, kind: "call", line: call.line });
 
       if ("id" in target) b.calls.push(edge(target.id));
@@ -529,7 +556,7 @@ function resolveCalls(b: Building, resolveCall: ReturnType<typeof callResolver>,
     // A function read as a value (`later(save)`, `{ save }`): it may be called by whoever holds it.
     for (const ref of file.valueRefs) {
       if (ref.member) continue;
-      const target = nameOf(file.path, ref.name);
+      const target = resolver.valueTarget(file.path, ref.name);
 
       if ("id" in target && b.nodes.get(target.id)?.kind === "fn") b.calls.push({ from: file.path, to: target.id, kind: "ref", line: ref.line });
     }
@@ -561,14 +588,7 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
   const resolvedExports = new Map<string, Map<string, string>>();
 
   for (const file of b.facts) resolvedExports.set(file.path, exports.allOf(file.path));
-  const resolveCall = callResolver(b, exports);
-  // A function read as a value is looked up like the head of a call: through the resolver, with no member.
-  const nameOf = (module: string, name: string): { id: string } | { gap: Gap["reason"] } => {
-    const target = resolveCall(module, null, { callee: name, line: 0, col: 0, endLine: 0, endCol: 0 });
-
-    return "id" in target ? target : "ids" in target ? { id: target.ids[0]! } : target;
-  };
-  resolveCalls(b, resolveCall, nameOf);
+  resolveCalls(b, new CallResolver(b, exports));
   const layers = [...new Set([...b.modules.values()].map((module) => module.layer))].sort();
 
   return { layers, modules: b.modules, nodes: b.nodes, deps: b.deps, calls: b.calls, externals: b.externals, gaps: b.gaps, unresolvedImports: b.unresolvedImports, resolvedExports };
