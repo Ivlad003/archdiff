@@ -382,6 +382,18 @@ test("chat tags are suggested and expanded into context; mocks come from the typ
   assert.ok(tasks.some((task) => task.file.startsWith(".archdiff/tasks/calls_src_lib_orders.ts_placeOrder-")), JSON.stringify(tasks.map((task) => task.file)));
 });
 
+test("the server stops on a signal though a page holds its live-reload stream open", async () => {
+  const { server, origin } = startWeb(fixture);
+  const stream = await fetch(`${await origin}/api/changes`);
+  assert.equal(stream.status, 200);
+  // A page left open keeps this stream (and reconnects to whatever server takes the port): it must not keep the server alive.
+  const exited = new Promise<number | null>((resolve) => server.once("exit", (code) => resolve(code)));
+  server.kill("SIGTERM");
+  const code = await Promise.race([exited, new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 5000))]);
+  assert.notEqual(code, "hung", "the server did not stop within 5 s");
+  await stream.body?.cancel().catch(() => {});
+});
+
 test("web without --port takes the next free port when 7080 is taken, and a named port that is taken is an error", async () => {
   // A blocker on 7080 (or whatever is free from there: the test only needs two servers in a row to pick different ports).
   const first = spawn(process.execPath, [join(import.meta.dirname, "..", "bin", "archdiff.js"), "web", fixture, "--no-watch"], { stdio: ["ignore", "pipe", "pipe"] });

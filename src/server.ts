@@ -366,6 +366,8 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     const stop = (): void => {
       runner?.stopAll();
       server.close(() => resolveStopped());
+      // A page left open holds its live-reload stream (and keeps reconnecting): `close` alone would wait for it forever.
+      server.closeAllConnections();
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
