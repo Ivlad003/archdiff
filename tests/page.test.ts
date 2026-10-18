@@ -325,6 +325,32 @@ test("a line's light stays while the pointer moves on, moves to the next line ta
   assert.deepEqual(await lit(), []);
 });
 
+test("the counts under a shape say what lies beyond the picture; a tap on one lists it, and a chip opens a neighbour's picture", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/?fresh=beyond#view=${encodeURIComponent("module:src/lib/log.ts")}`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/log.ts"`);
+  await page!.waitForTimeout(800);
+  // orders.ts is imported from beyond the picture (checkout.tsx) and imports beyond it (store.ts).
+  const counts = (await page!.evaluate(`window.archdiff.canvas().scene().filter((element) => element.customData?.archdiff === "beyond").map((element) => element.text)`)) as string[];
+  assert.deepEqual(counts, ["◂ 1", "1 ▸"]);
+  // A tap on the count picks its shape: the strip lists the neighbours beyond, dashed.
+  const before = await screenPointOf("beyond:src/lib/orders.ts:before");
+  await page!.mouse.click(before.x, before.y);
+  await page!.waitForFunction(`window.archdiff.selected()[0] === "src/lib/orders.ts"`);
+  await page!.waitForFunction(`(document.querySelector("#neighbours")?.textContent ?? "").includes("beyond ◂ 1:")`);
+  assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#neighbours button.beyond")].map((button) => button.textContent)`), ["◂ src/routes/checkout.tsx", "src/db/store.ts ▸"]);
+  // Shift+click on one beyond: everything joined to it; a click: its own picture.
+  await page!.click("#neighbours button.beyond:has-text('store.ts')", { modifiers: ["Shift"] });
+  await page!.waitForFunction(`window.archdiff.drawn() === "focus:src/db/store.ts"`);
+  await page!.goBack();
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/log.ts"`);
+  await page!.waitForTimeout(500);
+  const again = await screenPointOf("src/lib/orders.ts");
+  await page!.mouse.click(again.x, again.y);
+  await page!.waitForFunction(`document.querySelectorAll("#neighbours button.beyond").length === 2`);
+  await page!.click("#neighbours button.beyond:has-text('checkout.tsx')");
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/routes/checkout.tsx"`);
+});
+
 test("a double tap goes in though the page is still busy with its first tap", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.goto(`${base}/?fresh=busy#view=layer%3Alib`);
   await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`);

@@ -165,19 +165,24 @@ interface CanvasProps {
   modeState: [mode: "view" | "edit", subscribe: (listener: (mode: "view" | "edit") => void) => () => void];
 }
 
-/** A generated shape under the scene point, the smallest first (a label sits inside its shape). */
+/**
+ * A generated shape under the scene point, the smallest first (a label sits inside its shape); a count of the
+ * shape's neighbours beyond the picture, under its corner, stands for the shape.
+ */
 function shapeAt(elements: readonly SceneElement[], x: number, y: number): SceneElement | null {
   let best: SceneElement | null = null;
+  let counted: string | null = null;
 
   for (const element of elements) {
-    if (element.isDeleted || element.customData?.["archdiff"] !== "node") continue;
+    const role = element.isDeleted ? null : element.customData?.["archdiff"];
 
-    if (x < element.x || y < element.y || x > element.x + element.width || y > element.y + element.height) continue;
+    if ((role !== "node" && role !== "beyond") || x < element.x || y < element.y || x > element.x + element.width || y > element.y + element.height) continue;
 
-    if (!best || element.width * element.height < best.width * best.height) best = element;
+    if (role === "beyond") counted = String(element.customData?.["node"] ?? "");
+    else if (!best || element.width * element.height < best.width * best.height) best = element;
   }
 
-  return best;
+  return best ?? (counted ? (elements.find((element) => element.id === counted && !element.isDeleted) ?? null) : null);
 }
 
 /** The distance from a point to a segment. */
@@ -492,8 +497,8 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
     const role = element.customData?.["archdiff"];
     const next = { ...look };
 
-    // The dim fades a shape, a line and the label of one it does not keep; a lane never.
-    if (kept !== null && owner !== undefined && (role === "node" || role === "edge" || role === "label") && !kept.has(owner.id)) next.opacity = DIMMED_OPACITY;
+    // The dim fades a shape, a line and the label or the counts of one it does not keep; a lane never.
+    if (kept !== null && owner !== undefined && (role === "node" || role === "edge" || role === "label" || role === "beyond") && !kept.has(owner.id)) next.opacity = DIMMED_OPACITY;
 
     // The tap's light: a line gets the colour and a thick stroke, a shape a warm fill too; the hover's sits under it.
     if (lit.ids.has(element.id) && (role === "node" || role === "edge")) {
@@ -521,9 +526,9 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
       if (!drawn.has(element.id) && !lit.ids.has(element.id) && hovered !== element.id && kept === null) return element;
       const look = drawn.get(element.id) ?? { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth, backgroundColor: element.backgroundColor, opacity: element.opacity };
       drawn.set(element.id, look);
-      // A label follows its shape or line.
+      // A label follows its shape or line, and the counts under a shape their shape.
       const role = element.customData?.["archdiff"];
-      const owner = role === "label" ? byId.get(element.containerId ?? element.id.replace(/:text$/, "")) : element;
+      const owner = role === "label" ? byId.get(element.containerId ?? element.id.replace(/:text$/, "")) : role === "beyond" ? byId.get(String(element.customData?.["node"] ?? "")) : element;
       const wanted = litLook(element, look, owner);
 
       if (wanted.strokeColor === element.strokeColor && wanted.strokeWidth === element.strokeWidth && wanted.backgroundColor === element.backgroundColor && wanted.opacity === element.opacity) return element;

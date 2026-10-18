@@ -62,12 +62,24 @@ export interface Shape {
   reason?: string;
   /** The lane (layer) the shape sits in. */
   group?: string;
+  /**
+   * A shape of a picture that goes a depth: its neighbours of the repository the picture leaves out — what imports
+   * or calls it from beyond the picture (`before`, where its lines would come from on the left) and what it imports
+   * or calls there (`after`, on the right). Where the code leads on past the depth drawn.
+   */
+  beyond?: { before: BeyondSide; after: BeyondSide };
   /** How many things the shape stands for when it summarises (a layer: its modules). */
   count?: number;
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+/** One side of a shape's neighbours beyond its picture: how many, and the first of them by ID (modules or functions, sorted). */
+export interface BeyondSide {
+  count: number;
+  ids: string[];
 }
 
 /** One line between two shapes. */

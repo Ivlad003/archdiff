@@ -55,6 +55,8 @@ const FRAGMENT_LABEL = { dx: 8, dy: 2, w: 200, h: 18, fontSize: 12 } as const;
 const LINE_LABEL = { w: 120, h: 16, fontSize: 12, above: 18, middleUp: 10, selfDx: 80, selfDy: 4 } as const;
 /** The label of a step of a function's logic: up to four lines of 32 characters (24 for an exit), its start kept. */
 const LOGIC_LABEL = { lines: 4, width: 32, endWidth: 24 } as const;
+/** The counts of a shape's neighbours beyond the picture: small, grey, under its corners — before it on the left, after it on the right. */
+const BEYOND_LABEL = { w: 60, h: 14, gap: 2, fontSize: 11, colour: "#78909c" } as const;
 
 /** Where an element sits on the scene and how big it is: a shape's and a lane's box. */
 interface Box {
@@ -481,6 +483,15 @@ export function toExcalidraw(diagram: Diagram): string {
     const labelBox = { x: node.x + LABEL_INSET, y: node.kind === "class" ? node.y + LABEL_INSET : node.y + node.h / 2 - height / 2, w: node.w - 2 * LABEL_INSET, h: height };
     elements.push({ ...text(`${node.id}:text`, node.id, labelBox, label, fontSize), ...classText, ...(dark ? { strokeColor: "#ffffff" } : {}), customData: { archdiff: "label" } });
     centre.set(node.id, { x: node.x + node.w / 2, y: node.y + node.h / 2 });
+
+    // Where the code leads on past the picture's depth: "◂ 3" what imports or calls the shape from beyond, "5 ▸" what it imports or calls there.
+    for (const side of ["before", "after"] as const) {
+      const count = node.beyond?.[side].count ?? 0;
+
+      if (count === 0) continue;
+      const box = { x: side === "before" ? node.x : node.x + node.w - BEYOND_LABEL.w, y: node.y + node.h + BEYOND_LABEL.gap, w: BEYOND_LABEL.w, h: BEYOND_LABEL.h };
+      elements.push({ ...text(`beyond:${node.id}:${side}`, null, box, side === "before" ? `◂ ${count}` : `${count} ▸`, BEYOND_LABEL.fontSize), textAlign: side === "before" ? "left" : "right", verticalAlign: "top", strokeColor: BEYOND_LABEL.colour, customData: { archdiff: "beyond", node: node.id, side, count } });
+    }
   }
 
   const boxes = new Map(diagram.nodes.map((node) => [node.id, node]));

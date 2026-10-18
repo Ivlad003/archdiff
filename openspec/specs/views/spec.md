@@ -25,6 +25,15 @@ The system SHALL offer these views, each with a one-sentence question it answers
 - **WHEN** `archdiff diagram layer:nope` runs
 - **THEN** the command exits 2 with `no layer "nope"`
 
+### Requirement: A picture that goes a depth says what lies beyond it
+
+The system SHALL tell each module and function of a picture that goes a depth its neighbours of the repository the picture leaves out (`beyond`): before it, what imports or calls it from beyond the picture; after it, what it imports or calls there — by the imports a depth grows along (type-only ones not) and the calls (a module's top level among the callers), counted on the picture as its view drew it, before a fold or a hidden lane, the first twenty of each named. The Excalidraw scene SHALL count them under the shape's corners (◂ N on the left, N ▸ on the right), the picture's Markdown beside the shape, and the shape's page SHALL list them under "Beyond this picture". A view that goes no depth (the layers, the whole map) SHALL have none.
+
+#### Scenario: The next step of depth
+
+- **WHEN** `archdiff diagram module:src/lib/log.ts` runs, then with `--depth 2`
+- **THEN** `orders.ts` has `checkout.tsx` before it and `store.ts` after it beyond the picture, then nothing beyond, as depth 2 draws them
+
 ### Requirement: A focus view joins everything to one shape
 
 The system SHALL draw, as `focus:<path>#<fn>`, the function with the functions that call it and the ones it calls (`--depth` steps each way, calls and references alike), and as `focus:<path>` the module's functions with their callers and callees in other modules and the modules joined to it by an import alone (then the module itself as a shape, with dependency lines); each module SHALL be a lane, the subject's first.

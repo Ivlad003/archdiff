@@ -1,17 +1,61 @@
 // What happens to a picture after its view built it and before it is laid
-// out: hubs become badges, lanes are hidden, modules are opened in place
-// (the mix), the tail folds into "… N in dir/" shapes, light lines are
-// dropped. Each step is a pure function Diagram → Diagram that explains
-// itself in `reason`; `viewOf` applies them in that order.
+// out: each shape learns its neighbours beyond the picture's depth, hubs
+// become badges, lanes are hidden, modules are opened in place (the mix),
+// the tail folds into "… N in dir/" shapes, light lines are dropped. Each
+// step is a pure function Diagram → Diagram that explains itself in
+// `reason`; `viewOf` applies them in that order.
 //
-// Entry points: `hubsAsBadges`, `hideLanes`, `expandInPlace`, `fold`,
-// `dropLightLines`.
+// Entry points: `withBeyond`, `BEYOND_NAMED`, `hubsAsBadges`, `hideLanes`,
+// `expandInPlace`, `fold`, `dropLightLines`.
 
 import { DEFAULT_HUBS, type HubThresholds } from "./config.ts";
-import type { Diagram, Line, Lane, Shape } from "./diagram.ts";
+import type { BeyondSide, Diagram, Line, Lane, Shape } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode } from "./nodes.ts";
 import { standsFor } from "./shape-keys.ts";
+
+/** How many of a shape's neighbours beyond its picture are named, per side; the rest are counted. */
+export const BEYOND_NAMED = 20;
+
+/**
+ * The neighbours each module and function of a picture that goes a depth leaves out: for a module, the modules of
+ * the repository that import it from beyond the picture (`before`) and those it imports there (`after`), by the
+ * imports a depth grows along (type-only ones not); for a function, its callers and callees the same way (a module's
+ * top level among the callers). Run on the picture as its view drew it, before anything folds or hides: what the
+ * next step of depth would add next to each shape.
+ */
+export function withBeyond(diagram: Diagram, graph: Graph): Diagram {
+  const drawn = new Set(diagram.nodes.map((node) => standsFor(node)));
+  const edges = { module: { before: new Map<string, Set<string>>(), after: new Map<string, Set<string>>() }, fn: { before: new Map<string, Set<string>>(), after: new Map<string, Set<string>>() } };
+  const link = (sides: (typeof edges)["module"], from: string, to: string): void => {
+    if (from === to) return;
+    sides.after.set(from, (sides.after.get(from) ?? new Set()).add(to));
+    sides.before.set(to, (sides.before.get(to) ?? new Set()).add(from));
+  };
+
+  for (const dep of graph.deps) if (!dep.typeOnly && graph.modules.has(dep.from) && graph.modules.has(dep.to)) link(edges.module, dep.from, dep.to);
+
+  for (const call of graph.calls) if (graph.nodes.get(call.to)?.kind !== "type" && graph.nodes.get(call.from)?.kind !== "type") link(edges.fn, call.from, call.to);
+
+  /** The neighbours on one side not drawn, sorted, the first named. */
+  const side = (neighbours: ReadonlySet<string> | undefined): BeyondSide => {
+    const outside = [...(neighbours ?? [])].filter((id) => !drawn.has(id)).sort();
+
+    return { count: outside.length, ids: outside.slice(0, BEYOND_NAMED) };
+  };
+
+  const nodes = diagram.nodes.map((node): Shape => {
+    if (node.kind !== "module" && node.kind !== "fn") return node;
+    const sides = node.kind === "module" ? edges.module : edges.fn;
+    const id = standsFor(node);
+    const before = side(sides.before.get(id));
+    const after = side(sides.after.get(id));
+
+    return before.count === 0 && after.count === 0 ? node : { ...node, beyond: { before, after } };
+  });
+
+  return { ...diagram, nodes };
+}
 
 /** The deepest directory holding every path; "" when they share none. */
 function commonDirectory(paths: readonly string[]): string {

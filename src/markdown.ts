@@ -128,7 +128,9 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
       // The further lines of a label are what the overlays found (no tests, ⛁ a store, N calls in); a class lists its members elsewhere.
       const [first, ...rest] = node.label.split("\n");
       const found = node.kind === "class" || rest.length === 0 ? "" : ` — ${rest.join(" · ")}`;
-      lines.push(`- **${first}**${mark}${found}${detail}${where ? ` — ${where}` : ""}`);
+      // Where the code leads on past the picture's depth, as the canvas counts it under the shape.
+      const beyond = node.beyond ? ` — beyond the picture: ${[node.beyond.before.count > 0 ? `◂ ${node.beyond.before.count} before` : "", node.beyond.after.count > 0 ? `${node.beyond.after.count} after ▸` : ""].filter(Boolean).join(", ")}` : "";
+      lines.push(`- **${first}**${mark}${found}${detail}${where ? ` — ${where}` : ""}${beyond}`);
     }
 
     lines.push("");
@@ -171,6 +173,30 @@ function codeBlock(source: string | null, file: string, from: number, to: number
   return `${fence}${language}\n${shown.join("\n")}\n${fence}${cut}`;
 }
 
+/**
+ * The neighbours a shape's picture leaves out (`Shape.beyond`), as a section of its page: where the code leads past
+ * the depth drawn — what imports or calls it from beyond the picture, and what it imports or calls there.
+ */
+function beyondSection(node: Shape): string[] {
+  if (!node.beyond) return [];
+  const fn = node.kind === "fn";
+  const lines = ["## Beyond this picture", ""];
+
+  for (const side of ["before", "after"] as const) {
+    const { count, ids } = node.beyond[side];
+
+    if (count === 0) continue;
+    const what = side === "before" ? `the ${fn ? "functions that call" : "modules that import"} it` : `the ${fn ? "functions it calls" : "modules it imports"}`;
+    lines.push(`${side === "before" ? `◂ ${count} before it` : `${count} after it ▸`}: ${what}, not drawn here.`, "");
+    // A call from a module's top level comes from the module itself.
+    lines.push(...ids.map((other) => `- ${other}${fn && !other.includes("#") ? " (its top level)" : ""}`), ...(count > ids.length ? [`- … ${count - ids.length} more`] : []), "");
+  }
+
+  lines.push("_Focus (the right-click menu) draws everything joined to it; depth + takes the picture one step further._", "");
+
+  return lines;
+}
+
 /** What a function calls and what it could not follow, as list lines. */
 function callLines(id: string, analysis: Analysis): string[] {
   const { graph } = analysis;
@@ -205,6 +231,7 @@ export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file:
   const id = standsFor(node);
 
   if (node.kind === "fn") {
+    lines.push(...beyondSection(node));
     const calls = graph.calls.filter((call) => call.from === id);
     const callers = graph.calls.filter((call) => call.to === id);
 
@@ -236,7 +263,7 @@ export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file:
     const module = graph.modules.get(id);
 
     if (module) {
-      lines.push(`Layer ${module.layer}, ${module.lines} lines.`, "");
+      lines.push(`Layer ${module.layer}, ${module.lines} lines.`, "", ...beyondSection(node));
 
       if (module.decls.length > 0) {
         lines.push("## Declarations", "");

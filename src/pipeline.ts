@@ -1,7 +1,9 @@
 // What happens to a picture after its view built it and before it is laid
 // out, as data: a list of steps, each a pure Diagram → Diagram with the
-// condition under which it runs. The order is the list's order — hidden
-// lanes leave first, modules open in place, hubs become badges before the
+// condition under which it runs. The order is the list's order — the
+// shapes of a picture that goes a depth learn their neighbours beyond it
+// first (on the picture as drawn), hidden lanes leave next, modules open
+// in place, hubs become badges before the
 // fold (they would eat its budget), the question is set, the tail folds,
 // light lines go after the fold (on the merged lines), the review's marks
 // and the overlays come last so they sit on the shapes that stay, and the
@@ -17,7 +19,7 @@ import type { Diagram } from "./diagram.ts";
 import { onlyChanged, overlayDiff } from "./diff.ts";
 import type { Graph } from "./graph.ts";
 import { applyOverlays } from "./overlays.ts";
-import { dropLightLines, expandInPlace, fold, hideLanes, hubsAsBadges } from "./shape.ts";
+import { dropLightLines, expandInPlace, fold, hideLanes, hubsAsBadges, withBeyond } from "./shape.ts";
 import { depthWarning, type PictureOptions } from "./options.ts";
 import { foldLimit, isMapView, isModuleView, questionOf, usesDepth, type View } from "./view-keys.ts";
 import type { EdgeReads } from "./views.ts";
@@ -49,6 +51,8 @@ function marked({ reads, view }: StepContext): boolean {
 }
 
 export const STEPS: readonly Step[] = [
+  // First, on the picture as the view drew it: each shape's neighbours past the depth, before a fold or a hidden lane takes shapes away.
+  { name: "beyond", applies: ({ view }) => usesDepth(view.kind) && view.kind !== "sequence", run: (diagram, { graph }) => withBeyond(diagram, graph) },
   { name: "hide lanes", applies: ({ options }) => options.hideLanes.length > 0, run: (diagram, { options }) => hideLanes(diagram, options.hideLanes) },
   { name: "open in place", applies: ({ options, view }) => options.expand.length > 0 && isModuleView(view.kind), run: (diagram, { graph, options }) => expandInPlace(diagram, graph, options.expand) },
   { name: "hubs as badges", applies: ({ options, view }) => options.hubs && isModuleView(view.kind), run: (diagram, { subject, analysis }) => hubsAsBadges(diagram, subject, analysis.config.hubs) },

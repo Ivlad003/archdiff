@@ -94,6 +94,10 @@ _Avoid_: dim
 The tool that fades everything in a picture but a shape and its neighbours.
 _Avoid_: focus
 
+**Beyond**:
+A shape's neighbours its picture leaves out past the depth drawn: what imports or calls it from outside the picture (before it) and what it imports or calls there (after it), counted under the shape.
+_Avoid_: outside, hidden (a hidden lane is the reader's choice)
+
 **Chain**:
 The lines leading on from a line, or the shortest run of lines between two shapes.
 _Avoid_: path

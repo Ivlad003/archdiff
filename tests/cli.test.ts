@@ -580,6 +580,24 @@ test("inside shows a module's functions and their calls in module lanes; sequenc
   assert.equal(archdiff(["diagram", "inside:nope.ts", fixture]).status, 2);
 });
 
+test("a picture that goes a depth tells each shape its neighbours beyond it: before on the left, after on the right", () => {
+  const json = (view: string, ...flags: string[]): { nodes: { id: string; beyond?: { before: { count: number; ids: string[] }; after: { count: number; ids: string[] } } }[] } => JSON.parse(archdiff(["diagram", view, fixture, "--format", "json", ...flags]).stdout);
+  // log.ts at depth 1: orders.ts imports it; what imports orders.ts and what orders.ts imports lie beyond.
+  const module = json("module:src/lib/log.ts");
+  assert.deepEqual(module.nodes.find((node) => node.id === "src/lib/orders.ts")?.beyond, { before: { count: 1, ids: ["src/routes/checkout.tsx"] }, after: { count: 1, ids: ["src/db/store.ts"] } });
+  assert.equal(module.nodes.find((node) => node.id === "src/lib/log.ts")?.beyond, undefined);
+  // One step deeper draws them: nothing lies beyond orders.ts any more.
+  assert.equal(json("module:src/lib/log.ts", "--depth", "2").nodes.find((node) => node.id === "src/lib/orders.ts")?.beyond, undefined);
+  // Functions count calls: log is called from placeOrder, which the inside of log.ts does not draw.
+  assert.deepEqual(json("inside:src/lib/log.ts").nodes.find((node) => node.id === "src/lib/log.ts#log")?.beyond?.before.ids, ["src/lib/orders.ts#placeOrder"]);
+  // A view that goes no depth has nothing beyond.
+  assert.ok(json("layers").nodes.every((node) => node.beyond === undefined));
+  // The canvas counts them under the shape's corners; the Markdown says them beside the shape.
+  const scene = JSON.parse(archdiff(["diagram", "module:src/lib/log.ts", fixture, "--format", "excalidraw"]).stdout) as { elements: { id: string; text?: string; customData?: { archdiff?: string } }[] };
+  assert.deepEqual(scene.elements.filter((element) => element.customData?.archdiff === "beyond").map((element) => [element.id, element.text]), [["beyond:src/lib/orders.ts:before", "◂ 1"], ["beyond:src/lib/orders.ts:after", "1 ▸"]]);
+  assert.ok(archdiff(["diagram", "module:src/lib/log.ts", fixture]).stdout.includes("- **src/lib/orders.ts** — src/lib/orders.ts:1 — beyond the picture: ◂ 1 before, 1 after ▸"));
+});
+
 test("a script without functions: inside draws its top level and what it calls; a module or a function alone says why", () =>
   withTempDir("archdiff-script-", (dir) => {
     cpSync(fixture, dir, { recursive: true });

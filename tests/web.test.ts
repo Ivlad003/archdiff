@@ -107,6 +107,10 @@ test("a shape's page is asked for the picture the page shows: an opened module's
   const expanded = await getJson<{ markdown: string }>(`/api/shape?view=${encodeURIComponent("layer:lib")}&id=${encodeURIComponent("src/lib/orders.ts#placeOrder")}&expand=${encodeURIComponent("src/lib/orders.ts")}`);
   assert.ok(expanded.markdown.startsWith("# placeOrder"), expanded.markdown.slice(0, 80));
   assert.equal((await fetch(`${base}/api/shape?view=${encodeURIComponent("layer:lib")}&id=${encodeURIComponent("src/lib/orders.ts#placeOrder")}`)).status, 404);
+  // A shape of a picture that goes a depth names its neighbours beyond the picture, before it and after it.
+  const beyond = await getJson<{ markdown: string }>(`/api/shape?view=${encodeURIComponent("module:src/lib/log.ts")}&id=${encodeURIComponent("src/lib/orders.ts")}`);
+  assert.ok(beyond.markdown.includes("## Beyond this picture\n\n◂ 1 before it: the modules that import it, not drawn here.\n\n- src/routes/checkout.tsx\n"), beyond.markdown);
+  assert.ok(beyond.markdown.includes("1 after it ▸: the modules it imports, not drawn here.\n\n- src/db/store.ts\n"), beyond.markdown);
   const manifest = await fetch(`${base}/api/file?path=tsconfig.json`);
   assert.equal(manifest.status, 200);
   assert.ok((await manifest.text()).includes("compilerOptions"));

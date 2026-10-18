@@ -1023,6 +1023,12 @@ html.dark #options input.warn {
   cursor: pointer;
 }
 
+/* A neighbour beyond the picture's depth: dashed, as a line the picture does not draw. */
+.line-strip button.beyond {
+  border-style: dashed;
+  color: var(--muted);
+}
+
 .line-strip button.active {
   border-color: var(--accent);
   color: var(--accent);

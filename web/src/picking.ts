@@ -95,10 +95,19 @@ function neighbourLines(id: string, direction: "out" | "into") {
   return page.edges().filter((edge) => edge.kind !== "lifeline" && (direction === "out" ? edge.from === id && nodes.has(edge.to) : edge.to === id && nodes.has(edge.from)));
 }
 
+/** A neighbour beyond the picture, short: a function as its name and file, a module as its path. */
+function outsideLabel(id: string): string {
+  const at = id.indexOf("#");
+
+  return at === -1 ? id : `${id.slice(at + 1)} (${id.slice(0, at).split("/").pop()})`;
+}
+
 /**
  * The strip above a shape's page: its neighbours in this picture — what it imports or calls (→) and what imports or
  * calls it (←) — as chips. A click picks the neighbour here (sideways, the same picture); Shift+click opens the
  * neighbour's own view (sideways, the same kind of picture for another subject). The ← → keys do the same walk.
+ * Then its neighbours beyond the picture's depth (`beyond`), dashed: before it (◂) and after it (▸); a click opens
+ * the neighbour's own picture, Shift+click everything joined to it.
  */
 function renderNeighbours(node: Shape | null): void {
   const strip = element<HTMLDivElement>("neighbours");
@@ -106,7 +115,8 @@ function renderNeighbours(node: Shape | null): void {
   strip.className = "line-strip neighbours";
   const out = node ? neighbourLines(node.id, "out") : [];
   const into = node ? neighbourLines(node.id, "into") : [];
-  strip.hidden = out.length === 0 && into.length === 0;
+  const beyond = node?.beyond;
+  strip.hidden = out.length === 0 && into.length === 0 && beyond === undefined;
 
   if (strip.hidden) return;
 
@@ -131,6 +141,28 @@ function renderNeighbours(node: Shape | null): void {
   if (into.length > 0) strip.append(h("span", { class: "muted" }, `${into.length} in:`), ...into.slice(0, 12).map((edge) => chip(edge.from, "←")));
 
   if (out.length > 0) strip.append(h("span", { class: "muted" }, `${out.length} out:`), ...out.slice(0, 12).map((edge) => chip(edge.to, "→")));
+
+  if (!beyond) return;
+  // A neighbour the picture does not draw opens its own picture: a function its calls, a module (or a module's top level) its dependencies.
+  const outside = (id: string, side: "before" | "after"): HTMLButtonElement =>
+    h(
+      "button",
+      {
+        class: "beyond",
+        title: `${id}: ${side === "before" ? "imports or calls this shape" : "imported or called by this shape"} beyond this picture — click opens its own picture, Shift+click everything joined to it`,
+        on: { click: (event) => setLink({ ...currentLink(), view: event.shiftKey ? `focus:${id}` : id.includes("#") ? `calls:${id}` : `module:${id}` }) },
+      },
+      side === "before" ? `◂ ${outsideLabel(id)}` : `${outsideLabel(id)} ▸`,
+    );
+
+  for (const side of ["before", "after"] as const) {
+    const { count, ids } = beyond[side];
+
+    if (count === 0) continue;
+    strip.append(h("span", { class: "muted", title: "Past the depth of this picture: the next step of depth, or the shape's focus view, draws them" }, side === "before" ? `beyond ◂ ${count}:` : `beyond ${count} ▸:`), ...ids.slice(0, 8).map((id) => outside(id, side)));
+
+    if (count > Math.min(8, ids.length)) strip.append(h("span", { class: "muted" }, `+${count - Math.min(8, ids.length)} more (the Markdown lists them)`));
+  }
 }
 
 /** Picks a shape as a tap would: centred, lit, its page shown; the start of the next chain or arrow-key walk. */

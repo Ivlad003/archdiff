@@ -139,7 +139,12 @@ The system SHALL open, on **project** or `p`, a map of the whole repository over
 
 ### Requirement: Sideways navigation
 
-The system SHALL show a picked shape's neighbours in this picture as chips (← what imports or calls it, → what it imports or calls) under the tabs; a click picks the neighbour, Shift+click opens its own view; the arrow keys walk the same way (→ ← along the arrows, ↑ ↓ along the lane) and Enter goes into the picked shape.
+The system SHALL show a picked shape's neighbours in this picture as chips (← what imports or calls it, → what it imports or calls) under the tabs; a click picks the neighbour, Shift+click opens its own view; the arrow keys walk the same way (→ ← along the arrows, ↑ ↓ along the lane) and Enter goes into the picked shape. Its neighbours beyond the picture's depth SHALL follow as dashed chips (◂ before it, ▸ after it): a click opens the neighbour's own picture, Shift+click its focus view. The counts under a shape's corners (◂ N, N ▸) SHALL be tapped as the shape.
+
+#### Scenario: What lies beyond
+
+- **WHEN** the picture of `log.ts` is open and the count "◂ 1" under `orders.ts` is tapped
+- **THEN** `orders.ts` is picked, the strip lists `◂ src/routes/checkout.tsx` and `src/db/store.ts ▸` dashed, and a click on the first opens `module:src/routes/checkout.tsx`
 
 #### Scenario: Walking with the keys
 
