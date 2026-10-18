@@ -137,7 +137,8 @@ export async function loadBranches(state: Link): Promise<void> {
     }
 
     baseSelect.value = baseInput.value.trim();
-    const ticked = new Set(state.heads.length > 0 ? state.heads : ["WORKTREE"]);
+    // The heads of the link: a comparison's, a review's one head, else the working tree.
+    const ticked = new Set(state.heads.length > 0 ? state.heads : [state.head ?? "WORKTREE"]);
 
     for (const box of list.querySelectorAll<HTMLInputElement>("input")) box.checked = ticked.has(box.value);
     note.textContent = state.heads.length > 1 ? `${state.heads.length} heads against ${baseInput.value.trim() || result.base || "the merge-base"}` : "tick two or more heads to compare branches";

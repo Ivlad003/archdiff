@@ -6,7 +6,7 @@
 // Entry point: run by `npm run test:web` (after `npm run web:build`).
 
 import assert from "node:assert/strict";
-import type { ChildProcess } from "node:child_process";
+import { spawnSync, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -350,6 +350,58 @@ test("the counts under a shape say what lies beyond the picture; a tap on one li
   await page!.click("#neighbours button.beyond:has-text('checkout.tsx')");
   await page!.waitForFunction(`window.archdiff.drawn() === "module:src/routes/checkout.tsx"`);
 });
+
+test("the branch bar compares two heads: the title, the table from where each left main, a module's page per head; one head is its review", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-compare-",
+    (dir) => {
+      const git = (...args: string[]): void => {
+        const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      git("init", "-q", "-b", "main");
+      git("add", ".");
+      git("commit", "-q", "-m", "base");
+      // a: the store reads a route (db → routes); b: the store counts its rows.
+      git("checkout", "-q", "-b", "a");
+      writeFileSync(join(dir, "src/db/report.ts"), 'import { action } from "../routes/checkout.tsx";\n\nexport function report(): unknown {\n  return action({ total: 1 });\n}\n');
+      git("add", ".");
+      git("commit", "-q", "-m", "a: a report");
+      git("checkout", "-q", "main");
+      git("checkout", "-q", "-b", "b");
+      writeFileSync(join(dir, "src/db/store.ts"), "export function countOrders(): number {\n  return 0;\n}\n");
+      git("add", ".");
+      git("commit", "-q", "-m", "b: count");
+      git("checkout", "-q", "main");
+    },
+    async (origin) => {
+      await page!.goto(`${origin}/#view=review`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "review"`, undefined, { timeout: 20_000 });
+      await page!.waitForFunction(`document.querySelectorAll("#head-list input").length >= 3`);
+      // Tick the two heads, not the working tree, and compare.
+      await page!.evaluate(`for (const box of document.querySelectorAll("#head-list input")) box.checked = box.value === "a" || box.value === "b"`);
+      await page!.click("#compare");
+      await page!.waitForFunction(`window.archdiff.drawn() === "compare"`, undefined, { timeout: 20_000 });
+      assert.equal(await page!.textContent("#title-text"), "2 heads against main — ⚠ 1 head adds a layer dependency");
+      assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#head-list input:checked")].map((box) => box.value)`), ["a", "b"]);
+      // The table names where each head left main.
+      const markdown = (await page!.textContent("#markdown")) ?? "";
+      assert.ok(markdown.includes("since") && markdown.includes("Each head from where it left main"), markdown.slice(0, 400));
+      // A module's page: what each head did to it.
+      await page!.waitForTimeout(600);
+      const store = await screenPointOf("src/db/store.ts");
+      await page!.mouse.click(store.x, store.y);
+      await page!.click("#tabs button[data-tab='markdown']");
+      await page!.waitForFunction(`(document.querySelector("#markdown")?.textContent ?? "").includes("In this comparison")`, undefined, { timeout: 8000 });
+      assert.ok(((await page!.textContent("#markdown")) ?? "").includes("added fn countOrders"));
+      // One head ticked is that head's review, and the bar keeps it ticked.
+      await page!.evaluate(`for (const box of document.querySelectorAll("#head-list input")) box.checked = box.value === "b"`);
+      await page!.click("#compare");
+      await page!.waitForFunction(`window.archdiff.drawn() === "review" && location.hash.includes("head=b")`, undefined, { timeout: 20_000 });
+      assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#head-list input:checked")].map((box) => box.value)`), ["b"]);
+      assert.match((await page!.textContent("#title-text")) ?? "", /^Changes since [0-9a-f]{7}\.\.b — 1 source file changed$/);
+    },
+  ));
 
 test("a double tap goes in though the page is still busy with its first tap", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.goto(`${base}/?fresh=busy#view=layer%3Alib`);

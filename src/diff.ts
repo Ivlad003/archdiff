@@ -203,7 +203,7 @@ export function diffDiagram(diff: GraphDiff, base: Graph, head: Graph): PictureC
   const layers = [...new Set([...head.layers, ...base.layers])].sort();
   const used = new Set(nodes.map((node) => node.group));
   const groups = layers.filter((layer) => used.has(layer)).map((layer) => ({ id: layer, label: layer, kind: "lane" as const, x: 0, y: 0, w: 0, h: 0 }));
-  const picture: PictureContent = { title: `Changes since ${diff.base}`, nodes, edges, groups };
+  const picture: PictureContent = { title: `Changes since ${shortCommits(diff.base)}`, nodes, edges, groups };
 
   if (nodes.length === 0) picture.reason = "no module, function, import or call changed";
 
@@ -262,9 +262,9 @@ function fnLabel(change: NodeChange): string {
 
 /** The review as Markdown: the summary, the Mermaid picture, every change by kind; `contract`: the head has ARCHITECTURE.md. */
 export function reviewMarkdown(diff: GraphDiff, diagram: Diagram, contract: boolean): string {
-  const lines = [`<!-- archdiff:generated — review since ${diff.base} -->`, `# Architecture changes since ${diff.base}`, ""];
+  const lines = [`<!-- archdiff:generated — review since ${shortCommits(diff.base)} -->`, `# Architecture changes since ${shortCommits(diff.base)}`, ""];
   const counts = [
-    `${diff.changedFiles.length} source files changed`,
+    `${diff.changedFiles.length === 1 ? "1 source file" : `${diff.changedFiles.length} source files`} changed`,
     `modules +${diff.modulesAdded.length} −${diff.modulesRemoved.length}`,
     `functions +${diff.nodesAdded.length} −${diff.nodesRemoved.length} ~${diff.nodesChanged.length}`,
     `imports +${diff.depsAdded.length} −${diff.depsRemoved.length}`,
@@ -498,6 +498,11 @@ export function comparisonMarkdown(base: string, heads: readonly Compared[], dia
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
+/** A range or a ref as a reader reads it: every full commit hash in it cut to its first seven characters. */
+function shortCommits(text: string): string {
+  return text.replace(/\b[0-9a-f]{40}\b/g, (sha) => sha.slice(0, 7));
+}
+
 /** The title of a comparison: how many heads against which base. */
 function headsAgainst(count: number, base: string): string {
   return `${count} ${count === 1 ? "head" : "heads"} against ${base}`;
@@ -539,7 +544,7 @@ export function overlayDiff(diagram: Diagram, diff: GraphDiff): Diagram {
   });
   const removed = diff.modulesRemoved.length + diff.nodesRemoved.length;
   // A commit is named by its first seven characters, as git shows it; a branch or a range as written.
-  const since = diff.base.replace(/\b[0-9a-f]{40}\b/g, (sha) => sha.slice(0, 7));
+  const since = shortCommits(diff.base);
   const reason = `${marked} ${marked === 1 ? "shape" : "shapes"} changed since ${since}${removed > 0 ? `; ${removed} removed (not drawn)` : ""}${diagram.reason ? `; ${diagram.reason}` : ""}`;
 
   return { ...diagram, nodes, edges, reason, title: `${diagram.title} — changes since ${since}` };

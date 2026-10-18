@@ -51,7 +51,7 @@ type OptionSpec =
 
 export const PICTURE_OPTIONS = [
   { key: "depth", flag: "depth", param: "depth", type: "int", min: 0, help: "how far from the subject the picture goes (each view has its default)" },
-  { key: "limit", flag: "limit", param: "limit", type: "int", min: 1, help: "fold a bigger picture into \"… N more\" shapes by directory (default 40)" },
+  { key: "limit", flag: "limit", param: "limit", type: "int", min: 1, help: "fold a bigger picture into \"… N more\" shapes by directory (default 40; the whole map, modules, 200)" },
   { key: "weight", flag: "weight", param: "weight", type: "int", min: 1, help: "leave out lines standing for fewer than N imports or calls" },
   { key: "hubs", flag: "no-hubs", param: "hubs", type: "bool", default: true, negatedFlag: true, help: "a module most of a picture imports (a logger, the types) is a badge \"+ log.ts\" on its importers, not a tangle of lines; --no-hubs draws it" },
   { key: "packages", flag: "packages", param: "packages", type: "bool", default: false, help: "draw the packages and built-ins a module imports" },

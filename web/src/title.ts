@@ -36,13 +36,14 @@ function changeTitle(change: ChangeSummary | null): string {
   if (change.kind === "compare") {
     const warnings = change.heads.filter((head) => head.diff.layerEdgesAdded.length > 0).length;
 
-    return warnings > 0 ? ` — ⚠ ${warnings} head${warnings === 1 ? "" : "s"} add a layer dependency` : "";
+    return warnings > 0 ? ` — ⚠ ${warnings === 1 ? "1 head adds" : `${warnings} heads add`} a layer dependency` : "";
   }
 
   const { diff, contract } = change;
   const findings = contract ? diff.layerEdgesAdded.filter((edge) => edge.against) : diff.layerEdgesAdded;
+  const dependencies = (count: number): string => (count === 1 ? "1 new layer dependency" : `${count} new layer dependencies`);
 
-  return ` — ${diff.changedFiles.length} source files changed${findings.length > 0 ? ` — ⚠ ${findings.length} new layer dependencies${contract ? " against ARCHITECTURE.md" : ""}` : diff.layerEdgesAdded.length > 0 ? ` — ${diff.layerEdgesAdded.length} new layer dependencies, allowed by ARCHITECTURE.md` : ""}`;
+  return ` — ${diff.changedFiles.length === 1 ? "1 source file" : `${diff.changedFiles.length} source files`} changed${findings.length > 0 ? ` — ⚠ ${dependencies(findings.length)}${contract ? " against ARCHITECTURE.md" : ""}` : diff.layerEdgesAdded.length > 0 ? ` — ${dependencies(diff.layerEdgesAdded.length)}, allowed by ARCHITECTURE.md` : ""}`;
 }
 
 /** The picture's title with what its change found and whether it was drawn by hand; the question it answers as the tooltip. */
