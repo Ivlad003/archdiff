@@ -110,7 +110,8 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
 
     return { path, content: override ?? readFileSync(join(root, path), "utf8"), revision: override !== undefined };
   });
-  const { facts: read, parsed } = cache ? await cache.factsOf(toRead, extractEvery) : { facts: await extractEvery(toRead), parsed: toRead.length };
+  // An analysis without overrides lists the whole working tree: what the cache has beyond it is gone.
+  const { facts: read, parsed } = cache ? await cache.factsOf(toRead, extractEvery, overrides.size === 0) : { facts: await extractEvery(toRead), parsed: toRead.length };
   const facts = new Map(files.map((path, i) => [path, read[i]!]));
 
   // A file too large to parse is still a module of the repository: imports of it resolve, its own content stays unknown (opaque).

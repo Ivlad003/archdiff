@@ -144,7 +144,7 @@ export class FactCache {
   /** The paths the working tree's analyses asked for: an entry of another path is of a file that is gone. */
   private readonly used = new Set<string>();
   private dirty = false;
-  /** A batch was the whole working tree: the entries it did not ask for are dropped at the next write. */
+  /** A batch was the whole working tree (`whole`): the entries it did not ask for are dropped at the next write. */
   private complete = false;
   /** Other revisions' versions by path and hash; read from their file when the first one is asked for. */
   private revisions: Map<string, RevisionEntry> | null = null;
@@ -164,10 +164,10 @@ export class FactCache {
    * The facts of the files, in their order: from the cache where the content is known (the working tree's version
    * serves a revision whose file is the same), else parsed by `parse` in one batch — a file named twice with one
    * content once — and kept. The cache's files are written after, when the batch changed them; `parsed` counts the
-   * files parsed. A batch without a revision file in it is an analysis of the whole working tree: the files it does
-   * not name are gone, and the next write drops them.
+   * files parsed. `whole`: the files are the whole working tree (an analysis without overrides), so a file the batch
+   * does not name is gone and the next write drops it — said by the caller, since an empty batch tells nothing.
    */
-  async factsOf(files: readonly FileToRead[], parse: (files: readonly FileToRead[]) => Promise<FileFacts[]>): Promise<{ facts: FileFacts[]; parsed: number }> {
+  async factsOf(files: readonly FileToRead[], parse: (files: readonly FileToRead[]) => Promise<FileFacts[]>, whole = false): Promise<{ facts: FileFacts[]; parsed: number }> {
     const hashes = files.map((file) => contentHash(file.content));
     const known = files.map((file, i) => this.lookup(file.path, hashes[i]!, file.revision));
     /** The files to parse, by path and hash, with the position of each in `files`. */
@@ -188,7 +188,7 @@ export class FactCache {
       }
     }
 
-    if (files.every((file) => !file.revision)) {
+    if (whole) {
       this.complete = true;
       this.used.clear();
 
