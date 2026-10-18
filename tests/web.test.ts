@@ -1,14 +1,17 @@
 // The web server through HTTP on a temporary copy of the fixture: the API
 // of the page, the drawing saved by the editor and read back into the
 // layout, and the refusals (foreign Host, a path out of dist/web).
+//
+// Entry point: run by `npm test`.
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { startWeb, withOwnServer } from "./web-server.ts";
 
 const root = join(import.meta.dirname, "..");
 
@@ -23,18 +26,10 @@ before(async () => {
   cpSync(fixture, dir, { recursive: true });
   // A fake agent (tests/fixtures/fake-agent.mjs) stands in for claude/cursor: same stream-json, writes the file the prompt names.
   writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"], cartridge: ["cartridges/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" } }));
-  server = spawn(process.execPath, [join(root, "bin/archdiff.js"), "web", dir, "--port", "0"], { stdio: ["ignore", "ignore", "pipe"] });
-  base = await new Promise<string>((resolve, reject) => {
-    let text = "";
-    server!.stderr!.on("data", (chunk: Buffer) => {
-      text += chunk.toString();
-      const match = text.match(/archdiff web: (http:\/\/[^/]+)\//);
-
-      if (match) resolve(match[1]!);
-    });
-    server!.on("exit", (code) => reject(new Error(`server exited with ${code}: ${text}`)));
-    setTimeout(() => reject(new Error(`server did not start: ${text}`)), 60_000);
-  });
+  // This one watches the files: the live-reload test needs it.
+  const started = startWeb(dir, []);
+  server = started.server;
+  base = await started.origin;
 });
 
 after(() => {
@@ -256,6 +251,9 @@ test("chat tags are suggested and expanded into context; mocks come from the typ
   assert.equal(body.source, "types");
   assert.deepEqual(body.input, { id: "id-1", total: 1 });
   assert.deepEqual(Object.keys(body.storages), ["src/db/store.ts"]);
+  // The prompt went to the agent (whose answer held no JSON): it is kept with the other tasks.
+  const { tasks } = await getJson<{ tasks: { file: string; head: string }[] }>("/api/tasks");
+  assert.ok(tasks.some((task) => task.file.startsWith(".archdiff/tasks/calls_src_lib_orders.ts_placeOrder-")), JSON.stringify(tasks.map((task) => task.file)));
 });
 
 test("web without --port takes the next free port when 7080 is taken, and a named port that is taken is an error", async () => {
@@ -336,75 +334,63 @@ test("code this folds the drawing into the contract and writes the task; the int
   assert.equal(fromDocument.modules, 2);
 });
 
-test("after a run the contract and the configured checks run, their results in the run's events; /api/checks runs them on request", async () => {
-  // A second server on a copy of the fixture with checks: one that passes, one that fails with output.
-  const checked = mkdtempSync(join(tmpdir(), "archdiff-checks-"));
-  cpSync(fixture, checked, { recursive: true });
-  writeFileSync(join(checked, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"], cartridge: ["cartridges/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" }, checks: [`${JSON.stringify(process.execPath)} -e "process.exit(0)"`, `${JSON.stringify(process.execPath)} -e "process.stderr.write('boom'); process.exit(3)"`] }));
-  writeFileSync(join(checked, "ARCHITECTURE.md"), "# Architecture\n\n```mermaid\nflowchart LR\n  subgraph lib\n    o[src/lib/orders.ts]\n  end\n  subgraph db\n    s[src/db/store.ts]\n  end\n  o --> s\n```\n");
-  const second = spawn(process.execPath, [join(root, "bin/archdiff.js"), "web", checked, "--port", "0", "--no-watch"], { stdio: ["ignore", "ignore", "pipe"] });
+test("a document with a flowchart becomes the contract without an agent; one in prose needs an agent", () =>
+  withOwnServer(
+    "archdiff-no-agent-",
+    () => {},
+    async (origin, dir) => {
+      const post = (text: string): Promise<Response> => fetch(`${origin}/api/intent/document`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+      const kept = await post("# Note\n\n```mermaid\nflowchart LR\n  subgraph lib\n    A[src/lib/orders.ts]\n  end\n```\n");
+      const body = (await kept.json()) as { source: string; modules: number; error?: string };
+      assert.equal(kept.status, 200, body.error);
+      assert.equal(body.source, "document");
+      assert.equal(body.modules, 1);
+      assert.ok(readFileSync(join(dir, "ARCHITECTURE.md"), "utf8").includes("src/lib/orders.ts"));
+      const prose = await post("Orders go through the lib layer to the store.");
+      assert.equal(prose.status, 400);
+      assert.match(((await prose.json()) as { error: string }).error, /^no agent: the document holds no Mermaid flowchart/);
+    },
+  ));
 
-  try {
-    const origin = await new Promise<string>((resolve, reject) => {
-      let text = "";
-      second.stderr!.on("data", (chunk: Buffer) => {
-        text += chunk.toString();
-        const match = text.match(/archdiff web: (http:\/\/[^/]+)\//);
+test("after a run the contract and the configured checks run, their results in the run's events; /api/checks runs them on request", () =>
+  // A server of its own on a copy of the fixture with checks: one that passes, one that fails with output.
+  withOwnServer(
+    "archdiff-checks-",
+    (checked) => {
+      writeFileSync(join(checked, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"], cartridge: ["cartridges/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" }, checks: [`${JSON.stringify(process.execPath)} -e "process.exit(0)"`, `${JSON.stringify(process.execPath)} -e "process.stderr.write('boom'); process.exit(3)"`] }));
+      writeFileSync(join(checked, "ARCHITECTURE.md"), "# Architecture\n\n```mermaid\nflowchart LR\n  subgraph lib\n    o[src/lib/orders.ts]\n  end\n  subgraph db\n    s[src/db/store.ts]\n  end\n  o --> s\n```\n");
+    },
+    async (origin) => {
+      const started = await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "do nothing", resume: null }) });
+      const run = JSON.parse(await started.text()) as { id: string };
+      const events = (await (await fetch(`${origin}/api/agent/events?id=${run.id}`)).text()).split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => JSON.parse(chunk.slice(6)) as { kind: string; text: string });
+      const checks = events.filter((event) => event.kind === "check").map((event) => event.text);
+      assert.equal(checks.length, 3, JSON.stringify(events));
+      assert.equal(checks[0], "✔ archdiff check: the code follows ARCHITECTURE.md");
+      assert.ok(checks[1]!.startsWith("✔ ") && checks[1]!.includes("process.exit(0)"), checks[1]);
+      assert.ok(checks[2]!.startsWith("✘ ") && checks[2]!.includes("(exit 3)") && checks[2]!.endsWith("\nboom"), checks[2]);
+      assert.equal(events[events.length - 1]?.kind, "exit");
+      // On request, without a run.
+      const onRequest = (await (await fetch(`${origin}/api/checks`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json()) as { results: { command: string; ok: boolean; code?: number | null }[] };
+      assert.deepEqual(onRequest.results.map((result) => [result.ok, result.code ?? null]), [[true, null], [true, 0], [false, 3]]);
+    },
+  ));
 
-        if (match) resolve(match[1]!);
-      });
-      second.on("exit", (code) => reject(new Error(`server exited with ${code}: ${text}`)));
-      setTimeout(() => reject(new Error(`server did not start: ${text}`)), 60_000);
-    });
-    const started = await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "do nothing", resume: null }) });
-    const run = JSON.parse(await started.text()) as { id: string };
-    const events = (await (await fetch(`${origin}/api/agent/events?id=${run.id}`)).text()).split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => JSON.parse(chunk.slice(6)) as { kind: string; text: string });
-    const checks = events.filter((event) => event.kind === "check").map((event) => event.text);
-    assert.equal(checks.length, 3, JSON.stringify(events));
-    assert.equal(checks[0], "✔ archdiff check: the code follows ARCHITECTURE.md");
-    assert.ok(checks[1]!.startsWith("✔ ") && checks[1]!.includes("process.exit(0)"), checks[1]);
-    assert.ok(checks[2]!.startsWith("✘ ") && checks[2]!.includes("(exit 3)") && checks[2]!.endsWith("\nboom"), checks[2]);
-    assert.equal(events[events.length - 1]?.kind, "exit");
-    // On request, without a run.
-    const onRequest = (await (await fetch(`${origin}/api/checks`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json()) as { results: { command: string; ok: boolean; code?: number | null }[] };
-    assert.deepEqual(onRequest.results.map((result) => [result.ok, result.code ?? null]), [[true, null], [true, 0], [false, 3]]);
-  } finally {
-    second.kill();
-    rmSync(checked, { recursive: true, force: true });
-  }
-});
-
-test("Cursor's stream-json (chat_id, --resume) is read like Claude's: the question protocol and the resumed answer work", async () => {
-  const cursored = mkdtempSync(join(tmpdir(), "archdiff-cursor-"));
-  cpSync(fixture, cursored, { recursive: true });
-  writeFileSync(join(cursored, "archdiff.json"), JSON.stringify({ agent: { name: "cursor-fake", command: [process.execPath, join(root, "tests/fixtures/fake-cursor.mjs")], resume: "--resume" } }));
-  const second = spawn(process.execPath, [join(root, "bin/archdiff.js"), "web", cursored, "--port", "0", "--no-watch"], { stdio: ["ignore", "ignore", "pipe"] });
-
-  try {
-    const origin = await new Promise<string>((resolve, reject) => {
-      let text = "";
-      second.stderr!.on("data", (chunk: Buffer) => {
-        text += chunk.toString();
-        const match = text.match(/archdiff web: (http:\/\/[^/]+)\//);
-
-        if (match) resolve(match[1]!);
-      });
-      second.on("exit", (code) => reject(new Error(`server exited with ${code}: ${text}`)));
-      setTimeout(() => reject(new Error(`server did not start: ${text}`)), 60_000);
-    });
-    const started = JSON.parse(await (await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "pick a store; ask the user", resume: null }) })).text()) as { id: string; agent: string };
-    assert.equal(started.agent, "cursor-fake");
-    const events = (await (await fetch(`${origin}/api/agent/events?id=${started.id}`)).text()).split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => JSON.parse(chunk.slice(6)) as { kind: string; text: string; sessionId?: string });
-    assert.equal(events[0]?.sessionId, "chat-7");
-    assert.ok(events.some((event) => event.kind === "text" && event.text.includes("```archdiff-question")), JSON.stringify(events));
-    const answered = JSON.parse(await (await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "SQLite", resume: "chat-7" }) })).text()) as { id: string };
-    const more = await (await fetch(`${origin}/api/agent/events?id=${answered.id}`)).text();
-    assert.ok(more.includes("Cursor resumed: SQLite"), more);
-  } finally {
-    second.kill();
-    rmSync(cursored, { recursive: true, force: true });
-  }
-});
+test("Cursor's stream-json (chat_id, --resume) is read like Claude's: the question protocol and the resumed answer work", () =>
+  withOwnServer(
+    "archdiff-cursor-",
+    (cursored) => writeFileSync(join(cursored, "archdiff.json"), JSON.stringify({ agent: { name: "cursor-fake", command: [process.execPath, join(root, "tests/fixtures/fake-cursor.mjs")], resume: "--resume" } })),
+    async (origin) => {
+      const started = JSON.parse(await (await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "pick a store; ask the user", resume: null }) })).text()) as { id: string; agent: string };
+      assert.equal(started.agent, "cursor-fake");
+      const events = (await (await fetch(`${origin}/api/agent/events?id=${started.id}`)).text()).split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => JSON.parse(chunk.slice(6)) as { kind: string; text: string; sessionId?: string });
+      assert.equal(events[0]?.sessionId, "chat-7");
+      assert.ok(events.some((event) => event.kind === "text" && event.text.includes("```archdiff-question")), JSON.stringify(events));
+      const answered = JSON.parse(await (await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "SQLite", resume: "chat-7" }) })).text()) as { id: string };
+      const more = await (await fetch(`${origin}/api/agent/events?id=${answered.id}`)).text();
+      assert.ok(more.includes("Cursor resumed: SQLite"), more);
+    },
+  ));
 
 test("the Flow tab's run: POST /api/flow/run executes the entry with the saved mocks and reports the steps against the prediction", async () => {
   const view = "calls:src/lib/orders.ts#placeOrder";

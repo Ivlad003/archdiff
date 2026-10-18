@@ -2,6 +2,9 @@
 // streaming its events, the saved tasks, "code this", ARCHITECTURE.md
 // (read, write, from a document), the check against it, the data flow
 // and its mocks.
+//
+// Entry points: `routes`, by `METHOD /path` (server.ts dispatches through
+// it), and `TASKS_DIRECTORY`.
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +23,16 @@ import { json, problem, type RouteContext, type RouteRequest } from "./context.t
 
 /** Where the prompts sent to the agent are kept, beside the drawings. */
 export const TASKS_DIRECTORY = `${CACHE_DIRECTORY}/tasks`;
+
+/** Keeps a prompt sent to the agent under TASKS_DIRECTORY, named by its view and the time, so it can be read or resent without the page; the file's path. */
+function saveTask(root: string, view: string, header: string, prompt: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const file = `${TASKS_DIRECTORY}/${drawingSlug(view)}-${stamp}.md`;
+  mkdirSync(join(root, TASKS_DIRECTORY), { recursive: true });
+  writeFileSync(join(root, file), `<!-- archdiff:generated — ${header} -->\n${prompt}\n`);
+
+  return file;
+}
 
 export async function postAgentRun(ctx: RouteContext, { body, response, request }: RouteRequest): Promise<void> {
   const { root, agentSpec } = ctx;
@@ -42,12 +55,8 @@ export async function postAgentRun(ctx: RouteContext, { body, response, request 
   run.subscribe(0, (event) => {
     if (event.kind === "exit") ctx.invalidate();
   });
-  // The task as sent, kept beside the drawings so it can be read or resent without the page.
-  const view = isJsonString(parsed["view"]) ? parsed["view"] : "chat";
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const file = `${TASKS_DIRECTORY}/${drawingSlug(view)}-${stamp}.md`;
-  mkdirSync(join(root, TASKS_DIRECTORY), { recursive: true });
-  writeFileSync(join(root, file), `<!-- archdiff:generated — task for ${agentSpec.name}, run ${run.id} -->\n${parsed["prompt"]}\n`);
+  // The task as sent, kept beside the drawings.
+  const file = saveTask(root, isJsonString(parsed["view"]) ? parsed["view"] : "chat", `task for ${agentSpec.name}, run ${run.id}`, parsed["prompt"]);
 
   return json(response, { id: run.id, agent: agentSpec.name, task: file });
 }
@@ -81,8 +90,7 @@ export async function postCode(ctx: RouteContext, { body, response }: RouteReque
 
 export async function postIntentDocument(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
   const { root, agentSpec } = ctx;
-  // A document in prose becomes the intent through the agent: it writes the Mermaid, archdiff keeps it.
-  if (!agentSpec) return problem(response, 400, "no agent: start with --agent claude|cursor or set \"agent\" in archdiff.json");
+  // A document that holds a flowchart is kept as it is; one in prose becomes the intent through the agent, which writes the Mermaid.
   let parsed;
 
   try {
@@ -95,8 +103,14 @@ export async function postIntentDocument(ctx: RouteContext, { body, response }: 
   const analysis = await ctx.fresh();
   const direct = parseIntent(parsed["text"]);
 
-  // A document that already holds a flowchart needs no agent.
-  const intent = direct.modules.length > 0 ? direct : parseIntent(await ctx.runner().runToResult(documentPrompt(parsed["text"], analysis.files.some((file) => file.endsWith(".ts")) ? "ts" : null), 300_000));
+  if (direct.modules.length === 0 && !agentSpec) return problem(response, 400, "no agent: the document holds no Mermaid flowchart to keep, and writing one from prose needs an agent (start with --agent claude|cursor or set \"agent\" in archdiff.json)");
+  let intent = direct;
+
+  if (direct.modules.length === 0 && agentSpec) {
+    const prompt = documentPrompt(parsed["text"], analysis.files.some((file) => file.endsWith(".ts")) ? "ts" : null);
+    saveTask(root, "intent", `task for ${agentSpec.name}: the contract from a document`, prompt);
+    intent = parseIntent(await ctx.runner().runToResult(prompt, 300_000));
+  }
 
   if (intent.modules.length === 0) return problem(response, 502, "the agent gave no Mermaid flowchart; try again or write the block by hand");
   // The document's prose becomes the file's prose when the file had none of its own.
@@ -104,7 +118,7 @@ export async function postIntentDocument(ctx: RouteContext, { body, response }: 
   writeIntent(root, final);
   ctx.invalidate();
 
-  return json(response, { file: INTENT_FILE, source: direct.modules.length > 0 ? "document" : agentSpec.name, layers: final.layers.length, modules: final.modules.length, edges: final.edges.length, markdown: intentMarkdown(final) });
+  return json(response, { file: INTENT_FILE, source: direct.modules.length > 0 || !agentSpec ? "document" : agentSpec.name, layers: final.layers.length, modules: final.modules.length, edges: final.edges.length, markdown: intentMarkdown(final) });
 }
 
 export async function postFlowMocks(ctx: RouteContext, { body, response }: RouteRequest): Promise<void> {
@@ -128,8 +142,9 @@ export async function postFlowMocks(ctx: RouteContext, { body, response }: Route
   const typed = mocksFromTypes(flow);
 
   if (!agentSpec) return json(response, { source: "types", ...typed });
-  const runner = ctx.runner();
-  const answer = jsonInAnswer(await runner.runToResult(mockPrompt(flow, description)));
+  const prompt = mockPrompt(flow, description);
+  saveTask(ctx.root, key, `task for ${agentSpec.name}: mocks of the flow`, prompt);
+  const answer = jsonInAnswer(await ctx.runner().runToResult(prompt));
 
   if (!answer) return json(response, { source: "types", note: "the agent gave no JSON; the types did", ...typed });
 

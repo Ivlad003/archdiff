@@ -6,12 +6,13 @@
 // Entry point: run by `npm run test:web` (after `npm run web:build`).
 
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { chromium, type Browser, type Page } from "playwright-core";
+import { startWeb, withOwnServer } from "./web-server.ts";
 
 const root = join(import.meta.dirname, "..");
 
@@ -29,18 +30,9 @@ before(async () => {
   if (!CHROME) return;
   dir = mkdtempSync(join(tmpdir(), "archdiff-page-"));
   cpSync(fixture, dir, { recursive: true });
-  server = spawn(process.execPath, [join(root, "bin/archdiff.js"), "web", dir, "--port", "0", "--no-watch"], { stdio: ["ignore", "ignore", "pipe"] });
-  base = await new Promise<string>((resolve, reject) => {
-    let text = "";
-    server!.stderr!.on("data", (chunk: Buffer) => {
-      text += chunk.toString();
-      const match = text.match(/archdiff web: (http:\/\/[^/]+)\//);
-
-      if (match) resolve(match[1]!);
-    });
-    server!.on("exit", (code) => reject(new Error(`server exited with ${code}: ${text}`)));
-    setTimeout(() => reject(new Error(`server did not start: ${text}`)), 60_000);
-  });
+  const started = startWeb(dir);
+  server = started.server;
+  base = await started.origin;
   browser = await chromium.launch({ executablePath: CHROME, headless: true });
   // Wide enough for Excalidraw's desktop layout in the centre column (below ~730 px it switches to its mobile UI).
   page = await browser.newPage({ viewport: { width: 1900, height: 1000 } });
@@ -316,51 +308,36 @@ test("the canvas toolbar switches the picture, sets the detail and opens a modul
   await page!.waitForFunction(`!location.hash.includes("expand=")`);
 });
 
-test("the agent's question shows its options; an answer resumes the session", { skip: !CHROME && "no Chrome installed" }, async () => {
+test("the agent's question shows its options; an answer resumes the session", { skip: !CHROME && "no Chrome installed" }, () =>
   // A server of its own, on a copy with the fake agent configured (the shared one has no agent).
-  const agentDir = mkdtempSync(join(tmpdir(), "archdiff-page-agent-"));
-  cpSync(fixture, agentDir, { recursive: true });
-  writeFileSync(join(agentDir, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" } }));
-  const agentServer = spawn(process.execPath, [join(root, "bin/archdiff.js"), "web", agentDir, "--port", "0", "--no-watch"], { stdio: ["ignore", "ignore", "pipe"] });
-
-  try {
-    const agentBase = await new Promise<string>((resolve, reject) => {
-      let text = "";
-      agentServer.stderr!.on("data", (chunk: Buffer) => {
-        text += chunk.toString();
-        const match = text.match(/archdiff web: (http:\/\/[^/]+)\//);
-
-        if (match) resolve(match[1]!);
-      });
-      agentServer.on("exit", (code) => reject(new Error(`server exited with ${code}: ${text}`)));
-    });
-    await page!.goto(`${agentBase}/#view=layer%3Alib`);
-    await page!.waitForSelector(".excalidraw canvas");
-    await page!.click("#tabs button[data-tab='chat']");
-    await page!.waitForFunction(`(document.querySelector("#agent-name")?.textContent ?? "").includes("fake")`);
-    await page!.fill("#task", "Please ask the user which store to use.");
-    await page!.click("#run");
-    await page!.waitForFunction(`!document.querySelector("#question").hidden`, undefined, { timeout: 15_000 });
-    const options = (await page!.evaluate(`[...document.querySelectorAll("#question .options button")].map((b) => b.textContent)`)) as string[];
-    assert.deepEqual(options, ["in memory", "SQLite", "Postgres"]);
-    await page!.click("#question .options button:has-text('SQLite')");
-    await page!.waitForFunction(`document.querySelector("#question").hidden`);
-    await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev")].some((row) => (row.textContent ?? "").includes("Noted: SQLite"))`, undefined, { timeout: 15_000 });
-    // The transcript is compact: the steps fold under a summary, the result is the answer, rendered.
-    await page!.waitForFunction(`document.querySelector("#transcript .answer")?.textContent?.includes("Done.")`, undefined, { timeout: 15_000 });
-    assert.equal(await page!.evaluate("document.querySelector('#transcript details.steps').open"), false);
-    assert.ok(((await page!.textContent("#transcript details.steps summary")) ?? "").includes("step"));
-    // A question about the picture: a new run (the transcript starts afresh), the picture goes along as a tag, the row shows the question.
-    await page!.fill("#ask", "What does this layer do?");
-    await page!.press("#ask", "Enter");
-    await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev.you")].some((row) => (row.textContent ?? "").includes("What does this layer do? (with the picture)"))`, undefined, { timeout: 15_000 });
-    await page!.waitForFunction(`document.querySelector("#transcript .answer")?.textContent?.includes("Done.")`, undefined, { timeout: 15_000 });
-    assert.equal(await page!.evaluate(`document.querySelectorAll("#transcript .ev.you").length`), 1);
-  } finally {
-    agentServer.kill();
-    rmSync(agentDir, { recursive: true, force: true });
-  }
-});
+  withOwnServer(
+    "archdiff-page-agent-",
+    (agentDir) => writeFileSync(join(agentDir, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" } })),
+    async (agentBase) => {
+      await page!.goto(`${agentBase}/#view=layer%3Alib`);
+      await page!.waitForSelector(".excalidraw canvas");
+      await page!.click("#tabs button[data-tab='chat']");
+      await page!.waitForFunction(`(document.querySelector("#agent-name")?.textContent ?? "").includes("fake")`);
+      await page!.fill("#task", "Please ask the user which store to use.");
+      await page!.click("#run");
+      await page!.waitForFunction(`!document.querySelector("#question").hidden`, undefined, { timeout: 15_000 });
+      const options = (await page!.evaluate(`[...document.querySelectorAll("#question .options button")].map((b) => b.textContent)`)) as string[];
+      assert.deepEqual(options, ["in memory", "SQLite", "Postgres"]);
+      await page!.click("#question .options button:has-text('SQLite')");
+      await page!.waitForFunction(`document.querySelector("#question").hidden`);
+      await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev")].some((row) => (row.textContent ?? "").includes("Noted: SQLite"))`, undefined, { timeout: 15_000 });
+      // The transcript is compact: the steps fold under a summary, the result is the answer, rendered.
+      await page!.waitForFunction(`document.querySelector("#transcript .answer")?.textContent?.includes("Done.")`, undefined, { timeout: 15_000 });
+      assert.equal(await page!.evaluate("document.querySelector('#transcript details.steps').open"), false);
+      assert.ok(((await page!.textContent("#transcript details.steps summary")) ?? "").includes("step"));
+      // A question about the picture: a new run (the transcript starts afresh), the picture goes along as a tag, the row shows the question.
+      await page!.fill("#ask", "What does this layer do?");
+      await page!.press("#ask", "Enter");
+      await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev.you")].some((row) => (row.textContent ?? "").includes("What does this layer do? (with the picture)"))`, undefined, { timeout: 15_000 });
+      await page!.waitForFunction(`document.querySelector("#transcript .answer")?.textContent?.includes("Done.")`, undefined, { timeout: 15_000 });
+      assert.equal(await page!.evaluate(`document.querySelectorAll("#transcript .ev.you").length`), 1);
+    },
+  ));
 
 test("copy takes the active tab's text; the Spec tab lists the repository's specs", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.context().grantPermissions(["clipboard-read", "clipboard-write"]);
