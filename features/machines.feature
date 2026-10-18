@@ -19,6 +19,12 @@ Feature: State machines and control flow
     Then the initial state is closed
     And closed → open by Door.open and closed → locked by Door.lock are drawn
 
+  Scenario: Two entities with a field of one name
+    Given a file that sets "order.status" with "order: Order" and "payment.status" with "payment: Payment"
+    When I run "archdiff views"
+    Then it lists "machine:src/flows.ts#Order.status" and "machine:src/flows.ts#Payment.status"
+    And the payment's machine holds pending, settled and failed only
+
   Scenario: The list of machines
     When I run "archdiff diagram machines"
     Then the title is "State machines (3)"

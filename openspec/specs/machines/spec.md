@@ -26,12 +26,17 @@ The system SHALL draw, in a `sequence:` view, consecutive messages under the sam
 
 ### Requirement: Implicit machines come from literal states
 
-The system SHALL treat a field or variable as a state machine when it is set to two or more literal states (strings, numbers, enum members) somewhere other than its declaration, read as one (compared or switched on), and either set under a `case` or an `if` on the same field or declared by a union type with the field set in two or more places. Its states SHALL be the literals seen and those of a union type of the module named like the field (or holding most of the values); its transitions SHALL be the assignments under a `case` or `if` on the field (from each value the guard names to the value assigned, by the enclosing function), an assignment under no such guard a transition from any state; its initial state the one of a `let`/`var` declaration, a class field initializer or Python's `__init__`.
+The system SHALL treat a field or variable as a state machine when it is set to two or more literal states (strings, numbers, enum members) somewhere other than its declaration, read as one (compared or switched on), and either set under a `case` or an `if` on the same field or declared by a union type with the field set in two or more places. Its states SHALL be the literals seen and those of a union type of the module named like the field (or holding most of the values); its transitions SHALL be the assignments under a `case` or `if` on the field (from each value the guard names to the value assigned, by the enclosing function), an assignment under no such guard a transition from any state; its initial state the one of a `let`/`var` declaration, a class field initializer or Python's `__init__`. Two entities with a field of one name SHALL be two machines, `<Entity>.<field>`: by the class the code names (a parameter or local typed with it or made by it, the class `this` or `self` is in), a field reached by an object's name joining the class named like it or else the machine it shares a state with, else its own by the object's name; a field of one entity keeps the field's name. A guard SHALL be of the same entity as the assignment it guards.
 
 #### Scenario: The order's status
 
 - **WHEN** `archdiff diagram machine:src/order.ts#status` runs on the machines fixture
 - **THEN** the states are new, paid, shipped, cancelled and refunded (declared by the type, never set, dashed), the transitions new → paid by `pay`, paid → shipped by `ship`, new and paid → cancelled by `cancel`, and any state → new by `reset`
+
+#### Scenario: Two entities with a status
+
+- **WHEN** a file sets `order.status` (`order: Order`) and `payment.status` (`payment: Payment`, and `p: Payment`)
+- **THEN** `views` lists `machine:src/flows.ts#Order.status` and `machine:src/flows.ts#Payment.status`, the second with the states pending, settled and failed only
 
 ### Requirement: Explicit machines come from libraries
 

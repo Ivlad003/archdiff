@@ -654,6 +654,12 @@ export interface GuardFact {
  */
 export interface StateFact {
   subject: string;
+  /**
+   * Whose field the subject is, as the code tells it: the class its object is typed with or made by (`order: Order`,
+   * `new Order()`), the enclosing class for `this.status`; else the object's name as written (`order`). Absent for a
+   * plain variable. Two entities with a field of one name (`order.status`, `payment.status`) are two machines.
+   */
+  owner?: { class: string } | { name: string };
   kind: "assign" | "case" | "compare";
   value: string;
   within: string | null;

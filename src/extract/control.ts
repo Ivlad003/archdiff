@@ -239,9 +239,9 @@ function literalOf(node: Node): string | null {
   return null;
 }
 
-/** The `subject == "literal"` comparisons (equality only) inside a condition, as `[subject, value]` pairs. */
-function comparisonsIn(node: Node, grammar: ControlGrammar): [string, string][] {
-  const out: [string, string][] = [];
+/** The `subject == "literal"` comparisons (equality only) inside a condition, as `[subject, value, subject's node]`. */
+function comparisonsIn(node: Node, grammar: ControlGrammar): [string, string, Node][] {
+  const out: [string, string, Node][] = [];
   const stack = [node];
 
   while (stack.length > 0) {
@@ -260,21 +260,128 @@ function comparisonsIn(node: Node, grammar: ControlGrammar): [string, string][] 
   return out;
 }
 
-/** `subject == literal` either way round. */
-function pairOf(a: Node, b: Node): [string, string] | null {
+/** `subject == literal` either way round, with the subject's node. */
+function pairOf(a: Node, b: Node): [string, string, Node] | null {
   const subject = subjectOf(a);
   const literal = literalOf(b);
 
-  if (subject && literal !== null) return [subject, literal];
+  if (subject && literal !== null) return [subject, literal, a];
   const subjectB = subjectOf(b);
   const literalA = literalOf(a);
 
-  return subjectB && literalA !== null ? [subjectB, literalA] : null;
+  return subjectB && literalA !== null ? [subjectB, literalA, b] : null;
 }
 
-/** The states an assignment to `subject` at `node` moves from: the values of the enclosing `case` (and the cases falling through into it) or `if` on the same subject; the nearest such guard wins. */
-function underOf(node: Node, subject: string, grammar: ControlGrammar): string[] | undefined {
+/**
+ * Whose field a subject is, as the code tells it: the class its object is typed with or made by (`order: Order`,
+ * `const order = new Order()`, `(o as Order).status`, Python's `order = Order()`), the enclosing class for `this.x` and
+ * `self.x`; else the object's name (`order`; `this.order.status` → `order`). Null for a plain variable.
+ */
+function ownerOf(node: Node, grammar: ControlGrammar): NonNullable<StateFact["owner"]> | null {
+  if (node.type === "parenthesized_expression" || node.type === "as_expression" || node.type === "non_null_expression") {
+    const inner = node.namedChildren[0];
+
+    return inner ? ownerOf(inner, grammar) : null;
+  }
+
+  if (node.type !== "member_expression" && node.type !== "attribute") return null;
+  let object = node.childForFieldName("object");
+
+  while (object && (object.type === "parenthesized_expression" || object.type === "non_null_expression")) object = object.namedChildren[0] ?? null;
+
+  if (!object) return null;
+
+  // `(o as Order).status`: the class asserted.
+  if (object.type === "as_expression") {
+    const asserted = object.namedChildren[1];
+
+    if (asserted?.type === "type_identifier") return { class: asserted.text };
+    object = object.namedChildren[0] ?? null;
+
+    if (!object) return null;
+  }
+
+  if (object.type === "this" || (object.type === "identifier" && (object.text === "self" || object.text === "this"))) {
+    const cls = enclosingClass(node);
+
+    return cls ? { class: cls } : null;
+  }
+
+  if (object.type === "identifier") {
+    const cls = declaredClass(node, object.text, grammar);
+
+    return cls ? { class: cls } : { name: object.text };
+  }
+
+  const holder = object.childForFieldName("property") ?? object.childForFieldName("attribute");
+
+  return holder ? { name: holder.text } : null;
+}
+
+/** The name of the class a node sits in (TypeScript, JavaScript, Python); null outside one. */
+function enclosingClass(node: Node): string | null {
+  for (let at = node.parent; at; at = at.parent) {
+    if (at.type === "class_declaration" || at.type === "abstract_class_declaration" || at.type === "class" || at.type === "class_definition") return at.childForFieldName("name")?.text ?? null;
+  }
+
+  return null;
+}
+
+/** The class an annotation names: `Order`, `Order | null`, `Optional[Order]`, `"Order"`; null for any other type. */
+function annotatedClass(type: Node | null): string | null {
+  const text = type?.text.replace(/^:\s*/, "").replace(/\s+/g, "") ?? "";
+  const match = /^(["']?)(?:Optional\[)?([A-Z]\w*)\]?\1(?:\|(?:null|undefined|None))?$/.exec(text);
+
+  return match ? match[2]! : null;
+}
+
+/**
+ * The class a name has in the functions around `at`: a parameter typed with it, or a local typed with it or made by it
+ * (`const order = new Order()`, Python's `order = Order()`); null when the name is bound with no class, or not at all.
+ */
+function declaredClass(at: Node, name: string, grammar: ControlGrammar): string | null {
+  for (let fn = at.parent; fn; fn = fn.parent) {
+    if (!grammar.functions.has(fn.type)) continue;
+
+    for (const param of fn.childForFieldName("parameters")?.namedChildren ?? []) {
+      const bound = param.type === "identifier" ? param : (param.childForFieldName("pattern") ?? param.childForFieldName("name") ?? param.namedChildren.find((child) => child.type === "identifier") ?? null);
+
+      if (bound?.type === "identifier" && bound.text === name) return annotatedClass(param.childForFieldName("type"));
+    }
+
+    // The first declaration of the name in the function's body.
+    const stack = fn.childForFieldName("body") ? [fn.childForFieldName("body")!] : [];
+
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      const target = node.type === "variable_declarator" ? node.childForFieldName("name") : node.type === "assignment" ? node.childForFieldName("left") : null;
+
+      if (target?.type === "identifier" && target.text === name) {
+        const value = node.childForFieldName("value") ?? node.childForFieldName("right");
+        const made = value?.type === "new_expression" ? value.childForFieldName("constructor") : value?.type === "call" ? value.childForFieldName("function") : null;
+
+        return annotatedClass(node.childForFieldName("type")) ?? (made?.type === "identifier" && /^[A-Z]/.test(made.text) ? made.text : null);
+      }
+
+      for (const child of node.namedChildren) stack.push(child);
+    }
+  }
+
+  return null;
+}
+
+/** The key two owners of one entity share: the class or the object's name, case aside (`order` is an `Order`); "" for none. */
+function ownerKey(owner: StateFact["owner"] | null): string {
+  return owner ? ("class" in owner ? owner.class : owner.name).toLowerCase() : "";
+}
+
+/**
+ * The states an assignment to `subject` (of `owner`) at `node` moves from: the values of the enclosing `case` (and the
+ * cases falling through into it) or `if` on the same subject of the same owner; the nearest such guard wins.
+ */
+function underOf(node: Node, subject: string, grammar: ControlGrammar, owner: StateFact["owner"] | null): string[] | undefined {
   let child: Node = node;
+  const key = ownerKey(owner);
 
   for (let at = node.parent; at; child = at, at = at.parent) {
     if (grammar.cases.has(at.type)) {
@@ -282,7 +389,7 @@ function underOf(node: Node, subject: string, grammar: ControlGrammar): string[]
       const parent = at.parent?.type === "switch_body" || at.parent?.type === "block" ? at.parent.parent : at.parent;
       const switched = parent ? (parent.childForFieldName("value") ?? parent.childForFieldName("subject")) : null;
 
-      if (switched && subjectOf(switched) === subject) {
+      if (switched && subjectOf(switched) === subject && ownerKey(ownerOf(switched, grammar)) === key) {
         const values: string[] = [];
         // The case's own value, and the values of the empty cases just before it (they fall through into it).
         for (let sibling: Node | null = at; sibling; sibling = sibling.previousNamedSibling) {
@@ -313,7 +420,7 @@ function underOf(node: Node, subject: string, grammar: ControlGrammar): string[]
       const condition = at.childForFieldName("condition");
 
       if (consequence && consequence.id === child.id && condition) {
-        const values = comparisonsIn(condition, grammar).filter(([name]) => name === subject).map(([, value]) => value);
+        const values = comparisonsIn(condition, grammar).filter(([name, , at]) => name === subject && ownerKey(ownerOf(at, grammar)) === key).map(([, value]) => value);
 
         if (values.length > 0) return [...new Set(values)];
       }
@@ -339,8 +446,11 @@ export function collectTsStates(root: Node, language: Language, g: Grammar): Sta
   const out: StateFact[] = [];
   const states = query(language, g, "states", statesQuery(g));
 
-  const push = (fact: StateFact): void => {
-    out.push(fact);
+  // A fact of a field carries its owner.
+  const push = (fact: StateFact, subjectNode?: Node): void => {
+    const owner = subjectNode ? ownerOf(subjectNode, TS_CONTROL) : null;
+
+    out.push(owner ? { ...fact, owner } : fact);
   };
 
   for (const match of states.matches(root)) {
@@ -354,10 +464,10 @@ export function collectTsStates(root: Node, language: Language, g: Grammar): Sta
       if (subject === null || value === null) continue;
       const node = at("assign")!;
       const fact: StateFact = { subject, kind: "assign", value, within: enclosingDeclaration(node, TS_CONTROL), line: node.startPosition.row + 1, col: startCol(node) };
-      const under = underOf(node, subject, TS_CONTROL);
+      const under = underOf(node, subject, TS_CONTROL, ownerOf(at("target")!, TS_CONTROL));
 
       if (under) fact.under = under;
-      push(fact);
+      push(fact, at("target")!);
     } else if (captures.has("declare")) {
       // `let state = "idle"`: the initial state of a variable (a const is a constant, not a state).
       const declaration = at("declare")!.parent;
@@ -373,7 +483,10 @@ export function collectTsStates(root: Node, language: Language, g: Grammar): Sta
 
       if (value === null) continue;
       const node = at("field_init")!;
-      push({ subject: `this.${at("field")!.text}`, kind: "assign", value, within: enclosingDeclaration(node, TS_CONTROL), initial: true, line: node.startPosition.row + 1, col: startCol(node) });
+      const cls = enclosingClass(node);
+      const fact: StateFact = { subject: `this.${at("field")!.text}`, kind: "assign", value, within: enclosingDeclaration(node, TS_CONTROL), initial: true, line: node.startPosition.row + 1, col: startCol(node) };
+
+      push(cls ? { ...fact, owner: { class: cls } } : fact);
     } else if (captures.has("switch")) {
       const subject = subjectOf(at("subject")!);
 
@@ -384,14 +497,14 @@ export function collectTsStates(root: Node, language: Language, g: Grammar): Sta
         const literal = value ? literalOf(value) : null;
 
         if (literal === null) continue;
-        push({ subject, kind: "case", value: literal, within: enclosingDeclaration(caseNode, TS_CONTROL), line: caseNode.startPosition.row + 1, col: startCol(caseNode) });
+        push({ subject, kind: "case", value: literal, within: enclosingDeclaration(caseNode, TS_CONTROL), line: caseNode.startPosition.row + 1, col: startCol(caseNode) }, at("subject")!);
       }
     } else if (captures.has("compare")) {
       const pair = pairOf(at("left")!, at("right")!);
 
       if (!pair) continue;
       const node = at("compare")!;
-      push({ subject: pair[0], kind: "compare", value: pair[1], within: enclosingDeclaration(node, TS_CONTROL), line: node.startPosition.row + 1, col: startCol(node) });
+      push({ subject: pair[0], kind: "compare", value: pair[1], within: enclosingDeclaration(node, TS_CONTROL), line: node.startPosition.row + 1, col: startCol(node) }, pair[2]);
     }
   }
 
@@ -402,6 +515,12 @@ export function collectTsStates(root: Node, language: Language, g: Grammar): Sta
 export function collectPyStates(root: Node): StateFact[] {
   const out: StateFact[] = [];
   const stack = [root];
+  // A fact of a field carries its owner.
+  const withOwner = (fact: StateFact, subjectNode: Node): StateFact => {
+    const owner = ownerOf(subjectNode, PY_CONTROL);
+
+    return owner ? { ...fact, owner } : fact;
+  };
 
   while (stack.length > 0) {
     const node = stack.pop()!;
@@ -412,17 +531,17 @@ export function collectPyStates(root: Node): StateFact[] {
       const subject = left ? subjectOf(left) : null;
       const value = right ? literalOf(right) : null;
 
-      if (subject !== null && value !== null && !/^[A-Z_0-9]+$/.test(subject)) {
+      if (left && subject !== null && value !== null && !/^[A-Z_0-9]+$/.test(subject)) {
         const fact: StateFact = { subject, kind: "assign", value, within: enclosingDeclaration(node, PY_CONTROL), line: node.startPosition.row + 1, col: startCol(node) };
-        const under = underOf(node, subject, PY_CONTROL);
+        const under = underOf(node, subject, PY_CONTROL, ownerOf(left, PY_CONTROL));
 
         if (under) fact.under = under;
 
         if (fact.within === "__init__" || (fact.within !== null && fact.within.endsWith(".__init__"))) fact.initial = true;
-        out.push(fact);
+        out.push(withOwner(fact, left));
       }
     } else if (node.type === "comparison_operator") {
-      for (const [subject, value] of comparisonsIn(node, PY_CONTROL)) out.push({ subject, kind: "compare", value, within: enclosingDeclaration(node, PY_CONTROL), line: node.startPosition.row + 1, col: startCol(node) });
+      for (const [subject, value, at] of comparisonsIn(node, PY_CONTROL)) out.push(withOwner({ subject, kind: "compare", value, within: enclosingDeclaration(node, PY_CONTROL), line: node.startPosition.row + 1, col: startCol(node) }, at));
 
       continue;
     } else if (node.type === "match_statement") {
@@ -434,7 +553,7 @@ export function collectPyStates(root: Node): StateFact[] {
           for (const pattern of clause.namedChildren.filter((child) => child.type === "case_pattern")) {
             const literal = literalOf(pattern.namedChildren[0] ?? pattern);
 
-            if (literal !== null) out.push({ subject, kind: "case", value: literal, within: enclosingDeclaration(clause, PY_CONTROL), line: clause.startPosition.row + 1, col: startCol(clause) });
+            if (literal !== null) out.push(withOwner({ subject, kind: "case", value: literal, within: enclosingDeclaration(clause, PY_CONTROL), line: clause.startPosition.row + 1, col: startCol(clause) }, subjectNode!));
           }
         }
       }

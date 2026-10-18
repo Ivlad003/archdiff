@@ -7,15 +7,17 @@
 // assignments under a `case` or an `if` on the same field (`case "new":
 // order.status = "paid"` is new → paid, in `pay`), an assignment under no
 // such guard comes from any state, and a union type naming the states
-// declares the ones the code never sets. Two views: `machines` lists
-// them, `machine:<path>#<name>` draws one as states and transitions
-// (Mermaid: a stateDiagram-v2).
+// declares the ones the code never sets; two entities with a field of one
+// name (`Order.status`, `Payment.status`) are two machines. Two views:
+// `machines` lists them, `machine:<path>#<name>` draws one as states and
+// transitions (Mermaid: a stateDiagram-v2).
 //
 // Pure functions of the analysis. Entry points: `machinesOf`,
 // `machinesView`, `machineView`, `Machine`.
 
 import type { Analysis } from "./analyze.ts";
 import type { PictureContent, Line, Shape, MachineData } from "./diagram.ts";
+import type { StateFact } from "./extract/facts.ts";
 import { lane, unplaced } from "./nodes.ts";
 
 export interface Machine extends MachineData {
@@ -42,6 +44,66 @@ function displayName(subject: string): string {
   return subject.replace(/^this\./, "");
 }
 
+/**
+ * The facts of one field split by the entity owning it: a group per class the code names (`order: Order`, `this` in
+ * `class Payment`); a fact without one joins the class it is named like (`order` → `Order`), else the group it shares
+ * the most states with, else a group of its object's name (one for the facts of no object). `entity` is null when one
+ * group holds them all: the machine keeps the field's name, as before entities were told apart.
+ */
+function byEntity(list: readonly StateFact[]): { entity: string | null; facts: StateFact[] }[] {
+  const groups = new Map<string, { entity: string | null; facts: StateFact[]; fixed: boolean }>();
+  const loose: StateFact[] = [];
+
+  // The classes first: two classes are two entities, whatever states they share.
+  for (const fact of list) {
+    if (!fact.owner || !("class" in fact.owner)) {
+      loose.push(fact);
+      continue;
+    }
+
+    const key = fact.owner.class.toLowerCase();
+    const group = groups.get(key) ?? { entity: fact.owner.class, facts: [], fixed: true };
+    group.facts.push(fact);
+    groups.set(key, group);
+  }
+
+  // Then the facts named by an object's name, or by none: by that name, the class named like it taking them.
+  for (const fact of loose) {
+    const name = fact.owner && "name" in fact.owner ? fact.owner.name : null;
+    const key = name?.toLowerCase() ?? "";
+    const group = groups.get(key) ?? { entity: name, facts: [], fixed: false };
+    group.facts.push(fact);
+    groups.set(key, group);
+  }
+
+  // A group no class names joins the group it shares the most states with, a class's first; the rest stay apart.
+  const valuesOf = (facts: readonly StateFact[]): Set<string> => new Set(facts.map((fact) => fact.value));
+
+  for (const [key, group] of [...groups].filter(([, each]) => !each.fixed)) {
+    const own = valuesOf(group.facts);
+    let best: { key: string; shared: number; fixed: boolean } | null = null;
+
+    for (const [otherKey, other] of groups) {
+      if (otherKey === key) continue;
+      const shared = [...valuesOf(other.facts)].filter((value) => own.has(value)).length;
+
+      if (shared > 0 && (!best || (other.fixed && !best.fixed) || (other.fixed === best.fixed && shared > best.shared))) best = { key: otherKey, shared, fixed: other.fixed };
+    }
+
+    if (!best) continue;
+    const target = groups.get(best.key)!;
+
+    // Two names of one entity (`order`, `o`): the name written more often, the longer one on a tie; a class keeps its own.
+    if (!target.fixed && (group.facts.length > target.facts.length || (group.facts.length === target.facts.length && (group.entity ?? "").length > (target.entity ?? "").length))) target.entity = group.entity;
+    target.facts.push(...group.facts);
+    groups.delete(key);
+  }
+
+  const out = [...groups.values()].map((group) => ({ entity: group.entity, facts: group.facts.sort((a, b) => a.line - b.line || a.col - b.col) }));
+
+  return out.length === 1 ? [{ entity: null, facts: out[0]!.facts }] : out.sort((a, b) => ((a.entity ?? "") < (b.entity ?? "") ? -1 : 1));
+}
+
 /** Every machine of the repository, explicit first, by module then name. */
 export function machinesOf(analysis: Analysis): Machine[] {
   const { facts, graph } = analysis;
@@ -58,52 +120,60 @@ export function machinesOf(analysis: Analysis): Machine[] {
 
     for (const fact of file.states ?? []) bySubject.set(displayName(fact.subject), [...(bySubject.get(displayName(fact.subject)) ?? []), fact]);
 
-    for (const [name, list] of [...bySubject].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-      const assigns = list.filter((fact) => fact.kind === "assign" && !fact.initial);
-      const reads = list.filter((fact) => fact.kind !== "assign").length;
-      const values = new Set(list.map((fact) => fact.value));
+    for (const [field, every] of [...bySubject].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      const entities = byEntity(every);
 
-      // A machine: set to a literal somewhere other than its declaration, read as one somewhere, two or more states in all.
-      if (assigns.length === 0 || reads === 0 || values.size < 2) continue;
-      // A type alias of the module declaring the states: named like the subject, or a union holding most of the values seen.
-      const declared = new Set<string>();
+      for (const { entity, facts: list } of entities) {
+        // Two entities with a field of one name are two machines: `Order.status`, `Payment.status`.
+        const name = entity !== null ? `${entity}.${field}` : field;
+        const assigns = list.filter((fact) => fact.kind === "assign" && !fact.initial);
+        const reads = list.filter((fact) => fact.kind !== "assign").length;
+        const values = new Set(list.map((fact) => fact.value));
 
-      for (const node of graph.nodes.values()) {
-        if (node.module !== file.path || node.kind !== "type") continue;
-        const literals = unionLiterals(node.signature);
-        const shared = literals.filter((value) => values.has(value)).length;
+        // A machine: set to a literal somewhere other than its declaration, read as one somewhere, two or more states in all.
+        if (assigns.length === 0 || reads === 0 || values.size < 2) continue;
+        // A type alias of the module declaring the states: named like the subject, or a union holding most of the values seen.
+        const declared = new Set<string>();
 
-        if (literals.length >= 2 && (node.name.toLowerCase().includes(name.toLowerCase()) || shared * 2 >= values.size)) for (const value of literals) declared.add(value);
-      }
+        for (const node of graph.nodes.values()) {
+          if (node.module !== file.path || node.kind !== "type") continue;
+          const literals = unionLiterals(node.signature);
+          const shared = literals.filter((value) => values.has(value)).length;
 
-      // What tells a machine from a field that merely takes literals: a transition from a known state (an assignment under a
-      // case or an if on the field), or a type declaring the states with the field set in two or more places.
-      const guarded = assigns.some((fact) => fact.under !== undefined);
+          const named = node.name.toLowerCase().includes(field.toLowerCase()) && (entity === null || node.name.toLowerCase().includes(entity.toLowerCase()));
 
-      if (!guarded && !(declared.size >= 2 && assigns.length >= 2)) continue;
-
-      const assigned = new Set(list.filter((fact) => fact.kind === "assign").map((fact) => fact.value));
-      const names = [...new Set([...values, ...declared])];
-      const states = names.map((value) => ({ name: value, declared: declared.has(value), assigned: assigned.has(value) }));
-      const transitions: Machine["transitions"] = [];
-      const seen = new Set<string>();
-
-      for (const fact of assigns) {
-        for (const from of fact.under ?? ["*"]) {
-          const key = `${from}\u0000${fact.value}\u0000${fact.within ?? ""}`;
-
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const transition: Machine["transitions"][number] = { from, to: fact.value, line: fact.line };
-
-          if (fact.within) transition.fn = fact.within;
-          transitions.push(transition);
+          if (literals.length >= 2 && (named || shared * 2 >= values.size)) for (const value of literals) declared.add(value);
         }
-      }
 
-      const initial = list.find((fact) => fact.kind === "assign" && fact.initial)?.value ?? null;
-      const first = list[0]!;
-      machines.push({ id: `machine:${file.path}#${name}`, name, module: file.path, kind: "implicit", initial, states, transitions, line: first.line, reads });
+        // What tells a machine from a field that merely takes literals: a transition from a known state (an assignment under a
+        // case or an if on the field), or a type declaring the states with the field set in two or more places.
+        const guarded = assigns.some((fact) => fact.under !== undefined);
+
+        if (!guarded && !(declared.size >= 2 && assigns.length >= 2)) continue;
+
+        const assigned = new Set(list.filter((fact) => fact.kind === "assign").map((fact) => fact.value));
+        const names = [...new Set([...values, ...declared])];
+        const states = names.map((value) => ({ name: value, declared: declared.has(value), assigned: assigned.has(value) }));
+        const transitions: Machine["transitions"] = [];
+        const seen = new Set<string>();
+
+        for (const fact of assigns) {
+          for (const from of fact.under ?? ["*"]) {
+            const key = `${from}\u0000${fact.value}\u0000${fact.within ?? ""}`;
+
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const transition: Machine["transitions"][number] = { from, to: fact.value, line: fact.line };
+
+            if (fact.within) transition.fn = fact.within;
+            transitions.push(transition);
+          }
+        }
+
+        const initial = list.find((fact) => fact.kind === "assign" && fact.initial)?.value ?? null;
+        const first = list[0]!;
+        machines.push({ id: `machine:${file.path}#${name}`, name, module: file.path, kind: "implicit", initial, states, transitions, line: first.line, reads });
+      }
     }
   }
 

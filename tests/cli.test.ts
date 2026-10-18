@@ -1478,6 +1478,20 @@ test("state machines: the implicit ones written with literals, the explicit ones
   assert.deepEqual(json.nodes.filter((node) => node.kind === "fragment").map((node) => node.label), ["loop [const order of orders]", "opt [rush]", "opt [not rush]", "opt [try]", "opt [catch]"]);
 });
 
+test("two entities with a field of one name are two machines: by the class the code names, else by the object's name, two names of one entity as one", () =>
+  withTempDir("archdiff-machines-", (dir) => {
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src/flows.ts"), 'interface Order { status: string }\ninterface Payment { status: string }\nexport function toggle(order: Order): void {\n  if (order.status === "open") order.status = "closed";\n  else order.status = "open";\n}\nexport function settle(payment: Payment): void {\n  if (payment.status === "pending") payment.status = "settled";\n}\nexport function fail(p: Payment): void {\n  if (p.status === "pending") p.status = "failed";\n}\n');
+    writeFileSync(join(dir, "src/flows.js"), 'export function confirm(order) {\n  if (order.status === "draft") order.status = "confirmed";\n}\nexport function ship(o) {\n  if (o.status === "confirmed") o.status = "shipped";\n}\nexport function settle(payment) {\n  if (payment.status === "pending") payment.status = "settled";\n}\n');
+    writeFileSync(join(dir, "src/door.py"), 'class Door:\n    def __init__(self):\n        self.state = "closed"\n\n    def open(self):\n        if self.state == "closed":\n            self.state = "open"\n\nclass Lock:\n    def __init__(self):\n        self.state = "locked"\n\n    def unlock(self):\n        if self.state == "locked":\n            self.state = "unlocked"\n');
+    const machines = archdiff(["views", dir]).stdout.split("\n").filter((line) => line.startsWith("machine:")).map((line) => line.split("\t")[0]);
+    assert.deepEqual(machines, ["machine:src/door.py#Door.state", "machine:src/door.py#Lock.state", "machine:src/flows.js#order.status", "machine:src/flows.js#payment.status", "machine:src/flows.ts#Order.status", "machine:src/flows.ts#Payment.status"]);
+    // The states of one entity only; `o` and `order` share a state, so they are one order.
+    const states = (view: string): string[] => (JSON.parse(archdiff(["diagram", view, dir, "--format", "json"]).stdout) as { machine: { states: { name: string }[] } }).machine.states.map((state) => state.name).sort();
+    assert.deepEqual(states("machine:src/flows.ts#Payment.status"), ["failed", "pending", "settled"]);
+    assert.deepEqual(states("machine:src/flows.js#order.status"), ["confirmed", "draft", "shipped"]);
+  }));
+
 test("Rust integration tests are crates of their own: `mod util;` and `use <crate>::` resolve from tests/", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");
   // The test functions themselves carry no architecture (#[test] is left out); the imports of the test crate resolve.
