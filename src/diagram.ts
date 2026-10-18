@@ -383,6 +383,9 @@ interface Ordered {
   count: Map<string, number>;
 }
 
+/** An ordinal is a shape's lane times this plus its slot in the lane: lanes sort first, slots within one next (no rank of a picture holds this many shapes). */
+const LANE_STRIDE = 100_000;
+
 /**
  * Orders the shapes of every rank: by lane, then next to what leads into
  * them (the mean place of their predecessors, rank by rank: the
@@ -429,7 +432,7 @@ function orderRanks(diagram: Diagram, ranked: Ranked, index: ReadonlyMap<string,
       const n = count.get(key) ?? 0;
       count.set(key, n + 1);
       slot.set(node.id, n);
-      ordinal.set(node.id, laneOf(node) * 100000 + n);
+      ordinal.set(node.id, laneOf(node) * LANE_STRIDE + n);
     }
   };
 

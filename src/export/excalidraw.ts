@@ -1,7 +1,12 @@
 // A Diagram as an Excalidraw scene (`.excalidraw`, JSON): lanes as
-// rectangles behind the shapes, shapes as rectangles or ellipses with a
-// bound text element, lines as arrows bound to their shapes. IDs and seeds
-// derive from the archdiff IDs, so the same diagram gives the same file.
+// rectangles behind the shapes, shapes as rectangles, ellipses or diamonds
+// with a bound text element, lines as arrows along the routes of the
+// orthogonal router (not bound: Excalidraw would pull their ends to the
+// centres of the sides). IDs and seeds derive from the archdiff IDs, so
+// the same diagram gives the same file. The router is shared with the
+// draw.io export and the page.
+//
+// Entry points: `toExcalidraw`, `routeEdges`, `Point`.
 
 import type { Diagram, Line, Shape } from "../diagram.ts";
 import { heatColour } from "./colour.ts";
@@ -39,6 +44,30 @@ interface ExcalidrawElement {
 
 /** Characters of a line of a label inside a shape. */
 const LINE = 22;
+/** The height of a line of text, in font sizes. */
+const LINE_HEIGHT = 1.25;
+/** How far a shape's label keeps from the shape's sides (and a class box's from its top). */
+const LABEL_INSET = 8;
+/** The label of a lane, and of a sequence's fragment: top left in the frame, at its offset, in a box of its size. */
+const LANE_LABEL = { dx: 8, dy: 4, w: 120, h: 20, fontSize: 14 } as const;
+const FRAGMENT_LABEL = { dx: 8, dy: 2, w: 200, h: 18, fontSize: 12 } as const;
+/** The label of a line: a box of this size, centred on the line (a message's sits above it, a self-call's beside its loop). */
+const LINE_LABEL = { w: 120, h: 16, fontSize: 12, above: 18, middleUp: 10, selfDx: 80, selfDy: 4 } as const;
+/** The label of a step of a function's logic: up to four lines of 32 characters (24 for an exit), its start kept. */
+const LOGIC_LABEL = { lines: 4, width: 32, endWidth: 24 } as const;
+
+/** Where an element sits on the scene and how big it is: a shape's and a lane's box. */
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The height of `lines` lines of text at `fontSize`. */
+function textHeight(lines: number, fontSize: number): number {
+  return lines * fontSize * LINE_HEIGHT;
+}
 
 /**
  * A label in lines of at most `width` characters (`LINE` by default), broken after slashes, dots and spaces, `max` lines at
@@ -74,7 +103,7 @@ export function wrapLabel(text: string, max = 3, width = LINE, keepStart = false
   return [`…${lines.slice(0, lines.length - max + 1).join("").slice(-(width - 1))}`, ...lines.slice(lines.length - max + 1)].join("\n");
 }
 
-/** A stable 31-bit number from a string, for `seed` and `versionNonce`. */
+/** A stable 31-bit number from a string, for `seed` and `versionNonce`: FNV-1a (its offset basis and prime), folded below 2³¹ − 1. */
 function seed(text: string): number {
   let hash = 2166136261;
 
@@ -85,23 +114,76 @@ function seed(text: string): number {
 
 const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00", planned: "#1565c0" } as const;
 
-function base(id: string, type: string, x: number, y: number, width: number, height: number): ExcalidrawElement {
-  return { id, type, x, y, width, height, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: seed(id), version: 1, versionNonce: seed(`${id}:v`), isDeleted: false, boundElements: null, updated: 1, link: null, locked: false };
+function base(id: string, type: string, box: Box): ExcalidrawElement {
+  return { id, type, x: box.x, y: box.y, width: box.w, height: box.h, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: seed(id), version: 1, versionNonce: seed(`${id}:v`), isDeleted: false, boundElements: null, updated: 1, link: null, locked: false };
 }
 
-function text(id: string, container: string | null, x: number, y: number, width: number, height: number, content: string, fontSize: number): ExcalidrawElement {
-  const lines = content.split("\n").length;
+/** A text element: `content` in `box`, grown to hold its lines; `container` is the shape or line it labels, null for a free label. */
+function text(id: string, container: string | null, box: Box, content: string, fontSize: number): ExcalidrawElement {
+  const height = Math.max(box.h, textHeight(content.split("\n").length, fontSize));
 
-  return { ...base(id, "text", x, y, width, Math.max(height, lines * fontSize * 1.25)), text: content, originalText: content, fontSize, fontFamily: 1, textAlign: "center", verticalAlign: "middle", containerId: container, lineHeight: 1.25, autoResize: true };
+  return { ...base(id, "text", { ...box, h: height }), text: content, originalText: content, fontSize, fontFamily: 1, textAlign: "center", verticalAlign: "middle", containerId: container, lineHeight: LINE_HEIGHT, autoResize: true };
 }
 
-function shapeOf(node: Shape): { type: string; fill: string; stroke: string; style: ExcalidrawElement["strokeStyle"]; width: number } {
-  const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "class" ? "#4e342e" : node.kind === "state" || node.kind === "machine" ? "#2e7d32" : node.kind === "fragment" ? "#9e9e9e" : node.kind === "decision" ? "#6a1b9a" : node.kind === "action" ? "#424242" : node.kind === "end" ? "#616161" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
-  const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : node.kind === "class" ? "#fff8e1" : node.kind === "state" || node.kind === "machine" ? "#e8f5e9" : node.kind === "fragment" ? "transparent" : node.kind === "decision" ? "#f3e5f5" : node.kind === "end" ? "#eeeeee" : "#ffffff";
+/** How a kind of shape looks: its outline, the colours of its stroke and its fill, the line of its stroke, the size of its label. */
+interface Look {
+  type: "rectangle" | "ellipse" | "diamond";
+  stroke: string;
+  fill: string;
+  style: ExcalidrawElement["strokeStyle"];
+  fontSize: number;
+}
+
+/** The look of every kind of shape: an entry point, a package, an event and an exit are ellipses, a gap and a branch diamonds. */
+const LOOKS: Record<Shape["kind"], Look> = {
+  layer: { type: "rectangle", stroke: "#1e1e1e", fill: "#f5f5f5", style: "solid", fontSize: 15 },
+  module: { type: "rectangle", stroke: "#1e1e1e", fill: "#ffffff", style: "solid", fontSize: 12 },
+  fn: { type: "rectangle", stroke: "#1565c0", fill: "#e3f2fd", style: "solid", fontSize: 12 },
+  external: { type: "ellipse", stroke: "#757575", fill: "#ffffff", style: "solid", fontSize: 12 },
+  hole: { type: "diamond", stroke: "#ef6c00", fill: "#fff3e0", style: "dashed", fontSize: 12 },
+  start: { type: "ellipse", stroke: "#1e1e1e", fill: "#c8e6c9", style: "solid", fontSize: 12 },
+  more: { type: "rectangle", stroke: "#757575", fill: "#f5f5f5", style: "dotted", fontSize: 12 },
+  participant: { type: "rectangle", stroke: "#1e1e1e", fill: "#f5f5f5", style: "solid", fontSize: 12 },
+  // The foot of a lifeline is drawn invisible (toExcalidraw), whatever its look.
+  anchor: { type: "ellipse", stroke: "#1e1e1e", fill: "transparent", style: "solid", fontSize: 12 },
+  event: { type: "ellipse", stroke: "#f9a825", fill: "#fff8e1", style: "solid", fontSize: 12 },
+  cell: { type: "rectangle", stroke: "#757575", fill: "#f5f5f5", style: "solid", fontSize: 10 },
+  package: { type: "rectangle", stroke: "#3949ab", fill: "#e8eaf6", style: "solid", fontSize: 12 },
+  class: { type: "rectangle", stroke: "#4e342e", fill: "#fff8e1", style: "solid", fontSize: 11 },
+  state: { type: "rectangle", stroke: "#2e7d32", fill: "#e8f5e9", style: "solid", fontSize: 12 },
+  machine: { type: "rectangle", stroke: "#2e7d32", fill: "#e8f5e9", style: "solid", fontSize: 12 },
+  fragment: { type: "rectangle", stroke: "#9e9e9e", fill: "transparent", style: "dashed", fontSize: FRAGMENT_LABEL.fontSize },
+  decision: { type: "diamond", stroke: "#6a1b9a", fill: "#f3e5f5", style: "solid", fontSize: 11 },
+  action: { type: "rectangle", stroke: "#424242", fill: "#ffffff", style: "solid", fontSize: 11 },
+  end: { type: "ellipse", stroke: "#616161", fill: "#eeeeee", style: "solid", fontSize: 11 },
+};
+
+/** The look of a shape as drawn: its kind's, with a change's mark as the stroke (thicker; dashed when removed or planned) and its heat as the fill. */
+function lookOf(node: Shape): Look & { width: number } {
+  const look = LOOKS[node.kind];
   // Heat darkens the fill; a diff mark is the stroke, so both show at once.
-  const fill = node.heat !== undefined && node.heat > 0 ? heatColour(node.heat) : plain;
+  const fill = node.heat !== undefined && node.heat > 0 ? heatColour(node.heat) : look.fill;
+  const stroke = node.diff ? DIFF_STROKE[node.diff] : look.stroke;
+  const style = node.diff === "removed" || node.diff === "planned" ? "dashed" : look.style;
 
-  return { type: node.kind === "start" || node.kind === "external" || node.kind === "event" || node.kind === "end" ? "ellipse" : node.kind === "hole" || node.kind === "decision" ? "diamond" : "rectangle", fill, stroke, style: node.diff === "removed" || node.diff === "planned" || node.kind === "hole" || node.kind === "fragment" ? "dashed" : node.kind === "more" ? "dotted" : "solid", width: node.diff ? 3 : 1 };
+  return { ...look, fill, stroke, style, width: node.diff ? 3 : 1 };
+}
+
+/** The stroke of a line by its kind, unless a change marks it: calls and messages blue, lifelines faint, a type-only import grey. */
+function lineStroke(edge: Line): string {
+  if (edge.diff) return DIFF_STROKE[edge.diff];
+
+  switch (edge.kind) {
+    case "call":
+    case "message":
+      return "#1565c0";
+    case "lifeline":
+      return "#b0bec5";
+    case "flow":
+      return "#424242";
+    default:
+      return edge.typeOnly ? "#9e9e9e" : "#616161";
+  }
 }
 
 /** The view a shape opens on the page (`customData.view`, read on a second tap): shape-keys.ts's, as a link; not an Excalidraw link, whose icon would clutter every shape. */
@@ -110,6 +192,45 @@ function viewLink(node: Shape): string | null {
 
   return view === null ? null : `archdiff://view/${encodeURIComponent(view)}`;
 }
+
+/**
+ * The proportions and distances of the orthogonal router: fractions of a
+ * side or of a gap between columns, and scene pixels.
+ */
+const ROUTE = {
+  /** The ports of a side spread from this far down it, over this much of its height. */
+  portFrom: 0.15,
+  portSpan: 0.7,
+  /** How close a horizontal run may pass a shape it does not join, above or below. */
+  clearance: 6,
+  /** The margin kept around the shapes when finding the corridors between rows. */
+  corridorMargin: 10,
+  /** What a corridor's room keeps off the shapes on either side. */
+  corridorSlack: 2,
+  /** The corridor under the last row: how far below it, and how much room it has. */
+  underLastRow: 12,
+  underLastRoom: 40,
+  /** The channels of a gap fill its middle: from this far across, over this much of it. */
+  channelFrom: 0.2,
+  channelSpan: 0.6,
+  /** A detour leaves down the gap after its source's column, from this far across, its exits this many pixels apart, over at most this much of the gap. */
+  detourFrom: 0.08,
+  detourStep: 5,
+  detourSpan: 0.1,
+  /** Parallel lines of one corridor, of the lane below, of a backward gap, sit this far apart. */
+  lineSpacing: 4,
+  /** A full corridor costs as much as this distance: more than any corridor a row away. */
+  fullCorridor: 1000,
+  /** The lane below the shapes for the lines going back: this far below the lowest, the lines this far apart, in this many before they repeat. */
+  backBelow: 24,
+  backStep: 8,
+  backLanes: 8,
+  /** A line going back runs down its gap this far across (from the near side), in this many channels before they repeat. */
+  backAcross: 0.85,
+  backChannels: 4,
+  /** The gap assumed past the last column and before the first. */
+  outerGap: 40,
+} as const;
 
 /** A point of a route. */
 export interface Point {
@@ -172,9 +293,9 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
 
   const portY = (node: Shape, index: number, count: number): number => {
     if (count <= 1) return centreY(node);
-    const span = node.h * 0.7;
+    const span = node.h * ROUTE.portSpan;
 
-    return node.y + node.h * 0.15 + (span * index) / (count - 1);
+    return node.y + node.h * ROUTE.portFrom + (span * index) / (count - 1);
   };
 
   const outPort = new Map<Line, number>();
@@ -192,14 +313,14 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
 
   // A shape (other than the edge's own two) standing on the horizontal run at `y` between `x1` and `x2`.
   const blocked = (edge: Line, y: number, x1: number, x2: number): boolean =>
-    diagram.nodes.some((node) => node.id !== edge.from && node.id !== edge.to && node.x < x2 && node.x + node.w > x1 && node.y - 6 < y && node.y + node.h + 6 > y);
+    diagram.nodes.some((node) => node.id !== edge.from && node.id !== edge.to && node.x < x2 && node.x + node.w > x1 && node.y - ROUTE.clearance < y && node.y + node.h + ROUTE.clearance > y);
 
   // The free horizontal corridors between the rows of the columns `first`..`last`: the midpoints of the gaps between
   // the shapes' y-ranges, plus one below the last (not above the first: the lane's label sits there).
   const corridors = (first: number, last: number): { y: number; room: number }[] => {
     const spans = diagram.nodes
       .filter((node) => (columns.column.get(node.id) ?? -1) >= first && (columns.column.get(node.id) ?? -1) <= last)
-      .map((node) => [node.y - 10, node.y + node.h + 10] as [number, number])
+      .map((node) => [node.y - ROUTE.corridorMargin, node.y + node.h + ROUTE.corridorMargin] as [number, number])
       .sort((a, b) => a[0] - b[0]);
     const merged: [number, number][] = [];
 
@@ -214,9 +335,9 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
 
     for (let i = 0; i < merged.length; i++) {
       // `room`: how far from the corridor's centre a line may sit without touching a shape.
-      if (i > 0) free.push({ y: (merged[i - 1]![1] + merged[i]![0]) / 2, room: Math.max(0, (merged[i]![0] - merged[i - 1]![1]) / 2 - 2) });
+      if (i > 0) free.push({ y: (merged[i - 1]![1] + merged[i]![0]) / 2, room: Math.max(0, (merged[i]![0] - merged[i - 1]![1]) / 2 - ROUTE.corridorSlack) });
 
-      if (i === merged.length - 1) free.push({ y: merged[i]![1] + 12, room: 40 });
+      if (i === merged.length - 1) free.push({ y: merged[i]![1] + ROUTE.underLastRow, room: ROUTE.underLastRoom });
     }
 
     return free;
@@ -252,8 +373,8 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
       const sourceColumn = columns.column.get(edge.from)!;
       const startY = outPort.get(edge)!;
       const endY = inPort.get(edge)!;
-      // The middle 60% of the gap holds the channels; one edge runs down the centre.
-      const channel = n === 1 ? gapLeft + width / 2 : gapLeft + width * 0.2 + (width * 0.6 * i) / (n - 1);
+      // The middle of the gap holds the channels; one edge runs down the centre.
+      const channel = n === 1 ? gapLeft + width / 2 : gapLeft + width * ROUTE.channelFrom + (width * ROUTE.channelSpan * i) / (n - 1);
       const route: Point[] = [{ x: from.x + from.w, y: startY }];
 
       if (targetColumn > sourceColumn + 1 && blocked(edge, startY, from.x + from.w, channel)) {
@@ -262,16 +383,16 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
         const exitWidth = columns.left[sourceColumn + 1]! - exitLeft;
         const used = detours.get(sourceColumn) ?? 0;
         detours.set(sourceColumn, used + 1);
-        const exitX = exitLeft + exitWidth * 0.08 + Math.min(exitWidth * 0.1, used * 5);
+        const exitX = exitLeft + exitWidth * ROUTE.detourFrom + Math.min(exitWidth * ROUTE.detourSpan, used * ROUTE.detourStep);
         const wanted = (startY + endY) / 2;
         // The nearest corridor with room left: a full one costs as much as a corridor a row away.
-        const cost = (corridor: { y: number; room: number }): number => Math.abs(corridor.y - wanted) + ((taken.get(Math.round(corridor.y)) ?? 0) * 4 > corridor.room * 2 ? 1000 : 0);
+        const cost = (corridor: { y: number; room: number }): number => Math.abs(corridor.y - wanted) + ((taken.get(Math.round(corridor.y)) ?? 0) * ROUTE.lineSpacing > corridor.room * 2 ? ROUTE.fullCorridor : 0);
         const corridor = corridors(sourceColumn + 1, targetColumn - 1).sort((a, b) => cost(a) - cost(b))[0] ?? { y: startY, room: 0 };
         const key = Math.round(corridor.y);
         const seen = taken.get(key) ?? 0;
         taken.set(key, seen + 1);
-        // Lines of one corridor sit 4 px apart, alternating sides of its centre, never past its room.
-        const y = corridor.y + (seen % 2 === 0 ? 1 : -1) * Math.min(corridor.room, Math.ceil(seen / 2) * 4);
+        // Lines of one corridor sit a few pixels apart, alternating sides of its centre, never past its room.
+        const y = corridor.y + (seen % 2 === 0 ? 1 : -1) * Math.min(corridor.room, Math.ceil(seen / 2) * ROUTE.lineSpacing);
         route.push({ x: exitX, y: startY }, { x: exitX, y }, { x: channel, y }, { x: channel, y: endY });
       } else if (Math.abs(startY - endY) > 1) {
         route.push({ x: channel, y: startY }, { x: channel, y: endY });
@@ -290,11 +411,11 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
     const to = boxes.get(edge.to)!;
     const sourceColumn = columns.column.get(edge.from)!;
     const targetColumn = columns.column.get(edge.to)!;
-    const below = lowest + 24 + (i % 8) * 8;
-    const exitGap = sourceColumn + 1 < columns.left.length ? columns.left[sourceColumn + 1]! - columns.right[sourceColumn]! : 40;
-    const exitX = columns.right[sourceColumn]! + exitGap * 0.85 - (i % 4) * 4;
-    const entryGap = targetColumn > 0 ? columns.left[targetColumn]! - columns.right[targetColumn - 1]! : 40;
-    const entryX = columns.left[targetColumn]! - entryGap * 0.85 + (i % 4) * 4;
+    const below = lowest + ROUTE.backBelow + (i % ROUTE.backLanes) * ROUTE.backStep;
+    const exitGap = sourceColumn + 1 < columns.left.length ? columns.left[sourceColumn + 1]! - columns.right[sourceColumn]! : ROUTE.outerGap;
+    const exitX = columns.right[sourceColumn]! + exitGap * ROUTE.backAcross - (i % ROUTE.backChannels) * ROUTE.lineSpacing;
+    const entryGap = targetColumn > 0 ? columns.left[targetColumn]! - columns.right[targetColumn - 1]! : ROUTE.outerGap;
+    const entryX = columns.left[targetColumn]! - entryGap * ROUTE.backAcross + (i % ROUTE.backChannels) * ROUTE.lineSpacing;
     const startY = outPort.get(edge)!;
     const endY = inPort.get(edge)!;
     routes.set(edge, [
@@ -315,16 +436,16 @@ export function toExcalidraw(diagram: Diagram): string {
 
   for (const group of diagram.groups) {
     const id = `lane:${group.id}`;
-    elements.push({ ...base(id, "rectangle", group.x, group.y, group.w, group.h), backgroundColor: "#fafafa", strokeColor: "#bdbdbd", customData: { archdiff: "lane" } });
-    elements.push({ ...text(`${id}:text`, null, group.x + 8, group.y + 4, 120, 20, group.label, 14), textAlign: "left", verticalAlign: "top", customData: { archdiff: "label" } });
+    elements.push({ ...base(id, "rectangle", group), backgroundColor: "#fafafa", strokeColor: "#bdbdbd", customData: { archdiff: "lane" } });
+    elements.push({ ...text(`${id}:text`, null, { x: group.x + LANE_LABEL.dx, y: group.y + LANE_LABEL.dy, w: LANE_LABEL.w, h: LANE_LABEL.h }, group.label, LANE_LABEL.fontSize), textAlign: "left", verticalAlign: "top", customData: { archdiff: "label" } });
   }
 
   // A fragment is a frame like a lane: a dashed box with its label top left, not a shape to pick.
   for (const node of diagram.nodes) {
     if (node.kind !== "fragment") continue;
     const id = `fragment:${node.id}`;
-    elements.push({ ...base(id, "rectangle", node.x, node.y, node.w, node.h), backgroundColor: "transparent", strokeColor: "#9e9e9e", strokeStyle: "dashed", customData: { archdiff: "fragment" } });
-    elements.push({ ...text(`${id}:text`, null, node.x + 8, node.y + 2, 200, 18, node.label, 12), textAlign: "left", verticalAlign: "top", customData: { archdiff: "label" } });
+    elements.push({ ...base(id, "rectangle", node), backgroundColor: LOOKS.fragment.fill, strokeColor: LOOKS.fragment.stroke, strokeStyle: LOOKS.fragment.style, customData: { archdiff: "fragment" } });
+    elements.push({ ...text(`${id}:text`, null, { x: node.x + FRAGMENT_LABEL.dx, y: node.y + FRAGMENT_LABEL.dy, w: FRAGMENT_LABEL.w, h: FRAGMENT_LABEL.h }, node.label, FRAGMENT_LABEL.fontSize), textAlign: "left", verticalAlign: "top", customData: { archdiff: "label" } });
   }
 
   const centre = new Map<string, { x: number; y: number }>();
@@ -334,12 +455,12 @@ export function toExcalidraw(diagram: Diagram): string {
 
     if (node.kind === "anchor") {
       // The foot of a lifeline: nothing to see, a point for the line to end at.
-      elements.push({ ...base(node.id, "ellipse", node.x, node.y, node.w, node.h), opacity: 0, customData: { archdiff: "anchor" } });
+      elements.push({ ...base(node.id, "ellipse", node), opacity: 0, customData: { archdiff: "anchor" } });
       centre.set(node.id, { x: node.x + node.w / 2, y: node.y + node.h / 2 });
       continue;
     }
 
-    const look = shapeOf(node);
+    const look = lookOf(node);
     // Only the label is bound; the arrows keep their own points (see below).
     const bound: ExcalidrawElement["boundElements"] = [{ id: `${node.id}:text`, type: "text" }];
     const customData: Record<string, string | number> = { archdiff: "node", kind: node.kind };
@@ -347,16 +468,18 @@ export function toExcalidraw(diagram: Diagram): string {
     if (node.ref?.file) customData["file"] = node.ref.file;
 
     if (node.ref?.line !== undefined) customData["line"] = node.ref.line;
-    elements.push({ ...base(node.id, look.type, node.x, node.y, node.w, node.h), backgroundColor: look.fill, strokeColor: look.stroke, strokeStyle: look.style, strokeWidth: look.width, roundness: look.type === "rectangle" && node.kind !== "layer" ? { type: 3 } : null, boundElements: bound, link: null, customData: { ...customData, view: viewLink(node) ?? "" } });
+    elements.push({ ...base(node.id, look.type, node), backgroundColor: look.fill, strokeColor: look.stroke, strokeStyle: look.style, strokeWidth: look.width, roundness: look.type === "rectangle" && node.kind !== "layer" ? { type: 3 } : null, boundElements: bound, link: null, customData: { ...customData, view: viewLink(node) ?? "" } });
     // A class box keeps its lines as written (fields and methods), left-aligned in a monospace face; a box of a function's
     // logic is wider and keeps the start of its statements; everything else is wrapped and centred.
     const logicBox = node.kind === "decision" || node.kind === "action" || node.kind === "end";
-    const label = node.kind === "class" ? node.label : logicBox ? wrapLabel(node.label, 4, node.kind === "end" ? 24 : 32, true) : wrapLabel(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
-    const fontSize = node.kind === "layer" ? 15 : node.kind === "cell" ? 10 : node.kind === "class" || logicBox ? 11 : 12;
-    const lines = label.split("\n").length;
+    const label = node.kind === "class" ? node.label : logicBox ? wrapLabel(node.label, LOGIC_LABEL.lines, node.kind === "end" ? LOGIC_LABEL.endWidth : LOGIC_LABEL.width, true) : wrapLabel(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
+    const { fontSize } = look;
+    const height = textHeight(label.split("\n").length, fontSize);
+    // On a fill darker than this, the label is white.
     const dark = node.heat !== undefined && node.heat > 0.55;
     const classText = node.kind === "class" ? { textAlign: "left", verticalAlign: "top", fontFamily: 3 } : {};
-    elements.push({ ...text(`${node.id}:text`, node.id, node.x + 8, node.kind === "class" ? node.y + 8 : node.y + node.h / 2 - (lines * fontSize * 1.25) / 2, node.w - 16, lines * fontSize * 1.25, label, fontSize), ...classText, ...(dark ? { strokeColor: "#ffffff" } : {}), customData: { archdiff: "label" } });
+    const labelBox = { x: node.x + LABEL_INSET, y: node.kind === "class" ? node.y + LABEL_INSET : node.y + node.h / 2 - height / 2, w: node.w - 2 * LABEL_INSET, h: height };
+    elements.push({ ...text(`${node.id}:text`, node.id, labelBox, label, fontSize), ...classText, ...(dark ? { strokeColor: "#ffffff" } : {}), customData: { archdiff: "label" } });
     centre.set(node.id, { x: node.x + node.w / 2, y: node.y + node.h / 2 });
   }
 
@@ -369,15 +492,14 @@ export function toExcalidraw(diagram: Diagram): string {
 
     if (!source || !target) continue;
     const id = lineElementId(edge, diagram.edges.indexOf(edge));
-    const stroke = edge.diff === "added" ? "#2e7d32" : edge.diff === "removed" ? "#c62828" : edge.diff === "warning" || edge.diff === "changed" ? "#ef6c00" : edge.diff === "planned" || edge.kind === "call" || edge.kind === "message" ? "#1565c0" : edge.kind === "lifeline" ? "#b0bec5" : edge.kind === "flow" ? "#424242" : edge.typeOnly ? "#9e9e9e" : "#616161";
     const route = edge.route ?? routes.get(edge) ?? [centre.get(edge.from)!, centre.get(edge.to)!];
     const start = route[0]!;
     const finish = route[route.length - 1]!;
     const xs = route.map((point) => point.x);
     const ys = route.map((point) => point.y);
     elements.push({
-      ...base(id, "arrow", start.x, start.y, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
-      strokeColor: stroke,
+      ...base(id, "arrow", { x: start.x, y: start.y, w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }),
+      strokeColor: lineStroke(edge),
       strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" || edge.typeOnly ? "dashed" : "solid",
       strokeWidth: edge.diff ? 2 : 1,
       points: route.map((point) => [point.x - start.x, point.y - start.y]),
@@ -396,9 +518,9 @@ export function toExcalidraw(diagram: Diagram): string {
     // A message's label sits just above its line (beside the loop of a self-call); another edge's label at the middle of the line.
     if (edge.label) {
       const self = edge.kind === "message" && edge.from === edge.to;
-      const labelX = self ? start.x + 80 : (start.x + finish.x) / 2 - 60;
-      const labelY = edge.kind === "message" ? (self ? start.y + 4 : Math.min(start.y, finish.y) - 18) : (start.y + finish.y) / 2 - 10;
-      elements.push({ ...text(`${id}:text`, id, labelX, labelY, 120, 16, edge.label, 12), ...(self ? { textAlign: "left" } : {}), customData: { archdiff: "label" } });
+      const labelX = self ? start.x + LINE_LABEL.selfDx : (start.x + finish.x) / 2 - LINE_LABEL.w / 2;
+      const labelY = edge.kind === "message" ? (self ? start.y + LINE_LABEL.selfDy : Math.min(start.y, finish.y) - LINE_LABEL.above) : (start.y + finish.y) / 2 - LINE_LABEL.middleUp;
+      elements.push({ ...text(`${id}:text`, id, { x: labelX, y: labelY, w: LINE_LABEL.w, h: LINE_LABEL.h }, edge.label, LINE_LABEL.fontSize), ...(self ? { textAlign: "left" } : {}), customData: { archdiff: "label" } });
     }
   }
 
