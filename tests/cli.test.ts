@@ -4,10 +4,10 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { withTempDir } from "./temp-dir.ts";
 
 const root = join(import.meta.dirname, "..");
 
@@ -135,10 +135,8 @@ test("a wrong view, format or command exits 2 with a message on stderr", () => {
   assert.equal(archdiff(["--help"]).status, 0);
 });
 
-test("review reports the architectural diff of the working tree against a base commit", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-review-"));
-
-  try {
+test("review reports the architectural diff of the working tree against a base commit", () =>
+  withTempDir("archdiff-review-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     const git = (...args: string[]): void => {
       const result = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
@@ -183,15 +181,10 @@ export default function Checkout() {
     const clean = archdiff(["review", dir, "--base", "HEAD"]);
     assert.equal(clean.status, 0);
     assert.ok(clean.stdout.includes("_no module, function, import or call changed_"));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("--out writes a new file or one archdiff wrote, and refuses any other file", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-out-"));
-
-  try {
+test("--out writes a new file or one archdiff wrote, and refuses any other file", () =>
+  withTempDir("archdiff-out-", (dir) => {
     const out = join(dir, "layers.md");
     assert.equal(archdiff(["diagram", "layers", fixture, "--out", out]).status, 0);
     const first = readFileSync(out, "utf8");
@@ -205,15 +198,10 @@ test("--out writes a new file or one archdiff wrote, and refuses any other file"
     assert.equal(refused.status, 2);
     assert.ok(refused.stderr.includes("not written by archdiff; nothing written"));
     assert.equal(readFileSync(theirs, "utf8"), "# my notes\n");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("a file over the size limit is left out and named by the coverage report", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-big-"));
-
-  try {
+test("a file over the size limit is left out and named by the coverage report", () =>
+  withTempDir("archdiff-big-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     writeFileSync(join(dir, "src/lib/vendor.js"), `export const big = "${"x".repeat(1_600_000)}";\n`);
     const stats = JSON.parse(archdiff(["analyze", dir, "--json", "--no-cache"]).stdout) as { files: number };
@@ -224,15 +212,10 @@ test("a file over the size limit is left out and named by the coverage report", 
       ["src/lib/vendor.js"],
     );
     assert.ok(report.markdown.includes("## Files not analysed\n\n- src/lib/vendor.js — 1.6 MB, over the 1.5 MB limit"));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("review measures the change from the merge-base, not from the tip of main", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-mb-"));
-
-  try {
+test("review measures the change from the merge-base, not from the tip of main", () =>
+  withTempDir("archdiff-mb-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     const git = (...args: string[]): string => {
       const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
@@ -256,15 +239,10 @@ test("review measures the change from the merge-base, not from the tip of main",
     assert.equal(status, 0, stdout);
     assert.ok(stdout.includes("- fn `log` — src/lib/log.ts:1 (body)"), stdout);
     assert.ok(!stdout.includes("extra"), stdout);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("flow lists the steps from an entry with their types, the storages, and the mocks carried by name", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-flow-"));
-
-  try {
+test("flow lists the steps from an entry with their types, the storages, and the mocks carried by name", () =>
+  withTempDir("archdiff-flow-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     const plain = archdiff(["flow", "calls:src/lib/orders.ts#placeOrder", dir]);
     assert.equal(plain.status, 0, plain.stderr);
@@ -290,10 +268,7 @@ test("flow lists the steps from an entry with their types, the storages, and the
     );
     const save = mocked.steps.find((step) => step.name === "saveOrder")!;
     assert.equal(save.content, '{"order": {"id": "o-0"}}');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("plan refuses a view without a drawing and web --agent refuses an unknown agent", () => {
   const missing = archdiff(["plan", "module:src/lib/orders.ts", fixture]);
@@ -304,10 +279,8 @@ test("plan refuses a view without a drawing and web --agent refuses an unknown a
   assert.ok(unknown.stderr.includes("not claude or cursor"));
 });
 
-test("history lists the drift commit by commit, and review --head compares two refs", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-history-"));
-
-  try {
+test("history lists the drift commit by commit, and review --head compares two refs", () =>
+  withTempDir("archdiff-history-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     const git = (...args: string[]): string => {
       const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
@@ -338,15 +311,10 @@ test("history lists the drift commit by commit, and review --head compares two r
     const second = archdiff(["review", dir, "--base", "feature~1", "--head", "feature"]);
     assert.equal(second.status, 1);
     assert.ok(second.stdout.includes("- **routes → db**"));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("a package of a monorepo resolves imports through its own tsconfig, and extends reaches node_modules", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-mono-"));
-
-  try {
+test("a package of a monorepo resolves imports through its own tsconfig, and extends reaches node_modules", () =>
+  withTempDir("archdiff-mono-", (dir) => {
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(join(dir, "packages/app/src"), { recursive: true });
     mkdirSync(join(dir, "packages/app/node_modules/@acme/tsconfig"), { recursive: true });
@@ -361,10 +329,7 @@ test("a package of a monorepo resolves imports through its own tsconfig, and ext
     assert.equal(stats.unresolvedImports, 0);
     assert.equal(stats.deps, 1);
     assert.equal(stats.calls, 1);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("dir views list directories with two modules, and a folded picture groups by directory", () => {
   const { stdout } = archdiff(["views", fixture]);
@@ -378,10 +343,8 @@ test("dir views list directories with two modules, and a folded picture groups b
   assert.ok(dir.stdout.includes("src_lib_orders_ts --> src_lib_log_ts"), dir.stdout);
 });
 
-test("flow carries a mock into a destructured parameter, key by key", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-flow2-"));
-
-  try {
+test("flow carries a mock into a destructured parameter, key by key", () =>
+  withTempDir("archdiff-flow2-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     writeFileSync(join(dir, "src/lib/log.ts"), "export function log({ message, level }: { message: string; level?: number }): void {\n  console.log(level, message);\n}\n");
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
@@ -389,15 +352,10 @@ test("flow carries a mock into a destructured parameter, key by key", () => {
     writeFileSync(join(dir, ".archdiff/layouts/calls_src_lib_log.ts_log.json"), JSON.stringify({ format: 1, view: "calls:src/lib/log.ts#log", elements: [], mocks: [{ id: "src/lib/log.ts#log", kind: "input", value: '{"message": "hi", "other": 1}' }], saved: "2026-10-16T00:00:00.000Z" }));
     const flow = JSON.parse(archdiff(["flow", "calls:src/lib/log.ts#log", dir, "--json"]).stdout) as { steps: { params: { name: string; value?: string }[] }[] };
     assert.equal(flow.steps[0]?.params[0]?.value, '{ message: "hi" }');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("drawings lists the drawings and --prune deletes the orphans", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-layouts-"));
-
-  try {
+test("drawings lists the drawings and --prune deletes the orphans", () =>
+  withTempDir("archdiff-layouts-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(join(dir, ".archdiff/layouts"), { recursive: true });
@@ -414,10 +372,7 @@ test("drawings lists the drawings and --prune deletes the orphans", () => {
     assert.ok(existsSync(join(dir, ".archdiff/layouts/module_src_lib_orders.ts.json")));
     assert.ok(!existsSync(join(dir, ".archdiff/layouts/module_src_lib_gone.ts.json")));
     assert.ok(archdiff(["--version"]).stdout.trim().match(/^\d+\.\d+\.\d+$/));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("Python, Rust and PHP are read with the same graph: imports resolve and calls are followed", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");
@@ -437,10 +392,8 @@ test("Python, Rust and PHP are read with the same graph: imports resolve and cal
   assert.equal(coverage.blind, 0);
 });
 
-test("CommonJS: chained exports, a re-exporting index and a module binding called as a function all resolve", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-cjs-"));
-
-  try {
+test("CommonJS: chained exports, a re-exporting index and a module binding called as a function all resolve", () =>
+  withTempDir("archdiff-cjs-", (dir) => {
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(join(dir, "lib"), { recursive: true });
     mkdirSync(join(dir, "test"), { recursive: true });
@@ -457,15 +410,10 @@ test("CommonJS: chained exports, a re-exporting index and a module binding calle
     // The package's main file is an entry point, even though the tests call it.
     const views = archdiff(["views", dir]).stdout;
     assert.ok(views.includes("calls:index.js#default\tdefault (index.js) — main of sample-lib") || views.includes("main of sample-lib"), views);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("Rust: a facade crate's renamed re-exports and `use self::` of the file's own types resolve", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-rust-"));
-
-  try {
+test("Rust: a facade crate's renamed re-exports and `use self::` of the file's own types resolve", () =>
+  withTempDir("archdiff-rust-", (dir) => {
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(join(dir, "crates/facade/src"), { recursive: true });
     mkdirSync(join(dir, "crates/printer/src"), { recursive: true });
@@ -480,25 +428,17 @@ test("Rust: a facade crate's renamed re-exports and `use self::` of the file's o
     assert.equal(stats.unresolvedImports, 0);
     const calls = archdiff(["diagram", "calls:src/main.rs#main", dir, "--format", "mermaid"]).stdout;
     assert.ok(calls.includes("src_main_rs_main ==> crates_printer_src_lib_rs_specs"), calls);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("a class extending a package's class: a missing member is the package's, not a blind spot", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-base-"));
-
-  try {
+test("a class extending a package's class: a missing member is the package's, not a blind spot", () =>
+  withTempDir("archdiff-base-", (dir) => {
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(join(dir, "src"), { recursive: true });
     writeFileSync(join(dir, "src/view.ts"), 'import { Component } from "react";\n\nexport class View extends Component {\n  render() {\n    this.setState({});\n    return this.own();\n  }\n  own() {\n    return 1;\n  }\n}\n');
     const coverage = JSON.parse(archdiff(["coverage", dir, "--json"]).stdout) as { blind: number; byReason: Record<string, number> };
     assert.equal(coverage.blind, 0);
     assert.equal(coverage.byReason["external"], 1);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("inside shows a module's functions and their calls in module lanes; sequence lists the calls in order", () => {
   const inside = archdiff(["diagram", "inside:src/lib/orders.ts", fixture, "--format", "mermaid"]).stdout;
@@ -541,10 +481,8 @@ test("matrix, usage, type flow, path to the storages and hotspots on the fixture
   assert.ok((orders.heat ?? 0) > 0);
 });
 
-test("cycles, events, tests, packages and timeline on a repository that has them", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-views-"));
-
-  try {
+test("cycles, events, tests, packages and timeline on a repository that has them", () =>
+  withTempDir("archdiff-views-", (dir) => {
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(join(dir, "packages/app/src"), { recursive: true });
     mkdirSync(join(dir, "packages/lib/src"), { recursive: true });
@@ -589,15 +527,10 @@ test("cycles, events, tests, packages and timeline on a repository that has them
     assert.equal(timeline.placed, true);
     assert.ok(timeline.title.includes("1 commits"), timeline.title);
     assert.ok(timeline.nodes.some((node) => node.id.startsWith("commit:") && node.label.includes("lib: extra")), JSON.stringify(timeline.nodes));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("branches lists the branches with the default base, and compare puts several heads against it", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-branches-"));
-
-  try {
+test("branches lists the branches with the default base, and compare puts several heads against it", () =>
+  withTempDir("archdiff-branches-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     const git = (...args: string[]): void => {
       const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
@@ -637,10 +570,7 @@ test("branches lists the branches with the default base, and compare puts severa
     const excalidraw = archdiff(["compare", dir, "--heads", "feature-b,WORKTREE", "--format", "excalidraw"]).stdout;
     // log.ts changed in both heads: the shape says so.
     assert.ok(excalidraw.includes("every head") || excalidraw.includes("~ feature-b"), excalidraw.slice(0, 200));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("agent events name the files a tool touches, for the page to light their shapes", async () => {
   const { parseAgentLine } = await import("../src/agent.ts");
@@ -653,10 +583,8 @@ test("agent events name the files a tool touches, for the page to light their sh
   assert.deepEqual(mockFromType("Order[]"), []);
 });
 
-test("classes draws the class diagram with fields, methods, extends and implements, as boxes and as Mermaid", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-classes-"));
-
-  try {
+test("classes draws the class diagram with fields, methods, extends and implements, as boxes and as Mermaid", () =>
+  withTempDir("archdiff-classes-", (dir) => {
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(join(dir, "src"), { recursive: true });
     writeFileSync(join(dir, "src/repo.ts"), "export interface Repo {\n  save(o: Order): void;\n  readonly name: string;\n}\nexport type Order = { id: string; total: number };\n");
@@ -676,15 +604,10 @@ test("classes draws the class diagram with fields, methods, extends and implemen
     assert.equal(service.kind, "class");
     assert.ok(service.h > 100 && service.label.startsWith("Service\n"), service.label);
     assert.deepEqual(json.edges.map((edge) => edge.label).sort(), ["extends", "implements"]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("--changes lays the review's marks over any view", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-overlay-"));
-
-  try {
+test("--changes lays the review's marks over any view", () =>
+  withTempDir("archdiff-overlay-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     const git = (...args: string[]): void => {
       const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
@@ -705,10 +628,7 @@ test("--changes lays the review's marks over any view", () => {
     const only = JSON.parse(archdiff(["diagram", "layer:lib", dir, "--changes", "--base", "HEAD", "--only-changes", "--format", "json"]).stdout) as { nodes: { id: string }[]; reason?: string };
     assert.deepEqual(only.nodes.map((node) => node.id).sort(), ["src/lib/log.ts", "src/lib/orders.ts"]);
     assert.ok(only.reason?.includes("only the 1 changed shapes and their neighbours"), only.reason);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("--mermaid picks a Mermaid type that fits the view", () => {
   assert.ok(archdiff(["diagram", "layers", fixture, "--format", "mermaid", "--mermaid", "c4"]).stdout.includes("C4Context"));
@@ -785,10 +705,8 @@ test("--overlay marks untested modules, labels storages and shades by calls in, 
   assert.equal(archdiff(["diagram", "layers", fixture, "--overlay", "nope"]).status, 2);
 });
 
-test("new scaffolds a project with its intent and first commit; import, intent and check work on it", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-new-"));
-
-  try {
+test("new scaffolds a project with its intent and first commit; import, intent and check work on it", () =>
+  withTempDir("archdiff-new-", (dir) => {
     const target = join(dir, "shop-api");
     const made = archdiff(["new", target, "--lang", "ts", "--template", "api"]);
     assert.equal(made.status, 0, made.stderr);
@@ -837,15 +755,10 @@ test("new scaffolds a project with its intent and first commit; import, intent a
     assert.equal(archdiff(["intent", target, "--init", "--force"]).status, 0);
     const seeded = JSON.parse(archdiff(["intent", target, "--json"]).stdout) as { modules: { id: string }[] };
     assert.ok(seeded.modules.some((module) => module.id === "src/services/health.ts"));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("an import type expression does not make a file a syntax error; a dynamic import call is still a call", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-import-type-"));
-
-  try {
+test("an import type expression does not make a file a syntax error; a dynamic import call is still a call", () =>
+  withTempDir("archdiff-import-type-", (dir) => {
     mkdirSync(join(dir, "src"), { recursive: true });
     writeFileSync(join(dir, "src/scene.ts"), "export interface SceneElement {\n  id: string;\n}\n");
     writeFileSync(join(dir, "src/page.ts"), "export function elements(list: import(\"./scene.ts\").SceneElement[]): number {\n  return list.length;\n}\nexport type Scene = typeof import(\"./scene.ts\");\nexport async function load(): Promise<unknown> {\n  return import(\"./scene.ts\").then((m) => m);\n}\n");
@@ -854,10 +767,7 @@ test("an import type expression does not make a file a syntax error; a dynamic i
     const inside = JSON.parse(archdiff(["diagram", "inside:src/page.ts", dir, "--format", "json"]).stdout) as { nodes: { id: string; ref?: { line?: number } }[] };
     assert.deepEqual(inside.nodes.map((node) => node.id).filter((id) => id.startsWith("src/page.ts#")).sort(), ["src/page.ts#elements", "src/page.ts#load"]);
     assert.equal(inside.nodes.find((node) => node.id === "src/page.ts#load")?.ref?.line, 5);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("metrics: coupling and cohesion by module and layer, as Markdown and JSON; the pictures of cycles say where to cut", () => {
   const { status, stdout } = archdiff(["metrics", fixture]);
@@ -882,10 +792,8 @@ test("metrics: coupling and cohesion by module and layer, as Markdown and JSON; 
   assert.ok(overlay.includes("shade: instability") && overlay.includes("I 0.67 · Ca 1"), overlay);
 });
 
-test("review against the contract: a new layer dependency ARCHITECTURE.md forbids fails, one it allows is news; a storage is known by its calls", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-contract-"));
-
-  try {
+test("review against the contract: a new layer dependency ARCHITECTURE.md forbids fails, one it allows is news; a storage is known by its calls", () =>
+  withTempDir("archdiff-contract-", (dir) => {
     cpSync(fixture, dir, { recursive: true });
     writeFileSync(join(dir, "ARCHITECTURE.md"), "# Architecture\n\n```mermaid\nflowchart LR\n  subgraph routes\n    r[src/routes/checkout.tsx]\n  end\n  subgraph lib\n    o[src/lib/orders.ts]\n    l[src/lib/log.ts]\n  end\n  subgraph db\n    s[src/db/store.ts]\n  end\n  r --> o\n  o --> s\n  o --> l\n  s --> l\n```\n");
     const git = (...args: string[]): void => {
@@ -912,10 +820,7 @@ test("review against the contract: a new layer dependency ARCHITECTURE.md forbid
     // archdiff.json names a storage by glob, and a package by name.
     writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ storages: { "src/lib/log.ts": "the log file" }, storagePackages: {} }));
     assert.ok(archdiff(["diagram", "layer:lib", dir, "--overlay", "storages"]).stdout.includes("⛁ the log file"));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("state machines: the implicit ones written with literals, the explicit ones a library declares, in TypeScript and Python", () => {
   const machines = join(root, "tests/fixtures/machines");
@@ -958,10 +863,8 @@ test("Rust integration tests are crates of their own: `mod util;` and `use <crat
   assert.ok(calls.includes("crate_tests_integration_rs_setup ==> crate_tests_util_rs_sample_order"), calls);
 });
 
-test("a symbolic link to a file or a directory inside the root is read, once, under its own path", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-links-"));
-
-  try {
+test("a symbolic link to a file or a directory inside the root is read, once, under its own path", () =>
+  withTempDir("archdiff-links-", (dir) => {
     mkdirSync(join(dir, "src/real"), { recursive: true });
     writeFileSync(join(dir, "src/real/a.ts"), "export function a(): number { return 1; }\n");
     writeFileSync(join(dir, "src/b.ts"), "import { a } from \"./real/a.ts\";\nexport function b(): number { return a(); }\n");
@@ -974,10 +877,7 @@ test("a symbolic link to a file or a directory inside the root is read, once, un
     assert.ok(!views.includes("src/loop/") && !views.includes("src/linked/"), views);
     const calls = archdiff(["diagram", "calls:src/c.ts#b", dir, "--format", "mermaid"]).stdout;
     assert.ok(calls.includes("src_c_ts_b ==> src_real_a_ts_a"), calls);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("the mix puts a class's methods in a lane of the class; lanes lie as columns on request and on a map of many layers", () => {
   const mixed = JSON.parse(archdiff(["diagram", "layer:lib", fixture, "--expand", "src/lib/orders.ts", "--format", "json"]).stdout) as { groups: { id: string; label: string }[]; nodes: { id: string; group?: string }[] };
@@ -1023,10 +923,8 @@ test("run executes an entry for real with the storages mocked, traced function b
   assert.ok(!existsSync(join(fixture, ".archdiff")) || !readdirSync(join(fixture, ".archdiff")).some((name) => name.startsWith("run-")), "the plan file is removed after the run");
 });
 
-test("spec --tests writes a test skeleton per Gherkin scenario and keeps a test file archdiff did not write", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-gherkin-"));
-
-  try {
+test("spec --tests writes a test skeleton per Gherkin scenario and keeps a test file archdiff did not write", () =>
+  withTempDir("archdiff-gherkin-", (dir) => {
     mkdirSync(join(dir, "features"), { recursive: true });
     mkdirSync(join(dir, "src"), { recursive: true });
     writeFileSync(join(dir, "src/a.ts"), "export const a = 1;\n");
@@ -1050,10 +948,7 @@ test("spec --tests writes a test skeleton per Gherkin scenario and keeps a test 
     const ran = spawnSync(process.execPath, ["--test", join(dir, "tests/orders.test.ts")], { encoding: "utf8", env });
     assert.equal(ran.status, 0, ran.stdout + ran.stderr);
     assert.ok(ran.stdout.includes("todo 2"), ran.stdout);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("focus draws everything joined to a function or a module; logic draws a function's body as a flowchart with its paths as rules", () => {
   const machines = join(root, "tests/fixtures/machines");

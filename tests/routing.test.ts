@@ -15,8 +15,8 @@ import { parseView, viewList, viewOf } from "../src/views.ts";
 import { hideLanes, hubsAsBadges } from "../src/shape.ts";
 import { onlyChanged } from "../src/diff.ts";
 import { intentMarkdown, parseIntent, syncConfigLayers } from "../src/intent.ts";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
+import { withTempDir } from "./temp-dir.ts";
 
 const fixture = join(import.meta.dirname, "fixtures", "sample");
 
@@ -180,10 +180,8 @@ test("the intent parser keeps labels with entities and ampersands whole, reads e
   assert.ok(intentMarkdown(intent).startsWith("# Note\n") && intentMarkdown(intent).trimEnd().endsWith("After."));
 });
 
-test("archdiff.json's layers follow the intent: a directory as the glob, the files themselves where another layer lives below", () => {
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-layers-"));
-
-  try {
+test("archdiff.json's layers follow the intent: a directory as the glob, the files themselves where another layer lives below", () =>
+  withTempDir("archdiff-layers-", (dir) => {
     writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ layers: { app: ["src/**"] }, exclude: ["vendor/**"] }));
     const intent = parseIntent("```mermaid\nflowchart LR\n  subgraph entry\n    M[src/main.ts]\n    C[src/config.ts]\n  end\n  subgraph http\n    S[src/http/server.ts]\n  end\n  subgraph tests\n  end\n  M --> S\n```\n");
     syncConfigLayers(dir, intent);
@@ -193,10 +191,7 @@ test("archdiff.json's layers follow the intent: a directory as the glob, the fil
     assert.deepEqual(config.layers["http"], ["src/http/**"]);
     assert.deepEqual(config.layers["tests"], []);
     assert.deepEqual(config.exclude, ["vendor/**"]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
 /** A small deterministic generator, so a failing placement can be reproduced from its seed. */
 function mulberry32(seed: number): () => number {

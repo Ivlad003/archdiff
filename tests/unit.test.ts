@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { withTempDir } from "./temp-dir.ts";
 import { DEFAULT_PICTURE_OPTIONS, pictureOptionsHelp, pictureQueryText, readPictureOptions, writePictureParams, type PictureOptions } from "../src/options.ts";
 import { components, cycleThrough, stronglyConnected } from "../src/scc.ts";
 import { firstMatchingGlob, matchesGlob } from "../src/glob.ts";
@@ -236,12 +237,10 @@ test("property: the layout keeps every shape in its lane, apart from the others,
 
 test("the resolver follows tsconfig paths, extensionless specifiers, index files and node built-ins", async () => {
   const { createResolver } = await import("../src/resolve.ts");
-  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
   const { join } = await import("node:path");
-  const dir = mkdtempSync(join(tmpdir(), "archdiff-resolve-"));
 
-  try {
+  await withTempDir("archdiff-resolve-", (dir) => {
     mkdirSync(join(dir, "src/lib"), { recursive: true });
     writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@/*": ["src/*"] } } }));
     writeFileSync(join(dir, "src/lib/a.ts"), "");
@@ -254,7 +253,5 @@ test("the resolver follows tsconfig paths, extensionless specifiers, index files
     assert.deepEqual(resolve("src/b.ts", "node:fs"), { kind: "builtin", name: "fs" });
     assert.deepEqual(resolve("src/b.ts", "react-dom/client"), { kind: "package", name: "react-dom" });
     assert.equal(resolve("src/b.ts", "./nope").kind, "unresolved");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
 });
