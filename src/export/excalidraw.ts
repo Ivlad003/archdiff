@@ -377,8 +377,9 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
     diagram.nodes.some((node) => node.id !== edge.from && node.id !== edge.to && node.x < x2 && node.x + node.w > x1 && node.y - ROUTE.clearance < y && node.y + node.h + ROUTE.clearance > y);
 
   // The free horizontal corridors between the rows of the columns `first`..`last`: the midpoints of the gaps between
-  // the shapes' y-ranges, plus one below the last (not above the first: the lane's label sits there).
-  const corridors = (first: number, last: number): { y: number; room: number }[] => {
+  // the shapes' y-ranges, plus one below the last (not above the first: the lane's label sits there), whose lines go
+  // down from it only (`below`): the row above is nearer than its room.
+  const corridors = (first: number, last: number): { y: number; room: number; below?: true }[] => {
     const spans = diagram.nodes
       .filter((node) => (columns.column.get(node.id) ?? -1) >= first && (columns.column.get(node.id) ?? -1) <= last)
       .map((node) => [node.y - ROUTE.corridorMargin, node.y + node.h + ROUTE.corridorMargin] as [number, number])
@@ -392,13 +393,13 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
       else merged.push([span[0], span[1]]);
     }
 
-    const free: { y: number; room: number }[] = [];
+    const free: { y: number; room: number; below?: true }[] = [];
 
     for (let i = 0; i < merged.length; i++) {
       // `room`: how far from the corridor's centre a line may sit without touching a shape.
       if (i > 0) free.push({ y: (merged[i - 1]![1] + merged[i]![0]) / 2, room: Math.max(0, (merged[i]![0] - merged[i - 1]![1]) / 2 - ROUTE.corridorSlack) });
 
-      if (i === merged.length - 1) free.push({ y: merged[i]![1] + ROUTE.underLastRow, room: ROUTE.underLastRoom });
+      if (i === merged.length - 1) free.push({ y: merged[i]![1] + ROUTE.underLastRow, room: ROUTE.underLastRoom, below: true });
     }
 
     return free;
@@ -447,13 +448,14 @@ export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
         const exitX = exitLeft + exitWidth * ROUTE.detourFrom + Math.min(exitWidth * ROUTE.detourSpan, used * ROUTE.detourStep);
         const wanted = (startY + endY) / 2;
         // The nearest corridor with room left: a full one costs as much as a corridor a row away.
-        const cost = (corridor: { y: number; room: number }): number => Math.abs(corridor.y - wanted) + ((taken.get(Math.round(corridor.y)) ?? 0) * ROUTE.lineSpacing > corridor.room * 2 ? ROUTE.fullCorridor : 0);
+        const cost = (corridor: { y: number; room: number; below?: true }): number => Math.abs(corridor.y - wanted) + ((taken.get(Math.round(corridor.y)) ?? 0) * ROUTE.lineSpacing > corridor.room * (corridor.below ? 1 : 2) ? ROUTE.fullCorridor : 0);
         const corridor = corridors(sourceColumn + 1, targetColumn - 1).sort((a, b) => cost(a) - cost(b))[0] ?? { y: startY, room: 0 };
         const key = Math.round(corridor.y);
         const seen = taken.get(key) ?? 0;
         taken.set(key, seen + 1);
-        // Lines of one corridor sit a few pixels apart, alternating sides of its centre, never past its room.
-        const y = corridor.y + (seen % 2 === 0 ? 1 : -1) * Math.min(corridor.room, Math.ceil(seen / 2) * ROUTE.lineSpacing);
+        // Lines of one corridor sit a few pixels apart, alternating sides of its centre (under the last row: going down
+        // from it), never past its room.
+        const y = "below" in corridor ? corridor.y + Math.min(corridor.room, seen * ROUTE.lineSpacing) : corridor.y + (seen % 2 === 0 ? 1 : -1) * Math.min(corridor.room, Math.ceil(seen / 2) * ROUTE.lineSpacing);
         route.push({ x: exitX, y: startY }, { x: exitX, y }, { x: channel, y }, { x: channel, y: endY });
       } else if (Math.abs(startY - endY) > 1) {
         route.push({ x: channel, y: startY }, { x: channel, y: endY });

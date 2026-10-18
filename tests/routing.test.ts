@@ -85,6 +85,15 @@ test("a backward edge runs through the gaps beside the columns, not through the 
   assert.deepEqual(crossings(diagram), []);
 });
 
+test("many lines around one row share the corridor below it, every one of them below the row", () => {
+  // Every pair of the row two or more columns apart: each line must leave the row, and all take the corridor under it.
+  const names = ["a", "b", "c", "d", "e", "f", "g", "h"];
+  const pairs: [string, string][] = names.flatMap((from, i) => names.slice(i + 2).map((to): [string, string] => [from, to]));
+  const diagram = grid([names], pairs);
+  assert.ok(pairs.length >= 20);
+  assert.deepEqual(crossings(diagram), []);
+});
+
 test("no route of any view of the sample fixture runs through a shape", async () => {
   const analysis = await analyze(fixture, { cache: false });
   const keys = viewList(analysis).map((view) => view.key);
