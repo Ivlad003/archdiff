@@ -18,17 +18,16 @@ git commit -am "Release 0.1.0"
 # 2. what the tarball holds (bin, dist, dist/wasm, dist/web; no tests, no sources)
 npm pack --dry-run
 
-# 3. the tag starts the workflow
+# 3. the tag marks the release (no workflow publishes from it)
 git tag v0.1.0
 git push origin master v0.1.0
-```
 
-By hand instead of the workflow:
-
-```bash
+# 4. publish by hand, from the tagged commit
 npm login
 npm publish --access public      # runs prepack: tsc, the grammars, the page bundle
 ```
+
+Before the tag, the tarball can be tried from a clean clone: `git clone . /tmp/x && cd /tmp/x && npm ci && npm pack`, then `npm install <the .tgz>` in an empty directory and run `npx archdiff --version`, `npx archdiff diagram layers <repo>` and `npx archdiff web <repo>`.
 
 `prepack` builds `dist/` and swaps `bin/archdiff.js` to the compiled entry; `postpack` swaps it back, so the checkout keeps running from `src/` with Node's type stripping.
 
