@@ -433,3 +433,30 @@ test("the project map lists every module with its layer and every import; a tag 
   const node = await getJson<{ markdown: string }>(`/api/shape?view=${encodeURIComponent("logic:src/lib/orders.ts#validate")}&id=n1`);
   assert.ok(node.markdown.startsWith("# order.total < 0"), node.markdown.slice(0, 80));
 });
+
+test("a changed source file of any language the analysis reads reaches the page through /api/changes", async () => {
+  const controller = new AbortController();
+  const response = await fetch(`${base}/api/changes`, { signal: controller.signal });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  const file = join(dir, "src/lib/tool.py");
+
+  try {
+    // A Python file: the watcher once listened to TypeScript and JavaScript only.
+    writeFileSync(file, "def helper():\n    return 1\n");
+    let text = "";
+    const deadline = Date.now() + 15_000;
+
+    while (!text.includes("src/lib/tool.py") && Date.now() < deadline) {
+      const next = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), deadline - Date.now()))]);
+
+      if (next === null || next.done) break;
+      text += decoder.decode(next.value);
+    }
+
+    assert.ok(text.includes(`data: ${JSON.stringify({ path: "src/lib/tool.py" })}`), `no change event for the Python file: ${text}`);
+  } finally {
+    controller.abort();
+    rmSync(file, { force: true });
+  }
+});

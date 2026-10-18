@@ -11,14 +11,15 @@
 // picture is the one picture.ts draws for the query. Entry points:
 // `serve`, `ServeOptions`, `DEFAULT_PORT`.
 
-import { existsSync, readFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { existsSync, readFileSync, watch as watchFs } from "node:fs";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
-import { watch as watchFs } from "node:fs";
 import { AgentRunner, type AgentSpec } from "./agent.ts";
 import { allowedToolsFor, checkEvents, runChecks } from "./checks.ts";
+import type { Config } from "./config.ts";
+import { isSourceFile } from "./files.ts";
 import { drawPicture, type Picture } from "./picture.ts";
 import { ok, wrong, type Result } from "./result.ts";
 import { problem, requestOf, send, type RouteContext } from "./routes/context.ts";
@@ -93,141 +94,127 @@ export const DEFAULT_PORT = 7080;
 /** How many ports above DEFAULT_PORT are tried before giving up. */
 const PORT_TRIES = 50;
 
-export async function serve(root: string, options: ServeOptions): Promise<void> {
-  const web = await webDirectory();
+/** The analysis a burst of requests shares (the page asks for several things at once after a reload), and the way to drop it after a change. */
+function analysisPerBurst(root: string): { fresh(): Promise<Analysis>; invalidate(): void } {
   let current: Promise<Analysis> | null = null;
-  // The agent: --agent wins, else archdiff.json; the runner is made once the first run is asked for. Claude Code may run
-  // the checks of archdiff.json (and archdiff) on its own; every agent's run ends with archdiff running them.
-  const config = (await analyze(root)).config;
-  const chosen = options.agent ?? config.agent;
-  const agentSpec: AgentSpec | null = chosen && chosen.name === "claude" ? { ...chosen, allowedTools: allowedToolsFor(config.checks) } : chosen;
-  let runner: AgentRunner | null = null;
-  // Who waits for a change of the sources (`/api/changes`), and the watcher that tells them.
-  const changeListeners = new Set<ServerResponse>();
-  let changeTimer: NodeJS.Timeout | null = null;
 
-  const notifyChange = (path: string): void => {
-    current = null;
+  return {
+    fresh: () => {
+      if (!current) {
+        current = analyze(root);
+        setTimeout(() => (current = null), 300);
+      }
 
-    if (changeTimer) clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => {
-      for (const listener of changeListeners) listener.write(`data: ${JSON.stringify({ path })}\n\n`);
-    }, 300);
-  };
-
-  if (options.watch) {
-    try {
-      watchFs(root, { recursive: true }, (_event, name) => {
-        const path = typeof name === "string" ? name.split("\\").join("/") : "";
-
-        // Only a source file counts; the cache, the drawings, git and node_modules change for other reasons.
-        if (path === "" || path.startsWith(".archdiff/") || path.startsWith(".git/") || path.includes("node_modules/") || !/\.[cm]?[jt]sx?$/.test(path)) return;
-        notifyChange(path);
-      });
-    } catch (error) {
-      process.stderr.write(`archdiff web: not watching the files (${error instanceof Error ? error.message : String(error)})\n`);
-    }
-  }
-
-  // One analysis per burst of requests: the page asks for several things at once after a reload.
-  const fresh = (): Promise<Analysis> => {
-    if (!current) {
-      current = analyze(root);
-      setTimeout(() => (current = null), 300);
-    }
-
-    return current;
-  };
-
-  /** The picture a query names, drawn on the current analysis; git's refusal (outside a repository, a bad ref) is the request's problem. */
-  const picture = async (query: URLSearchParams): Promise<Result<Picture>> => {
-    const request = requestOf(query, options.base);
-
-    if (!request.ok) return request;
-
-    try {
-      return ok(await drawPicture(await fresh(), request.value));
-    } catch (error) {
-      return wrong(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const routes = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes };
-  const ctx: RouteContext = {
-    root,
-    options,
-    agentSpec,
-    fresh,
+      return current;
+    },
     invalidate: () => {
       current = null;
     },
-    runner: () => {
-      if (!agentSpec) throw new Error("no agent");
+  };
+}
 
-      // After a run: the repository changed, so a fresh analysis, then the contract and the configured checks.
-      return (runner ??= new AgentRunner(root, agentSpec, async () => {
-        current = null;
+/** The responses waiting on `/api/changes`, and how they hear of a changed file: once per burst of changes, the analysis dropped first. */
+function changeChannel(invalidate: () => void): { listeners: Set<ServerResponse>; notify(path: string): void } {
+  const listeners = new Set<ServerResponse>();
+  let timer: NodeJS.Timeout | null = null;
 
-        return checkEvents(await runChecks(await fresh()));
-      }));
+  return {
+    listeners,
+    notify: (path) => {
+      invalidate();
+
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        for (const listener of listeners) listener.write(`data: ${JSON.stringify({ path })}\n\n`);
+      }, 300);
     },
-    activeRunner: () => runner,
-    changeListeners,
-    picture,
   };
+}
 
-  const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    if (request.method !== "GET" && request.method !== "POST") return problem(response, 405, "GET or POST only");
-    // A page on another site cannot read the sources through DNS rebinding: the Host header must be this server's own name.
-    const hostHeader = (request.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+/** Watches the repository for a changed source file of any language archdiff reads; the cache, the drawings, git and node_modules change for other reasons. */
+function watchSources(root: string, onChange: (path: string) => void): void {
+  try {
+    watchFs(root, { recursive: true }, (_event, name) => {
+      const path = typeof name === "string" ? name.split("\\").join("/") : "";
 
-    if (!ALLOWED_HOSTS.has(hostHeader) && hostHeader !== options.host) return problem(response, 421, "unexpected Host header");
-    const url = new URL(request.url ?? "/", "http://localhost");
-    const path = url.pathname;
-
-    if (request.method === "POST") {
-      const body = await readBody(request, MAX_BODY);
-
-      if (body === null) return problem(response, 413, `the body is over ${MAX_BODY / 1_000_000} MB`);
-
-      const handler = routes[`POST ${path}`];
-
-      if (handler) return handler(ctx, { url, body, response, request });
-
-      return problem(response, 404, "no such API");
-    }
-
-    if (path.startsWith("/api/")) {
-      const handler = routes[`GET ${path}`];
-
-      if (handler) return handler(ctx, { url, body: "", response, request });
-
-      return problem(response, 404, "no such API");
-    }
-
-    // Static files of the page, from dist/web only: the page, its chunks and the editor's fonts; never a path that climbs out.
-    const file = path === "/" ? "index.html" : decodeURIComponent(path.slice(1));
-
-    if (file.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) return problem(response, 404, "not found");
-    const full = join(web, ...file.split("/"));
-    const extension = file.slice(file.lastIndexOf("."));
-
-    if (!full.startsWith(web) || !existsSync(full) || !(extension in STATIC_TYPES)) return problem(response, 404, "not found");
-
-    return send(response, 200, STATIC_TYPES[extension]!, readFileSync(full));
-  };
-
-  const server = createServer((request, response) => {
-    handle(request, response).catch((error: unknown) => {
-      process.stderr.write(`archdiff web: ${error instanceof Error ? error.message : String(error)}\n`);
-
-      if (!response.headersSent) problem(response, 500, error instanceof Error ? error.message : String(error));
+      if (path === "" || path.startsWith(".archdiff/") || path.startsWith(".git/") || path.includes("node_modules/") || !isSourceFile(path)) return;
+      onChange(path);
     });
-  });
+  } catch (error) {
+    process.stderr.write(`archdiff web: not watching the files (${error instanceof Error ? error.message : String(error)})\n`);
+  }
+}
 
-  // A named port is binding: taken means an error. Without one, the default port or the next free one above it, so
-  // a second archdiff (or a page left running) does not stop this one.
-  const listen = (port: number): Promise<void> =>
+/** The agent of the page: --agent wins, else archdiff.json; Claude Code may run the checks of archdiff.json (and archdiff) on its own. */
+function agentSpecOf(config: Config, given: AgentSpec | null): AgentSpec | null {
+  const chosen = given ?? config.agent;
+
+  return chosen && chosen.name === "claude" ? { ...chosen, allowedTools: allowedToolsFor(config.checks) } : chosen;
+}
+
+/** The picture a query names, drawn on the current analysis; git's refusal (outside a repository, a bad ref) is the request's problem. */
+async function pictureOf(query: URLSearchParams, defaultBase: string | null, fresh: () => Promise<Analysis>): Promise<Result<Picture>> {
+  const request = requestOf(query, defaultBase);
+
+  if (!request.ok) return request;
+
+  try {
+    return ok(await drawPicture(await fresh(), request.value));
+  } catch (error) {
+    return wrong(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/** Every route of the API by `METHOD /path`. */
+const ROUTES = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes };
+
+/** Answers one request: an API route by its method and path, else a static file of the page. */
+async function handle(ctx: RouteContext, web: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  if (request.method !== "GET" && request.method !== "POST") return problem(response, 405, "GET or POST only");
+  // A page on another site cannot read the sources through DNS rebinding: the Host header must be this server's own name.
+  const hostHeader = (request.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+
+  if (!ALLOWED_HOSTS.has(hostHeader) && hostHeader !== ctx.options.host) return problem(response, 421, "unexpected Host header");
+  const url = new URL(request.url ?? "/", "http://localhost");
+  const path = url.pathname;
+
+  if (request.method === "POST") {
+    const body = await readBody(request, MAX_BODY);
+
+    if (body === null) return problem(response, 413, `the body is over ${MAX_BODY / 1_000_000} MB`);
+    const handler = ROUTES[`POST ${path}`];
+
+    return handler ? handler(ctx, { url, body, response, request }) : problem(response, 404, "no such API");
+  }
+
+  if (path.startsWith("/api/")) {
+    const handler = ROUTES[`GET ${path}`];
+
+    return handler ? handler(ctx, { url, body: "", response, request }) : problem(response, 404, "no such API");
+  }
+
+  return sendStatic(web, path, response);
+}
+
+/** A static file of the page, from dist/web only: the page, its chunks and the editor's fonts; never a path that climbs out. */
+function sendStatic(web: string, path: string, response: ServerResponse): void {
+  const file = path === "/" ? "index.html" : decodeURIComponent(path.slice(1));
+
+  if (file.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) return problem(response, 404, "not found");
+  const full = join(web, ...file.split("/"));
+  const extension = file.slice(file.lastIndexOf("."));
+
+  if (!full.startsWith(web) || !existsSync(full) || !(extension in STATIC_TYPES)) return problem(response, 404, "not found");
+
+  return send(response, 200, STATIC_TYPES[extension]!, readFileSync(full));
+}
+
+/**
+ * Binds the server and says on which port: a named port is binding (taken is an error); without one, the default
+ * port or the next free one above it, so a second archdiff (or a page left running) does not stop this one.
+ */
+async function listen(server: Server, options: ServeOptions): Promise<number | null> {
+  const on = (port: number): Promise<void> =>
     new Promise<void>((resolveStarted, reject) => {
       const onError = (error: Error): void => reject(error);
       server.once("error", onError);
@@ -237,13 +224,13 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
       });
     });
 
-  if (options.port !== null) await listen(options.port);
+  if (options.port !== null) await on(options.port);
   else {
     let bound = false;
 
     for (let port = DEFAULT_PORT; port < DEFAULT_PORT + PORT_TRIES && !bound; port++) {
       try {
-        await listen(port);
+        await on(port);
         bound = true;
       } catch (error) {
         if (!(error instanceof Error && "code" in error && error.code === "EADDRINUSE")) throw error;
@@ -254,7 +241,49 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   }
 
   const address = server.address();
-  const port = typeof address === "object" && address ? address.port : options.port;
+
+  return typeof address === "object" && address ? address.port : options.port;
+}
+
+/** Serves the page and the API on the repository at `root` until the process is stopped (Ctrl+C or a signal). */
+export async function serve(root: string, options: ServeOptions): Promise<void> {
+  const web = await webDirectory();
+  const analyses = analysisPerBurst(root);
+  const changes = changeChannel(analyses.invalidate);
+
+  if (options.watch) watchSources(root, changes.notify);
+  const agentSpec = agentSpecOf((await analyze(root)).config, options.agent);
+  // The agent's runner is made once the first run is asked for; every run ends with archdiff running the checks.
+  let runner: AgentRunner | null = null;
+  const ctx: RouteContext = {
+    root,
+    options,
+    agentSpec,
+    fresh: analyses.fresh,
+    invalidate: analyses.invalidate,
+    runner: () => {
+      if (!agentSpec) throw new Error("no agent");
+
+      // After a run: the repository changed, so a fresh analysis, then the contract and the configured checks.
+      return (runner ??= new AgentRunner(root, agentSpec, async () => {
+        analyses.invalidate();
+
+        return checkEvents(await runChecks(await analyses.fresh()));
+      }));
+    },
+    activeRunner: () => runner,
+    changeListeners: changes.listeners,
+    picture: (query) => pictureOf(query, options.base, analyses.fresh),
+  };
+
+  const server = createServer((request, response) => {
+    handle(ctx, web, request, response).catch((error: unknown) => {
+      process.stderr.write(`archdiff web: ${error instanceof Error ? error.message : String(error)}\n`);
+
+      if (!response.headersSent) problem(response, 500, error instanceof Error ? error.message : String(error));
+    });
+  });
+  const port = await listen(server, options);
   process.stderr.write(`archdiff web: http://${options.host}:${port}/  (${root})${options.port === null && port !== DEFAULT_PORT ? `  (port ${DEFAULT_PORT} was taken)` : ""}\n`);
 
   // Runs until the process is stopped.
