@@ -17,6 +17,7 @@ The options of a picture, checked case by case on the page and fixed.
 Switching between the pictures, walked on a browser extension's repository (scripts without functions, modules nothing imports) and fixed.
 
 - A view opened while the first picture was still mounting the canvas left the canvas blank for good: a second Excalidraw was mounted into the same container. The canvas mounts once, and a picture that comes meanwhile waits for it. A picture slower than the next link (a big one, a slow machine) no longer lands over the picture the link names now: a load the link overtook draws nothing.
+- The fit put a big picture's top rows under the toolbar and its corner under the minimap; it keeps clear of both (beside the minimap or above it, whichever is larger) and of the zoom row, and fits again when the window or a folded panel changes the canvas. The zoom and place of a view were never given back (the fit always won, and the place was kept every two seconds under whichever view the link named, often the next one): a view the reader zoomed or panned comes back where it was left, a place that no longer shows the picture gives way to the fit, `0` forgets it, and the places an older page kept are dropped.
 
 ## 0.5.0 — 2026-10-18
 

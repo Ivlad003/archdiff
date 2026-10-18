@@ -66,21 +66,35 @@ test("the page lists the views, draws the layers and walks to a module and its c
   await page!.waitForFunction(`location.hash.includes("module%3Asrc%2Flib%2Forders.ts")`);
   await page!.waitForFunction(`(document.querySelector("#crumbs")?.textContent ?? "").includes("orders.ts")`);
   assert.ok((await page!.textContent("#crumbs"))?.includes("lib"));
-  // After "fit" the whole scene is centred in the canvas; the single module of a depth-0 view sits at the centre, so a tap there picks it.
-  // A remembered viewport would win over the fit: forget it, as a first visit would.
+  // A first visit (nothing remembered): the single module of a depth-0 view, fitted, picked by a tap on it.
   await page!.evaluate("localStorage.clear()");
   await page!.goto(`${base}/?fresh=1#view=module%3Asrc%2Flib%2Forders.ts&depth=0`);
-  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent === "src/lib/orders.ts"`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/orders.ts"`);
   await page!.waitForTimeout(1000);
-  const canvasBox = (await page!.evaluate(`document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect().toJSON()`)) as { left: number; top: number; width: number; height: number };
-  assert.ok(canvasBox.width > 100);
-  const centre = { x: canvasBox.left + canvasBox.width / 2, y: canvasBox.top + canvasBox.height / 2 };
-  await page!.mouse.move(centre.x, centre.y);
+  const module = await screenPointOf("src/lib/orders.ts");
+  await page!.mouse.move(module.x, module.y);
   await page!.mouse.down();
   await page!.mouse.up();
   await page!.waitForFunction(`(document.querySelector("#code")?.textContent ?? "").includes("placeOrder")`, undefined, { timeout: 8000 });
   assert.ok((await page!.textContent("#code"))?.includes("export function placeOrder"));
 });
+
+/** Where a scene point sits on screen now: through the canvas's own scroll and zoom, wherever the page placed the scene. */
+async function onScreen(x: number, y: number): Promise<{ x: number; y: number }> {
+  return (await page!.evaluate(`(() => {
+    const viewport = window.archdiff.canvas().viewport();
+    const box = document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect();
+    return { x: box.left + (${x} + viewport.scrollX) * viewport.zoom, y: box.top + (${y} + viewport.scrollY) * viewport.zoom };
+  })()`)) as { x: number; y: number };
+}
+
+/** Where the middle of a shape of the picture on the canvas sits on screen now. */
+async function screenPointOf(elementId: string): Promise<{ x: number; y: number }> {
+  const shape = (await page!.evaluate(`window.archdiff.canvas().scene().find((element) => element.id === ${JSON.stringify(elementId)} && !element.isDeleted)`)) as { x: number; y: number; width: number; height: number } | undefined;
+  assert.ok(shape, `no element ${elementId} on the canvas`);
+
+  return onScreen(shape.x + shape.width / 2, shape.y + shape.height / 2);
+}
 
 /** The canvas against the page's own picture: how many Excalidraws are mounted, and whether the canvas shows the shapes of the picture the page holds. */
 async function canvasState(): Promise<{ canvases: number; drawn: string | null; same: boolean; shapes: number }> {
@@ -121,6 +135,88 @@ test("a link that changes while the canvas mounts, and links faster than the pic
   state = await canvasState();
   assert.ok(state.same && state.canvases === 1 && state.drawn === "module:src/db/store.ts", JSON.stringify(state));
   assert.equal(await page!.textContent("#title-text"), "src/db/store.ts");
+});
+
+/** Where the picture sits on screen against the canvas and what the page lays over it: the toolbar and the minimap. */
+async function pictureBoxes(): Promise<Record<"picture" | "canvas" | "tools" | "minimap", { left: number; top: number; right: number; bottom: number }> & { zoom: number }> {
+  return (await page!.evaluate(`(() => {
+    const canvas = window.archdiff.canvas();
+    const viewport = canvas.viewport();
+    const box = document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect();
+    const elements = canvas.scene().filter((element) => !element.isDeleted && element.customData?.archdiff);
+    const sx = (x) => box.left + (x + viewport.scrollX) * viewport.zoom;
+    const sy = (y) => box.top + (y + viewport.scrollY) * viewport.zoom;
+    const rect = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; };
+    return {
+      zoom: viewport.zoom,
+      picture: { left: sx(Math.min(...elements.map((e) => e.x))), top: sy(Math.min(...elements.map((e) => e.y))), right: sx(Math.max(...elements.map((e) => e.x + e.width))), bottom: sy(Math.max(...elements.map((e) => e.y + e.height))) },
+      canvas: rect(".excalidraw__canvas.interactive"),
+      tools: rect("#canvas-tools"),
+      minimap: rect("#minimap"),
+    };
+  })()`)) as Record<"picture" | "canvas" | "tools" | "minimap", { left: number; top: number; right: number; bottom: number }> & { zoom: number };
+}
+
+/** The picture is all on the canvas, below the toolbar and clear of the minimap. */
+async function assertPictureClear(when: string): Promise<number> {
+  const boxes = await pictureBoxes();
+  const { picture, canvas, tools, minimap } = boxes;
+  const facts = JSON.stringify(boxes);
+  assert.ok(picture.left >= canvas.left && picture.right <= canvas.right && picture.top >= canvas.top && picture.bottom <= canvas.bottom, `${when}: off the canvas ${facts}`);
+  assert.ok(picture.top >= tools.bottom, `${when}: under the toolbar ${facts}`);
+  assert.ok(picture.right <= minimap.left || picture.bottom <= minimap.top, `${when}: under the minimap ${facts}`);
+
+  return boxes.zoom;
+}
+
+test("a picture is fitted clear of the toolbar and the minimap, again when the canvas resizes, and a view comes back where the reader left it", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/?fresh=fit0#view=layers`);
+  await page!.evaluate("localStorage.clear()");
+  // A short window: the whole map fills the canvas's height, where the toolbar and the minimap sit.
+  await page!.setViewportSize({ width: 1900, height: 620 });
+  await page!.goto(`${base}/?fresh=fit#view=modules`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "modules"`);
+  await page!.waitForTimeout(800);
+  const short = await assertPictureClear("a short window");
+  // The window grows: the picture the reader did not move is fitted again, larger.
+  await page!.setViewportSize({ width: 1900, height: 1000 });
+  await page!.waitForTimeout(800);
+  assert.ok((await assertPictureClear("a tall window")) > short);
+  // The reader zooms in; another view is fitted; back on this one, the picture is where the reader left it.
+  const centre = await screenPointOf("src/lib/orders.ts");
+  await page!.mouse.move(centre.x, centre.y);
+  await page!.keyboard.down("Control");
+
+  for (let i = 0; i < 4; i++) {
+    await page!.mouse.wheel(0, -100);
+    await page!.waitForTimeout(40);
+  }
+
+  await page!.keyboard.up("Control");
+  await page!.waitForTimeout(300);
+  const left = (await page!.evaluate("window.archdiff.canvas().viewport()")) as { zoom: number };
+  await page!.evaluate(`location.hash = "view=layers"`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layers"`);
+  await page!.waitForTimeout(500);
+  await assertPictureClear("a view shown the first time");
+  await page!.goBack();
+  await page!.waitForFunction(`window.archdiff.drawn() === "modules"`);
+  await page!.waitForTimeout(500);
+  assert.deepEqual(await page!.evaluate("window.archdiff.canvas().viewport()"), left);
+  // 0 fits it again and forgets the place: the next visit is fitted.
+  await page!.keyboard.press("0");
+  await page!.evaluate(`location.hash = "view=layers"`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layers"`);
+  await page!.goBack();
+  await page!.waitForFunction(`window.archdiff.drawn() === "modules"`);
+  await page!.waitForTimeout(500);
+  await assertPictureClear("after 0");
+  // A remembered place that shows none of the picture (the picture changed since) gives way to the fit.
+  await page!.evaluate(`localStorage.setItem("archdiff.viewport.v2.layer:lib", JSON.stringify({ scrollX: 90000, scrollY: 90000, zoom: 1 }))`);
+  await page!.evaluate(`location.hash = "view=layer%3Alib"`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`);
+  await page!.waitForTimeout(500);
+  await assertPictureClear("a stale place");
 });
 
 test("the editor opens and closes, and the Chat tab reads the task from the drawing", { skip: !CHROME && "no Chrome installed" }, async () => {
@@ -237,19 +333,8 @@ test("a tap on a line lights it with its ends and shows where it leads", { skip:
   await page!.waitForSelector(".excalidraw canvas");
   await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.includes("lib")`);
   await page!.waitForTimeout(1200);
-  // Where the page put the scene: the fit centres the bounds of every element at a zoom of at most 1 with a 32 px margin.
-  const scene = (await (await fetch(`${base}/api/scene?view=${encodeURIComponent("layer:lib")}`)).json()) as { elements: { x: number; y: number; width: number; height: number; isDeleted?: boolean; points?: [number, number][]; customData?: Record<string, unknown> }[] };
-  const all = scene.elements.filter((element) => !element.isDeleted);
-  const minX = Math.min(...all.map((element) => element.x));
-  const minY = Math.min(...all.map((element) => element.y));
-  const maxX = Math.max(...all.map((element) => element.x + element.width));
-  const maxY = Math.max(...all.map((element) => element.y + element.height));
-  const canvasBox = (await page!.evaluate(`document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect().toJSON()`)) as { left: number; top: number; width: number; height: number };
-  const zoom = Math.max(0.1, Math.min(1, (canvasBox.width - 64) / (maxX - minX), (canvasBox.height - 64) / (maxY - minY)));
-  const scrollX = canvasBox.width / zoom / 2 - (minX + (maxX - minX) / 2);
-  const scrollY = canvasBox.height / zoom / 2 - (minY + (maxY - minY) / 2);
-  // The line orders.ts → store.ts: the middle of its longest segment is in a gap, on no shape.
-  const arrow = all.find((element) => element.customData?.["archdiff"] === "edge" && element.customData["from"] === "src/lib/orders.ts" && element.customData["to"] === "src/db/store.ts")!;
+  // The line orders.ts → store.ts as the canvas shows it: the middle of its longest segment is in a gap, on no shape.
+  const arrow = (await page!.evaluate(`window.archdiff.canvas().scene().find((element) => !element.isDeleted && element.customData?.archdiff === "edge" && element.customData.from === "src/lib/orders.ts" && element.customData.to === "src/db/store.ts")`)) as { x: number; y: number; points?: [number, number][] } | undefined;
   assert.ok(arrow, "no arrow orders → store in the scene");
   let longest: { x: number; y: number; length: number } | null = null;
 
@@ -261,7 +346,7 @@ test("a tap on a line lights it with its ends and shows where it leads", { skip:
     if (!longest || length > longest.length) longest = { x: arrow.x + (ax + bx) / 2, y: arrow.y + (ay + by) / 2, length };
   }
 
-  const screen = { x: canvasBox.left + (longest!.x + scrollX) * zoom, y: canvasBox.top + (longest!.y + scrollY) * zoom };
+  const screen = await onScreen(longest!.x, longest!.y);
   await page!.mouse.move(screen.x, screen.y);
   await page!.mouse.down();
   await page!.mouse.up();
@@ -275,24 +360,6 @@ test("a tap on a line lights it with its ends and shows where it leads", { skip:
   await page!.waitForFunction(`![...document.querySelectorAll("#markdown h2")].some((h) => h.textContent?.startsWith("Chain onward"))`);
 });
 
-/** Where the scene element sits on screen after the page's own fit (bounds centred, zoom at most 1, 32 px margin). */
-async function screenPointOf(view: string, elementId: string, extra = ""): Promise<{ x: number; y: number }> {
-  const scene = (await (await fetch(`${base}/api/scene?view=${encodeURIComponent(view)}${extra}`)).json()) as { elements: { id: string; x: number; y: number; width: number; height: number; isDeleted?: boolean }[] };
-  const all = scene.elements.filter((element) => !element.isDeleted);
-  const minX = Math.min(...all.map((element) => element.x));
-  const minY = Math.min(...all.map((element) => element.y));
-  const maxX = Math.max(...all.map((element) => element.x + element.width));
-  const maxY = Math.max(...all.map((element) => element.y + element.height));
-  const box = (await page!.evaluate(`document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect().toJSON()`)) as { left: number; top: number; width: number; height: number };
-  const zoom = Math.max(0.1, Math.min(1, (box.width - 64) / (maxX - minX), (box.height - 64) / (maxY - minY)));
-  const scrollX = box.width / zoom / 2 - (minX + (maxX - minX) / 2);
-  const scrollY = box.height / zoom / 2 - (minY + (maxY - minY) / 2);
-  const target = all.find((element) => element.id === elementId)!;
-  assert.ok(target, `no element ${elementId}`);
-
-  return { x: box.left + (target.x + target.width / 2 + scrollX) * zoom, y: box.top + (target.y + target.height / 2 + scrollY) * zoom };
-}
-
 test("find (/), the views filter (v), dim (d), lanes, split, the chain between two shapes and the minimap", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.evaluate("localStorage.clear()");
   await page!.goto(`${base}/?fresh=7#view=layer%3Alib`);
@@ -300,8 +367,8 @@ test("find (/), the views filter (v), dim (d), lanes, split, the chain between t
   await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.includes("lib")`);
   await page!.waitForTimeout(1000);
   // The path: a tap on orders.ts, then Shift+tap on log.ts.
-  const orders = await screenPointOf("layer:lib", "src/lib/orders.ts");
-  const log = await screenPointOf("layer:lib", "src/lib/log.ts");
+  const orders = await screenPointOf("src/lib/orders.ts");
+  const log = await screenPointOf("src/lib/log.ts");
   await page!.mouse.click(orders.x, orders.y);
   await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/lib/orders.ts"`, undefined, { timeout: 8000 });
   await page!.keyboard.down("Shift");
@@ -360,7 +427,7 @@ test("a picked shape's neighbours are chips; the arrow keys walk them sideways, 
   await page!.waitForSelector(".excalidraw canvas");
   await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.startsWith("Modules")`);
   await page!.waitForTimeout(1000);
-  const orders = await screenPointOf("modules", "src/lib/orders.ts");
+  const orders = await screenPointOf("src/lib/orders.ts");
   await page!.mouse.click(orders.x, orders.y);
   await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/lib/orders.ts"`, undefined, { timeout: 8000 });
   const chips = (await page!.evaluate(`[...document.querySelectorAll("#neighbours button")].map((b) => b.textContent)`)) as string[];
@@ -407,8 +474,8 @@ test("the canvas toolbar switches the picture, sets the detail and opens a modul
   await page!.waitForFunction(`document.querySelector("#title-text")?.textContent === "src/lib/orders.ts"`);
   await page!.waitForTimeout(1000);
   await page!.click("#tool-mix");
-  const canvasBox = (await page!.evaluate(`document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect().toJSON()`)) as { left: number; top: number; width: number; height: number };
-  await page!.mouse.move(canvasBox.left + canvasBox.width / 2, canvasBox.top + canvasBox.height / 2);
+  const module = await screenPointOf("src/lib/orders.ts");
+  await page!.mouse.move(module.x, module.y);
   await page!.mouse.down();
   await page!.mouse.up();
   await page!.waitForFunction(`location.hash.includes("expand=src%2Flib%2Forders.ts")`, undefined, { timeout: 8000 });
@@ -458,7 +525,7 @@ test("copy takes the active tab's text; the Spec tab lists the repository's spec
   const copied = (await page!.evaluate("navigator.clipboard.readText()")) as string;
   assert.ok(copied.startsWith("<!-- archdiff:generated — view layer:lib"), copied.slice(0, 80));
   // The Code tab copies the file, without line numbers.
-  const orders = await screenPointOf("layer:lib", "src/lib/orders.ts");
+  const orders = await screenPointOf("src/lib/orders.ts");
   await page!.mouse.click(orders.x, orders.y);
   await page!.waitForFunction(`(document.querySelector("#code")?.textContent ?? "").includes("placeOrder")`, undefined, { timeout: 8000 });
   await page!.click("#copy");
@@ -479,9 +546,9 @@ test("Shift or Ctrl+tap selects several shapes; a right click opens the menu; th
   await page!.waitForTimeout(1000);
   // The minimap is on by default.
   assert.equal(await page!.evaluate("document.querySelector('#minimap').hidden"), false);
-  const orders = await screenPointOf("layer:lib", "src/lib/orders.ts");
-  const log = await screenPointOf("layer:lib", "src/lib/log.ts");
-  const store = await screenPointOf("layer:lib", "src/db/store.ts");
+  const orders = await screenPointOf("src/lib/orders.ts");
+  const log = await screenPointOf("src/lib/log.ts");
+  const store = await screenPointOf("src/db/store.ts");
   await page!.mouse.click(orders.x, orders.y);
   await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "src/lib/orders.ts"`, undefined, { timeout: 8000 });
   await page!.keyboard.down("Control");

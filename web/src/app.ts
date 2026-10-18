@@ -115,7 +115,7 @@ async function load(): Promise<void> {
     edges = result.diagram.edges;
     mocks = result.mocks;
     setPictureLanes(state, result.diagram.groups, result.diagram.lanes ?? "rows");
-    await showScene(result.elements, CANVAS_EVENTS);
+    await showScene(state.view, result.elements, CANVAS_EVENTS);
 
     if (overtaken()) return;
     drawn = state.view;

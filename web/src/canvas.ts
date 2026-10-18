@@ -1,18 +1,20 @@
 // The canvas of the page: one Excalidraw, mounted with the first picture
-// and handed each next scene; the viewport remembered per view in this
-// browser; and the two modes — reading, and drawing over the picture
-// (edit), saved as the view's drawing with its mocks, refreshed from the
-// code with the strokes kept, screenshot as PNG or SVG. What a tap means
-// is picking.ts's: app.ts hands its handlers over with the scene.
+// and handed each next scene, fitted clear of the toolbar, the bottom row
+// and the minimap; the place of a view the reader moved to remembered in
+// this browser and given back when the view is shown again; and the two
+// modes — reading, and drawing over the picture (edit), saved as the
+// view's drawing with its mocks, refreshed from the code with the strokes
+// kept, screenshot as PNG or SVG. What a tap means is picking.ts's:
+// app.ts hands its handlers over with the scene.
 //
 // Entry points: `showScene`, `canvasHandle`, `canvasMode`, `setMode`,
 // `saveDrawing`, `leaveEdit`.
 
 import { api } from "./api.ts";
 import { element } from "./dom.ts";
-import { mountCanvas, type CanvasEvents, type CanvasHandle } from "./editor.tsx";
+import { mountCanvas, type CanvasCover, type CanvasEvents, type CanvasHandle, type Viewport } from "./editor.tsx";
 import { notice } from "./title.ts";
-import { currentLink, refsOf, type Link } from "./link.ts";
+import { currentLink, refsOf } from "./link.ts";
 import { page } from "./page.ts";
 import type { SceneElement } from "../../src/scene.ts";
 
@@ -33,66 +35,107 @@ export function canvasMode(): "view" | "edit" {
   return mode;
 }
 
-// ── The viewport of every view, remembered in this browser ──────────────────
+// ── The place of every view, remembered in this browser ─────────────────────
 
-function viewportKey(state: Link): string {
-  return `archdiff.viewport.${state.view}`;
+/** Where this browser keeps the place of a view: `v2`, as an older page kept every fit, under whichever view the link named then. */
+const VIEWPORT_KEY = "archdiff.viewport.v2.";
+
+/** The view whose scene the canvas shows: its place is remembered under it (the link may name the next one already). */
+let shown: string | null = null;
+
+try {
+  // The places an older page kept are forgotten: many were kept under the wrong view, and they would place pictures off the canvas.
+  const stale = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => key !== null && key.startsWith("archdiff.viewport.") && !key.startsWith(VIEWPORT_KEY));
+
+  for (const key of stale) localStorage.removeItem(key);
+} catch {
+  // No storage: nothing was kept.
 }
 
+/** Keeps the place of the shown view when the reader moved it; a view left where the fit put it is fitted again next time, to the window it is shown in then. */
 function rememberViewport(): void {
   const viewport = canvas?.viewport();
 
-  if (!viewport) return;
+  if (!canvas || !viewport || shown === null) return;
 
   try {
-    localStorage.setItem(viewportKey(currentLink()), JSON.stringify(viewport));
+    if (canvas.moved()) localStorage.setItem(VIEWPORT_KEY + shown, JSON.stringify(viewport));
+    else localStorage.removeItem(VIEWPORT_KEY + shown);
   } catch {
-    // No storage: the viewport is not remembered.
+    // No storage: the place is not remembered.
   }
 }
 
-function restoreViewport(state: Link): boolean {
+/** The place the reader left a view at, when this browser kept one that reads as a place. */
+function rememberedViewport(view: string): Viewport | null {
   try {
-    const saved = localStorage.getItem(viewportKey(state));
+    const saved = JSON.parse(localStorage.getItem(VIEWPORT_KEY + view) ?? "null") as Partial<Record<keyof Viewport, unknown>> | null;
 
-    if (!saved || !canvas) return false;
-    canvas.setViewport(JSON.parse(saved) as { scrollX: number; scrollY: number; zoom: number });
+    if (!saved || typeof saved.scrollX !== "number" || typeof saved.scrollY !== "number" || typeof saved.zoom !== "number" || !(saved.zoom > 0)) return null;
 
-    return true;
+    return { scrollX: saved.scrollX, scrollY: saved.scrollY, zoom: saved.zoom };
   } catch {
-    return false;
+    return null;
   }
 }
 
 window.addEventListener("beforeunload", rememberViewport);
-setInterval(rememberViewport, 2000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") rememberViewport();
+});
+
+/**
+ * What the page lays over the canvas, for the fit to keep the picture clear of: the toolbar over the top, the row of
+ * Excalidraw's zoom and help buttons and of the reason along the bottom, the minimap in the bottom right corner.
+ */
+function coveredEdges(): CanvasCover {
+  const box = element("canvas").getBoundingClientRect();
+  const tools = element("canvas-tools").getBoundingClientRect();
+  const rows = [element("reason"), ...element("canvas").querySelectorAll(".layer-ui__wrapper__footer")].map((row) => row.getBoundingClientRect()).filter((row) => row.height > 0);
+  const minimap = element<HTMLCanvasElement>("minimap");
+  const corner = minimap.hidden ? null : minimap.getBoundingClientRect();
+
+  return {
+    top: tools.height > 0 ? Math.max(0, tools.bottom - box.top) : 0,
+    bottom: Math.max(0, ...rows.map((row) => box.bottom - row.top)),
+    corner: corner && corner.width > 0 ? { left: corner.left - box.left, top: corner.top - box.top } : null,
+  };
+}
 
 // ── The scene ────────────────────────────────────────────────────────────────
 
 /**
- * Shows a picture's scene: the first mounts the canvas with the page's handlers of a tap, a double tap, a selection
- * and a right click (`events`, the same every time); each next one replaces the scene where this browser left the
- * view's viewport. A scene that comes while the canvas mounts (the link changed meanwhile) waits for that canvas:
- * a second Excalidraw mounted into the same container would leave the page drawing nowhere.
+ * Shows the scene of a view's picture: the first mounts the canvas with the page's handlers of a tap, a double tap,
+ * a selection and a right click (`events`, the same every time); each next one replaces the scene. The place of the
+ * view being left is kept, and the view shown comes back where the reader left it, else fitted. A scene that comes
+ * while the canvas mounts (the link changed meanwhile) waits for that canvas: a second Excalidraw mounted into the
+ * same container would leave the page drawing nowhere.
  */
-export async function showScene(elements: SceneElement[], events: Omit<CanvasEvents, "changed">): Promise<void> {
+export async function showScene(view: string, elements: SceneElement[], events: Omit<CanvasEvents, "changed">): Promise<void> {
   if (!canvas && !mounting) {
-    mounting = mountCanvas(element("canvas"), elements, {
-      ...events,
-      changed: () => {
-        if (mode !== "edit") return;
-        dirty = true;
-        saveButton.classList.add("dirty");
+    shown = view;
+    mounting = mountCanvas(
+      element("canvas"),
+      elements,
+      {
+        ...events,
+        changed: () => {
+          if (mode !== "edit") return;
+          dirty = true;
+          saveButton.classList.add("dirty");
+        },
       },
-    });
+      { cover: coveredEdges, place: rememberedViewport(view) },
+    );
     canvas = await mounting;
 
     return;
   }
 
   canvas ??= await mounting!;
-  canvas.replace(elements);
-  restoreViewport(currentLink());
+  rememberViewport();
+  shown = view;
+  canvas.replace(elements, rememberedViewport(view));
 }
 
 // ── Drawing over the picture ─────────────────────────────────────────────────
@@ -135,7 +178,8 @@ async function refreshFromCode(): Promise<void> {
   await saveDrawing();
   const now = currentLink();
   const scene = await api.scene(now.view, { ...now, onlyChanges: false, changes: false }, refsOf(now));
-  canvas.replace(scene.elements);
+  // The drawing stays where it is being drawn.
+  canvas.replace(scene.elements, canvas.viewport());
 }
 
 function download(blob: Blob, name: string): void {

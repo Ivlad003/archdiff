@@ -8,8 +8,13 @@
 // page for its menu; the link icon of a shape does the same through
 // `onLinkOpen`.
 //
+// A scene is placed where the reader left the view when that place still
+// shows it, else fitted clear of what the page lays over the canvas (the
+// toolbar, the bottom row, the minimap's corner), and fitted again when
+// the canvas changes size until the reader moves it.
+//
 // Entry point: `mountCanvas` (returns a handle: scene, replace, mode,
-// screenshot, scrollToContent, unmount), used by canvas.ts.
+// screenshot, scrollToContent, moved, unmount), used by canvas.ts.
 
 import { Excalidraw, exportToBlob, exportToSvg, restoreElements } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI, NormalizedZoomValue } from "@excalidraw/excalidraw/types";
@@ -36,15 +41,35 @@ export interface CanvasEvents {
   menu?(id: string | null, at: { x: number; y: number }, lines: PickedLine[]): void;
 }
 
+/** Where the viewport is: the scene's scroll and the zoom. */
+export interface Viewport {
+  scrollX: number;
+  scrollY: number;
+  zoom: number;
+}
+
+/**
+ * What the page lays over the canvas, in screen pixels, for the fit to keep the scene clear of: a toolbar down from
+ * the top edge, a row up from the bottom edge, and a box in the bottom right corner (its left and top edges, from the
+ * canvas's left and top), or none.
+ */
+export interface CanvasCover {
+  top: number;
+  bottom: number;
+  corner: { left: number; top: number } | null;
+}
+
 export interface CanvasHandle {
   scene(): SceneElement[];
-  /** Replaces the scene and fits it to the window. */
-  replace(elements: SceneElement[]): void;
+  /** Replaces the scene: at `place` (where the reader left the view) when that still shows a good part of it, else fitted to the window. */
+  replace(elements: SceneElement[], place?: Viewport | null): void;
   /** View mode (reading) or edit mode (Excalidraw's whole UI). */
   setMode(mode: "view" | "edit"): void;
   /** A PNG or SVG of the whole scene, or of the selected elements when there are some. */
   screenshot(kind: "png" | "svg"): Promise<Blob>;
   scrollToContent(): void;
+  /** Whether the reader has a place worth keeping: the viewport moved since the fit (a pan, a zoom), or a remembered place was given back. */
+  moved(): boolean;
   /** Lights the shapes of `ids` (a run passing through them); an empty list clears every light. */
   highlight(ids: readonly string[], colour?: string): void;
   /** Lights the line under the pointer, under the tap's own light; null puts it out. */
@@ -56,8 +81,8 @@ export interface CanvasHandle {
   /** The size of the canvas on screen, for the minimap's viewport box. */
   size(): { width: number; height: number };
   /** Where the viewport is, to remember per view. */
-  viewport(): { scrollX: number; scrollY: number; zoom: number } | null;
-  setViewport(viewport: { scrollX: number; scrollY: number; zoom: number }): void;
+  viewport(): Viewport | null;
+  setViewport(viewport: Viewport): void;
   unmount(): void;
 }
 
@@ -103,6 +128,10 @@ const TAP_SLOP = 6;
 const DOUBLE_TAP_MS = 500;
 /** The room left around the scene when it is fitted to the canvas, in screen pixels. */
 const FIT_MARGIN = 32;
+/** The room left between the fitted scene and what the page lays over the canvas, in screen pixels. */
+const FIT_GAP = 12;
+/** Excalidraw's own floor of the zoom. */
+const MIN_ZOOM = 0.1;
 /** The opacity of what the dim tool fades, in percent. */
 const DIMMED_OPACITY = 18;
 
@@ -112,12 +141,18 @@ interface SceneVersions {
   baseline: string | null;
 }
 
-/** What the parts of a mounted canvas share: the container, Excalidraw's API once it is ready, the mode, and the scene's versions. */
+/**
+ * What the parts of a mounted canvas share: the container, Excalidraw's API once it is ready, the mode, the scene's
+ * versions, what the page lays over the canvas, and how the scene was placed — not yet (`null`), by the fit (with the
+ * viewport it set, to tell a pan or a zoom since), or at a place given back (`given`).
+ */
 interface Mounted {
   container: HTMLElement;
   api: ExcalidrawImperativeAPI | null;
   mode: "view" | "edit";
   versions: SceneVersions | null;
+  cover: () => CanvasCover;
+  placed: { by: "fit"; at: Viewport } | { by: "given" } | null;
 }
 
 interface CanvasProps {
@@ -345,29 +380,73 @@ function listenForHover(mounted: Mounted, hover: (id: string | null) => void): v
   });
 }
 
+/** The box around the scene's elements, or null for an empty scene (a loop: a big scene's coordinates would overflow a spread). */
+function boundsOf(elements: readonly SceneElement[]): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  if (elements.length === 0) return null;
+  const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+  for (const element of elements) {
+    bounds.minX = Math.min(bounds.minX, element.x);
+    bounds.minY = Math.min(bounds.minY, element.y);
+    bounds.maxX = Math.max(bounds.maxX, element.x + element.width);
+    bounds.maxY = Math.max(bounds.maxY, element.y + element.height);
+  }
+
+  return bounds;
+}
+
+/** The scene centred in a rectangle of the canvas (screen pixels from its corner), as large as fits there but never above 1; with where its right and bottom edges land. */
+function placeIn(bounds: NonNullable<ReturnType<typeof boundsOf>>, area: { left: number; top: number; right: number; bottom: number }): Viewport & { right: number; bottom: number } {
+  const width = Math.max(1, bounds.maxX - bounds.minX);
+  const height = Math.max(1, bounds.maxY - bounds.minY);
+  const zoom = Math.max(MIN_ZOOM, Math.min(1, (area.right - area.left) / width, (area.bottom - area.top) / height));
+  const centreX = (area.left + area.right) / 2;
+  const centreY = (area.top + area.bottom) / 2;
+
+  return { zoom, scrollX: centreX / zoom - (bounds.minX + width / 2), scrollY: centreY / zoom - (bounds.minY + height / 2), right: centreX + (width * zoom) / 2, bottom: centreY + (height * zoom) / 2 };
+}
+
 /**
- * Fits the whole scene into the container: Excalidraw's own scrollToContent zooms out far too much for a small
- * scene, so the zoom is computed here from the scene's bounds (never above 1, so a tiny diagram stays readable).
+ * Fits the whole scene into the container, clear of what the page lays over it: below the toolbar, above the bottom
+ * row, and — when the scene would reach under the corner's box — beside the box or above it, whichever leaves the
+ * scene larger. Excalidraw's own scrollToContent zooms out far too much for a small scene and knows nothing of the
+ * page, so the zoom is computed here from the scene's bounds (never above 1, so a tiny diagram stays readable).
  */
 function fitScene(mounted: Mounted): void {
   const { api, container } = mounted;
-
-  if (!api) return;
-  const all = elementsOf(api);
-
-  if (all.length === 0) return;
-  const minX = Math.min(...all.map((element) => element.x));
-  const minY = Math.min(...all.map((element) => element.y));
-  const maxX = Math.max(...all.map((element) => element.x + element.width));
-  const maxY = Math.max(...all.map((element) => element.y + element.height));
+  const bounds = api ? boundsOf(elementsOf(api)) : null;
   const width = container.clientWidth;
   const height = container.clientHeight;
 
-  if (width === 0 || height === 0) return;
-  const zoom = Math.max(0.1, Math.min(1, (width - 2 * FIT_MARGIN) / (maxX - minX), (height - 2 * FIT_MARGIN) / (maxY - minY)));
-  const scrollX = width / zoom / 2 - (minX + (maxX - minX) / 2);
-  const scrollY = height / zoom / 2 - (minY + (maxY - minY) / 2);
-  api.updateScene({ appState: { scrollX, scrollY, zoom: { value: asZoom(zoom) } } });
+  if (!api || !bounds || width === 0 || height === 0) return;
+  const cover = mounted.cover();
+  const area = { left: FIT_MARGIN, top: Math.max(FIT_MARGIN, cover.top + FIT_GAP), right: width - FIT_MARGIN, bottom: height - Math.max(FIT_MARGIN, cover.bottom + FIT_GAP) };
+  let place = placeIn(bounds, area);
+  const corner = cover.corner;
+
+  if (corner && place.right > corner.left - FIT_GAP && place.bottom > corner.top - FIT_GAP) {
+    const beside = placeIn(bounds, { ...area, right: Math.min(area.right, corner.left - FIT_GAP) });
+    const above = placeIn(bounds, { ...area, bottom: Math.min(area.bottom, corner.top - FIT_GAP) });
+    place = beside.zoom >= above.zoom ? beside : above;
+  }
+
+  const at = { scrollX: place.scrollX, scrollY: place.scrollY, zoom: place.zoom };
+  api.updateScene({ appState: { scrollX: at.scrollX, scrollY: at.scrollY, zoom: { value: asZoom(at.zoom) } } });
+  mounted.placed = { by: "fit", at };
+}
+
+/** Whether a place of the viewport shows a good part of the scene: a quarter of what the canvas shows, or of the scene when the scene is the smaller. */
+function showsScene(mounted: Mounted, place: Viewport): boolean {
+  const { api, container } = mounted;
+  const bounds = api ? boundsOf(elementsOf(api)) : null;
+
+  if (!bounds || !(place.zoom > 0) || container.clientWidth === 0) return false;
+  const width = container.clientWidth / place.zoom;
+  const height = container.clientHeight / place.zoom;
+  const across = Math.min(-place.scrollX + width, bounds.maxX) - Math.max(-place.scrollX, bounds.minX);
+  const down = Math.min(-place.scrollY + height, bounds.maxY) - Math.max(-place.scrollY, bounds.minY);
+
+  return across > 0 && down > 0 && across * down >= 0.25 * Math.min(width * height, Math.max(1, bounds.maxX - bounds.minX) * Math.max(1, bounds.maxY - bounds.minY));
 }
 
 /**
@@ -462,10 +541,14 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
   return { highlight, dim, hover, forget: () => lit.clear() };
 }
 
-export function mountCanvas(container: HTMLElement, elements: SceneElement[], events: CanvasEvents): Promise<CanvasHandle> {
+/**
+ * Mounts the canvas with its first scene. `cover` says what the page lays over the canvas (the fit keeps clear of
+ * it); `place` is where the reader left the view, kept when it still shows the scene.
+ */
+export function mountCanvas(container: HTMLElement, elements: SceneElement[], events: CanvasEvents, options: { cover?: () => CanvasCover; place?: Viewport | null } = {}): Promise<CanvasHandle> {
   return new Promise((resolve) => {
     let root: Root | null = createRoot(container);
-    const mounted: Mounted = { container, api: null, mode: "view", versions: null };
+    const mounted: Mounted = { container, api: null, mode: "view", versions: null, cover: options.cover ?? (() => ({ top: 0, bottom: 0, corner: null })), placed: null };
     const listeners = new Set<(mode: "view" | "edit") => void>();
     const modeState: CanvasProps["modeState"] = [
       mounted.mode,
@@ -477,16 +560,38 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
     ];
     const lights = makeLights(mounted);
     const fit = (): void => fitScene(mounted);
+    // A place worth keeping: the reader's own — moved since the fit, or given back; a scene not placed yet has none.
+    const moved = (): boolean => {
+      const { placed } = mounted;
+      const state = mounted.api?.getAppState();
+
+      if (!placed || !state) return false;
+
+      return placed.by === "given" || Math.abs(state.scrollX - placed.at.scrollX) > 0.5 || Math.abs(state.scrollY - placed.at.scrollY) > 0.5 || Math.abs(state.zoom.value - placed.at.zoom) > 0.0005;
+    };
+    // The scene where the reader left the view when that still shows it (a picture that changed may not), else fitted.
+    const settle = (place: Viewport | null): void => {
+      if (place && mounted.api && showsScene(mounted, place)) {
+        mounted.api.updateScene({ appState: { scrollX: place.scrollX, scrollY: place.scrollY, zoom: { value: asZoom(place.zoom) } } });
+        mounted.placed = { by: "given" };
+      } else fit();
+    };
+    // The canvas grows and shrinks with the window and the panels: a scene the reader did not move is fitted again.
+    const resizes = new ResizeObserver(() => {
+      if (!moved()) requestAnimationFrame(fit);
+    });
+    resizes.observe(container);
     listenForTaps(mounted, events);
     listenForHover(mounted, lights.hover);
 
     const handle: CanvasHandle = {
       scene: () => (mounted.api ? elementsOf(mounted.api, true) : elements),
-      replace: (next) => {
+      replace: (next, place = null) => {
         // A saved element may lack fields Excalidraw needs (a scene saved through the API, an older version): restore fills them.
         lights.forget();
         mounted.api?.updateScene({ elements: restoreElements(asExcalidraw(next), null) });
-        requestAnimationFrame(fit);
+        mounted.placed = null;
+        requestAnimationFrame(() => settle(place));
       },
       setMode: (next) => {
         mounted.mode = next;
@@ -515,6 +620,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         return exportToBlob({ elements: chosen, appState, files, mimeType: "image/png", quality: 1, exportPadding: 24 });
       },
       scrollToContent: fit,
+      moved,
       highlight: lights.highlight,
       hover: lights.hover,
       dim: lights.dim,
@@ -535,6 +641,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       },
       setViewport: (viewport) => mounted.api?.updateScene({ appState: { scrollX: viewport.scrollX, scrollY: viewport.scrollY, zoom: { value: asZoom(viewport.zoom) } } }),
       unmount: () => {
+        resizes.disconnect();
         root?.unmount();
         root = null;
         mounted.api = null;
@@ -549,9 +656,11 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         modeState={modeState}
         onApi={(ready) => {
           mounted.api = ready;
-          // The container may still be laid out when Excalidraw mounts: fit once the frames are drawn.
-          requestAnimationFrame(() => requestAnimationFrame(fit));
-          setTimeout(fit, 300);
+          // The container may still be laid out when Excalidraw mounts: placed once the frames are drawn, fitted again a moment later unless the reader has a place.
+          requestAnimationFrame(() => requestAnimationFrame(() => settle(options.place ?? null)));
+          setTimeout(() => {
+            if (!moved()) fit();
+          }, 300);
           resolve(handle);
         }}
       />,

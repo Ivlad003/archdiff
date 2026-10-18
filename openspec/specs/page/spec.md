@@ -66,6 +66,15 @@ The system SHALL draw the picture of the link on one canvas, however fast the li
 - **WHEN** a reader opens a view while the first picture is still mounting the canvas, and a slow picture is overtaken by a quick one
 - **THEN** the page holds one canvas, and it shows the picture of the last link
 
+### Requirement: A picture is fitted where nothing covers it
+
+The system SHALL fit a picture whole into the canvas at a zoom of at most 1: below the toolbar, above the row of the zoom buttons and the reason, and beside the minimap or above it, whichever leaves the picture larger; and fit it again when the canvas changes size (the window, a folded panel) until the reader moves it.
+
+#### Scenario: A short window
+
+- **WHEN** the whole map fills the height of the canvas
+- **THEN** no shape sits under the toolbar or the minimap, and a taller window fits the map again, larger
+
 ### Requirement: The canvas has tools
 
 The system SHALL offer on the canvas: a picture select (the pictures of this subject, then the overviews), detail presets minimal / normal / full (full one step deeper than the view by itself) and depth −/+ (from the view's own depth, without a ceiling, off on a view that goes no depth), mix (a tapped module opens in place), dim (all but a shape and its neighbours dims), the lanes menu and lanes ↔ (rows or columns), find (`/`, Enter centres the first match or opens the matching view), split (a second embedded picture, stacked below 1520 pixels), project (the project map), a minimap (on by default, remembered when hidden; the shapes and lines small with the viewport as a box, moved by a tap or a drag), and the shortest chain of lines between two shapes on Shift+tap.
@@ -174,7 +183,7 @@ The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or
 
 ### Requirement: The browser remembers the reader's choices
 
-The system SHALL remember in the browser, and only there, the zoom and place of every view, the folded side panels, a hidden minimap, the theme (the system's at first) and the options kept with *remember as defaults*; the options menu SHALL offer the presets of who reads — reviewer (the changes and the tests overlay), newcomer (one step deep, thirty shapes) and architect (the heat, sixty shapes, lines of weight two) — and *reset*, which forgets the remembered defaults and sets every option of the picture back to the built-in one (opened modules, hidden lanes and type-only imports too). Both SHALL say what they did once the picture is drawn again. A private window without storage SHALL work the same, forgetting.
+The system SHALL remember in the browser, and only there, the zoom and place of every view the reader moved (a view left where the fit put it is fitted again, to the window it is shown in then; a place that no longer shows the picture gives way to the fit), the folded side panels, a hidden minimap, the theme (the system's at first) and the options kept with *remember as defaults*; the options menu SHALL offer the presets of who reads — reviewer (the changes and the tests overlay), newcomer (one step deep, thirty shapes) and architect (the heat, sixty shapes, lines of weight two) — and *reset*, which forgets the remembered defaults and sets every option of the picture back to the built-in one (opened modules, hidden lanes and type-only imports too). Both SHALL say what they did once the picture is drawn again. A private window without storage SHALL work the same, forgetting.
 
 #### Scenario: Back to a view
 
