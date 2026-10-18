@@ -7,7 +7,16 @@ import { writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 const at = args.indexOf("--resume");
 const session = at === -1 ? "fake-session-1" : args[at + 1];
-const prompt = args[args.length - 1] ?? "";
+// As Claude Code reads its arguments: `--allowedTools` takes everything after it up to `--`; a prompt swallowed by it is no prompt.
+const tools = args.indexOf("--allowedTools");
+const end = args.indexOf("--");
+
+if (tools !== -1 && end === -1) {
+  process.stderr.write("Error: Input must be provided either through stdin or as a prompt argument when using --print\n");
+  process.exit(1);
+}
+
+const prompt = (end !== -1 ? args[end + 1] : args[args.length - 1]) ?? "";
 
 const line = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 

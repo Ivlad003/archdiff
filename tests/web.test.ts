@@ -11,7 +11,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { hostname, networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { startWeb, withOwnServer } from "./web-server.ts";
+import { startWeb, TEST_PATH, withOwnServer } from "./web-server.ts";
 
 const root = join(import.meta.dirname, "..");
 
@@ -520,6 +520,33 @@ test("after a run the contract and the configured checks run, their results in t
       assert.deepEqual(onRequest.results.map((result) => [result.ok, result.code ?? null]), [[true, null], [true, 0], [false, 3]]);
     },
   ));
+
+test("Claude Code with checks still gets its task: the allowed tools end before the prompt", async () => {
+  // A `claude` on the test PATH that is the fake agent, reading its arguments as Claude Code does: `--allowedTools`
+  // takes everything up to `--`, and a prompt swallowed by it ends the run with an error and no text.
+  const wrapper = join(TEST_PATH, "claude");
+  writeFileSync(wrapper, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(root, "tests/fixtures/fake-agent.mjs"))} "$@"\n`, { mode: 0o755 });
+
+  try {
+    await withOwnServer(
+      "archdiff-allowed-tools-",
+      (own) => writeFileSync(join(own, "archdiff.json"), JSON.stringify({ checks: [`${JSON.stringify(process.execPath)} -e "process.exit(0)"`] })),
+      async (origin, own) => {
+        const started = await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: `add a module. write-file: ${join(own, "src/lib/planned.ts")}`, resume: null, agent: "claude" }) });
+        const body = await started.text();
+        assert.equal(started.status, 200, body);
+        const run = JSON.parse(body) as { id: string; agent: string };
+        assert.equal(run.agent, "claude");
+        const events = await eventsOf(origin, run.id);
+        assert.ok(events.some((event) => event.kind === "text" && event.text.startsWith("Reading the task")), JSON.stringify(events));
+        assert.ok(existsSync(join(own, "src/lib/planned.ts")), "the agent wrote the file the task names");
+        assert.ok(events.some((event) => event.kind === "check" && event.text.startsWith("✔ ")), JSON.stringify(events));
+      },
+    );
+  } finally {
+    rmSync(wrapper, { force: true });
+  }
+});
 
 test("Cursor's stream-json (chat_id, --resume) is read like Claude's: the question protocol and the resumed answer work", () =>
   withOwnServer(

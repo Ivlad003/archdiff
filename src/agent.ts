@@ -394,7 +394,8 @@ export class AgentRunner {
 
     if (resume && !spec.resumeCommand && spec.resumeFlag) args.push(spec.resumeFlag, resume);
 
-    if (spec.allowedTools && spec.allowedTools.length > 0) args.push("--allowedTools", ...spec.allowedTools);
+    // `--allowedTools` takes every argument after it: `--` ends the list, or the prompt would be read as a tool and the agent start with none.
+    if (spec.allowedTools && spec.allowedTools.length > 0) args.push("--allowedTools", ...spec.allowedTools, "--");
     args.push(prompt);
     const child = spawn(command[0]!, args, { cwd: this.root, stdio: ["ignore", "pipe", "pipe"], env: process.env });
     const id = `run-${this.next++}`;
