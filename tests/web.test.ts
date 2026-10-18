@@ -5,7 +5,7 @@
 // Entry point: run by `npm test`.
 
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -247,6 +247,36 @@ test("branches and a multi-head comparison through the API", async () => {
   assert.equal(compare.status, 400);
   assert.ok(((await compare.json()) as { error: string }).error.includes("not a git repository"));
 });
+
+test("a module's page in a comparison says what each head did to it", () =>
+  withOwnServer(
+    "archdiff-compare-page-",
+    (dir) => {
+      // Two heads off main: gone removes log.ts, loud makes it write to stderr.
+      const git = (...args: string[]): void => {
+        const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      git("init", "-q", "-b", "main");
+      git("add", ".");
+      git("commit", "-q", "-m", "base");
+      git("checkout", "-q", "-b", "gone");
+      rmSync(join(dir, "src/lib/log.ts"));
+      writeFileSync(join(dir, "src/lib/orders.ts"), readFileSync(join(dir, "src/lib/orders.ts"), "utf8").replace('import { log } from "./log.ts";\n', "").replace("  log(`placed ${id}`);\n", ""));
+      git("add", "-A");
+      git("commit", "-q", "-m", "gone");
+      git("checkout", "-q", "main");
+      git("checkout", "-q", "-b", "loud");
+      writeFileSync(join(dir, "src/lib/log.ts"), "export function log(message: string): void {\n  console.error(message);\n}\n");
+      git("commit", "-q", "-am", "loud");
+      git("checkout", "-q", "main");
+    },
+    async (origin) => {
+      const page = (await (await fetch(`${origin}/api/shape?view=compare&heads=gone,loud&id=${encodeURIComponent("src/lib/log.ts")}`)).json()) as { markdown: string; error?: string };
+      assert.ok(page.markdown?.includes("## In this comparison\n\n### gone\n\n- the module removed\n- removed fn `log` — src/lib/log.ts:1\n- import removed: src/lib/orders.ts → src/lib/log.ts\n"), page.markdown ?? page.error);
+      assert.ok(page.markdown.includes("### loud\n\n- changed fn `log` — src/lib/log.ts:1 (body)\n"), page.markdown);
+    },
+  ));
 
 test("chat tags are suggested and expanded into context; mocks come from the types when the agent gives no JSON", async () => {
   const tags = await getJson<{ tags: { tag: string; title: string }[] }>("/api/tags?q=orders");

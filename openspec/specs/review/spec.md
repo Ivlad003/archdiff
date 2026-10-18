@@ -31,7 +31,7 @@ The system SHALL lay the review's marks over any view (`--changes`), keep only t
 
 ### Requirement: Branches are compared, several at once
 
-The system SHALL list the branches with the default base, and compare any number of heads against one base in one picture, every module labelled with what each head did: each head from where it left the base (their merge-base, the base itself when they share no commit), as its pull request would show it, so what landed on the base since is not read as the head's doing; the table SHALL name that commit for every head. A head named twice SHALL be compared once, and a ref git does not know SHALL be refused by name.
+The system SHALL list the branches with the default base, and compare any number of heads against one base in one picture, every module labelled with what each head did: each head from where it left the base (their merge-base, the base itself when they share no commit), as its pull request would show it, so what landed on the base since is not read as the head's doing; the table SHALL name that commit for every head. A head named twice SHALL be compared once, and a ref git does not know SHALL be refused by name. A module the heads touched in different ways SHALL be labelled head by head, "every head" only when they all did the same; each head's section SHALL list all it changed — modules, functions added, removed and changed, imports, calls, packages — or say it changed none of them; a module's page SHALL say what each head did to it (in a review, what the change did).
 
 #### Scenario: Three heads
 
@@ -42,6 +42,11 @@ The system SHALL list the branches with the default base, and compare any number
 
 - **WHEN** develop gains a module after `a` left it, and `archdiff compare --heads a` runs
 - **THEN** `a`'s row starts from the commit it left develop at, and the new module is not among what `a` removed
+
+#### Scenario: Removed by one, changed by the other
+
+- **WHEN** head `gone` removes `log.ts` and head `loud` changes its function
+- **THEN** the shape of `log.ts` reads "− gone  ~ loud", not "every head", and its page lists the module removed under `gone` and the function changed under `loud`
 
 ### Requirement: History shows the drift
 

@@ -18,6 +18,7 @@ import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, typ
 import { toExcalidraw } from "../export/excalidraw.ts";
 import { planFromScene, taskMarkdown } from "../plan.ts";
 import { mergeScene, parseDrawing, readDrawing, writeDrawing, type SceneElement } from "../drawings.ts";
+import { moduleChangeMarkdown } from "../diff.ts";
 import { edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView, viewList } from "../views.ts";
@@ -152,8 +153,11 @@ export async function getShape(ctx: RouteContext, { url, response }: RouteReques
   if (!node) return problem(response, 404, "no such shape in the picture");
   const analysis = await ctx.fresh();
   const readSource = (file: string): string | null => (analysis.facts.has(file) ? readFileSync(join(root, file), "utf8") : null);
+  // In a review or a comparison, a module's page says what the change, or each head, did to it.
+  const { change } = picture.value;
+  const changed = node.kind !== "module" || !change ? "" : change.kind === "review" ? moduleChangeMarkdown(node.id, [{ head: "", diff: change.diff }], false) : moduleChangeMarkdown(node.id, change.heads, true);
 
-  return json(response, { markdown: nodeMarkdown(node, analysis, readSource) });
+  return json(response, { markdown: changed ? `${nodeMarkdown(node, analysis, readSource)}\n${changed}` : nodeMarkdown(node, analysis, readSource) });
 }
 
 export async function getLine(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {

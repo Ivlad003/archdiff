@@ -14,7 +14,7 @@
 import type { Commit } from "./git.ts";
 import type { Diagram, Line, Shape, DiffMark, PictureContent } from "./diagram.ts";
 import { toMermaid } from "./export/mermaid.ts";
-import type { Graph, Declaration } from "./graph.ts";
+import { moduleOf, type Graph, type Declaration } from "./graph.ts";
 import { allowedLayerPairs, type Intent } from "./intent.ts";
 import { standsFor } from "./shape-keys.ts";
 
@@ -290,10 +290,16 @@ export function reviewMarkdown(diff: GraphDiff, diagram: Diagram, contract: bool
 
   if (diagram.nodes.length > 0) lines.push("```mermaid", toMermaid(diagram).trimEnd(), "```", "");
   else lines.push(`_${diagram.reason}_`, "");
+  lines.push(...changeSections(diff, "##"));
 
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/** What a diff changed, a section of `level` (`##`, `###`) each, the empty ones left out: modules, functions, imports, calls, packages. */
+function changeSections(diff: GraphDiff, level: string): string[] {
+  const lines: string[] = [];
   const section = (title: string, items: string[]): void => {
-    if (items.length === 0) return;
-    lines.push(`## ${title}`, "", ...items.map((item) => `- ${item}`), "");
+    if (items.length > 0) lines.push(`${level} ${title}`, "", ...items.map((item) => `- ${item}`), "");
   };
 
   section("Modules added", diff.modulesAdded);
@@ -310,6 +316,49 @@ export function reviewMarkdown(diff: GraphDiff, diagram: Diagram, contract: bool
   section("Calls removed", diff.callsRemoved.map((edge) => `${edge.from} → ${edge.to}`));
   section("Packages added", diff.externalsAdded);
   section("Packages removed", diff.externalsRemoved);
+
+  return lines;
+}
+
+/** The modules a diff touched and how, as the picture of a comparison marks them: added or removed, else changed (a function added, removed or changed in it). */
+function touchedModules(diff: GraphDiff): Map<string, DiffMark> {
+  const touched = new Map<string, DiffMark>();
+
+  for (const change of [...diff.nodesChanged, ...diff.nodesAdded, ...diff.nodesRemoved]) touched.set(change.module, "changed");
+
+  // Added or removed outranks changed.
+  for (const id of diff.modulesAdded) touched.set(id, "added");
+
+  for (const id of diff.modulesRemoved) touched.set(id, "removed");
+
+  return touched;
+}
+
+/**
+ * What a change did to one module, for the module's page: in a review, what the change did; in a comparison, what
+ * each head did — the module added or removed, its functions, its imports, the calls into it or out of it.
+ */
+export function moduleChangeMarkdown(id: string, heads: readonly { head: string; diff: GraphDiff }[], comparison: boolean): string {
+  const lines = [comparison ? "## In this comparison" : "## In this change", ""];
+
+  for (const { head, diff } of heads) {
+    const own = (change: { module: string }): boolean => change.module === id;
+    const touches = (edge: { from: string; to: string }): boolean => moduleOf(edge.from) === id || moduleOf(edge.to) === id;
+    const items = [
+      ...(diff.modulesAdded.includes(id) ? ["the module added"] : []),
+      ...(diff.modulesRemoved.includes(id) ? ["the module removed"] : []),
+      ...diff.nodesAdded.filter(own).map((change) => `added ${fnLabel(change)}`),
+      ...diff.nodesRemoved.filter(own).map((change) => `removed ${fnLabel(change)}`),
+      ...diff.nodesChanged.filter(own).map((change) => `changed ${fnLabel(change)} (${(change.what ?? []).join(", ")})`),
+      ...diff.depsAdded.filter(touches).map((edge) => `import added: ${edge.from} → ${edge.to}`),
+      ...diff.depsRemoved.filter(touches).map((edge) => `import removed: ${edge.from} → ${edge.to}`),
+      ...diff.callsAdded.filter(touches).map((edge) => `call added: ${edge.from} → ${edge.to}`),
+      ...diff.callsRemoved.filter(touches).map((edge) => `call removed: ${edge.from} → ${edge.to}`),
+    ];
+
+    if (comparison) lines.push(`### ${head === "WORKTREE" ? "working tree" : head}`, "");
+    lines.push(...(items.length > 0 ? items.map((item) => `- ${item}`) : ["- nothing"]), "");
+  }
 
   return `${lines.join("\n").trimEnd()}\n`;
 }
@@ -333,23 +382,10 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
   const everyGraph = [baseGraph, ...forks.values(), ...graphs.values()];
   const findModule = (id: string) => everyGraph.map((graph) => graph.modules.get(id)).find((candidate) => candidate !== undefined);
   const findExternal = (id: string) => everyGraph.map((graph) => graph.externals.get(id)).find((candidate) => candidate !== undefined);
+  // What each head did to each module it touched.
   const marks = new Map<string, Map<string, DiffMark>>();
 
-  const mark = (module: string, head: string, what: DiffMark): void => {
-    const own = marks.get(module) ?? new Map<string, DiffMark>();
-
-    // Added or removed outranks changed for the same head.
-    if (own.get(head) !== "added" && own.get(head) !== "removed") own.set(head, what);
-    marks.set(module, own);
-  };
-
-  for (const { head, diff } of heads) {
-    for (const id of diff.modulesAdded) mark(id, head, "added");
-
-    for (const id of diff.modulesRemoved) mark(id, head, "removed");
-
-    for (const change of [...diff.nodesChanged, ...diff.nodesAdded, ...diff.nodesRemoved]) mark(change.module, head, "changed");
-  }
+  for (const { head, diff } of heads) for (const [module, what] of touchedModules(diff)) marks.set(module, (marks.get(module) ?? new Map<string, DiffMark>()).set(head, what));
 
   const glyph: Record<DiffMark, string> = { added: "+", removed: "−", changed: "~", warning: "!", planned: "○" };
   const nodes: Shape[] = [];
@@ -365,7 +401,8 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
     const colour: DiffMark = kinds.size === 1 ? [...kinds][0]! : "changed";
     const node: Shape = { id, kind: "module", label: `${id}\n${parts.join("  ")}`, ref: { id, file: id, line: 1 }, group: module.layer, diff: colour, count: own.size, x: 0, y: 0, w: 0, h: 0 };
 
-    if (own.size === everyHead && everyHead > 1) node.label = `${id}\n${glyph[colour]} every head`;
+    // "Every head" only when every head did the same: one that removed the module and one that changed it say so apart.
+    if (own.size === everyHead && everyHead > 1 && kinds.size === 1) node.label = `${id}\n${glyph[colour]} every head`;
     nodes.push(node);
   }
 
@@ -406,10 +443,10 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
     }
   }
 
-  const layers = [...new Set([...baseGraph.layers, ...[...graphs.values()].flatMap((graph) => graph.layers)])].sort();
+  const layers = [...new Set(everyGraph.flatMap((graph) => graph.layers))].sort();
   const used = new Set(nodes.map((node) => node.group));
   const groups = layers.filter((layer) => used.has(layer)).map((layer) => ({ id: layer, label: layer, kind: "lane" as const, x: 0, y: 0, w: 0, h: 0 }));
-  const picture: PictureContent = { title: `${heads.length} heads against ${base}`, nodes, edges, groups };
+  const picture: PictureContent = { title: headsAgainst(heads.length, base), nodes, edges, groups };
 
   if (nodes.length === 0) picture.reason = "no head changed a module, function, import or call against the base";
 
@@ -418,7 +455,7 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
 
 /** The comparison as Markdown: a table of the heads, the picture, and each head's own review. */
 export function comparisonMarkdown(base: string, heads: readonly Compared[], diagram: Diagram): string {
-  const lines = [`<!-- archdiff:generated — compare ${base} .. ${heads.map((head) => head.head).join(", ")} -->`, `# ${heads.length} heads against ${base}`, "", `_Each head from where it left ${base} (their merge-base, the commit under "since"): what the head did, not what ${base} did since._`, "", "| head | since | files | modules | functions | imports | calls | layer couplings |", "| --- | --- | --- | --- | --- | --- | --- | --- |"];
+  const lines = [`<!-- archdiff:generated — compare ${base} .. ${heads.map((head) => head.head).join(", ")} -->`, `# ${headsAgainst(heads.length, base)}`, "", `_Each head from where it left ${base} (their merge-base, the commit under "since"): what the head did, not what ${base} did since._`, "", "| head | since | files | modules | functions | imports | calls | layer couplings |", "| --- | --- | --- | --- | --- | --- | --- | --- |"];
 
   for (const { head, since, diff, contract } of heads) {
     const couplings = diff.layerEdgesAdded.map((edge) => `${edge.against || !contract ? "⚠ " : ""}+${edge.from}→${edge.to}`).concat(diff.layerEdgesRemoved.map((edge) => `−${edge.from}→${edge.to}`)).join(" ");
@@ -430,10 +467,10 @@ export function comparisonMarkdown(base: string, heads: readonly Compared[], dia
   if (diagram.nodes.length > 0) lines.push("```mermaid", toMermaid(diagram).trimEnd(), "```", "");
   else lines.push(`_${diagram.reason}_`, "");
 
-  // What every head shares and what only one has: the shape of the divergence.
+  // What every head shares and what only one has: the shape of the divergence, the modules as the picture marks them.
   const touched = new Map<string, string[]>();
 
-  for (const { head, diff } of heads) for (const id of new Set([...diff.modulesAdded, ...diff.modulesRemoved, ...diff.nodesChanged.map((change) => change.module), ...diff.nodesAdded.map((change) => change.module)])) touched.set(id, [...(touched.get(id) ?? []), head]);
+  for (const { head, diff } of heads) for (const id of touchedModules(diff).keys()) touched.set(id, [...(touched.get(id) ?? []), head]);
   const shared = [...touched].filter(([, by]) => by.length === heads.length).map(([id]) => id);
   const only = [...touched].filter(([, by]) => by.length === 1);
 
@@ -446,20 +483,24 @@ export function comparisonMarkdown(base: string, heads: readonly Compared[], dia
     lines.push("");
   }
 
+  // Each head's own review: its layer dependencies, then everything it changed, as a review lists it; or that it changed nothing.
   for (const { head, diff, contract } of heads) {
     lines.push(`## ${head === "WORKTREE" ? "working tree" : head}`, "");
-    const section = (title: string, items: string[]): void => {
-      if (items.length > 0) lines.push(`### ${title}`, "", ...items.map((item) => `- ${item}`), "");
-    };
-    section("New dependencies between layers", diff.layerEdgesAdded.map((edge) => `**${edge.from} → ${edge.to}**${contract ? (edge.against ? " — against ARCHITECTURE.md" : " — allowed by ARCHITECTURE.md") : ""}`));
-    section("Modules added", diff.modulesAdded);
-    section("Modules removed", diff.modulesRemoved);
-    section("Functions changed", diff.nodesChanged.map(fnLabel));
-    section("Imports added", diff.depsAdded.map((edge) => `${edge.from} → ${edge.to}`));
-    section("Imports removed", diff.depsRemoved.map((edge) => `${edge.from} → ${edge.to}`));
+    const own: string[] = [];
+
+    if (diff.layerEdgesAdded.length > 0) own.push("### New dependencies between layers", "", ...diff.layerEdgesAdded.map((edge) => `- **${edge.from} → ${edge.to}**${contract ? (edge.against ? " — against ARCHITECTURE.md" : " — allowed by ARCHITECTURE.md") : ""}`), "");
+
+    if (diff.layerEdgesRemoved.length > 0) own.push("### Layer dependencies removed", "", ...diff.layerEdgesRemoved.map((edge) => `- ${edge.from} → ${edge.to}`), "");
+    own.push(...changeSections(diff, "###"));
+    lines.push(...(own.length > 0 ? own : [`_No module, function, import, call or package changed${diff.changedFiles.length > 0 ? `: ${diff.changedFiles.length === 1 ? "1 source file" : `${diff.changedFiles.length} source files`} changed in what the picture does not show (comments, code outside the declarations)` : ""}._`, ""]));
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/** The title of a comparison: how many heads against which base. */
+function headsAgainst(count: number, base: string): string {
+  return `${count} ${count === 1 ? "head" : "heads"} against ${base}`;
 }
 
 /**

@@ -16,7 +16,7 @@ import { chainBetween, chainFrom, neighbourhoodOf } from "./chains.ts";
 import { askAbout } from "./chat.ts";
 import { h, element } from "./dom.ts";
 import { VIEW_LINK, type PickedLine } from "./editor.tsx";
-import { currentLink, refsOf, reviewing, setLink } from "./link.ts";
+import { currentLink, refsOf, setLink } from "./link.ts";
 import { closeMenu } from "./menu.ts";
 import { page } from "./page.ts";
 import { markdownPanel, setMarkdown, showCode, showPicturePage, showTab } from "./panel.ts";
@@ -70,13 +70,14 @@ async function showNode(id: string | null): Promise<void> {
     markdown = error instanceof Error ? error.message : String(error);
   }
 
-  // A review: what the change did to the shape, and the commits that touched its file.
+  // A review: the commits that touched the shape's file (a module's page says what the change did to it, another
+  // shape its mark). A comparison's module page says what each head did; the history here is the checkout's, not theirs.
   const file = node.ref?.file;
 
-  if (reviewing(state.view) && file) {
+  if (state.view === "review" && file) {
     try {
       const { commits } = await api.fileHistory(file);
-      markdown += `\n\n_${node.diff ?? "context"} in this change._${commits.length > 0 ? `\n\n## Commits that touched it\n\n${commits.map((commit) => `- \`${commit.short}\` ${commit.date} ${commit.author}: ${commit.subject}`).join("\n")}` : ""}\n`;
+      markdown += `${node.kind === "module" ? "" : `\n\n_${node.diff ?? "context"} in this change._`}${commits.length > 0 ? `\n\n## Commits that touched it\n\n${commits.map((commit) => `- \`${commit.short}\` ${commit.date} ${commit.author}: ${commit.subject}`).join("\n")}` : ""}\n`;
     } catch {
       // Outside git: the shape's page alone.
     }

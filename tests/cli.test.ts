@@ -805,6 +805,37 @@ test("branches lists the branches with the default base, and compare puts severa
     assert.equal(unknown.stderr, 'archdiff: no branch, tag or commit "nope" (archdiff branches lists the branches)\n');
   }));
 
+test("a comparison says what each head did: apart where they differ, every function in each head's own section", () =>
+  withTempDir("archdiff-heads-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    const git = gitIn(dir);
+    git("init", "-q", "-b", "main");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    // gone: log.ts removed, orders.ts no longer logs; loud: log.ts writes to stderr, and store.ts counts its rows.
+    git("checkout", "-q", "-b", "gone");
+    rmSync(join(dir, "src/lib/log.ts"));
+    writeFileSync(join(dir, "src/lib/orders.ts"), readFileSync(join(fixture, "src/lib/orders.ts"), "utf8").replace('import { log } from "./log.ts";\n', "").replace("  log(`placed ${id}`);\n", ""));
+    git("add", "-A");
+    git("commit", "-q", "-m", "gone: no log");
+    git("checkout", "-q", "main");
+    git("checkout", "-q", "-b", "loud");
+    writeFileSync(join(dir, "src/lib/log.ts"), "export function log(message: string): void {\n  console.error(message);\n}\n");
+    writeFileSync(join(dir, "src/db/store.ts"), `${readFileSync(join(fixture, "src/db/store.ts"), "utf8")}\nexport function countOrders(): number {\n  return rows.size;\n}\n`);
+    git("commit", "-q", "-am", "loud: log to stderr, count the orders");
+    git("checkout", "-q", "main");
+    const markdown = archdiff(["compare", dir, "--heads", "gone,loud"]).stdout;
+    // log.ts: removed by one head, changed by the other — not "every head".
+    const picture = JSON.parse(archdiff(["compare", dir, "--heads", "gone,loud", "--format", "excalidraw"]).stdout) as { elements: { id: string; text?: string }[] };
+    assert.equal(picture.elements.find((element) => element.id === "src/lib/log.ts:text")?.text?.includes("every head"), false);
+    // Each head's own section lists what it did, functions added and removed among it.
+    assert.ok(markdown.includes("## loud\n\n### Functions added\n\n- fn `countOrders`"), markdown);
+    assert.ok(markdown.includes("## gone\n\n### Modules removed\n\n- src/lib/log.ts"), markdown);
+    // Both heads touched log.ts (the one removed it, the other changed it): touched by every head.
+    assert.ok(markdown.includes("## Touched by every head\n\n- src/lib/log.ts"), markdown);
+    assert.ok(archdiff(["compare", dir, "--heads", "loud"]).stdout.includes("# 1 head against main"));
+  }));
+
 test("agent events name the files a tool touches, for the page to light their shapes", async () => {
   const { parseAgentLine } = await import("../src/agent.ts");
   const event = parseAgentLine(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/repo/src/lib/orders.ts", old_string: "a", new_string: "b" } }] } }));
