@@ -19,12 +19,12 @@ import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, typ
 import { toExcalidraw } from "../export/excalidraw.ts";
 import { planFromScene, taskMarkdown } from "../plan.ts";
 import { mergeScene, parseDrawing, readDrawing, writeDrawing, type SceneElement } from "../drawings.ts";
-import { fileAt } from "../git.ts";
+import { commitFiles, commitInfo, fileAt } from "../git.ts";
 import { moduleChangeMarkdown } from "../diff.ts";
-import { edgeMarkdown, nodeMarkdown } from "../markdown.ts";
+import { commitMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView, viewList } from "../views.ts";
-import { drawnAtHead, type ViewKind } from "../view-keys.ts";
+import { codeRevision, type ViewKind } from "../view-keys.ts";
 import { projectMap } from "../project-map.ts";
 import { standsFor } from "../shape-keys.ts";
 import { failed, json, optionsOf, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
@@ -165,11 +165,19 @@ export async function getShape(ctx: RouteContext, { url, response }: RouteReques
   const node = picture.value.diagram.nodes.find((candidate) => candidate.id === id);
 
   if (!node) return problem(response, 404, "no such shape in the picture");
+
+  // A commit (of the branches, of the timeline): its own page, read from git.
+  if (node.opens?.startsWith("commit:")) {
+    const commit = commitInfo(root, node.opens.slice("commit:".length));
+
+    return commit ? json(response, { markdown: commitMarkdown(commit, commitFiles(root, commit.sha)) }) : problem(response, 404, `no commit ${node.opens.slice("commit:".length)}`);
+  }
+
   const analysis = await codeOf(ctx, url.searchParams, response);
 
   if (!analysis) return;
   // The code as the picture's head has it: a branch's file from git, the working tree's from the disk.
-  const head = drawnAtHead(parseView(url.searchParams.get("view") ?? "")?.kind) ? url.searchParams.get("head") || null : null;
+  const head = codeRevision(parseView(url.searchParams.get("view") ?? ""), url.searchParams.get("head") || null);
   const readSource = (file: string): string | null => (!analysis.facts.has(file) ? null : head ? fileAt(root, head, file) : readFileSync(join(root, file), "utf8"));
   // In a review or a comparison, a module's page says what the change, or each head, did to it.
   const { change } = picture.value;

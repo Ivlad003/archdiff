@@ -4,14 +4,15 @@
 // `p` the project map, `0` fits, Backspace goes back, the arrows walk
 // from the picked shape and Enter goes into it, `s` splits, `m` mix, `d`
 // dim, `l` flips the lanes, `[` and `]` step the head through the
-// branches, `e` edits, Escape clears (or closes the menu and the project
-// map first). A review and a comparison are read, not drawn on: the keys
-// of the tools are off there.
+// branches, `b` shows the branches, `e` edits, Escape clears (or closes
+// the menu and the project map first). A picture read from git (a review,
+// a comparison, a commit, the branches) is not drawn on: the keys of the
+// tools are off there.
 //
 // Entry point: the module itself, imported by app.ts.
 
 import { canvasMode, saveDrawing, setMode } from "./canvas.ts";
-import { currentLink, reviewing } from "./link.ts";
+import { currentLink, readOnlyView, setLink } from "./link.ts";
 import { closeMenu, menuOpen } from "./menu.ts";
 import { toggleOptions } from "./options-panel.ts";
 import { page } from "./page.ts";
@@ -30,7 +31,7 @@ function isArrow(key: string): key is (typeof ARROWS)[number] {
 
 /** The keys of reading a picture: none while a field has the focus, none with Ctrl, Alt or Cmd held. */
 function readingKey(event: KeyboardEvent): void {
-  const drawable = !reviewing(currentLink().view);
+  const drawable = !readOnlyView(currentLink().view);
   const picked = lastPicked();
 
   if (event.key === "/") {
@@ -57,6 +58,7 @@ function readingKey(event: KeyboardEvent): void {
   else if (event.key === "d" && drawable) toggleTool("dim");
   else if (event.key === "l") flipLanes();
   else if (event.key === "[" || event.key === "]") stepHead(event.key === "]" ? 1 : -1);
+  else if (event.key === "b") setLink({ ...currentLink(), view: "branches", heads: [] });
   else if (event.key === "e" && drawable) setMode("edit");
   else if (event.key === "Escape") select([]);
 }

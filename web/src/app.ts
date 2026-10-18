@@ -25,7 +25,7 @@ import { loadTasks } from "./chat.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
 import { loadFlow } from "./flow-tab.ts";
-import { codeHead, currentLink, refsOf, reviewing, wrongInLink } from "./link.ts";
+import { codeHead, currentLink, refsOf, reviewing, readOnlyView, wrongInLink } from "./link.ts";
 import { closeMenu, menuOpen, openMenu } from "./menu.ts";
 import { updateMinimap } from "./minimap.ts";
 import { showOptions } from "./options-panel.ts";
@@ -113,9 +113,9 @@ async function load(): Promise<void> {
   const kind = parseView(state.view)?.kind;
   const deep = kind !== undefined && usesDepth(kind) ? depthWarning(state.depth) : null;
   setReason(deep ? `⚠ ${deep}` : "");
-  // A review and a comparison are read, not drawn on; the chat has nothing to build from them.
-  element<HTMLButtonElement>("edit").disabled = reviewing(state.view);
-  element("chat-tab").hidden = reviewing(state.view);
+  // A change (a review, a comparison, a commit) is read, not drawn on; the chat has nothing to build from it.
+  element<HTMLButtonElement>("edit").disabled = readOnlyView(state.view);
+  element("chat-tab").hidden = readOnlyView(state.view);
 
   /** The scene is on the canvas: a failure after it (the flow, the page) leaves the picture be. */
   let shown = false;

@@ -62,6 +62,20 @@ The system SHALL list, commit by commit between a base and a head, the modules, 
 - **WHEN** a commit adds the first import from `routes` to `db`
 - **THEN** that commit's row names `+routes→db` and its bar in the timeline is red
 
+### Requirement: The branches and one commit are pictures
+
+The system SHALL draw the branches as the `branches` view: a lane per branch with commits of its own, the base's lane on top (develop, main or master unless a base is named), its last commits from left to right; each branch SHALL leave the commit it forked from — on the base, or the newest commit of a branch it was started on — and its lane SHALL say how many commits it is ahead and behind the base; a branch with nothing of its own SHALL be named on the commit it points at. Every commit SHALL open `commit:<sha>`: the review of the commit against its first parent (the empty tree for a first commit), headed and stamped by the commit. A commit git does not know SHALL be refused by name.
+
+#### Scenario: A branch started on another one
+
+- **WHEN** `stacked` was branched from `feature-a`, which left main's first commit, and main moved on by one commit
+- **THEN** the lanes read "main (base, checked out)", "feature-a — 1 ahead, 1 behind", "stacked — 2 ahead, 1 behind", and the line into stacked's one commit comes from feature-a's commit
+
+#### Scenario: One commit's change
+
+- **WHEN** a reader opens `commit:<sha>` of the commit that added `src/lib/extra.ts`
+- **THEN** the Markdown starts with "# Architecture changes of commit <short>: <subject>" and lists the module added, and the export's stamp names that commit
+
 ### Requirement: A GitHub Action posts the review
 
 The system SHALL offer `action.yml` that runs the review of a pull request against its base and posts the Markdown as a comment, failing the check on a new dependency between layers.

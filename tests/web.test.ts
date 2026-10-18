@@ -285,6 +285,15 @@ test("a module's page in a comparison says what each head did to it", () =>
       const unknown = await fetch(`${origin}/api/views?head=nope`);
       assert.equal(unknown.status, 400);
       assert.equal(((await unknown.json()) as { error: string }).error, 'no branch, tag or commit "nope" (archdiff branches lists the branches)');
+      // The branches: a lane each; a commit's page is its message and files, read from git.
+      const branches = (await (await fetch(`${origin}/api/scene?view=branches`)).json()) as { diagram: { groups: { label: string }[]; nodes: { id: string; label: string }[] } };
+      assert.deepEqual(branches.diagram.groups.map((lane) => lane.label), ["main (base, checked out)", "gone — 1 ahead, 0 behind", "loud — 1 ahead, 0 behind"]);
+      const gone = branches.diagram.nodes.find((node) => node.label.includes("\ngone"))!;
+      const commitPage = (await (await fetch(`${origin}/api/shape?view=branches&id=${encodeURIComponent(gone.id)}`)).json()) as { markdown: string };
+      assert.ok(commitPage.markdown.includes("## Files (2)\n\n- deleted src/lib/log.ts\n- modified src/lib/orders.ts\n"), commitPage.markdown);
+      // In the commit's own picture, a module's page reads the module at that commit: orders.ts no longer imports log.ts.
+      const orders = (await (await fetch(`${origin}/api/shape?${gone.id.replace("commit:", "view=commit:")}&id=${encodeURIComponent("src/lib/orders.ts")}`)).json()) as { markdown: string };
+      assert.ok(orders.markdown.includes("## In this change") && !orders.markdown.includes("## Imports\n\n- src/lib/log.ts"), orders.markdown);
     },
   ));
 

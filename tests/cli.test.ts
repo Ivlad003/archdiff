@@ -813,6 +813,54 @@ test("branches lists the branches with the default base, and compare puts severa
     assert.equal(unknown.stderr, 'archdiff: no branch, tag or commit "nope" (archdiff branches lists the branches)\n');
   }));
 
+test("the branches picture lays each branch from the commit it left, and a commit's picture is its own change", () =>
+  withTempDir("archdiff-branch-graph-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    const git = gitIn(dir);
+    const sha = (ref: string): string => git("rev-parse", ref).trim();
+    git("init", "-q", "-b", "main");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    // level: a branch with nothing of its own; feature-a: one commit off the base; stacked: one more on feature-a.
+    git("branch", "level");
+    git("checkout", "-q", "-b", "feature-a");
+    writeFileSync(join(dir, "src/lib/extra.ts"), "export function extra(): number {\n  return 1;\n}\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "a: extra module");
+    git("checkout", "-q", "-b", "stacked");
+    writeFileSync(join(dir, "src/lib/extra.ts"), "export function extra(): number {\n  return 2;\n}\n");
+    git("commit", "-q", "-am", "stacked: two");
+    git("checkout", "-q", "main");
+    writeFileSync(join(dir, "src/lib/audit.ts"), "export function audit(): number {\n  return 1;\n}\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "main: audit");
+    const picture = JSON.parse(archdiff(["diagram", "branches", dir, "--format", "json"]).stdout) as { title: string; reason?: string; groups: { label: string }[]; nodes: { id: string; label: string; opens?: string; group?: string }[]; edges: { from: string; to: string }[] };
+    assert.equal(picture.title, "Branches against main");
+    assert.deepEqual(picture.groups.map((lane) => lane.label), ["main (base, checked out)", "feature-a — 1 ahead, 1 behind", "stacked — 2 ahead, 1 behind"]);
+    // Every commit opens its own change; the base's first commit names the branch that points at it.
+    const [base, a, stacked] = [sha("main~1"), sha("feature-a"), sha("stacked")];
+    assert.ok(picture.nodes.every((node) => node.opens === node.id), JSON.stringify(picture.nodes.map((node) => node.id)));
+    assert.ok(picture.nodes.find((node) => node.id === `commit:${base}`)?.label.endsWith("\n⌂ level"), JSON.stringify(picture.nodes));
+    // feature-a leaves the base's first commit; stacked leaves feature-a's commit, not the base.
+    assert.ok(picture.edges.some((edge) => edge.from === `commit:${base}` && edge.to === `commit:${a}`));
+    assert.ok(picture.edges.some((edge) => edge.from === `commit:${a}` && edge.to === `commit:${stacked}`));
+    assert.equal(picture.nodes.filter((node) => node.group === "stacked").length, 1);
+    assert.ok(picture.reason?.includes("level with main or merged: level"), picture.reason);
+    // A commit's picture: what it did against the commit before it, headed and stamped by the commit.
+    const commit = archdiff(["diagram", `commit:${a.slice(0, 7)}`, dir]);
+    assert.equal(commit.status, 0, commit.stderr);
+    assert.ok(commit.stdout.startsWith(`<!-- archdiff:generated — commit ${a.slice(0, 7)} -->\n# Architecture changes of commit ${a.slice(0, 7)}: a: extra module\n`), commit.stdout.slice(0, 200));
+    assert.ok(commit.stdout.includes("## Modules added\n\n- src/lib/extra.ts\n") && !commit.stdout.includes("audit"), commit.stdout);
+    assert.ok(archdiff(["diagram", `commit:${a}`, dir, "--format", "mermaid"]).stdout.includes(`%% commit ${a.slice(0, 7)} (`));
+    // The first commit has no parent: against the empty tree, every module is added.
+    const first = archdiff(["diagram", `commit:${base}`, dir]);
+    assert.equal(first.status, 0, first.stderr);
+    assert.ok(first.stdout.includes("## Modules added\n\n- cartridges/") && first.stdout.includes("\n- src/db/store.ts\n"), first.stdout.slice(0, 600));
+    const unknown = archdiff(["diagram", "commit:nope", dir]);
+    assert.equal(unknown.status, 2);
+    assert.equal(unknown.stderr, 'archdiff: no commit "nope" (archdiff branches lists the branches)\n');
+  }));
+
 test("a comparison says what each head did: apart where they differ, every function in each head's own section", () =>
   withTempDir("archdiff-heads-", (dir) => {
     cpSync(fixture, dir, { recursive: true });

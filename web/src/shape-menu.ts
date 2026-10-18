@@ -9,18 +9,19 @@
 import { setMode } from "./canvas.ts";
 import { neighbourhoodOf } from "./chains.ts";
 import type { PickedLine } from "./editor.tsx";
-import { currentLink, reviewing, setLink } from "./link.ts";
+import { currentLink, setLink, readOnlyView } from "./link.ts";
 import type { MenuItem } from "./menu.ts";
 import { siblingViews } from "./navigation.ts";
 import { page } from "./page.ts";
 import { copyText, showCode } from "./panel.ts";
 import { askSelected, deeperView, labelOf, select, selection, showEdge, toggleSelected } from "./picking.ts";
 import { toggleProjectMap } from "./project-map.ts";
+import { reviewBase } from "./review.ts";
 import { standsFor, subjectView, tagOf } from "../../src/shape-keys.ts";
 import { parseView } from "../../src/view-keys.ts";
 
 /** The words of "open" for the view a second tap opens, by its kind. */
-const OPEN_LABELS: Partial<Record<string, string>> = { inside: "Open: inside it (its functions and calls)", calls: "Open: its calls", layer: "Open: the layer", logic: "Open: its logic", machine: "Open: the machine", dir: "Open: the directory" };
+const OPEN_LABELS: Partial<Record<string, string>> = { inside: "Open: inside it (its functions and calls)", calls: "Open: its calls", layer: "Open: the layer", logic: "Open: its logic", machine: "Open: the machine", dir: "Open: the directory", commit: "Open: what it did to the architecture" };
 
 function openLabel(key: string): string {
   return OPEN_LABELS[parseView(key)?.kind ?? ""] ?? `Open ${key}`;
@@ -42,6 +43,18 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
     const items: MenuItem[] = [];
 
     if (own) items.push({ label: openLabel(own), hint: "tap again", run: go(own) });
+
+    // A commit (of the branches, of the timeline): the code at it; in the branches, the code and the review of its branch.
+    if (node.opens?.startsWith("commit:")) {
+      const sha = node.opens.slice("commit:".length);
+      const branch = parseView(now.view)?.kind === "branches" ? node.group : undefined;
+      items.push({ label: "The code at this commit", hint: `${sha.slice(0, 7)} in the head field`, run: () => setLink({ ...now, view: "layers", head: sha, heads: [] }) });
+
+      if (branch) {
+        items.push({ label: `The code of ${branch}`, hint: "its tip in the head field", run: () => setLink({ ...now, view: "layers", head: branch, heads: [] }) });
+        items.push({ label: `Review ${branch}`, hint: "since it left the base", disabled: branch === reviewBase(), run: () => setLink({ ...now, view: "review", head: branch, heads: [] }) });
+      }
+    }
 
     if (node.kind === "module" || node.kind === "participant" || fnLike) items.push({ label: "Focus: everything joined to it", hint: "callers, callees, imports, across the modules", run: go(`focus:${target}`) });
 
@@ -76,6 +89,6 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
     { label: "Project map", hint: "p", run: () => toggleProjectMap(true) },
     { label: "Fit the picture", hint: "0", run: () => page.canvas()?.scrollToContent() },
     { label: "Clear the selection", hint: "Esc", disabled: selection().length === 0, run: () => select([]) },
-    { label: "Edit the drawing", hint: "e", disabled: reviewing(now.view), run: () => setMode("edit") },
+    { label: "Edit the drawing", hint: "e", disabled: readOnlyView(now.view), run: () => setMode("edit") },
   ];
 }

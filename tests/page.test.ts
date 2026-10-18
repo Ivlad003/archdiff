@@ -413,6 +413,22 @@ test("the branch bar compares two heads: the title, the table from where each le
       await page!.keyboard.press("]");
       await page!.waitForFunction(`location.hash !== ${JSON.stringify(before)}`, undefined, { timeout: 10_000 });
       assert.ok(!(((await page!.evaluate("location.hash")) as string).includes("head=a&") || ((await page!.evaluate("location.hash")) as string).endsWith("head=a")));
+      // b: the branches, a lane each from where it left main; a tap on a commit is its page, a double tap its change.
+      await page!.evaluate(`location.hash = "view=layers"`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "layers"`, undefined, { timeout: 20_000 });
+      await page!.mouse.click(10, 300);
+      await page!.keyboard.press("b");
+      await page!.waitForFunction(`window.archdiff.drawn() === "branches"`, undefined, { timeout: 20_000 });
+      assert.equal(await page!.textContent("#title-text"), "Branches against main");
+      const commitOfA = (await page!.evaluate(`[...window.archdiff.nodes().values()].find((node) => node.label.includes("a: a report"))?.id ?? ""`)) as string;
+      assert.ok(commitOfA.startsWith("commit:"), commitOfA);
+      const spot = await screenPointOf(commitOfA);
+      await page!.mouse.click(spot.x, spot.y);
+      await page!.waitForFunction(`(document.querySelector("#markdown")?.textContent ?? "").includes("Files (1)")`, undefined, { timeout: 8000 });
+      assert.ok(((await page!.textContent("#markdown")) ?? "").includes("added src/db/report.ts"));
+      await page!.mouse.dblclick(spot.x, spot.y);
+      await page!.waitForFunction(`window.archdiff.drawn()?.startsWith("commit:")`, undefined, { timeout: 20_000 });
+      assert.match((await page!.textContent("#title-text")) ?? "", /^Commit [0-9a-f]{7}: a: a report — 1 source file changed — ⚠ 1 new layer dependency$/);
     },
   ));
 

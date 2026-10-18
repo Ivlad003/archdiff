@@ -20,12 +20,12 @@ import type { Analysis } from "./analyze.ts";
 import { layout, type Diagram } from "./diagram.ts";
 import { comparisonMarkdown, reviewMarkdown, type Compared, type GraphDiff } from "./diff.ts";
 import { readLogic, type LogicFact } from "./extract/logic.ts";
-import { mergeBase, revisionStamp } from "./git.ts";
+import { branchGraph, commitInfo, defaultBase, mergeBase, revisionStamp, type CommitInfo } from "./git.ts";
 import { positionsOf, readDrawing, type DrawingFile } from "./drawings.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import type { PictureOptions } from "./options.ts";
 import { compareBranches, history, review } from "./review.ts";
-import { drawnAtHead, viewKey, type View } from "./view-keys.ts";
+import { codeRevision, viewKey, type View } from "./view-keys.ts";
 import { viewOf, type EdgeReads } from "./views.ts";
 
 /**
@@ -48,8 +48,8 @@ export interface PictureRequest {
   refs: Refs;
 }
 
-/** What a review or a comparison found, beside its picture: the exit code of the CLI and the page's title read it. */
-export type Change = { kind: "review"; diff: GraphDiff; contract: boolean } | { kind: "compare"; base: string; heads: readonly Compared[] };
+/** What a review (of a range, or of one commit) or a comparison found, beside its picture: the exit code of the CLI and the page's title read it. */
+export type Change = { kind: "review"; diff: GraphDiff; contract: boolean; commit?: CommitInfo } | { kind: "compare"; base: string; heads: readonly Compared[] };
 
 export interface Picture {
   /** The placed diagram, stamped with the revision it was drawn from. */
@@ -89,10 +89,11 @@ async function draw(analysis: Analysis, { view, options, refs }: PictureRequest,
   // What the edge could not read for the picture (the changes outside git) is said after what the picture says itself.
   const said = notes.length > 0 ? { ...content, reason: [content.reason, ...notes].filter(Boolean).join("; ") } : content;
   const placed = layout(said, positionsOf(drawing?.elements ?? null));
-  // The revision the picture is of: its head's when it is the code at a branch or a commit, the checkout's otherwise.
-  const stamp = drawnAtHead(view.kind) && refs.head ? revisionStamp(analysis.root, refs.head) : revisionStamp(analysis.root);
+  // The revision the picture is of: the code's head, a review's head, a commit itself; the checkout's otherwise.
+  const revision = codeRevision(view, refs.head);
+  const stamp = revision ? revisionStamp(analysis.root, revision) : revisionStamp(analysis.root);
   const diagram = stamp ? { ...placed, stamp } : placed;
-  const markdown = change?.kind === "review" ? reviewMarkdown(change.diff, diagram, change.contract) : change?.kind === "compare" ? comparisonMarkdown(change.base, change.heads, diagram) : diagramMarkdown(diagram, analysis, options.mermaid);
+  const markdown = change?.kind === "review" ? reviewMarkdown(change.diff, diagram, change.contract, change.commit ?? null) : change?.kind === "compare" ? comparisonMarkdown(change.base, change.heads, diagram) : diagramMarkdown(diagram, analysis, options.mermaid);
 
   return change ? { diagram, markdown, drawing, change } : { diagram, markdown, drawing };
 }
@@ -121,6 +122,19 @@ async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOpt
 
     return { reads: { review: { diff: result.diff, base: result.base.graph, head: result.head.graph } }, change: { kind: "review", diff: result.diff, contract: result.contract }, notes: [] };
   }
+
+  // One commit's own change: the review of the commit against the one before it (the empty tree for a first commit).
+  if (view.kind === "commit") {
+    const commit = commitInfo(root, view.subject ?? "");
+
+    if (!commit) throw new Error(`no commit "${view.subject ?? ""}" (archdiff branches lists the branches)`);
+    const result = await review(root, commit.parent, commit.sha, analysis);
+
+    return { reads: { review: { diff: result.diff, base: result.base.graph, head: result.head.graph }, commit }, change: { kind: "review", diff: result.diff, contract: result.contract, commit }, notes: [] };
+  }
+
+  // The branches against the base (develop, main or master unless named; the checkout's branch without one).
+  if (view.kind === "branches") return { reads: { branches: branchGraph(root, refs.base ?? defaultBase(root) ?? "HEAD") }, notes: [] };
 
   if (view.kind === "compare") {
     const result = await compareBranches(root, refs.base, refs.heads.length > 0 ? refs.heads : ["WORKTREE"]);

@@ -260,9 +260,12 @@ function fnLabel(change: NodeChange): string {
   return `${change.kind} \`${change.id.slice(change.module.length + 1)}\` — ${change.module}:${change.line}`;
 }
 
-/** The review as Markdown: the summary, the Mermaid picture, every change by kind; `contract`: the head has ARCHITECTURE.md. */
-export function reviewMarkdown(diff: GraphDiff, diagram: Diagram, contract: boolean): string {
-  const lines = [`<!-- archdiff:generated — review since ${shortCommits(diff.base)} -->`, `# Architecture changes since ${shortCommits(diff.base)}`, ""];
+/**
+ * The review as Markdown: the summary, the Mermaid picture, every change by kind; `contract`: the head has
+ * ARCHITECTURE.md. A commit's own change (`commit`) is headed by the commit, not by its base.
+ */
+export function reviewMarkdown(diff: GraphDiff, diagram: Diagram, contract: boolean, commit: { short: string; subject: string } | null = null): string {
+  const lines = commit ? [`<!-- archdiff:generated — commit ${commit.short} -->`, `# Architecture changes of commit ${commit.short}: ${commit.subject}`, ""] : [`<!-- archdiff:generated — review since ${shortCommits(diff.base)} -->`, `# Architecture changes since ${shortCommits(diff.base)}`, ""];
   const counts = [
     `${diff.changedFiles.length === 1 ? "1 source file" : `${diff.changedFiles.length} source files`} changed`,
     `modules +${diff.modulesAdded.length} −${diff.modulesRemoved.length}`,

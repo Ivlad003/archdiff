@@ -8,17 +8,19 @@
 // from outside), `events` (emitters, event names, listeners), `tests`
 // (which modules the tests import), `hotspots` (modules sized by lines,
 // coloured by calls in), `packages` (the package.json files as a system)
-// and `timelineDiagram` (the drift commit by commit, from `history`).
+// `timelineDiagram` (the drift commit by commit, from `history`) and
+// `branchesDiagram` (the branches and their commits, from `branchGraph`).
 // All pure functions of the analysis; the placed ones set their own
 // coordinates and `layout` leaves them alone.
 //
 // Entry points: `matrixView`, `typeView`, `pathView`, `usageView`,
 // `eventsView`, `testsView`, `hotspotsView`, `packagesView`, `classesView`,
-// `timelineDiagram` (views.ts's `viewOf` dispatches to them).
+// `timelineDiagram`, `branchesDiagram` (views.ts's `viewOf` dispatches to them).
 
 import type { Analysis } from "./analyze.ts";
 import { SIZE, type Diagram, type Line, type PictureContent, type Shape } from "./diagram.ts";
 import type { HistoryRow } from "./diff.ts";
+import type { BranchGraph, Commit } from "./git.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
@@ -685,8 +687,144 @@ export function timelineDiagram(rows: readonly HistoryRow[], base: string, head:
     if (row.layerEdgesAdded.length > 0) bar.diff = "removed";
     else if (row.layerEdgesRemoved.length > 0) bar.diff = "added";
     nodes.push(bar);
-    nodes.push({ id: `commit:${row.commit.sha}`, kind: "cell", label: `${row.commit.short} ${row.commit.date}\n${row.commit.subject.slice(0, 28)}`, x, y: 20 + chart + 10, w: column - 20, h: 48 });
+    nodes.push({ id: `commit:${row.commit.sha}`, kind: "cell", label: `${row.commit.short} ${row.commit.date}\n${row.commit.subject.slice(0, 28)}`, opens: `commit:${row.commit.sha}`, x, y: 20 + chart + 10, w: column - 20, h: 48 });
   });
 
   return unplaced(`Timeline ${base}..${head}: ${rows.length} commits`, nodes, [], [], { placed: true, reason: "bars: imports and functions moved; red: a coupling between layers appeared, green: one went" });
+}
+
+/** The cell of one commit in the branches' picture, and the room between two columns (the lines to a branch turn there). */
+const COMMIT_CELL = { w: 150, h: 56, gap: 40, row: 100, top: 32 } as const;
+
+/**
+ * The branches as a picture: one lane per branch, the base on top, time from left to right. The base's last
+ * commits lie along its lane; a branch leaves the commit it forked from — on the base, or on the branch it was
+ * started on (a stacked branch) — and its own commits follow in its lane. Every commit opens its own change
+ * (`commit:<sha>`); a branch with nothing of its own is named on the commit it points at.
+ */
+export function branchesDiagram(graph: BranchGraph): PictureContent {
+  const { w, h, gap, row, top } = COMMIT_CELL;
+  const nodes: Shape[] = [];
+  const edges: Line[] = [];
+  const groups: Diagram["groups"] = [];
+  /** Where each drawn commit is: its shape and column, so a later branch can leave it. */
+  const drawn = new Map<string, { id: string; column: number; lane: number }>();
+  /** The branches with no lane of their own, by the commit they point at. */
+  const tips = new Map<string, string[]>();
+  let columns = 0;
+
+  for (const { name, tip } of graph.level) tips.set(tip, [...(tips.get(tip) ?? []), name]);
+  const place = (column: number, lane: number): { x: number; y: number } => ({ x: 20 + column * (w + gap), y: lane * row + top });
+  const commitShape = (commit: Commit, column: number, lane: number, branch: string): Shape => {
+    columns = Math.max(columns, column + 1);
+    drawn.set(commit.sha, { id: `commit:${commit.sha}`, column, lane });
+
+    return { id: `commit:${commit.sha}`, kind: "cell", label: `${commit.short} · ${commit.date}\n${commit.subject.length > 24 ? `${commit.subject.slice(0, 23)}…` : commit.subject}`, opens: `commit:${commit.sha}`, group: branch, ...place(column, lane), w, h };
+  };
+  const moreShape = (id: string, count: number, column: number, lane: number, branch: string): Shape => {
+    columns = Math.max(columns, column + 1);
+
+    return { id, kind: "more", label: `${count} earlier ${count === 1 ? "commit" : "commits"}`, group: branch, count, ...place(column, lane), w, h };
+  };
+  const flow = (from: string, to: string, route?: { x: number; y: number }[]): Line => (route ? { from, to, kind: "flow", route } : { from, to, kind: "flow" });
+
+  // The base: its earlier commits as one shape, then its last commits, oldest on the left.
+  const baseRow = [...graph.baseCommits].reverse();
+  const baseStart = graph.baseEarlier > 0 ? 1 : 0;
+  let previous: string | null = null;
+
+  if (graph.baseEarlier > 0) {
+    nodes.push(moreShape(`more:${graph.base}`, graph.baseEarlier, 0, 0, graph.base));
+    previous = `more:${graph.base}`;
+  }
+
+  for (const [i, commit] of baseRow.entries()) {
+    nodes.push(commitShape(commit, baseStart + i, 0, graph.base));
+
+    if (previous) edges.push(flow(previous, `commit:${commit.sha}`));
+    previous = `commit:${commit.sha}`;
+  }
+
+  groups.push({ id: graph.base, label: `${graph.base} (base${graph.current === graph.base ? ", checked out" : ""})`, kind: "lane", x: 0, y: 0, w: 0, h: row });
+
+  // The branches, the shortest first, so a branch started on another one leaves that one's commit.
+  const lanes = [...graph.lanes].sort((a, b) => a.ahead - b.ahead || (a.name < b.name ? -1 : 1));
+
+  for (const lane of lanes) {
+    // Its own commits not drawn yet, newest first; the first one already drawn is where it left (a stacked branch).
+    const own: Commit[] = [];
+    let from: { id: string; column: number; lane: number } | null = null;
+
+    for (const commit of lane.commits) {
+      const known = drawn.get(commit.sha);
+
+      if (known) {
+        from = known;
+        break;
+      }
+
+      own.push(commit);
+    }
+
+    // Nothing of its own left: it points at a commit another branch drew.
+    if (own.length === 0) {
+      const tip = lane.commits[0]?.sha;
+
+      if (tip) tips.set(tip, [...(tips.get(tip) ?? []), lane.name]);
+      continue;
+    }
+
+    // Left where it forked from the base: that commit when drawn, else the base's earlier commits (older than drawn).
+    if (!from && lane.fork) from = drawn.get(lane.fork) ?? (graph.baseEarlier > 0 ? { id: `more:${graph.base}`, column: 0, lane: 0 } : null);
+    const index = groups.length;
+    const unread = lane.ahead - lane.commits.length;
+    let column = (from?.column ?? -1) + 1;
+    let last: string | null = null;
+
+    // Its commits older than those read (none for a stacked branch: those are the other branch's), one shape before them.
+    if (own.length === lane.commits.length && unread > 0) {
+      nodes.push(moreShape(`more:${lane.name}`, unread, column, index, lane.name));
+      last = `more:${lane.name}`;
+      column++;
+    }
+
+    for (const commit of [...own].reverse()) {
+      nodes.push(commitShape(commit, column, index, lane.name));
+
+      if (last) edges.push(flow(last, `commit:${commit.sha}`));
+      last = `commit:${commit.sha}`;
+      column++;
+    }
+
+    // The line from where it left: out of that commit's right side, down (or up) in the gap after it, into the lane.
+    if (from) {
+      const first = nodes.find((node) => node.group === lane.name)!;
+      const start = place(from.column, from.lane);
+      const turn = start.x + w + gap / 2;
+      edges.push(flow(from.id, first.id, [{ x: start.x + w, y: start.y + h / 2 }, { x: turn, y: start.y + h / 2 }, { x: turn, y: first.y + h / 2 }, { x: first.x, y: first.y + h / 2 }]));
+    }
+
+    const state = [`${lane.ahead} ahead`, `${lane.behind} behind`].join(", ");
+    groups.push({ id: lane.name, label: `${lane.name}${lane.current ? " (checked out)" : ""}${lane.remote ? " (remote)" : ""} — ${state}`, kind: "lane", x: 0, y: index * row, w: 0, h: row });
+  }
+
+  // The branches with no lane, named on the commit they point at (when it is drawn).
+  for (const node of nodes) {
+    const names = tips.get(node.id.slice("commit:".length));
+
+    if (node.kind === "cell" && names) node.label += `\n⌂ ${names.join(", ")}`;
+  }
+
+  const width = 20 + columns * (w + gap);
+
+  for (const group of groups) group.w = width;
+  const level = graph.level.map((branch) => branch.name);
+  const notes = [
+    graph.lanes.length === 0 ? `no branch has commits of its own against ${graph.base}` : `${graph.lanes.length} ${graph.lanes.length === 1 ? "branch has" : "branches have"} commits of their own against ${graph.base}`,
+    level.length > 0 ? `level with ${graph.base} or merged: ${level.join(", ")}` : "",
+    graph.more > 0 ? `${graph.more} more ${graph.more === 1 ? "branch" : "branches"} left out` : "",
+    "a double tap on a commit opens what it did",
+  ].filter(Boolean);
+
+  return unplaced(`Branches against ${graph.base}`, nodes, edges, groups, { placed: true, reason: notes.join("; ") });
 }

@@ -9,8 +9,9 @@
 // Sits at the I/O edge below review.ts (which reads a change), files.ts
 // (which lists the sources) and the server. Entry points: `listedFiles`,
 // `changedFiles`, `treeAt`, `mergeBase`, `forkPoint`, `commitOf`,
-// `defaultBase`, `listBranches`, `commitsBetween`, `fileHistory`, `fileAt`,
-// `revisionStamp`, `commitFirst`.
+// `defaultBase`, `listBranches`, `branchGraph`, `commitsBetween`,
+// `commitInfo`, `commitFiles`, `fileHistory`, `fileAt`, `revisionStamp`,
+// `commitFirst`.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -82,6 +83,43 @@ export function forkPoint(root: string, base: string, head: string): string | nu
   const result = git(root, ["merge-base", base, head]);
 
   return result.ok ? result.out.trim() || null : null;
+}
+
+/** The tree of no files: what a first commit is compared against, as it has no parent. */
+export const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/** One commit as a reader names it, with its first parent (the empty tree for a first commit) and the rest of its message. */
+export interface CommitInfo extends Commit {
+  parent: string;
+  body: string;
+}
+
+/** The commit a ref names, as `CommitInfo`; null when git knows no commit of that name. */
+export function commitInfo(root: string, ref: string): CommitInfo | null {
+  if (commitOf(root, ref) === null) return null;
+  const result = git(root, ["log", "-1", "--format=%H%x00%h%x00%P%x00%an%x00%ad%x00%s%x00%b", "--date=short", ref]);
+
+  if (!result.ok) return null;
+  const [sha = "", short = "", parents = "", author = "", date = "", subject = "", body = ""] = result.out.split("\0");
+
+  return { sha, short, parent: parents.split(" ")[0] || EMPTY_TREE, author, date, subject, body: body.trim() };
+}
+
+/** The files a commit touched, as `git show` names them: A added, M modified, D deleted, R renamed (the new path). */
+export function commitFiles(root: string, sha: string): { status: string; path: string }[] {
+  assertRef(sha);
+  const result = git(root, ["show", "--format=", "--name-status", "--no-renames", sha]);
+
+  if (!result.ok) return [];
+
+  return result.out
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [status = "", path = ""] = line.split("\t");
+
+      return { status: status.slice(0, 1), path };
+    });
 }
 
 /** The commit a ref names (a branch, a tag, a commit), as its full hash; null when git knows none of that name. */
@@ -214,34 +252,16 @@ export interface Commit {
 export function commitsBetween(root: string, base: string, head: string): Commit[] {
   assertRef(base);
   assertRef(head);
-  const log = git(root, ["log", "--reverse", "--format=%H%x00%h%x00%an%x00%ad%x00%s", "--date=short", `${base}..${head}`]);
+  const log = git(root, ["log", "--reverse", LOG_FORMAT, "--date=short", `${base}..${head}`]);
 
   if (!log.ok) throw new Error(log.error);
 
-  return log.out
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => {
-      const [sha, short, author, date, subject] = line.split("\0") as [string, string, string, string, string];
-
-      return { sha, short, author, date, subject };
-    });
+  return commitsOf(log.out);
 }
 
 /** The commits that touched a file, newest first, for the history of a shape. */
 export function fileHistory(root: string, path: string, limit = 30): Commit[] {
-  const log = git(root, ["log", `-${limit}`, "--format=%H%x00%h%x00%an%x00%ad%x00%s", "--date=short", "--", path]);
-
-  if (!log.ok) return [];
-
-  return log.out
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => {
-      const [sha, short, author, date, subject] = line.split("\0") as [string, string, string, string, string];
-
-      return { sha, short, author, date, subject };
-    });
+  return logOf(root, [`-${limit}`, "--", path]);
 }
 
 /** A branch of the repository, local or remote. */
@@ -272,6 +292,105 @@ export function listBranches(root: string): { current: string | null; branches: 
   }
 
   return { current: head, branches };
+}
+
+/** A branch of the branches' picture: where it left the base, its own commits, how far it is ahead and behind. */
+export interface BranchLane {
+  name: string;
+  remote: boolean;
+  /** The branch checked out. */
+  current: boolean;
+  /** Where the branch left the base (their merge-base); null when they share no commit. */
+  fork: string | null;
+  /** Its own commits (on it, not on the base) along its first parents, newest first, at most the limit. */
+  commits: Commit[];
+  /** How many commits of its own it has. */
+  ahead: number;
+  /** How many commits of the base it does not have. */
+  behind: number;
+}
+
+/** The branches as their picture reads them: the base's last commits, and every branch with commits of its own. */
+export interface BranchGraph {
+  base: string;
+  /** The branch checked out; null on a detached head. */
+  current: string | null;
+  /** The base's last commits along its first parents, newest first. */
+  baseCommits: Commit[];
+  /** The base's commits older than those read. */
+  baseEarlier: number;
+  /** The branches with commits of their own, the checked-out one first, then the newest tip first. */
+  lanes: BranchLane[];
+  /** The branches with no commit of their own (merged into the base, or level with it), with the commit they point at. */
+  level: { name: string; tip: string }[];
+  /** The branches with commits of their own left out past the limit. */
+  more: number;
+}
+
+/** How many of each the picture of the branches reads: the base's commits, a branch's commits, the branches. */
+export const BRANCH_LIMITS = { base: 12, branch: 8, branches: 12 } as const;
+
+/**
+ * The branches against a base, for their picture: the base's last commits, and for every other branch (local, or
+ * remote with no local branch of its name) the commits of its own since it left the base, with how far it is ahead
+ * and behind. A branch with nothing of its own (merged, or level with the base) is only named. Throws when the base
+ * is no commit git knows.
+ */
+export function branchGraph(root: string, base: string, limits: { base: number; branch: number; branches: number } = BRANCH_LIMITS): BranchGraph {
+  assertRef(base);
+
+  if (commitOf(root, base) === null) throw new Error(`no branch, tag or commit "${base}" (archdiff branches lists the branches)`);
+  const { current, branches } = listBranches(root);
+  // HEAD as the base (no develop, main or master): the branch checked out is the base, named.
+  const named = base === "HEAD" && current ? current : base;
+  const baseCommits = logOf(root, [`-${limits.base}`, "--first-parent", named]);
+  const total = git(root, ["rev-list", "--count", "--first-parent", named]);
+  const local = new Set(branches.filter((branch) => !branch.remote).map((branch) => branch.name));
+  const lanes: BranchLane[] = [];
+  const level: { name: string; tip: string }[] = [];
+  let more = 0;
+
+  // The checked-out branch first, then the newest tip first (listBranches' order); a remote twin of a local branch is the same line.
+  for (const branch of [...branches].sort((a, b) => Number(b.current) - Number(a.current))) {
+    if (branch.name === named || (branch.remote && local.has(branch.name.slice(branch.name.indexOf("/") + 1)))) continue;
+    const counts = git(root, ["rev-list", "--left-right", "--count", `${named}...${branch.name}`]);
+    const [behind = 0, ahead = 0] = counts.ok ? counts.out.trim().split(/\s+/).map(Number) : [];
+
+    if (ahead === 0) {
+      level.push({ name: branch.name, tip: commitOf(root, branch.name) ?? "" });
+      continue;
+    }
+
+    if (lanes.length >= limits.branches) {
+      more++;
+      continue;
+    }
+
+    lanes.push({ name: branch.name, remote: branch.remote, current: branch.current, fork: forkPoint(root, named, branch.name), commits: logOf(root, [`-${limits.branch}`, "--first-parent", `${named}..${branch.name}`]), ahead, behind });
+  }
+
+  return { base: named, current, baseCommits, baseEarlier: total.ok ? Math.max(0, Number(total.out.trim()) - baseCommits.length) : 0, lanes, level, more };
+}
+
+/** The commits `git log` lists for the arguments (newest first unless they say otherwise); none when git refuses. */
+function logOf(root: string, args: string[]): Commit[] {
+  const log = git(root, ["log", LOG_FORMAT, "--date=short", ...args]);
+
+  return log.ok ? commitsOf(log.out) : [];
+}
+
+/** One line per commit: hash, short hash, author, date, subject. */
+const LOG_FORMAT = "--format=%H%x00%h%x00%an%x00%ad%x00%s";
+
+function commitsOf(out: string): Commit[] {
+  return out
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [sha, short, author, date, subject] = line.split("\0") as [string, string, string, string, string];
+
+      return { sha, short, author, date, subject };
+    });
 }
 
 /** The base branch a comparison starts from: develop, main or master, local or on origin, whichever exists first; null when none. */

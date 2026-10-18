@@ -5,9 +5,11 @@
 // is, what it calls and what calls it.
 //
 // Pure: Diagram + Analysis → text, byte-stable for the same inputs.
-// Entry points: `diagramMarkdown`, `nodeMarkdown`.
+// Entry points: `diagramMarkdown`, `nodeMarkdown`, `edgeMarkdown`,
+// `metricsMarkdown`, `commitMarkdown`.
 
 import type { Analysis } from "./analyze.ts";
+import type { CommitInfo } from "./git.ts";
 import type { Diagram, Line, Shape } from "./diagram.ts";
 import { farFromMainSequence, type Metrics } from "./diagram.ts";
 import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
@@ -404,4 +406,20 @@ export function edgeMarkdown(edge: Line, diagram: Diagram, analysis: Analysis): 
   if (imports.length === 0 && calls.length === 0) lines.push("Nothing in the graph lies behind this line by name: the view drew it from its own data (a sequence, a matrix cell, a declared dependency).", "");
 
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/** The words of a file's status in a commit, as `git show --name-status` gives it. */
+const FILE_STATUS: Readonly<Record<string, string>> = { A: "added", M: "modified", D: "deleted", T: "type changed" };
+
+/** The page of one commit (a shape of the branches or the timeline): who made it and when, its message, the files it touched. */
+export function commitMarkdown(commit: CommitInfo, files: readonly { status: string; path: string }[]): string {
+  const lines = [`# ${commit.short} ${commit.subject}`, "", `${commit.author}, ${commit.date} · \`${commit.sha}\``, ""];
+
+  if (commit.body) lines.push(commit.body, "");
+  lines.push(`## Files (${files.length})`, "");
+
+  for (const file of files) lines.push(`- ${FILE_STATUS[file.status] ?? file.status} ${file.path}`);
+  lines.push("", `A second tap opens what it did to the architecture (\`commit:${commit.short}\`).`);
+
+  return `${lines.join("\n")}\n`;
 }

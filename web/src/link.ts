@@ -9,11 +9,11 @@
 // the page renders from `currentLink()` and navigates with `setLink()`.
 //
 // Entry points: `Link`, `currentLink`, `setLink`, `wrongInLink`, `refsOf`, `codeHead`,
-// `reviewing`, `readDefaults`, `rememberDefaults`, `forgetDefaults`,
+// `reviewing`, `readOnlyView`, `readDefaults`, `rememberDefaults`, `forgetDefaults`,
 // `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`.
 
 import { DEFAULT_PICTURE_OPTIONS, readEachPictureOption, writePictureParams, type PictureOptionKey, type PictureOptions } from "../../src/options.ts";
-import { defaultDepth, parseView, usesDepth } from "../../src/view-keys.ts";
+import { codeRevision, defaultDepth, parseView, usesDepth } from "../../src/view-keys.ts";
 import type { Refs } from "./api.ts";
 
 export type { PictureOptions } from "../../src/options.ts";
@@ -26,21 +26,23 @@ export interface Link extends PictureOptions {
   heads: string[];
 }
 
-/** A review of a change or a comparison of heads: the page shows the branch bar, and nothing is drawn on it. */
+/** A review of a change or a comparison of heads: the page shows the branch bar. */
 export function reviewing(view: string): boolean {
   const kind = parseView(view)?.kind;
 
   return kind === "review" || kind === "compare";
 }
 
-/**
- * The revision whose code the page shows: the link's head for a picture of the code and for a review (the change's
- * result); the working tree (null) for a comparison of several heads and for the timeline.
- */
-export function codeHead(link: Link): string | null {
-  const kind = parseView(link.view)?.kind;
+/** A picture read from git — a review, a comparison, one commit's change, the branches: nothing is drawn on it. */
+export function readOnlyView(view: string): boolean {
+  const kind = parseView(view)?.kind;
 
-  return kind === "compare" || kind === "timeline" ? null : link.head;
+  return kind === "review" || kind === "compare" || kind === "commit" || kind === "branches";
+}
+
+/** The revision whose code the page shows (null: the working tree), as `codeRevision` says for the link's view. */
+export function codeHead(link: Link): string | null {
+  return codeRevision(parseView(link.view), link.head);
 }
 
 /** The refs of the link: the base (the base field), the head, the heads. */
@@ -140,7 +142,7 @@ export function setLink(link: Link): void {
   if (link.heads.length > 0) params.set("heads", link.heads.join(","));
   // The picture's options, written only when they differ from the remembered defaults, so a plain link stays short; an
   // explicit "none" when a default is turned off. "Only the changes" needs marks: the changes laid over, or a review.
-  const picture = writePictureParams({ ...link, onlyChanges: link.onlyChanges && (link.changes || reviewing(link.view)) }, { ...DEFAULT_PICTURE_OPTIONS, ...readDefaults() });
+  const picture = writePictureParams({ ...link, onlyChanges: link.onlyChanges && (link.changes || readOnlyView(link.view)) }, { ...DEFAULT_PICTURE_OPTIONS, ...readDefaults() });
 
   for (const [key, value] of picture) params.set(key, value);
   location.hash = params.toString();
@@ -167,4 +169,4 @@ export function detailPresets(view: string): Record<Detail, Partial<Link>> {
 }
 
 /** The overview pictures of the picture select, after those of the current subject. */
-export const OVERVIEWS: [string, string][] = [["layers", "layers"], ["modules", "every module and import"], ["intent", "the intent against the code"], ["matrix", "matrix of the layers"], ["cycles", "import cycles"], ["cycles:fns", "call cycles"], ["metrics", "coupling and cohesion"], ["machines", "state machines"], ["classes", "class diagram"], ["hotspots", "hotspots"], ["tests", "test coverage"], ["events", "events"], ["packages", "packages"], ["coverage", "blind spots"], ["timeline", "timeline"]];
+export const OVERVIEWS: [string, string][] = [["layers", "layers"], ["modules", "every module and import"], ["intent", "the intent against the code"], ["matrix", "matrix of the layers"], ["cycles", "import cycles"], ["cycles:fns", "call cycles"], ["metrics", "coupling and cohesion"], ["machines", "state machines"], ["classes", "class diagram"], ["hotspots", "hotspots"], ["tests", "test coverage"], ["events", "events"], ["packages", "packages"], ["coverage", "blind spots"], ["timeline", "timeline"], ["branches", "branches and their commits"]];

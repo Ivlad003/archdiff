@@ -64,6 +64,8 @@ export const VIEW_KINDS = {
   // The whole map shows every module of all but a big repository (the fold of `full`); the project map has the rest.
   modules: { subject: "none", question: "every module of the repository in its layer, and every import between them", modules: true, map: true, fold: 200 },
   review: { subject: "none", question: "what a change did to the architecture: the modules, imports and calls it added, removed or changed, and the new couplings between layers", modules: true, change: true },
+  commit: { subject: "required", question: "what one commit did to the architecture, against the commit before it: the modules, imports and calls it added, removed or changed", modules: true, change: true },
+  branches: { subject: "none", question: "where every branch left the base, the commits of its own, and how far it is ahead and behind", change: true },
   compare: { subject: "none", question: "what each of several branches did to the architecture against one base, side by side", modules: true, change: true },
 } as const satisfies Record<string, KindSpec>;
 
@@ -123,6 +125,17 @@ export function drawnAtHead(kind: ViewKind | undefined): boolean {
   const spec: KindSpec = VIEW_KINDS[kind];
 
   return spec.change !== true;
+}
+
+/**
+ * The revision whose code the pages of a view read — a shape's page, its file, the views list, the project map —
+ * null for the working tree: the head of a picture of the code and of a review (the change's result), the commit of
+ * a commit's change; the working tree for a comparison of several heads and for the timeline.
+ */
+export function codeRevision(view: View | null, head: string | null): string | null {
+  if (view?.kind === "commit") return view.subject;
+
+  return view?.kind === "compare" || view?.kind === "timeline" ? null : head;
 }
 
 /** How many shapes a picture of the kind keeps before its tail folds, without `--limit`. */

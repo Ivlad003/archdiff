@@ -25,7 +25,7 @@ import { ok, wrong, type Result } from "./result.ts";
 import { commitOf } from "./git.ts";
 import { analysisAt } from "./review.ts";
 import { problem, requestOf, send, type RouteContext } from "./routes/context.ts";
-import { drawnAtHead, parseView } from "./view-keys.ts";
+import { codeRevision, drawnAtHead, parseView } from "./view-keys.ts";
 import { routes as pictureRoutes } from "./routes/pictures.ts";
 import { routes as agentRoutes } from "./routes/agent.ts";
 import { routes as gitRoutes } from "./routes/git.ts";
@@ -294,7 +294,9 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   const web = await webDirectory();
   const analyses = analysisPerBurst(root);
   const at = analysesAt(root, analyses.fresh);
-  const analysisFor = (query: URLSearchParams): Promise<Analysis> => (drawnAtHead(parseView(query.get("view") ?? "layers")?.kind) ? at(query.get("head") || null) : analyses.fresh());
+  // A picture of the code is drawn on the analysis of its head; a change reads its revisions itself (picture.ts).
+  const pictureAnalysis = (query: URLSearchParams): Promise<Analysis> => (drawnAtHead(parseView(query.get("view") ?? "layers")?.kind) ? at(query.get("head") || null) : analyses.fresh());
+  const analysisFor = (query: URLSearchParams): Promise<Analysis> => at(codeRevision(parseView(query.get("view") ?? "layers"), query.get("head") || null));
   const changes = changeChannel(analyses.invalidate);
 
   // Whether the page follows the code, and why not when it was asked to (`--no-watch` is no problem).
@@ -321,7 +323,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     activeRunner: () => runner,
     changeListeners: changes.listeners,
     watching: { on: options.watch && watching === null, problem: watching },
-    picture: (query) => pictureOf(query, options.base, analysisFor),
+    picture: (query) => pictureOf(query, options.base, pictureAnalysis),
     analysisFor,
   };
 

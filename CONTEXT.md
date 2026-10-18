@@ -162,6 +162,10 @@ _Avoid_: issue, violation (in a review)
 How the dependencies between layers moved, commit by commit.
 _Avoid_: history graph
 
+**Branches**:
+The picture of the branches against the base: where each left it, its own commits, how far it is ahead and behind.
+_Avoid_: git graph, history graph
+
 ## Flows and runs
 
 **Calls view**:

@@ -64,7 +64,12 @@ The system SHALL, on a tap on a line, light it with its two ends and show its pa
 
 ### Requirement: The page shows the code at any head
 
-The system SHALL draw every picture that is no change (a review, a comparison, the timeline read revisions of their own) from the code at the link's head — a branch, a tag or a commit, read from git without a checkout — and the views list, the shape's and the line's pages, the Code tab, the coverage and the project map from it too; an empty head is the working tree. The header's head field SHALL offer the branches as it is typed, `[` and `]` SHALL step through them with the same view, and the title SHALL end with "@ head". A head git does not know SHALL be refused by name.
+The system SHALL draw every picture that is no change (a review, a comparison, the timeline read revisions of their own) from the code at the link's head — a branch, a tag or a commit, read from git without a checkout — and the views list, the shape's and the line's pages, the Code tab, the coverage and the project map from it too; an empty head is the working tree. The header's head field SHALL offer the branches as it is typed, `[` and `]` SHALL step through them with the same view, and the title SHALL end with "@ head"; `b` SHALL show the branches' picture. A head git does not know SHALL be refused by name. A shape's page in a review and in a commit's picture SHALL read the module at the change's head, at the commit.
+
+#### Scenario: The branches, to go to one
+
+- **WHEN** a reader presses `b`, taps the commit of branch `a` and taps it again
+- **THEN** the panel shows the commit's message and files, then the canvas shows "Commit <short>: a: a report — 1 source file changed — ⚠ 1 new layer dependency"; the commit's menu offers the code at that commit, the code of `a` and the review of `a`
 
 #### Scenario: Another branch's modules
 

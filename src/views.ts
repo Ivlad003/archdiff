@@ -28,7 +28,8 @@ import { logicList, logicView } from "./logic.ts";
 import { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 import { defaultDepth, foldLimit, viewKey, type View } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
-import { timelineDiagram } from "./views-more.ts";
+import { branchesDiagram, timelineDiagram } from "./views-more.ts";
+import type { BranchGraph } from "./git.ts";
 import { compareDiagram, diffDiagram, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
 import type { LogicFact } from "./extract/logic.ts";
 import { DEFAULT_PICTURE_OPTIONS, type PictureOptions } from "./options.ts";
@@ -50,6 +51,10 @@ export interface EdgeReads {
   logic?: LogicFact | null;
   review?: { diff: GraphDiff; base: Graph; head: Graph };
   compare?: { base: string; heads: readonly Compared[]; baseGraph: Graph; graphs: ReadonlyMap<string, Graph>; forks: ReadonlyMap<string, Graph> };
+  /** The commit of a `commit:` view: who made it, when, and what it says. */
+  commit?: { sha: string; short: string; author: string; date: string; subject: string };
+  /** The branches and their commits, for the branches' picture. */
+  branches?: BranchGraph;
 }
 
 export interface ViewEntry {
@@ -166,6 +171,7 @@ export function viewList(analysis: Analysis): ViewEntry[] {
 
   if (analysis.packages.length > 1) list.push({ key: "packages", title: `Packages: ${analysis.packages.length} package.json as a system`, kind: "packages" });
   list.push({ key: "timeline", title: "Timeline: the drift of the architecture, commit by commit", kind: "timeline" });
+  list.push({ key: "branches", title: "Branches: where each branch left the base, commit by commit", kind: "branches" });
 
   return list;
 }
@@ -745,6 +751,11 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
       case "review":
         // The analyses of the base and the head, which picture.ts reads from git.
         return reads.review ? diffDiagram(reads.review.diff, reads.review.base, reads.review.head) : unplaced("Review", [], [], [], { reason: "a review is read from git (archdiff review, or the page's review)" });
+      case "branches":
+        return reads.branches ? branchesDiagram(reads.branches) : unplaced("Branches", [], [], [], { placed: true, reason: "the branches are read from git" });
+      case "commit":
+        // One commit's change, read as a review of it against the commit before it; titled by the commit.
+        return reads.review && reads.commit ? { ...diffDiagram(reads.review.diff, reads.review.base, reads.review.head), title: `Commit ${reads.commit.short}: ${reads.commit.subject}`, question: `what ${reads.commit.short} (${reads.commit.author}, ${reads.commit.date}) did to the architecture` } : unplaced(`Commit ${view.subject}`, [], [], [], { reason: "a commit is read from git" });
       case "compare":
         return reads.compare ? compareDiagram(reads.compare.base, reads.compare.heads, reads.compare.baseGraph, reads.compare.graphs, reads.compare.forks) : unplaced("Compare", [], [], [], { reason: "a comparison is read from git (archdiff compare --heads a,b)" });
       case "coverage":

@@ -7,7 +7,7 @@
 // through them), the working tree when empty.
 //
 // Entry points: `showReviewBars`, `loadCommits`, `loadBranches`,
-// `loadHeadRefs`, `stepHead`.
+// `loadHeadRefs`, `stepHead`, `reviewBase`.
 
 import { api, type Commit } from "./api.ts";
 import { leaveEdit } from "./canvas.ts";
@@ -92,11 +92,19 @@ headInput.addEventListener("change", () => setLink({ ...currentLink(), head: hea
 
 /** The branches the head field offers, the working tree first (an empty head), local before remote. */
 let headRefs: string[] = [""];
+/** The branch a review starts from when the base field is empty: develop, main or master, as the server found it. */
+let defaultBase: string | null = null;
+
+/** The base of a review and of the branches' picture: the base field, else the repository's default base branch. */
+export function reviewBase(): string | null {
+  return baseInput.value.trim() || defaultBase;
+}
 
 /** Offers the branches in the head field; outside git, none (the field still takes a ref typed). */
 export async function loadHeadRefs(): Promise<void> {
   try {
-    const { branches, current } = await api.branches();
+    const { branches, current, base } = await api.branches();
+    defaultBase = base;
     headRefs = ["", ...branches.map((branch) => branch.name)];
     element("head-refs").replaceChildren(...branches.map((branch) => Object.assign(document.createElement("option"), { value: branch.name, label: `${branch.name}${branch.name === current ? " (checked out)" : ""}${branch.remote ? " (remote)" : ""} — ${branch.subject}` })));
   } catch {
