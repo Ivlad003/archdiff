@@ -4,6 +4,9 @@
 // sets up the recorder the traced code and the mocks report to. Runs
 // before the harness imports the entry, so every project module loads
 // through the hooks.
+//
+// Entry point: the module itself, loaded by run.ts (`--import`) before the
+// harness.
 
 import { readFileSync } from "node:fs";
 import { register } from "node:module";

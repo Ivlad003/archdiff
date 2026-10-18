@@ -2,6 +2,8 @@
 // by a right click on a shape, a line or the empty canvas, closed by a
 // click anywhere else, Escape or a scroll. One menu element, filled per
 // opening; shape-menu.ts says what the items are.
+//
+// Entry points: `openMenu`, `closeMenu`, `menuOpen`, `MenuItem`.
 
 import { h } from "./dom.ts";
 

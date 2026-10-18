@@ -4,6 +4,8 @@
 // extractor wrote it, becomes a `Resolution`. resolve.ts turns these into
 // archdiff's own `Resolution` (file, package, builtin, unresolved) for the
 // graph, beside its TypeScript resolver.
+//
+// Entry points: `Resolution`, `SourceResolver`.
 
 /** What a specifier names, as the language resolvers say it. */
 export type Resolution =

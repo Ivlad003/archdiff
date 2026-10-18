@@ -19,6 +19,8 @@
 // constructor parameter assigned to it (`$this->x = $x` with `X $x`), a fact of
 // the syntax; without one, the class its `@var` (or the parameter's `@param`)
 // writes, which PHP does not check: provenance `docblock`.
+//
+// Entry points: `extractPhp`, `NAME_ARG_MEMBERS`.
 
 import { asciiLowerCase } from "../languages.ts";
 import type { ArgFact, AttributeFact, CallFact, ChainLinkFact, DeclFact, ExportRow, FieldFact, FileFacts, ImportFact, LiteralFact, MethodSigFact, ParamFact, PassFact, PropertyFact, ResultCallFact, ResultTypeFact, TypeRefFact, UnsupportedFact, ValueOfFact, ValueRefFact } from "./facts.ts";

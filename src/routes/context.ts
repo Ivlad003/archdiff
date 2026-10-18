@@ -4,6 +4,9 @@
 // plus the ways to answer and to read a picture's request from a query. The handlers live in pictures.ts,
 // agent.ts and git.ts; server.ts builds the context and dispatches by
 // `METHOD /path`.
+//
+// Entry points: `RouteContext`, `RouteRequest`, `requestOf`, `optionsOf`,
+// `send`, `json`, `problem`, `failed`.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Analysis } from "../analyze.ts";

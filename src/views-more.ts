@@ -11,6 +11,10 @@
 // and `timelineDiagram` (the drift commit by commit, from `history`).
 // All pure functions of the analysis; the placed ones set their own
 // coordinates and `layout` leaves them alone.
+//
+// Entry points: `matrixView`, `typeView`, `pathView`, `usageView`,
+// `eventsView`, `testsView`, `hotspotsView`, `packagesView`, `classesView`,
+// `timelineDiagram` (views.ts's `viewOf` dispatches to them).
 
 import type { Analysis } from "./analyze.ts";
 import { SIZE, type Diagram, type Line, type PictureContent, type Shape } from "./diagram.ts";

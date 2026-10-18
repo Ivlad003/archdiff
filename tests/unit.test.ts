@@ -1,6 +1,8 @@
 // Unit tests of the pure algorithms, where one is cheaper and sharper than
 // a run of the CLI: the options table (one description, three readers),
 // strongly connected components, globs, the result helpers.
+//
+// Entry point: run by `npm test`.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

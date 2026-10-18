@@ -6,6 +6,8 @@
 // targets a version that had it. Update it when a new CPython version is supported.
 // Used by the Python import resolver (source → FileFacts) to classify an import
 // as stdlib rather than an unresolved project or third-party module.
+//
+// Entry point: `isPythonStdlib`.
 
 /** 329 names, sorted. */
 const NAMES: readonly string[] = [

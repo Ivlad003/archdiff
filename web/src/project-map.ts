@@ -7,6 +7,9 @@
 // picture wear a ring, so the reader sees where in the project the
 // picture sits. Search filters the labels, the layer chips hide layers.
 // Takes the page as its context (page.ts).
+//
+// Entry points: `toggleProjectMap`, `projectMapOpen`, `refreshProjectMap`;
+// `mapDots` and `mapSettled` for the browser tests.
 
 import { api, type ProjectMap } from "./api.ts";
 import { element, h } from "./dom.ts";

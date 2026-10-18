@@ -1,6 +1,8 @@
 // One extractor for every language archdiff reads: the file's extension
 // picks the frontend (TypeScript/JavaScript, Python, Rust, PHP), all of
 // which produce the same `FileFacts`.
+//
+// Entry point: `extractAny` (pool.ts and its workers).
 
 import type { FileFacts } from "./facts.ts";
 import { languageOf } from "../languages.ts";

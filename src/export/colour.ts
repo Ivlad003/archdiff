@@ -2,6 +2,8 @@
 // blue by a shape's heat (calls in, a matrix cell's count). Its own module so
 // that drawio.ts and excalidraw.ts, which share routes and colours, do not
 // import each other.
+//
+// Entry point: `heatColour`.
 /** A fill from near white to a deep blue by `heat` 0–1. */
 export function heatColour(heat: number): string {
   const t = Math.max(0, Math.min(1, heat));

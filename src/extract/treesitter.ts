@@ -6,6 +6,11 @@
 // `startCol`), syntax errors (`errorLine`) and the syntax fingerprints that
 // make a closure stale (`fingerprint`, `fingerprintFacts`, `valuesFingerprint`),
 // and the two helpers every frontend shares (`unsupportedAt`, `collapse`).
+//
+// Entry points: `withTree`, `loadLanguage`, `query`, `grammarFor`,
+// `located`, `startCol`, `errorLine`, `fingerprint`, `fingerprintFacts`,
+// `valuesFingerprint`, `unsupportedAt`, `collapse`, `READS_IMPORTED_VALUE`,
+// and the types `Grammar`, `Language`, `Node`, `Query`, `Tree`.
 
 import { createHash, type Hash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";

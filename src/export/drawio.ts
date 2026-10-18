@@ -3,6 +3,8 @@
 // the laid-out positions, each cell an `<object>` carrying the archdiff ID
 // and kind, so a drawing opened in draw.io keeps the link to the code.
 // Byte-stable for the same placed diagram.
+//
+// Entry point: `toDrawio` (export/index.ts).
 
 import type { Diagram, Shape } from "../diagram.ts";
 import { routeEdges } from "./excalidraw.ts";

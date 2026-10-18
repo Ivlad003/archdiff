@@ -2,6 +2,8 @@
 // listed and shown; *spec this view* and *review all specs* hand the
 // agent the task (through the Chat tab); *validate* runs the OpenSpec
 // CLI. Takes the page as its context (page.ts).
+//
+// Entry points: `loadSpecs`, `specTextOf`.
 
 import { api } from "./api.ts";
 import { agentNameOf, runState, runTask, taskField } from "./chat.ts";

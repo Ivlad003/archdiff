@@ -7,6 +7,10 @@
 // commands, the checks after a run, the document that becomes the
 // contract, and the previous tasks. Takes the page as its context
 // (page.ts).
+//
+// Entry points: `askAbout`, `runTask`, `setAgentName`, `agentNameOf`,
+// `loadTasks`, and the elements `taskField`, `runButton`, `runState`,
+// `transcript`.
 
 import { api } from "./api.ts";
 import { element, h } from "./dom.ts";

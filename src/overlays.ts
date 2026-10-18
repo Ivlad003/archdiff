@@ -6,6 +6,9 @@
 // module shaded by Martin's I (metrics.ts). Pure functions of a
 // diagram and the analysis; `--overlay a,b` and the options panel of the
 // page apply them in order after the review's own overlay (diff.ts).
+//
+// Entry points: `applyOverlays`, `parseOverlays`, `overlayTests`,
+// `overlayStorages`, `overlayHeat`, `OVERLAYS`.
 
 import type { Analysis } from "./analyze.ts";
 import type { Diagram } from "./diagram.ts";

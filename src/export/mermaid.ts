@@ -2,6 +2,8 @@
 // imports as solid arrows, calls as thick ones, references dotted; the
 // marks of a diff as classes. Text only, byte-stable for the same diagram,
 // so it pastes into a pull request comment or a Markdown file.
+//
+// Entry points: `toMermaid`, `mermaidStyleFor`, `MERMAID_STYLES`.
 
 import type { Diagram, Shape } from "../diagram.ts";
 

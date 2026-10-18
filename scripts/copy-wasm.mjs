@@ -1,6 +1,8 @@
 // Copies the grammar WASM files into dist/wasm so the published package can
 // parse without relying on the layout of @vscode/tree-sitter-wasm, which is
 // a devDependency. The list is the runtime's own (`src/extract/grammars.ts`).
+//
+// Entry point: the script itself, run by prepack.
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";

@@ -15,6 +15,8 @@
 // for every `use` path, and the `Resolution` decides the graph's edge. The
 // `Cargo.toml` files are read on every analysis, so a changed manifest is
 // seen at once.
+//
+// Entry point: `RustResolver`.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";

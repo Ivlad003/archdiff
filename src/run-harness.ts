@@ -4,6 +4,9 @@
 // one JSON report on stdout — the trace of the functions entered, the
 // calls the mocks took, the result or the error. The parent (run.ts)
 // reads it; nothing else of this process reaches the user.
+//
+// Entry point: the module itself, run by run.ts as a child process with
+// run-register.ts loaded first.
 
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";

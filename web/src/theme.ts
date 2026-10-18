@@ -1,4 +1,6 @@
 // Light or dark, remembered in this browser; the system's choice at first.
+//
+// Entry point: the module itself (the ◐ button), imported by app.ts.
 
 import { element } from "./dom.ts";
 

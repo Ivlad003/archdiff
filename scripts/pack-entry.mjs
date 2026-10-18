@@ -1,5 +1,8 @@
 // Swaps bin/archdiff.js for the published package: the checkout imports
 // src/cli.ts (Node strips its types), the package imports dist/cli.js.
+//
+// Entry point: the script itself: `publish` in prepack, `restore` in
+// postpack.
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +12,8 @@ const bin = join(dirname(fileURLToPath(import.meta.url)), "../bin/archdiff.js");
 const entry = (target) => `#!/usr/bin/env node
 // Checkout entry. \`npm pack\` rewrites this file to import ../dist/cli.js and
 // restores this copy afterwards (scripts/pack-entry.mjs).
+//
+// Entry point: the \`archdiff\` command of package.json's \`bin\`.
 import { main } from "${target}";
 
 // \`archdiff … | head\` closes stdout early; that is not an error.

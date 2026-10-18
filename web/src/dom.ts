@@ -3,6 +3,8 @@
 // with its attributes and children in one call (the lists the page
 // renders — views, tasks, lanes, chips, questions — were each a block
 // of createElement calls), and a flag remembered in this browser.
+//
+// Entry points: `element`, `h`, `remembered`, `remember`.
 
 export function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);

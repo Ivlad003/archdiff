@@ -14,6 +14,8 @@
 // Part of source → FileFacts: the Python frontend asks `PythonResolver.resolve`
 // for every import, and the `Resolution` kind (internal, local, stdlib,
 // external, generated, unresolved) decides whether the graph gets an edge.
+//
+// Entry point: `PythonResolver`.
 
 import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { join, posix } from "node:path";

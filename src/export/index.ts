@@ -1,5 +1,8 @@
 // One entry for every text format a placed Diagram can become: Mermaid,
 // draw.io, Excalidraw, ArchiMate Open Exchange, or the Diagram JSON itself.
+//
+// Entry points: `exportDiagram`, `EXPORT_FORMATS`, `ExportFormat`,
+// `EXPORT_EXTENSION`, `EXPORT_MEDIA_TYPE`, `MERMAID_STYLES`.
 
 import type { Diagram } from "../diagram.ts";
 import { toArchimate } from "./archimate.ts";

@@ -1,5 +1,7 @@
 // The extraction worker (pool.ts): receives `{path, content}` jobs, answers
 // `{path, facts}` (or `{path, error}`), and exits on `null`.
+//
+// Entry point: the module itself, started as a worker thread by pool.ts.
 
 import { parentPort } from "node:worker_threads";
 import { extractAny } from "./any.ts";

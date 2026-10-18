@@ -6,6 +6,8 @@
 // (0 success, 1 findings or differences, 2 a wrong invocation or an I/O
 // error); bin/archdiff.js sets process.exitCode. Machine output (`--json`)
 // goes to stdout alone; notes go to stderr.
+//
+// Entry points: `main` (bin/archdiff.js runs it), `helpText`.
 
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -606,7 +608,7 @@ const COMMANDS: readonly Command[] = [
   },
 ];
 
-const HELP_HEAD = `archdiff: live diagrams of a TypeScript/JavaScript repository, and the architectural diff of a change
+const HELP_HEAD = `archdiff: live diagrams of a TypeScript, JavaScript, Python, Rust or PHP repository, and the architectural diff of a change
 
 Usage: archdiff <command> [options] [dir]
 

@@ -159,7 +159,7 @@ npm run test:web  # the page in headless Chrome (playwright-core; skipped withou
 node bin/archdiff.js web .
 ```
 
-`npm pack` compiles `src/` to `dist/`, copies the tree-sitter grammars to `dist/wasm` and bundles the page (Excalidraw, React, marked) to `dist/web`, about 6 MB with the fonts. The published package has one runtime dependency, `web-tree-sitter`; no native code is compiled on install.
+`npm pack` compiles `src/` to `dist/`, copies the tree-sitter grammars to `dist/wasm` and bundles the page (Excalidraw, React, marked) to `dist/web`, about 6 MB with the fonts. The published package has two runtime dependencies, `web-tree-sitter` (the parser, WebAssembly) and `smol-toml` (the `Cargo.toml` files of a Rust repository); no native code is compiled on install.
 
 ## License
 

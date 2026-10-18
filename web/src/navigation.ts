@@ -2,6 +2,8 @@
 // (`siblingViews`) and the path above a view for the breadcrumbs
 // (`crumbsOf`). Pure functions of view keys and the views list; where a
 // shape leads is src/shape-keys.ts's, shared with the exports.
+//
+// Entry points: `siblingViews`, `crumbsOf`.
 
 import type { ViewEntry } from "./api.ts";
 import { parseView } from "../../src/view-keys.ts";

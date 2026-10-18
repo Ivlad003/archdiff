@@ -2,6 +2,8 @@
 // records of imports, declarations, calls, decorators, states and guards.
 // The CLI tests cover the fixtures end to end; these pin the facts a
 // snippet gives, which is where a regression in an extractor shows first.
+//
+// Entry point: run by `npm test`.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

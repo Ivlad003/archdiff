@@ -3,6 +3,8 @@
 // grids that force every case (a span over several columns with a shape in
 // the way, a backward edge with shapes below its source) and on every view
 // of the sample fixture.
+//
+// Entry point: run by `npm test`.
 
 import assert from "node:assert/strict";
 import { join } from "node:path";

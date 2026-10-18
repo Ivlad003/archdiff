@@ -1,6 +1,9 @@
 // The routes of the specification: the specs and features of the
 // repository, one of them, the prompt that has the agent write or review
 // them, and the OpenSpec validation.
+//
+// Entry point: `routes`, by `METHOD /path` (server.ts dispatches through
+// it).
 
 import { listSpecs, readSpec, specPrompt, specSubject, validateSpecs } from "../spec.ts";
 import { parseView } from "../views.ts";

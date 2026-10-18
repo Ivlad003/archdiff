@@ -1,6 +1,9 @@
 // The routes that read git for the review's bars: the branches, the commits
 // of a range and the history of a file. The review and the comparison
 // themselves are pictures (`/api/scene?view=review`, `view=compare`).
+//
+// Entry point: `routes`, by `METHOD /path` (server.ts dispatches through
+// it).
 
 import { commitsBetween, defaultBase, fileHistory, listBranches, mergeBase } from "../git.ts";
 import { json, problem, type RouteContext, type RouteRequest } from "./context.ts";

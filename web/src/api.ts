@@ -1,6 +1,8 @@
 // What the page reads from the server: the types of src/diagram.ts (shared
 // by import, so the page and the server cannot drift) and one typed fetch
 // per API route of src/server.ts.
+//
+// Entry points: `api`, and the types of its answers.
 
 export type { Diagram, Line, Lane, Shape } from "../../src/diagram.ts";
 export type { ProjectMap, MapLine, MapDot } from "../../src/diagram.ts";

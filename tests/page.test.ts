@@ -2,6 +2,8 @@
 // a tap on a shape showing its code, the breadcrumbs, the editor, the Chat
 // tab. Skipped when no Chrome is installed (`npm run test:web`); the API
 // itself is covered by web.test.ts.
+//
+// Entry point: run by `npm run test:web` (after `npm run web:build`).
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";

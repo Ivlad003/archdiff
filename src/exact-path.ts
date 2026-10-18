@@ -6,6 +6,8 @@
 // on a developer's laptop. The directory listing carries the real spelling,
 // so every segment of the path is compared with the listing of its parent.
 // Names are compared in NFC: HFS+ lists them in NFD.
+//
+// Entry points: `exactExistence`, `nodeFs`, `ExactFs`.
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";

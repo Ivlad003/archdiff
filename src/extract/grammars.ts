@@ -2,6 +2,8 @@
 // (`treesitter.ts` loads them) and for packaging (`scripts/copy-wasm.mjs`
 // copies each into dist/wasm), so a grammar cannot be left out of the
 // published package.
+//
+// Entry points: `GRAMMARS`, `Grammar`, `wasmFile`.
 
 /** Every grammar archdiff ships. */
 export const GRAMMARS = ["typescript", "tsx", "javascript", "rust", "python", "php"] as const;

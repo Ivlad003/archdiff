@@ -6,6 +6,9 @@
 // the query (`view`, the options, the refs), so a shape's page is asked
 // of the picture the page shows. Each handler takes the server's context
 // and the request; the table at the end names them by method and path.
+//
+// Entry point: `routes`, by `METHOD /path` (server.ts dispatches through
+// it).
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";

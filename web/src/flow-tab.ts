@@ -3,6 +3,8 @@
 // generated from the types or by the agent, ▶ play (the predicted steps
 // lit one by one) and ▶ run (the entry run for real with the storages
 // mocked). Takes the page as its context (page.ts).
+//
+// Entry points: `loadFlow`, `flowText`, `textarea`.
 
 import { api } from "./api.ts";
 import { element } from "./dom.ts";

@@ -9,6 +9,9 @@
 // checkout when dist/web is missing (`buildWeb`).
 //
 // usage: node scripts/build-web.mjs [--outdir <dir>]
+//
+// Entry points: `buildWeb` (the server, in a checkout), and the script
+// itself (`npm run web:build`, prepack).
 
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";

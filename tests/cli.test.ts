@@ -1,6 +1,8 @@
 // Behavioural tests through the real CLI on tests/fixtures/sample: the
 // analysis, the views, every export format, the coverage map, and the
 // review of a change in a temporary git repository.
+//
+// Entry point: run by `npm test`.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

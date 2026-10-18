@@ -6,6 +6,8 @@
 // calls Triggering, references Association. One view holds every element
 // at its laid-out place, lanes as Group nodes. Byte-stable for the same
 // placed diagram.
+//
+// Entry point: `toArchimate` (export/index.ts).
 
 import type { Diagram, Line, Shape } from "../diagram.ts";
 import { escapeXml } from "./xml.ts";

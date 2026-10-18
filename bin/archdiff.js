@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Checkout entry. `npm pack` rewrites this file to import ../dist/cli.js and
 // restores this copy afterwards (scripts/pack-entry.mjs).
+//
+// Entry point: the `archdiff` command of package.json's `bin`.
 import { main } from "../src/cli.ts";
 
 // `archdiff … | head` closes stdout early; that is not an error.

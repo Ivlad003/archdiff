@@ -1,6 +1,9 @@
 // Documentation comments without their syntax. Frontends decide which comment
 // documents what; this module only turns comment source into text, lines kept,
-// so the brief rule (`src/brief.ts`) can find the first paragraph.
+// for the `doc` of a declaration and of a module.
+//
+// Entry points: `jsdocDescription`, `blockCommentBody`, `lineCommentsBody`,
+// `isLicense`, `nonEmpty`.
 
 /**
  * A license or copyright notice: a comment that starts with one (`SPDX-…`,
