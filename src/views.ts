@@ -15,7 +15,7 @@
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
 
 import type { Analysis } from "./analyze.ts";
-import { SIZE, type Diagram, type Line, type PictureContent, type Shape } from "./diagram.ts";
+import { SIZE, type Diagram, type Line, type PictureContent, type SequenceFragment, type Shape } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
@@ -454,29 +454,49 @@ function focusView(graph: Graph, id: string, depth: number): PictureContent {
 
 /** The width of a column of the sequence view and the height of one message row. */
 const SEQ_COLUMN = 190;
-
 const SEQ_ROW = 44;
+/** The top of the participants, and where the rows of messages start below them. */
+const SEQ_TOP = 20;
+const SEQ_MESSAGES = 80;
+/** A fragment's frame starts this far above its first message and ends this far below its last; a nested one sits this much inside its parent. */
+const FRAGMENT_ABOVE = 26;
+const FRAGMENT_BELOW = 14;
+const FRAGMENT_INSET = 8;
+/** How deep fragments nest: a guard inside a guard inside a guard, no deeper. */
+const FRAGMENT_LEVELS = 3;
+/** A call within one module loops out this far to the right and back, this far above and below its row. */
+const SELF_CALL = { out: 70, rise: 12, back: 6 } as const;
+/** Lifelines a sequence keeps apart; beyond it the picture is a wall of arrows (the usual guidance says 10–12). */
+const MAX_PARTICIPANTS = 12;
+
+/** A guard a message sits under, as a fragment frames it: an `opt` (a branch) or a `loop`, with its condition. */
+type SequenceGuard = { id: string; kind: "opt" | "loop"; label: string };
+
+/** One message of a sequence: the modules it goes between, the function it calls, where, how deep, how many times in a row, and its guards outermost first. */
+interface SequenceMessage {
+  from: string;
+  to: string;
+  label: string;
+  line: number;
+  depth: number;
+  times: number;
+  chain: SequenceGuard[];
+}
 
 /**
- * The sequence of calls from a function, drawn like a sequence diagram:
- * the modules on the way as participants across the top, their lifelines
- * down, every call a horizontal message in the order the code makes them
- * (depth first, by line), `depth` levels deep, at most `limit` messages.
+ * The calls from a function, depth first and by line, `depth` levels deep and at most `limit` of them. A message's
+ * guards are those its caller sat under (the calls a guarded call makes happen under the same guards), then its own
+ * call's branches and loops; a guard's id is made unique per function it sits in. A call back into a function on the
+ * stack is drawn, not followed.
  */
-function sequenceView(graph: Graph, id: string, depth: number, limit: number): PictureContent {
-  const start = graph.nodes.get(id);
-
-  if (!start) return unplaced(id, [], [], [], { reason: `no function "${id}"`, missing: true });
+function sequenceMessages(graph: Graph, id: string, depth: number, limit: number): SequenceMessage[] {
   const callsFrom = new Map<string, typeof graph.calls>();
 
   for (const call of graph.calls) if (call.kind === "call") callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call]);
-  type Guard = { id: string; kind: "opt" | "loop"; label: string };
-  const messages: { from: string; to: string; label: string; line: number; depth: number; times?: number; chain: Guard[] }[] = [];
+  const messages: SequenceMessage[] = [];
   const active = new Set<string>();
 
-  // The guards of a message, outermost first: those its caller sat under (the calls a guarded call makes happen under
-  // the same guards), then its own call's branches and loops. A guard's id is made unique per function it sits in.
-  const walk = (from: string, level: number, inherited: Guard[]): void => {
+  const walk = (from: string, level: number, inherited: SequenceGuard[]): void => {
     if (level >= depth || messages.length >= limit) return;
     active.add(from);
 
@@ -485,11 +505,10 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): P
       const target = graph.nodes.get(call.to);
 
       if (!target) continue;
-      const own = (call.guards ?? []).map((guard): Guard => ({ id: `${from}:${guard.id}`, kind: guard.kind === "loop" ? "loop" : "opt", label: guard.kind === "loop" || guard.kind === "if" || guard.kind === "else" ? guard.text : guard.text === "" || guard.text === guard.kind ? guard.kind : `${guard.kind} ${guard.text}` }));
+      const own = (call.guards ?? []).map((guard): SequenceGuard => ({ id: `${from}:${guard.id}`, kind: guard.kind === "loop" ? "loop" : "opt", label: guard.kind === "loop" || guard.kind === "if" || guard.kind === "else" ? guard.text : guard.text === "" || guard.text === guard.kind ? guard.kind : `${guard.kind} ${guard.text}` }));
       const chain = [...inherited, ...own];
-      messages.push({ from: moduleOf(from), to: moduleOf(call.to), label: target.parent ? `${target.parent}.${target.name}` : target.name, line: call.line, depth: level, chain });
+      messages.push({ from: moduleOf(from), to: moduleOf(call.to), label: target.parent ? `${target.parent}.${target.name}` : target.name, line: call.line, depth: level, times: 1, chain });
 
-      // A call back into a function already on the stack is drawn, not followed: no loop.
       if (!active.has(call.to)) walk(call.to, level + 1, chain);
     }
 
@@ -497,26 +516,35 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): P
   };
 
   walk(id, 0, []);
-  // Consecutive repeats of one call (a loop body, a helper called twice in a row) collapse into one message "×N".
-  const collapsed: (typeof messages[number] & { times: number })[] = [];
+
+  return messages;
+}
+
+/** Consecutive repeats of one call under the same guards (a loop body, a helper called twice in a row) as one message "×N". */
+function collapseRepeats(messages: readonly SequenceMessage[]): SequenceMessage[] {
+  const collapsed: SequenceMessage[] = [];
+  const guardsOf = (message: SequenceMessage): string => message.chain.map((guard) => guard.id).join();
 
   for (const message of messages) {
     const last = collapsed[collapsed.length - 1];
 
-    if (last && last.from === message.from && last.to === message.to && last.label === message.label && last.chain.map((guard) => guard.id).join() === message.chain.map((guard) => guard.id).join()) last.times++;
+    if (last && last.from === message.from && last.to === message.to && last.label === message.label && guardsOf(last) === guardsOf(message)) last.times++;
     else collapsed.push({ ...message, times: 1 });
   }
 
-  // Consecutive messages under one guard form a fragment: an opt (a branch) or a loop, labelled with the condition;
-  // the guards inside a guard nest, up to three deep.
-  const fragments: NonNullable<Diagram["sequence"]>["fragments"] = [];
+  return collapsed;
+}
+
+/** Consecutive messages under one guard form a fragment, labelled with the condition; the guards inside a guard nest, up to FRAGMENT_LEVELS deep. */
+function fragmentsOf(messages: readonly SequenceMessage[]): SequenceFragment[] {
+  const fragments: SequenceFragment[] = [];
 
   const frame = (first: number, last: number, level: number): void => {
-    if (level >= 3) return;
+    if (level >= FRAGMENT_LEVELS) return;
     let i = first;
 
     while (i <= last) {
-      const guard = collapsed[i]!.chain[level];
+      const guard = messages[i]!.chain[level];
 
       if (!guard) {
         i++;
@@ -525,82 +553,112 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): P
 
       let end = i;
 
-      while (end + 1 <= last && collapsed[end + 1]!.chain[level]?.id === guard.id) end++;
+      while (end + 1 <= last && messages[end + 1]!.chain[level]?.id === guard.id) end++;
       fragments.push({ kind: guard.kind, label: guard.label, first: i, last: end, level });
       frame(i, end, level + 1);
       i = end + 1;
     }
   };
 
-  frame(0, collapsed.length - 1, 0);
-  fragments.sort((a, b) => a.first - b.first || a.level - b.level);
+  frame(0, messages.length - 1, 0);
 
-  messages.length = 0;
-  messages.push(...collapsed);
-  const participants = [moduleOf(id)];
+  return fragments.sort((a, b) => a.first - b.first || a.level - b.level);
+}
+
+/**
+ * The participants of a sequence, the subject's module first, then as the messages meet them. Beyond
+ * MAX_PARTICIPANTS the rest share one "… N more" lifeline: the messages to and from them are moved onto it.
+ */
+function participantsOf(subject: string, messages: SequenceMessage[]): { participants: string[]; folded: number } {
+  const participants = [subject];
 
   for (const message of messages) for (const module of [message.from, message.to]) if (!participants.includes(module)) participants.push(module);
 
-  // More than MAX_PARTICIPANTS lifelines no longer read as a sequence: the rest share one "… N more" lifeline.
-  let foldedParticipants = 0;
+  if (participants.length <= MAX_PARTICIPANTS) return { participants, folded: 0 };
+  const kept = new Set(participants.slice(0, MAX_PARTICIPANTS - 1));
+  const folded = participants.length - kept.size;
+  const more = `… ${folded} more`;
 
-  if (participants.length > MAX_PARTICIPANTS) {
-    const kept = new Set(participants.slice(0, MAX_PARTICIPANTS - 1));
-    foldedParticipants = participants.length - kept.size;
-    const more = `… ${foldedParticipants} more`;
+  for (const message of messages) {
+    if (!kept.has(message.from)) message.from = more;
 
-    for (const message of messages) {
-      if (!kept.has(message.from)) message.from = more;
-
-      if (!kept.has(message.to)) message.to = more;
-    }
-
-    participants.splice(0, participants.length, ...kept, more);
+    if (!kept.has(message.to)) message.to = more;
   }
-  const column = new Map(participants.map((module, i) => [module, 20 + i * SEQ_COLUMN]));
-  const bottom = 80 + (messages.length + 1) * SEQ_ROW;
+
+  return { participants: [...kept, more], folded };
+}
+
+/** The y of a message's row. */
+function messageY(index: number): number {
+  return SEQ_MESSAGES + (index + 1) * SEQ_ROW;
+}
+
+/**
+ * The shapes and lines of a sequence, placed: a participant per column with its lifeline down to an invisible foot,
+ * a dashed frame per fragment across every lifeline, a numbered message per row (a call within one module loops out
+ * to the right and back).
+ */
+function drawSequence(participants: readonly string[], messages: readonly SequenceMessage[], fragments: readonly SequenceFragment[]): { nodes: Shape[]; edges: Line[] } {
+  const column = new Map(participants.map((module, i) => [module, SEQ_TOP + i * SEQ_COLUMN]));
+  const centre = (module: string): number => column.get(module)! + SIZE.participant.w / 2;
+  const bottom = messageY(messages.length);
   const nodes: Shape[] = [];
   const edges: Line[] = [];
 
   for (const module of participants) {
     const x = column.get(module)!;
-    nodes.push({ id: module, kind: "participant", label: module, ref: { id: module, file: module, line: 1 }, x, y: 20, w: SIZE.participant.w, h: SIZE.participant.h });
-    nodes.push({ id: `foot:${module}`, kind: "anchor", label: "", x: x + SIZE.participant.w / 2 - 1, y: bottom, w: 2, h: 2 });
-    edges.push({ from: module, to: `foot:${module}`, kind: "lifeline", route: [{ x: x + SIZE.participant.w / 2, y: 20 + SIZE.participant.h }, { x: x + SIZE.participant.w / 2, y: bottom }] });
+    nodes.push({ id: module, kind: "participant", label: module, ref: { id: module, file: module, line: 1 }, x, y: SEQ_TOP, w: SIZE.participant.w, h: SIZE.participant.h });
+    nodes.push({ id: `foot:${module}`, kind: "anchor", label: "", x: centre(module) - 1, y: bottom, w: 2, h: 2 });
+    edges.push({ from: module, to: `foot:${module}`, kind: "lifeline", route: [{ x: centre(module), y: SEQ_TOP + SIZE.participant.h }, { x: centre(module), y: bottom }] });
   }
 
-  // A fragment is a dashed frame across every lifeline, from a little above its first message to a little below its
-  // last; a nested one sits a few pixels inside its parent.
   for (const [i, fragment] of fragments.entries()) {
-    const inset = fragment.level * 8;
-    const top = 80 + (fragment.first + 1) * SEQ_ROW - 26 + inset;
-    const bottom = 80 + (fragment.last + 1) * SEQ_ROW + 14 - inset;
-    nodes.push({ id: `fragment:${i}`, kind: "fragment", label: `${fragment.kind} [${fragment.label}]`, x: 6 + inset, y: top, w: participants.length * SEQ_COLUMN - 2 * inset, h: bottom - top });
+    const inset = fragment.level * FRAGMENT_INSET;
+    const top = messageY(fragment.first) - FRAGMENT_ABOVE + inset;
+    const end = messageY(fragment.last) + FRAGMENT_BELOW - inset;
+    nodes.push({ id: `fragment:${i}`, kind: "fragment", label: `${fragment.kind} [${fragment.label}]`, x: 6 + inset, y: top, w: participants.length * SEQ_COLUMN - 2 * inset, h: end - top });
   }
 
   messages.forEach((message, i) => {
-    const y = 80 + (i + 1) * SEQ_ROW;
-    const fromX = column.get(message.from)! + SIZE.participant.w / 2;
-    const toX = column.get(message.to)! + SIZE.participant.w / 2;
-    // A call within one module loops out to the right and back.
-    const route = message.from === message.to ? [{ x: fromX, y: y - 12 }, { x: fromX + 70, y: y - 12 }, { x: fromX + 70, y: y + 12 }, { x: fromX + 6, y: y + 12 }] : [{ x: fromX, y }, { x: toX, y }];
-    edges.push({ from: message.from, to: message.to, kind: "message", label: `${i + 1}. ${message.label}()${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`, route });
+    const y = messageY(i);
+    const fromX = centre(message.from);
+    const toX = centre(message.to);
+    const route = message.from === message.to ? [{ x: fromX, y: y - SELF_CALL.rise }, { x: fromX + SELF_CALL.out, y: y - SELF_CALL.rise }, { x: fromX + SELF_CALL.out, y: y + SELF_CALL.rise }, { x: fromX + SELF_CALL.back, y: y + SELF_CALL.rise }] : [{ x: fromX, y }, { x: toX, y }];
+    edges.push({ from: message.from, to: message.to, kind: "message", label: `${i + 1}. ${message.label}()${message.times > 1 ? ` ×${message.times}` : ""}`, route });
   });
 
-  const diagram = unplaced(`Sequence from ${start.parent ? `${start.parent}.` : ""}${start.name}`, nodes, edges, [], { placed: true, sequence: { participants, messages: messages.map(({ from, to, label, line, times }) => ((times ?? 1) > 1 ? { from, to, label, line, times: times as number } : { from, to, label, line })), ...(fragments.length > 0 ? { fragments } : {}) } });
+  return { nodes, edges };
+}
+
+/**
+ * The sequence of calls from a function, drawn like a sequence diagram:
+ * the modules on the way as participants across the top, their lifelines
+ * down, every call a horizontal message in the order the code makes them
+ * (depth first, by line), `depth` levels deep, at most `limit` messages;
+ * a call repeated in a row is one message "×N", the calls under a branch
+ * or a loop are framed as fragments.
+ */
+function sequenceView(graph: Graph, id: string, depth: number, limit: number): PictureContent {
+  const start = graph.nodes.get(id);
+
+  if (!start) return unplaced(id, [], [], [], { reason: `no function "${id}"`, missing: true });
+  const walked = sequenceMessages(graph, id, depth, limit);
+  const messages = collapseRepeats(walked);
+  const fragments = fragmentsOf(messages);
+  const { participants, folded } = participantsOf(moduleOf(id), messages);
+  const { nodes, edges } = drawSequence(participants, messages, fragments);
+  const sequence = { participants, messages: messages.map(({ from, to, label, line, times }) => (times > 1 ? { from, to, label, line, times } : { from, to, label, line })), ...(fragments.length > 0 ? { fragments } : {}) };
+  const diagram = unplaced(`Sequence from ${start.parent ? `${start.parent}.` : ""}${start.name}`, nodes, edges, [], { placed: true, sequence });
 
   if (fragments.length > 0) diagram.reason = `${fragments.length} fragments: the calls under a branch or a loop, framed`;
 
   if (messages.length === 0) diagram.reason = "the function calls nothing archdiff can follow";
   else if (messages.length >= limit) diagram.reason = `cut at ${limit} messages; --limit raises it`;
 
-  if (foldedParticipants > 0) diagram.reason = [diagram.reason, `${foldedParticipants} modules share the last lifeline (at most ${MAX_PARTICIPANTS})`].filter(Boolean).join("; ");
+  if (folded > 0) diagram.reason = [diagram.reason, `${folded} modules share the last lifeline (at most ${MAX_PARTICIPANTS})`].filter(Boolean).join("; ");
 
   return diagram;
 }
-
-/** Lifelines a sequence keeps apart; beyond it the picture is a wall of arrows (the usual guidance says 10–12). */
-const MAX_PARTICIPANTS = 12;
 
 /**
  * The picture of a view before `layout`: drawn from the analysis (and what
