@@ -843,4 +843,4 @@ function useNames(clause: Node): string[] {
   }
 }
 
-export type { Language, Node, Tree };
+export type { Language, Node, Query, Tree };

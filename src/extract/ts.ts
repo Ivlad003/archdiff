@@ -11,7 +11,7 @@
 import { builtinModules } from "node:module";
 import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, TypeFieldFact, TypeRefFact, ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
-import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Tree } from "./treesitter.ts";
+import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Query, type Tree } from "./treesitter.ts";
 import { collectTsMachines, collectTsStates, countBranches, guardsOf, TS_CONTROL } from "./control.ts";
 
 // Every call and `new`, whatever its callee: each becomes an edge or a hole, never nothing.
@@ -278,6 +278,26 @@ function moduleHeader(root: Node): ModuleHeader {
   return { doc: null, nodes: new Set() };
 }
 
+/**
+ * One file's extraction as it goes: the facts so far, the tree, the queries compiled for its grammar (no JSX tags in
+ * the `typescript` one), what value imports from React bind, and the bodies whose calls a declaration claimed —
+ * every other call is module-level code.
+ */
+interface Extraction {
+  facts: FileFacts;
+  root: Node;
+  calls: Query;
+  jsxTags: Query | null;
+  requires: Query;
+  react: ReactBindings;
+  covered: Set<number>;
+}
+
+/** `declarationCalls` bound to the extraction, as the class and CommonJS readers take it. */
+function callsOf(x: Extraction): (body: Node, cls?: ClassScope | null) => CallFact[] {
+  return (body, cls = null) => declarationCalls(x, body, cls);
+}
+
 /** The facts of a file once the parent index and header are set: the top-level walk, then the whole-tree collectors. */
 function extractIndexed(path: string, root: Node, language: Language, g: Grammar, typeStars: ReadonlyMap<number, string>): FileFacts {
   const facts: FileFacts = { path, endLine: 1, endCol: 1, imports: [], decls: [], exports: new Set(), reexportsAll: [], exportRows: [], unsupported: [], valueRefs: [], moduleCalls: [], completeness: "complete", parseError: null };
@@ -294,219 +314,17 @@ function extractIndexed(path: string, root: Node, language: Language, g: Grammar
     return facts;
   }
 
-  // Queries are compiled once per grammar. The `typescript` grammar has no JSX nodes, so no tag query there.
-  const calls = query(language, g, "calls", CALLS_QUERY);
-  const jsxTags = g === "typescript" ? null : query(language, g, "jsx", JSX_QUERY);
-  const requires = query(language, g, "require", REQUIRE_QUERY);
-
-  // Bodies whose calls belong to a declaration; every other call is module-level code.
-  const covered = new Set<number>();
-
-  // The calls and component uses inside `body`, as facts of the declaration that owns it.
-  // `cls` is the enclosing class, for `this.m()`; `keep` filters the captured nodes (module-level
-  // calls skip those inside declaration bodies). Marks `body` as covered.
-  const declCalls = (body: Node, cls: ClassScope | null = null, keep: (n: Node) => boolean = () => true): CallFact[] => {
-    if (body.id !== root.id) covered.add(body.id);
-    const out: CallFact[] = [];
-
-    for (const c of calls.captures(body)) {
-      if (!keep(c.node)) continue;
-      const fact = calleeOfCall(c.node, body, cls);
-
-      if (!fact) continue;
-      const call = parentOf(c.node);
-      // `setGlobalPrefix("api")` and `emit("order.created")`: keep the first argument, which framework adapters read.
-      const member = fact.callee.slice(fact.callee.lastIndexOf(".") + 1);
-      const first = call?.type === "call_expression" && !fact.opaque && (LITERAL_CALLS.has(member) || NAME_ARG_CALLS.has(member)) ? call.childForFieldName("arguments")?.namedChildren.find((a) => a.type !== "comment") : undefined;
-
-      if (first) {
-        const value = stringValue(unwrapValue(first)) ?? templateValue(unwrapValue(first));
-
-        if (LITERAL_CALLS.has(member)) fact.literal = value;
-        else fact.nameArg = { literal: value, text: collapse(first.text).slice(0, MAX_CALLEE) };
-      }
-
-      // Functions the call receives as values (`later(save)`), and whether the call sits in a closure.
-      const passes = call ? passesOf(call, body, cls) : [];
-
-      if (passes.length > 0) fact.passes = passes;
-      markClosure(fact, c.node, body);
-      // The branches, loops and handlers the call sits under, for the sequence's fragments.
-      const guards = guardsOf(c.node, body, TS_CONTROL);
-
-      if (guards.length > 0) fact.guards = guards;
-      out.push(fact);
-
-      // `jsx(Cart)` is the same call as `<Cart />` when `jsx` is React's. The factory call and its `passes` stay.
-      if (!call) continue;
-      const component = componentOfFactory(call, c.node, body, cls, react);
-
-      if (!component) continue;
-      markClosure(component, c.node, body);
-      out.push(component);
-    }
-
-    if (!jsxTags) return out;
-
-    // JSX tags are calls of the component they name.
-    for (const c of jsxTags.captures(body)) {
-      if (!keep(c.node)) continue;
-      const fact = componentOfTag(c.node, body, cls);
-
-      if (!fact) continue;
-      markClosure(fact, c.node, body);
-      out.push(fact);
-    }
-
-    // Two queries walk the body in turn; the facts are kept in source order.
-    return out.sort((a, b) => a.line - b.line || a.col - b.col);
+  // Queries are compiled once per grammar. The `typescript` grammar has no JSX nodes, so no tag query there. Imports
+  // hoist, so a wrapper or factory may sit above its import: the React bindings are read once, before the walk.
+  const x: Extraction = {
+    facts,
+    root,
+    calls: query(language, g, "calls", CALLS_QUERY),
+    jsxTags: g === "typescript" ? null : query(language, g, "jsx", JSX_QUERY),
+    requires: query(language, g, "require", REQUIRE_QUERY),
+    react: reactBindings(root),
+    covered: new Set<number>(),
   };
-
-  // One top-level declaration, bare or under `export`: push its declaration, import and export facts.
-  // Named declarations `break` to the export bookkeeping after the switch; the rest `return` having done their own.
-  const visitDecl = (node: Node, exported: boolean): void => {
-    switch (node.type) {
-      case "function_declaration":
-      case "generator_function_declaration":
-      case "function_signature": {
-        const name = node.childForFieldName("name")?.text;
-
-        if (!name) return;
-        facts.decls.push(decl("fn", name, node, signature(node), exported, declCalls(node), collectTypeRefs(node), []));
-        break;
-      }
-
-      case "lexical_declaration":
-      case "variable_declaration": {
-        // Each declarator is a `require` import, a function value, a class value or a plain value.
-        for (const d of node.namedChildren) {
-          if (d.type !== "variable_declarator") continue;
-          const nameNode = d.childForFieldName("name");
-          const value = d.childForFieldName("value");
-
-          if (!nameNode || nameNode.type !== "identifier") continue;
-          const name = nameNode.text;
-          // `const x = require("./x")` (or SFCC's `module.superModule`) binds a whole module: an import, not a declaration.
-          const req = value ? (requireSource(value, requires) ?? superModuleSource(value)) : null;
-
-          if (req) {
-            facts.imports.push(importAt(d, req.source, [req.namespace ? { kind: "module", local: name, namespace: true } : { kind: "module", local: name }], false));
-            continue;
-          }
-
-          // `(() => …) as Handler` and `(function () {}) satisfies T` are the function itself.
-          const fnValue = value ? unwrapValue(value) : null;
-          // `const Cart = memo(() => …)` is the fn the React wrapper wraps; `let`/`var` stay values.
-          const wrapped = fnValue && node.children.some((c) => c.type === "const") ? reactWrapperFn(fnValue, react) : null;
-          const fnNode = wrapped ?? (fnValue && FUNCTION_VALUES.has(fnValue.type) ? fnValue : null);
-
-          if (fnNode) {
-            facts.decls.push(decl("fn", name, d, signature(fnNode), exported, declCalls(fnNode), collectTypeRefs(fnNode), []));
-          } else if (fnValue && fnValue.type === "class") {
-            facts.decls.push(classDecl(name, fnValue, d, exported, declCalls, facts));
-          }
-
-          // Every exported declarator is an export row, whatever its value; the kind tells the graph what it stands for.
-          if (exported) {
-            facts.exports.add(name);
-            const kind = fnNode ? "fn" : fnValue?.type === "class" ? "class" : "value";
-            facts.exportRows.push({ name, kind, local: name });
-          }
-        }
-
-        // `const { a, b } = require("./x")`
-        for (const d of node.namedChildren) {
-          const nameNode = d.childForFieldName("name");
-          const value = d.childForFieldName("value");
-
-          if (d.type !== "variable_declarator" || !nameNode || nameNode.type !== "object_pattern" || !value) continue;
-          // `const { a } = mod;` where `mod` is an imported module binding.
-          const req = requireSource(value, requires)?.source ?? (value.type === "identifier" ? moduleSource(facts, value.text) : null);
-
-          if (!req) continue;
-          const bindings: ImportBinding[] = [];
-
-          for (const p of nameNode.namedChildren) {
-            if (p.type === "shorthand_property_identifier_pattern") bindings.push({ kind: "named", local: p.text, imported: p.text });
-            else if (p.type === "pair_pattern") {
-              const k = p.childForFieldName("key")?.text;
-              const v = p.childForFieldName("value")?.text;
-
-              if (k && v) bindings.push({ kind: "named", local: v, imported: k });
-            }
-          }
-
-          facts.imports.push(importAt(d, req, bindings, false));
-        }
-
-        return;
-      }
-
-      case "class_declaration":
-      case "abstract_class_declaration": {
-        const name = node.childForFieldName("name")?.text;
-
-        if (!name) return;
-        facts.decls.push(classDecl(name, node, node, exported, declCalls, facts));
-        break;
-      }
-
-      case "type_alias_declaration":
-      case "interface_declaration":
-      case "enum_declaration": {
-        const name = node.childForFieldName("name")?.text;
-
-        if (!name) return;
-        const fact = decl("type", name, node, typeSignature(node), exported, [], collectTypeRefs(node), []);
-        const shape = typeShape(node);
-
-        if (shape !== undefined) fact.shape = shape;
-        facts.decls.push(fact);
-        break;
-      }
-
-      case "ambient_declaration": {
-        // `export declare function f(): void;`, `export declare const x: T;`
-        const inner = node.namedChildren.find((c) => c.type !== "comment");
-
-        if (inner) visitDecl(inner, exported);
-
-        return;
-      }
-
-      case "internal_module":
-      case "module": {
-        // `export namespace Util {}` exports the name `Util`; its members are not indexed (`unsupported`).
-        const nameNode = node.childForFieldName("name");
-        const name = nameNode?.type === "nested_identifier" ? nameNode.text.split(".")[0]?.trim() : nameNode?.type === "identifier" ? nameNode.text : undefined;
-
-        if (exported && name) {
-          facts.exports.add(name);
-          facts.exportRows.push({ name, kind: "value", local: name, form: "namespace" });
-        }
-
-        return;
-      }
-
-      default:
-        return;
-    }
-
-    // The declarations that reached `break`: the export row's kind comes from the node type.
-    if (exported) {
-      const name = node.childForFieldName("name")?.text;
-
-      if (name) {
-        facts.exports.add(name);
-        const kind = node.type.includes("class") ? "class" : node.type.includes("type") || node.type.includes("interface") || node.type.includes("enum") ? "type" : node.type.includes("function") ? "fn" : "value";
-        facts.exportRows.push({ name, kind, local: name });
-      }
-    }
-  };
-
-  // Imports hoist, so a wrapper or factory may sit above its import. Read once.
-  const react = reactBindings(root);
-
   // Declarations exported later by name: `function a() {}; export { a }`.
   const localExports = new Set<string>();
 
@@ -523,115 +341,19 @@ function extractIndexed(path: string, root: Node, language: Language, g: Grammar
         if (source) {
           const spec = stringValue(source);
 
-          if (spec === null) break;
-          const clause = node.namedChildren.find((c) => c.type === "export_clause");
-          const star = node.children.some((c) => c.type === "*");
-          const ns = node.namedChildren.find((c) => c.type === "namespace_export");
-          const bindings: ImportBinding[] = [];
-
-          if (clause) {
-            for (const s of clause.namedChildren) {
-              if (s.type !== "export_specifier") continue;
-              const name = s.childForFieldName("name")?.text;
-              const alias = s.childForFieldName("alias")?.text ?? name;
-
-              if (name && alias) {
-                bindings.push({ kind: "named", local: alias, imported: name });
-                facts.exports.add(alias);
-                facts.exportRows.push({ name: alias, kind: "value", local: name, form: "reexport", from: spec });
-              }
-            }
-          } else if (ns) {
-            const alias = ns.namedChildren[0]?.text;
-
-            if (alias) {
-              bindings.push({ kind: "module", local: alias, namespace: true });
-              facts.exports.add(alias);
-              facts.exportRows.push({ name: alias, kind: "value", local: null, form: "namespace", from: spec });
-            }
-          } else if (star) {
-            facts.reexportsAll.push(spec);
-            facts.exportRows.push({ name: "*", kind: "reexport", local: null, form: "reexport", from: spec });
-          }
-
-          // `export type { A } from`, `export type * from` (read without its blanked `type`): types only.
-          const written = typeStars.get(node.startIndex);
-          const fact = importAt(node, spec, bindings, true);
-
-          if (written !== undefined) fact.text = written;
-
-          if (written !== undefined || typeKeyword(node)) fact.typeOnly = true;
-          else if (clause && inlineTypesOnly(clause, "export_specifier")) fact.inlineTypeOnly = true;
-          facts.imports.push(fact);
+          if (spec !== null) reexport(x, node, spec, typeStars);
           break;
         }
 
-        // A local export: `export <declaration>`, `export { … }` or `export default …`.
-        const declaration = node.childForFieldName("declaration");
-        const isDefault = node.children.some((c) => c.type === "default");
-
-        if (declaration) {
-          const before = facts.exportRows.length;
-          visitDecl(declaration, true);
-
-          // `export default function main() {}` is imported as `default`, not `main`.
-          if (isDefault) {
-            for (const row of facts.exportRows.slice(before)) {
-              facts.exports.delete(row.name);
-              facts.exports.add("default");
-              row.local = row.name;
-              row.name = "default";
-              row.form = "default";
-            }
-          }
-        } else {
-          // `export { a, b as c }`, `export { x as default }`
-          const clause = node.namedChildren.find((c) => c.type === "export_clause");
-
-          for (const s of clause?.namedChildren ?? []) {
-            if (s.type !== "export_specifier") continue;
-            const alias = s.childForFieldName("alias")?.text ?? s.childForFieldName("name")?.text;
-
-            if (alias) {
-              const local = s.childForFieldName("name")?.text ?? alias;
-              facts.exports.add(alias);
-              facts.exportRows.push({ name: alias, kind: "value", local, ...(alias === "default" ? { form: "default" as const } : alias !== local ? { form: "alias" as const } : {}) });
-              localExports.add(local);
-            }
-          }
-
-          // `export default <expression>` and TypeScript `export = <expression>`: the module's default value.
-          const written = node.childForFieldName("value") ?? (node.children.some((c) => c.type === "=") ? node.namedChildren.find((c) => c.type !== "comment") : undefined);
-          const value = written ? unwrapValue(written) : null;
-
-          if (value) {
-            facts.exports.add("default");
-
-            if (value.type === "identifier") {
-              facts.exportRows.push({ name: "default", kind: "value", local: value.text, form: "default" });
-              localExports.add(value.text);
-            } else if (FUNCTION_VALUES.has(value.type)) {
-              facts.decls.push(decl("fn", "default", value, signature(value), true, declCalls(value), collectTypeRefs(value), []));
-              facts.exportRows.push({ name: "default", kind: "fn", local: "default", form: "default" });
-            } else if (value.type === "class") {
-              const name = value.childForFieldName("name")?.text ?? "default";
-              facts.decls.push(classDecl(name, value, value, true, declCalls, facts));
-              facts.exportRows.push({ name: "default", kind: "class", local: name, form: "default" });
-            } else {
-              // `export default 3`, `export default { a, b }`, `export default make()`: a value, no declaration.
-              facts.exportRows.push({ name: "default", kind: "value", local: null, form: "default" });
-            }
-          }
-        }
-
+        localExport(x, node, localExports);
         break;
       }
 
       case "expression_statement":
-        commonJsExports(node, facts, declCalls);
+        commonJsExports(node, facts, callsOf(x));
         break;
       default:
-        visitDecl(node, false);
+        visitDeclaration(x, node, false);
     }
   }
 
@@ -640,12 +362,12 @@ function extractIndexed(path: string, root: Node, language: Language, g: Grammar
 
   // Module-level calls: every call outside the bodies a declaration already claimed.
   const inDeclaration = (n: Node): boolean => {
-    for (let at: Node | null = n; at; at = parentOf(at)) if (covered.has(at.id)) return true;
+    for (let at: Node | null = n; at; at = parentOf(at)) if (x.covered.has(at.id)) return true;
 
     return false;
   };
 
-  facts.moduleCalls = declCalls(root, null, (n) => !inDeclaration(n));
+  facts.moduleCalls = declarationCalls(x, root, null, (n) => !inDeclaration(n));
   // Whole-tree collectors, each adding its own kind of fact.
   collectDynamicImports(root, facts);
   collectUnsupported(root, facts);
@@ -671,6 +393,326 @@ function extractIndexed(path: string, root: Node, language: Language, g: Grammar
   }
 
   return facts;
+}
+
+/**
+ * The calls and component uses inside `body`, as facts of the declaration that owns it. `cls` is the enclosing
+ * class, for `this.m()`; `keep` filters the captured nodes (module-level calls skip those inside declaration
+ * bodies). Marks `body` as covered.
+ */
+function declarationCalls(x: Extraction, body: Node, cls: ClassScope | null = null, keep: (n: Node) => boolean = () => true): CallFact[] {
+  if (body.id !== x.root.id) x.covered.add(body.id);
+  const out: CallFact[] = [];
+
+  for (const c of x.calls.captures(body)) {
+    if (!keep(c.node)) continue;
+    const fact = calleeOfCall(c.node, body, cls);
+
+    if (!fact) continue;
+    const call = parentOf(c.node);
+    // `setGlobalPrefix("api")` and `emit("order.created")`: keep the first argument, which framework adapters read.
+    const member = fact.callee.slice(fact.callee.lastIndexOf(".") + 1);
+    const first = call?.type === "call_expression" && !fact.opaque && (LITERAL_CALLS.has(member) || NAME_ARG_CALLS.has(member)) ? call.childForFieldName("arguments")?.namedChildren.find((a) => a.type !== "comment") : undefined;
+
+    if (first) {
+      const value = stringValue(unwrapValue(first)) ?? templateValue(unwrapValue(first));
+
+      if (LITERAL_CALLS.has(member)) fact.literal = value;
+      else fact.nameArg = { literal: value, text: collapse(first.text).slice(0, MAX_CALLEE) };
+    }
+
+    // Functions the call receives as values (`later(save)`), and whether the call sits in a closure.
+    const passes = call ? passesOf(call, body, cls) : [];
+
+    if (passes.length > 0) fact.passes = passes;
+    markClosure(fact, c.node, body);
+    // The branches, loops and handlers the call sits under, for the sequence's fragments.
+    const guards = guardsOf(c.node, body, TS_CONTROL);
+
+    if (guards.length > 0) fact.guards = guards;
+    out.push(fact);
+
+    // `jsx(Cart)` is the same call as `<Cart />` when `jsx` is React's. The factory call and its `passes` stay.
+    if (!call) continue;
+    const component = componentOfFactory(call, c.node, body, cls, x.react);
+
+    if (!component) continue;
+    markClosure(component, c.node, body);
+    out.push(component);
+  }
+
+  if (!x.jsxTags) return out;
+
+  // JSX tags are calls of the component they name.
+  for (const c of x.jsxTags.captures(body)) {
+    if (!keep(c.node)) continue;
+    const fact = componentOfTag(c.node, body, cls);
+
+    if (!fact) continue;
+    markClosure(fact, c.node, body);
+    out.push(fact);
+  }
+
+  // Two queries walk the body in turn; the facts are kept in source order.
+  return out.sort((a, b) => a.line - b.line || a.col - b.col);
+}
+
+/**
+ * One top-level declaration, bare or under `export`: pushes its declaration, import and export facts. Named
+ * declarations `break` to the export bookkeeping after the switch; the rest `return` having done their own.
+ */
+function visitDeclaration(x: Extraction, node: Node, exported: boolean): void {
+  const { facts } = x;
+  const calls = callsOf(x);
+
+  switch (node.type) {
+    case "function_declaration":
+    case "generator_function_declaration":
+    case "function_signature": {
+      const name = node.childForFieldName("name")?.text;
+
+      if (!name) return;
+      facts.decls.push(decl("fn", name, node, signature(node), exported, calls(node), collectTypeRefs(node), []));
+      break;
+    }
+
+    case "lexical_declaration":
+    case "variable_declaration":
+      variableDeclaration(x, node, exported);
+
+      return;
+
+    case "class_declaration":
+    case "abstract_class_declaration": {
+      const name = node.childForFieldName("name")?.text;
+
+      if (!name) return;
+      facts.decls.push(classDecl(name, node, node, exported, calls, facts));
+      break;
+    }
+
+    case "type_alias_declaration":
+    case "interface_declaration":
+    case "enum_declaration": {
+      const name = node.childForFieldName("name")?.text;
+
+      if (!name) return;
+      const fact = decl("type", name, node, typeSignature(node), exported, [], collectTypeRefs(node), []);
+      const shape = typeShape(node);
+
+      if (shape !== undefined) fact.shape = shape;
+      facts.decls.push(fact);
+      break;
+    }
+
+    case "ambient_declaration": {
+      // `export declare function f(): void;`, `export declare const x: T;`
+      const inner = node.namedChildren.find((c) => c.type !== "comment");
+
+      if (inner) visitDeclaration(x, inner, exported);
+
+      return;
+    }
+
+    case "internal_module":
+    case "module": {
+      // `export namespace Util {}` exports the name `Util`; its members are not indexed (`unsupported`).
+      const nameNode = node.childForFieldName("name");
+      const name = nameNode?.type === "nested_identifier" ? nameNode.text.split(".")[0]?.trim() : nameNode?.type === "identifier" ? nameNode.text : undefined;
+
+      if (exported && name) {
+        facts.exports.add(name);
+        facts.exportRows.push({ name, kind: "value", local: name, form: "namespace" });
+      }
+
+      return;
+    }
+
+    default:
+      return;
+  }
+
+  // The declarations that reached `break`: the export row's kind comes from the node type.
+  if (exported) {
+    const name = node.childForFieldName("name")?.text;
+
+    if (name) {
+      facts.exports.add(name);
+      const kind = node.type.includes("class") ? "class" : node.type.includes("type") || node.type.includes("interface") || node.type.includes("enum") ? "type" : node.type.includes("function") ? "fn" : "value";
+      facts.exportRows.push({ name, kind, local: name });
+    }
+  }
+}
+
+/** A `const`, `let` or `var` at the top level: each declarator is a `require` import, a function value, a class value or a plain value; a destructured `require` imports its names. */
+function variableDeclaration(x: Extraction, node: Node, exported: boolean): void {
+  const { facts } = x;
+  const calls = callsOf(x);
+  // Each declarator is a `require` import, a function value, a class value or a plain value.
+  for (const d of node.namedChildren) {
+    if (d.type !== "variable_declarator") continue;
+    const nameNode = d.childForFieldName("name");
+    const value = d.childForFieldName("value");
+
+    if (!nameNode || nameNode.type !== "identifier") continue;
+    const name = nameNode.text;
+    // `const x = require("./x")` (or SFCC's `module.superModule`) binds a whole module: an import, not a declaration.
+    const req = value ? (requireSource(value, x.requires) ?? superModuleSource(value)) : null;
+
+    if (req) {
+      facts.imports.push(importAt(d, req.source, [req.namespace ? { kind: "module", local: name, namespace: true } : { kind: "module", local: name }], false));
+      continue;
+    }
+
+    // `(() => …) as Handler` and `(function () {}) satisfies T` are the function itself.
+    const fnValue = value ? unwrapValue(value) : null;
+    // `const Cart = memo(() => …)` is the fn the React wrapper wraps; `let`/`var` stay values.
+    const wrapped = fnValue && node.children.some((c) => c.type === "const") ? reactWrapperFn(fnValue, x.react) : null;
+    const fnNode = wrapped ?? (fnValue && FUNCTION_VALUES.has(fnValue.type) ? fnValue : null);
+
+    if (fnNode) {
+      facts.decls.push(decl("fn", name, d, signature(fnNode), exported, calls(fnNode), collectTypeRefs(fnNode), []));
+    } else if (fnValue && fnValue.type === "class") {
+      facts.decls.push(classDecl(name, fnValue, d, exported, calls, facts));
+    }
+
+    // Every exported declarator is an export row, whatever its value; the kind tells the graph what it stands for.
+    if (exported) {
+      facts.exports.add(name);
+      const kind = fnNode ? "fn" : fnValue?.type === "class" ? "class" : "value";
+      facts.exportRows.push({ name, kind, local: name });
+    }
+  }
+
+  // `const { a, b } = require("./x")`
+  for (const d of node.namedChildren) {
+    const nameNode = d.childForFieldName("name");
+    const value = d.childForFieldName("value");
+
+    if (d.type !== "variable_declarator" || !nameNode || nameNode.type !== "object_pattern" || !value) continue;
+    // `const { a } = mod;` where `mod` is an imported module binding.
+    const req = requireSource(value, x.requires)?.source ?? (value.type === "identifier" ? moduleSource(facts, value.text) : null);
+
+    if (!req) continue;
+    const bindings: ImportBinding[] = [];
+
+    for (const p of nameNode.namedChildren) {
+      if (p.type === "shorthand_property_identifier_pattern") bindings.push({ kind: "named", local: p.text, imported: p.text });
+      else if (p.type === "pair_pattern") {
+        const k = p.childForFieldName("key")?.text;
+        const v = p.childForFieldName("value")?.text;
+
+        if (k && v) bindings.push({ kind: "named", local: v, imported: k });
+      }
+    }
+
+    facts.imports.push(importAt(d, req, bindings, false));
+  }
+}
+
+/** `export … from "./x"`: a re-export of names, of a namespace or of everything, which is also an import of that module. */
+function reexport(x: Extraction, node: Node, spec: string, typeStars: ReadonlyMap<number, string>): void {
+  const { facts } = x;
+    const clause = node.namedChildren.find((c) => c.type === "export_clause");
+    const star = node.children.some((c) => c.type === "*");
+    const ns = node.namedChildren.find((c) => c.type === "namespace_export");
+    const bindings: ImportBinding[] = [];
+
+    if (clause) {
+      for (const s of clause.namedChildren) {
+        if (s.type !== "export_specifier") continue;
+        const name = s.childForFieldName("name")?.text;
+        const alias = s.childForFieldName("alias")?.text ?? name;
+
+        if (name && alias) {
+          bindings.push({ kind: "named", local: alias, imported: name });
+          facts.exports.add(alias);
+          facts.exportRows.push({ name: alias, kind: "value", local: name, form: "reexport", from: spec });
+        }
+      }
+    } else if (ns) {
+      const alias = ns.namedChildren[0]?.text;
+
+      if (alias) {
+        bindings.push({ kind: "module", local: alias, namespace: true });
+        facts.exports.add(alias);
+        facts.exportRows.push({ name: alias, kind: "value", local: null, form: "namespace", from: spec });
+      }
+    } else if (star) {
+      facts.reexportsAll.push(spec);
+      facts.exportRows.push({ name: "*", kind: "reexport", local: null, form: "reexport", from: spec });
+    }
+
+    // `export type { A } from`, `export type * from` (read without its blanked `type`): types only.
+    const written = typeStars.get(node.startIndex);
+    const fact = importAt(node, spec, bindings, true);
+
+    if (written !== undefined) fact.text = written;
+
+    if (written !== undefined || typeKeyword(node)) fact.typeOnly = true;
+    else if (clause && inlineTypesOnly(clause, "export_specifier")) fact.inlineTypeOnly = true;
+    facts.imports.push(fact);
+}
+
+/** A local export: `export <declaration>`, `export { … }`, or the module's default value (`export default …`, TypeScript's `export = …`); names exported after their declaration go into `localExports`. */
+function localExport(x: Extraction, node: Node, localExports: Set<string>): void {
+  const { facts } = x;
+  const declaration = node.childForFieldName("declaration");
+  const isDefault = node.children.some((c) => c.type === "default");
+
+  if (declaration) {
+    const before = facts.exportRows.length;
+    visitDeclaration(x, declaration, true);
+
+    // `export default function main() {}` is imported as `default`, not `main`.
+    if (isDefault) {
+      for (const row of facts.exportRows.slice(before)) {
+        facts.exports.delete(row.name);
+        facts.exports.add("default");
+        row.local = row.name;
+        row.name = "default";
+        row.form = "default";
+      }
+    }
+  } else {
+    // `export { a, b as c }`, `export { x as default }`
+    const clause = node.namedChildren.find((c) => c.type === "export_clause");
+
+    for (const s of clause?.namedChildren ?? []) {
+      if (s.type !== "export_specifier") continue;
+      const alias = s.childForFieldName("alias")?.text ?? s.childForFieldName("name")?.text;
+
+      if (alias) {
+        const local = s.childForFieldName("name")?.text ?? alias;
+        facts.exports.add(alias);
+        facts.exportRows.push({ name: alias, kind: "value", local, ...(alias === "default" ? { form: "default" as const } : alias !== local ? { form: "alias" as const } : {}) });
+        localExports.add(local);
+      }
+    }
+
+    // `export default <expression>` and TypeScript `export = <expression>`: the module's default value.
+    const written = node.childForFieldName("value") ?? (node.children.some((c) => c.type === "=") ? node.namedChildren.find((c) => c.type !== "comment") : undefined);
+    const value = written ? unwrapValue(written) : null;
+
+    if (value) {
+      facts.exports.add("default");
+
+      if (value.type === "identifier") {
+        facts.exportRows.push({ name: "default", kind: "value", local: value.text, form: "default" });
+        localExports.add(value.text);
+      } else if (FUNCTION_VALUES.has(value.type)) {
+        facts.decls.push(decl("fn", "default", value, signature(value), true, callsOf(x)(value), collectTypeRefs(value), []));
+        facts.exportRows.push({ name: "default", kind: "fn", local: "default", form: "default" });
+      } else if (value.type === "class") {
+        const name = value.childForFieldName("name")?.text ?? "default";
+        facts.decls.push(classDecl(name, value, value, true, callsOf(x), facts));
+        facts.exportRows.push({ name: "default", kind: "class", local: name, form: "default" });
+      } else {
+        // `export default 3`, `export default { a, b }`, `export default make()`: a value, no declaration.
+        facts.exportRows.push({ name: "default", kind: "value", local: null, form: "default" });
+      }
+    }
+  }
 }
 
 /** The React exports archdiff reads, per module: wrappers from `react`, factories from `react` and its JSX runtimes. */
