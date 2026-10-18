@@ -889,8 +889,10 @@ test("a script without functions: inside draws its top level and what it calls; 
     assert.equal(picture("module:src/lib/banner.js").reason, "no module of the repository imports src/lib/banner.js, and it imports none of them");
     // A function that calls no function of the repository: its call tree is itself, and says why.
     assert.match(picture("calls:src/routes/checkout.tsx#Checkout").reason ?? "", /^Checkout calls no function of the repository/);
-    // The module alone on purpose (depth 0) needs no reason.
+    // The module alone on purpose (depth 0) needs no reason; a function alone at depth 0 is not said to call nothing.
     assert.equal(picture("module:src/lib/banner.js", "--depth", "0").reason, undefined);
+    assert.equal(picture("calls:src/routes/checkout.tsx#action", "--depth", "0").reason, "depth 0 draws action alone, without the 2 functions it calls (--depth 1 draws them)");
+    assert.equal(picture("sequence:src/routes/checkout.tsx#action", "--depth", "0").reason, "depth 0 draws no message (--depth 1 draws the function's own calls)");
   }));
 
 test("matrix, usage, type flow, path to the storages and hotspots on the fixture", () => {

@@ -319,9 +319,12 @@ function callsView(graph: Graph, id: string, depth: number): PictureContent {
   const nodes = [...members].map((member) => fnNode(graph, member));
   nodes[0] = { ...nodes[0]!, kind: "fn" };
   const name = `${start.parent ? `${start.parent}.` : ""}${start.name}`;
-  // A tree of the function alone: it calls no function of the repository (no hole either), only what lies outside it.
+  // A tree of the function alone: it calls no function of the repository (no hole either), only what lies outside it —
+  // or the depth is 0, which draws it alone whatever it calls.
   const outside = (gapsFrom.get(id) ?? []).filter((gap) => !isBlindSpot(gap)).length;
-  const alone = members.size === 1 && holes.length === 0 ? { reason: `${name} calls no function of the repository${outside > 0 ? `; its ${outside === 1 ? "call goes" : `${outside} calls go`} to packages, the language or values archdiff does not track` : ""}` } : {};
+  const callees = new Set((callsFrom.get(id) ?? []).map((call) => call.to)).size;
+  const lone = depth === 0 && callees > 0 ? `depth 0 draws ${name} alone, without the ${counted(callees, "function")} it calls (--depth 1 draws them)` : `${name} calls no function of the repository${outside > 0 ? `; its ${outside === 1 ? "call goes" : `${outside} calls go`} to packages, the language or values archdiff does not track` : ""}`;
+  const alone = members.size === 1 && holes.length === 0 ? { reason: lone } : {};
 
   return unplaced(`Calls from ${name}`, [...nodes, ...holes], edges, lanesOf(graph, [...nodes, ...holes]), alone);
 }
@@ -687,7 +690,7 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): P
 
   if (fragments.length > 0) diagram.reason = `${fragments.length} fragments: the calls under a branch or a loop, framed`;
 
-  if (messages.length === 0) diagram.reason = "the function calls nothing archdiff can follow";
+  if (messages.length === 0) diagram.reason = depth === 0 && graph.calls.some((call) => call.from === id && call.kind === "call") ? "depth 0 draws no message (--depth 1 draws the function's own calls)" : "the function calls nothing archdiff can follow";
   else if (messages.length >= limit) diagram.reason = `cut at ${limit} messages; --limit raises it`;
 
   if (folded > 0) diagram.reason = [diagram.reason, `${counted(folded, "module")} ${folded === 1 ? "shares" : "share"} the last lifeline (at most ${MAX_PARTICIPANTS})`].filter(Boolean).join("; ");
