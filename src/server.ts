@@ -1,20 +1,15 @@
 // `archdiff web`: a local HTTP server that serves the page (dist/web, built
 // by scripts/build-web.mjs; built on the fly in a checkout) and a JSON API
-// over the analysis. Every request re-analyses the repository, which the
-// fact cache keeps fast, so the diagrams are live: edit a file, reload.
-// GET only; binds to localhost unless --host says otherwise; the files it
-// returns are only the analysed sources of the repository.
+// over the analysis. Every request reads a fresh analysis (one per burst of
+// requests; the fact cache keeps it fast), so the pictures are live: edit a
+// file and the page reloads. GET and POST only; it binds to localhost unless
+// --host says otherwise, refuses a Host header that is not its own, and
+// returns no file outside the repository.
 //
-// API (GET): /api/views, /api/diagram?view=&depth=, /api/node?view=&id=,
-// /api/file?path=, /api/coverage, /api/review?base=,
-// /api/export?view=&format=, /api/scene?view= (the editor's scene: the
-// code's picture merged into the saved drawing), /api/layout?view=,
-// /api/flow?view= (the data flow of a calls view with its saved mocks),
-// /api/graph (the whole repository for the project map).
-// POST /api/layout saves a drawing to .archdiff/layouts/. /api/plan?view=
-// reads the task drawn on a view; POST /api/agent/run starts the agent on
-// a prompt (saved to .archdiff/tasks/), /api/agent/events?id= streams its
-// events, POST /api/agent/stop?id= ends it. Entry point: `serve`.
+// The routes live in routes/*.ts by `METHOD /path` — the pictures, the
+// agent and the contract, git's bars, the specs — over one context; every
+// picture is the one picture.ts draws for the query. Entry points:
+// `serve`, `ServeOptions`, `DEFAULT_PORT`.
 
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";

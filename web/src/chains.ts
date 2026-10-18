@@ -1,14 +1,17 @@
-// The picture as a graph, for the page's tools: the element ID of a line
-// (as the export names it), the shortest path between two shapes, the
-// chain onward from a line, the neighbourhood of a shape, and the shapes
-// matching a search. Pure functions of the current diagram's nodes and
-// edges, which app.ts passes in.
+// Chains of lines in the current picture, for the page's tools: the
+// shortest chain between two shapes, the chain onward from a line, the
+// neighbourhood of a shape (what the dim tool keeps), and the shapes a
+// search finds. Pure functions of the picture's shapes and lines, which
+// app.ts passes in.
+//
+// Entry points: `chainBetween`, `chainFrom`, `neighbourhoodOf`, `findShapes`.
 
 import type { Line, Shape } from "./api.ts";
 import type { PickedLine } from "./editor.tsx";
 import { lineElementId } from "../../src/shape-keys.ts";
+
 /** The shortest chain of lines from `from` to `to` along the arrows (else against them), breadth first; null when none. */
-export function pathBetween(edges: readonly Line[], from: string, to: string, directed: boolean): { edge: Line; index: number }[] | null {
+export function chainBetween(edges: readonly Line[], from: string, to: string, directed: boolean): { edge: Line; index: number }[] | null {
   const previous = new Map<string, { edge: Line; index: number; node: string }>();
   const seen = new Set([from]);
   let frontier = [from];
@@ -52,8 +55,6 @@ export function findShapes(nodes: ReadonlyMap<string, Shape>, text: string): Sha
 
   return hits.sort((a, b) => Number(b.label.toLowerCase().startsWith(needle)) - Number(a.label.toLowerCase().startsWith(needle)));
 }
-
-// ── The minimap ───────────────────────────────────────────────────────────────
 
 /** A shape, its lines and the shapes at their other ends: what stays lit under the focus tool. */
 export function neighbourhoodOf(edges: readonly Line[], id: string): string[] {

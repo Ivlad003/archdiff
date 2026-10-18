@@ -6,12 +6,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dataFlow, flowMarkdown, jsonInAnswer, mockPrompt, mocksFromTypes } from "../flow.ts";
-import { mergePlan, planFromScene, planMarkdown } from "../plan.ts";
+import { mergePlan, planFromScene, taskMarkdown } from "../plan.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { CACHE_DIRECTORY } from "../cache.ts";
-import { layoutSlug } from "../layouts.ts";
+import { drawingSlug } from "../drawings.ts";
 import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, parseIntent, writeIntent } from "../intent.ts";
-import { readLayout } from "../layouts.ts";
+import { readDrawing } from "../drawings.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView } from "../views.ts";
 import { checkEvents, runChecks } from "../checks.ts";
@@ -45,7 +45,7 @@ export async function postAgentRun(ctx: RouteContext, { body, response, request 
   // The task as sent, kept beside the drawings so it can be read or resent without the page.
   const view = isJsonString(parsed["view"]) ? parsed["view"] : "chat";
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const file = `${TASKS_DIRECTORY}/${layoutSlug(view)}-${stamp}.md`;
+  const file = `${TASKS_DIRECTORY}/${drawingSlug(view)}-${stamp}.md`;
   mkdirSync(join(root, TASKS_DIRECTORY), { recursive: true });
   writeFileSync(join(root, file), `<!-- archdiff:generated — task for ${agentSpec.name}, run ${run.id} -->\n${parsed["prompt"]}\n`);
 
@@ -67,14 +67,14 @@ export async function postCode(ctx: RouteContext, { body, response }: RouteReque
 
   if (!parseView(key)) return problem(response, 400, "unknown view");
   const analysis = await ctx.fresh();
-  const saved = readLayout(root, key);
+  const saved = readDrawing(root, key);
   const plan = planFromScene(analysis, key, saved?.elements ?? []);
   const intent = mergePlan(analysis.intent ?? parseIntent(""), plan, analysis.graph);
   writeIntent(root, intent);
   ctx.invalidate();
   const after = await ctx.fresh();
   const report = checkIntent(after, intent);
-  const task = [planMarkdown(plan, after).trimEnd(), "", `## The contract`, "", `${INTENT_FILE} now holds what was drawn. Build what it names and the code does not have yet:`, "", ...report.planned.map((item) => `- \`${item}\``), ...report.plannedEdges.map((item) => `- ${item}`), "", "Keep every import within the arrows of the contract; add an arrow there when one is truly needed and say why."].join("\n");
+  const task = [taskMarkdown(plan, after).trimEnd(), "", `## The contract`, "", `${INTENT_FILE} now holds what was drawn. Build what it names and the code does not have yet:`, "", ...report.planned.map((item) => `- \`${item}\``), ...report.plannedEdges.map((item) => `- ${item}`), "", "Keep every import within the arrows of the contract; add an arrow there when one is truly needed and say why."].join("\n");
 
   return json(response, { markdown: `${task}\n`, intent: intentMarkdown(intent), planned: report.planned.length + report.plannedEdges.length });
 }
@@ -152,7 +152,7 @@ export async function postFlowRun(ctx: RouteContext, { body, response }: RouteRe
 
   if (!view || view.kind !== "calls") return problem(response, 400, "the run needs a calls: view");
   const analysis = await ctx.fresh();
-  const options: Parameters<typeof runFlow>[2] = { mocks: readLayout(root, key)?.mocks ?? [] };
+  const options: Parameters<typeof runFlow>[2] = { mocks: readDrawing(root, key)?.mocks ?? [] };
 
   if (isJsonObject(parsed) && isJsonObject(parsed["input"])) options.input = parsed["input"];
 
@@ -189,7 +189,7 @@ export async function getFlow(ctx: RouteContext, { url, response }: RouteRequest
   if (!view || view.kind !== "calls") return problem(response, 400, "the flow needs a calls: view");
   const analysis = await ctx.fresh();
   const depthText = url.searchParams.get("depth");
-  const flow = dataFlow(analysis, view.subject, readLayout(root, key)?.mocks ?? [], depthText === null || depthText === "" ? 4 : Number(depthText));
+  const flow = dataFlow(analysis, view.subject, readDrawing(root, key)?.mocks ?? [], depthText === null || depthText === "" ? 4 : Number(depthText));
 
   return json(response, { flow, markdown: flowMarkdown(flow) });
 }

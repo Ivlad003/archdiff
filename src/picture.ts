@@ -21,7 +21,7 @@ import { layout, type Diagram } from "./diagram.ts";
 import { comparisonMarkdown, reviewMarkdown, type Compared, type GraphDiff } from "./diff.ts";
 import { readLogic, type LogicFact } from "./extract/logic.ts";
 import { mergeBase, revisionStamp } from "./git.ts";
-import { positionsOf, readLayout, type LayoutFile } from "./layouts.ts";
+import { positionsOf, readDrawing, type DrawingFile } from "./drawings.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import type { PictureOptions } from "./options.ts";
 import { compareBranches, history, review } from "./review.ts";
@@ -57,7 +57,7 @@ export interface Picture {
   /** Its Markdown page: a review's or a comparison's report for those, the picture's page for the rest. */
   markdown: string;
   /** The saved drawing of the view, when there is one: its shapes' places are the picture's. */
-  drawing: LayoutFile | null;
+  drawing: DrawingFile | null;
   change?: Change;
 }
 
@@ -67,7 +67,7 @@ const pictures = new WeakMap<Analysis, Map<string, Promise<Picture>>>();
 /** The picture of a request on `analysis`; drawn once per analysis and request (a saved drawing changes the request). */
 export function drawPicture(analysis: Analysis, request: PictureRequest): Promise<Picture> {
   const key = viewKey(request.view);
-  const drawing = readLayout(analysis.root, key);
+  const drawing = readDrawing(analysis.root, key);
   const memoKey = JSON.stringify([key, request.options, request.refs, drawing?.saved ?? null]);
   const known = pictures.get(analysis) ?? new Map<string, Promise<Picture>>();
   pictures.set(analysis, known);
@@ -83,7 +83,7 @@ export function drawPicture(analysis: Analysis, request: PictureRequest): Promis
   return picture;
 }
 
-async function draw(analysis: Analysis, { view, options, refs }: PictureRequest, drawing: LayoutFile | null): Promise<Picture> {
+async function draw(analysis: Analysis, { view, options, refs }: PictureRequest, drawing: DrawingFile | null): Promise<Picture> {
   const { reads, change } = await readAtTheEdge(analysis, view, options, refs);
   const placed = layout(viewOf(analysis, view, options, reads), positionsOf(drawing?.elements ?? null));
   const stamp = revisionStamp(analysis.root);

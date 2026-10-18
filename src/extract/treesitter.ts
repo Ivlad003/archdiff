@@ -211,7 +211,8 @@ export function errorLine(node: Node): number {
  * `static` (and, transitively, the values those read). `LIMIT = 100` → `5`
  * changes every fn that reads `LIMIT`. A value imported from another file of
  * the repository is out of reach, so the fingerprint then ends with
- * {@link READS_IMPORTED_VALUE}: the snapshot marks its closure incomplete.
+ * {@link READS_IMPORTED_VALUE}: a review that sees the same fingerprint cannot tell
+ * the value did not change, and the mark says so.
  */
 export function fingerprint(node: Node): string {
   return fingerprintFacts(node).fingerprint;

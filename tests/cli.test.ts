@@ -394,7 +394,7 @@ test("flow carries a mock into a destructured parameter, key by key", () => {
   }
 });
 
-test("layouts lists the drawings and --prune deletes the orphans", () => {
+test("drawings lists the drawings and --prune deletes the orphans", () => {
   const dir = mkdtempSync(join(tmpdir(), "archdiff-layouts-"));
 
   try {
@@ -404,11 +404,12 @@ test("layouts lists the drawings and --prune deletes the orphans", () => {
     const file = (view: string, name: string): void => writeFileSync(join(dir, ".archdiff/layouts", name), JSON.stringify({ format: 1, view, elements: [], mocks: [], saved: "2026-10-16T00:00:00.000Z" }));
     file("module:src/lib/orders.ts", "module_src_lib_orders.ts.json");
     file("module:src/lib/gone.ts", "module_src_lib_gone.ts.json");
-    const listed = archdiff(["layouts", dir]);
+    const listed = archdiff(["drawings", dir]);
     assert.equal(listed.status, 0);
     assert.ok(listed.stdout.includes("module_src_lib_orders.ts.json\tmodule:src/lib/orders.ts\tok"));
     assert.ok(listed.stdout.includes("module_src_lib_gone.ts.json\tmodule:src/lib/gone.ts\torphan"));
-    const pruned = archdiff(["layouts", dir, "--prune"]);
+    // The command still answers to its old name.
+  const pruned = archdiff(["layouts", dir, "--prune"]);
     assert.ok(pruned.stdout.includes("orphan\tdeleted"));
     assert.ok(existsSync(join(dir, ".archdiff/layouts/module_src_lib_orders.ts.json")));
     assert.ok(!existsSync(join(dir, ".archdiff/layouts/module_src_lib_gone.ts.json")));

@@ -1,8 +1,8 @@
 // TypeScript / JavaScript facts: imports, declarations, exports, calls.
 // A tree walk over the top level plus tree-sitter queries inside bodies.
 //
-// Pipeline: source → `FileFacts` (this module, via `extractTs`) → graph →
-// map/index. The graph resolves the import sources, callee texts and export
+// Pipeline: source → `FileFacts` (this module, via `extractTs`) → graph.
+// The graph resolves the import sources, callee texts and export
 // rows recorded here; nothing here touches other files. Entry points:
 // `extractTs` for one file and `withTsTree` for callers that need the parsed
 // tree. Key terms: a *hole* is a call kept as text because it does not name a

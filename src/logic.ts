@@ -11,13 +11,13 @@
 // points: `logicView`, `logicList`.
 
 import type { Analysis } from "./analyze.ts";
-import type { PictureContent, Line, Shape, LogicData, LogicPath } from "./diagram.ts";
+import type { PictureContent, Line, Shape, LogicData, LogicRule } from "./diagram.ts";
 import type { LogicFact, LogicStep } from "./extract/logic.ts";
 import { moduleOf, type Declaration } from "./graph.ts";
 import { lane, unplaced } from "./nodes.ts";
 
-/** Paths listed in the table of a function, at most. */
-const MAX_PATHS = 64;
+/** Rules listed in the table of a function, at most. */
+const MAX_RULES = 64;
 
 /** Functions the `logic` list draws, at most, the most branching first. */
 const MAX_LISTED = 60;
@@ -36,14 +36,14 @@ function fnLabel(node: Declaration): string {
  * Every path from the start to an exit, the branches taken on the way as
  * conditions and the calls as a list: the rules of the function. A loop is
  * walked once (its body, then what follows), so a path through it says what
- * the body does; the list is cut at `MAX_PATHS`.
+ * the body does; the list is cut at `MAX_RULES`.
  */
-function pathsOf(fact: LogicFact): { paths: LogicPath[]; more: number } {
+function rulesOf(fact: LogicFact): { rules: LogicRule[]; more: number } {
   const byId = new Map(fact.nodes.map((node) => [node.id, node]));
   const edgesFrom = new Map<string, { to: string; label?: string }[]>();
 
   for (const edge of fact.edges) edgesFrom.set(edge.from, [...(edgesFrom.get(edge.from) ?? []), edge]);
-  const paths: LogicPath[] = [];
+  const rules: LogicRule[] = [];
   let more = 0;
   let steps = 0;
 
@@ -55,7 +55,7 @@ function pathsOf(fact: LogicFact): { paths: LogicPath[]; more: number } {
     if (node.kind === "return" || node.kind === "throw" || node.kind === "end") {
       const made = [...calls, ...(node.calls ?? []).filter((call) => !calls.includes(call))];
 
-      if (paths.length < MAX_PATHS) paths.push({ conditions, calls: made, outcome: node.text, kind: node.kind });
+      if (rules.length < MAX_RULES) rules.push({ conditions, calls: made, outcome: node.text, kind: node.kind });
       else more++;
 
       return;
@@ -84,7 +84,7 @@ function pathsOf(fact: LogicFact): { paths: LogicPath[]; more: number } {
 
   if (start) walk(start.id, new Set([start.id]), [], []);
 
-  return { paths, more };
+  return { rules, more };
 }
 
 /** The resolved callee of a step: the first call of the function whose line falls in the step, by preference one with logic of its own. */
@@ -121,13 +121,13 @@ export function logicView(analysis: Analysis, scope: string | null, fact: LogicF
   const decisions = fact.nodes.filter((step) => step.kind === "decision").length;
   const loops = fact.nodes.filter((step) => step.kind === "loop").length;
   const exits = fact.nodes.filter((step) => step.kind === "return" || step.kind === "throw").length;
-  const { paths, more } = pathsOf(fact);
-  const logic: LogicData = { fn: fnLabel(fn), module: fn.module, decisions, loops, exits, paths };
+  const { rules, more } = rulesOf(fact);
+  const logic: LogicData = { fn: fnLabel(fn), module: fn.module, decisions, loops, exits, rules };
 
   if (fact.truncated) logic.truncated = true;
 
-  if (more > 0) logic.morePaths = more;
-  const notes = [`${decisions} ${decisions === 1 ? "decision" : "decisions"}, ${loops} ${loops === 1 ? "loop" : "loops"}, ${exits} ${exits === 1 ? "exit" : "exits"}; ${paths.length}${more > 0 ? "+" : ""} paths from the start to an exit, listed in the Markdown as the rules`, fact.truncated ? "the body is longer than the picture holds: the rest was left out" : ""].filter(Boolean);
+  if (more > 0) logic.moreRules = more;
+  const notes = [`${decisions} ${decisions === 1 ? "decision" : "decisions"}, ${loops} ${loops === 1 ? "loop" : "loops"}, ${exits} ${exits === 1 ? "exit" : "exits"}; ${rules.length}${more > 0 ? "+" : ""} rules (paths from the start to an exit), listed in the Markdown`, fact.truncated ? "the body is longer than the picture holds: the rest was left out" : ""].filter(Boolean);
 
   return unplaced(`Logic of ${fnLabel(fn)} (${fn.module})`, nodes, edges, [], { logic, reason: notes.join("; ") });
 }

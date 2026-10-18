@@ -18,11 +18,9 @@ export type Resolution =
   | { kind: "generated" }
   | { kind: "unresolved" };
 
-/** The per-language resolver: specifier → `Resolution`, plus the config files it read. */
+/** The per-language resolver: specifier → `Resolution`. */
 export interface SourceResolver {
   resolve(fromFile: string, spec: string): Resolution;
-  /** Config files read, with their text (null: absent). */
-  readonly inputs: ReadonlyMap<string, string | null>;
   /** The source paths the specifier would name, whether or not they exist, in the order resolution tries them. */
   wouldName?(fromFile: string, spec: string): string[];
   verbatimModuleSyntax?(file: string): boolean;

@@ -49,7 +49,7 @@
     "diagram": [
       "src/diagram.ts",
       "src/scene.ts",
-      "src/layouts.ts"
+      "src/drawings.ts"
     ],
     "extract": [
       "src/extract/**",

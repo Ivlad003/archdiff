@@ -51,7 +51,7 @@ flowchart LR
   end
   subgraph n_diagram["diagram — the placed picture"]
     n_src_diagram_ts["src/diagram.ts<br>the Diagram types and the layout: ranks, barycentre, lanes"]
-    n_src_layouts_ts["src/layouts.ts<br>the saved drawings of the editor"]
+    n_src_drawings_ts["src/drawings.ts<br>the saved drawings of the editor"]
   end
   subgraph n_core["core — the analysis: files to facts to graph"]
     n_src_analyze_ts["src/analyze.ts<br>one analysis: list, extract (cached), build the graph"]
@@ -88,7 +88,7 @@ flowchart LR
   n_src_cli_ts --> n_src_server_ts
   n_src_cli_ts --> n_src_views_ts
   n_src_cli_ts --> n_src_export_index_ts
-  n_src_cli_ts --> n_src_layouts_ts
+  n_src_cli_ts --> n_src_drawings_ts
   n_src_cli_ts --> n_src_analyze_ts
   n_src_server_ts --> n_src_routes_pictures_ts
   n_src_server_ts --> n_src_routes_agent_ts
@@ -96,7 +96,7 @@ flowchart LR
   n_src_server_ts --> n_src_analyze_ts
   n_src_routes_pictures_ts --> n_src_views_ts
   n_src_routes_pictures_ts --> n_src_export_index_ts
-  n_src_routes_pictures_ts --> n_src_layouts_ts
+  n_src_routes_pictures_ts --> n_src_drawings_ts
   n_src_routes_pictures_ts --> n_src_markdown_ts
   n_web_src_app_ts --> n_src_options_ts
   n_web_src_app_ts --> n_src_view_keys_ts
@@ -111,7 +111,7 @@ flowchart LR
   n_src_cli_ts --> n_src_picture_ts
   n_src_picture_ts --> n_src_views_ts
   n_src_picture_ts --> n_src_markdown_ts
-  n_src_picture_ts --> n_src_layouts_ts
+  n_src_picture_ts --> n_src_drawings_ts
   n_src_picture_ts --> n_src_analyze_ts
   n_src_picture_ts --> n_src_extract_logic_ts
   n_src_review_ts --> n_src_diff_ts
@@ -133,7 +133,7 @@ flowchart LR
   n_src_intent_view_ts --> n_src_intent_ts
   n_src_export_index_ts --> n_src_diagram_ts
   n_src_markdown_ts --> n_src_analyze_ts
-  n_src_layouts_ts --> n_src_cache_ts
+  n_src_drawings_ts --> n_src_cache_ts
   n_src_analyze_ts --> n_src_graph_ts
   n_src_analyze_ts --> n_src_intent_ts
   n_src_analyze_ts --> n_src_extract_pool_ts

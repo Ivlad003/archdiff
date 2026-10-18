@@ -45,9 +45,6 @@ export class PhpResolver implements SourceResolver {
   private readonly namespaces = new Set<string>();
   /** Namespace prefixes of packages in ASCII lower case (`symfony\component\httpfoundation\`), longest first. */
   private readonly packages: { prefix: string; name: string }[] = [];
-  /** The lock file read, with its text (null: absent); the snapshot id depends on it. */
-  readonly inputs = new Map<string, string | null>();
-
   constructor(root: string, sources: ReadonlySet<string> = new Set(), files: readonly FileFacts[] = []) {
     this.root = root;
     this.sources = sources;
@@ -67,10 +64,8 @@ export class PhpResolver implements SourceResolver {
     }
 
     // Read the first lock file that exists; the other is only a fallback.
-    // Each lock tried is recorded in `inputs`, absent ones as null.
     for (const lock of LOCKS) {
       const text = readText(join(root, lock));
-      this.inputs.set(lock, text);
 
       if (text === null) continue;
       this.packages.push(...packagePrefixes(text));

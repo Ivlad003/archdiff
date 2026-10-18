@@ -196,8 +196,8 @@ export const api = {
   runFlow: (view: string) => post<{ run: { steps: { id: string; order: number }[]; storageCalls: { module: string; member: string; args: unknown[] }[]; result: unknown; error: string | null; ms: number; predicted: string[]; missed: string[]; unexpected: string[] }; markdown: string }>("/api/flow/run", { view }),
   /** The picture of a view with the link's options and refs: the canvas's scene, the diagram, its Markdown, what a review found. */
   scene: (view: string, options: PictureOptions, refs: Refs) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${pictureQueryText(options)}${refsQuery(refs)}`),
-  saveLayout: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
-    const response = await fetch(`/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
+  saveDrawing: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
+    const response = await fetch(`/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
     const body = (await response.json()) as { saved: string } | { error: string };
 
     if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : response.statusText);

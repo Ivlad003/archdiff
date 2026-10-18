@@ -87,7 +87,7 @@ test("a drawing saved by the editor places the shapes of the live diagram and me
   // The user moves one shape and draws a stroke.
   const moved = scene.elements.map((element) => (element.id === "src/db/store.ts" ? { ...element, x: 900, y: 40 } : element));
   moved.push({ id: "stroke-1", type: "freedraw", x: 10, y: 10, width: 50, height: 20 });
-  const saved = await fetch(`${base}/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: moved, mocks: [{ id: "src/db/store.ts", kind: "storage", value: '{"rows": []}' }] }) });
+  const saved = await fetch(`${base}/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: moved, mocks: [{ id: "src/db/store.ts", kind: "storage", value: '{"rows": []}' }] }) });
   const savedText = await saved.text();
   assert.equal(saved.status, 200, savedText);
   assert.deepEqual(JSON.parse(savedText), { saved: ".archdiff/layouts/module_src_lib_orders.ts.json" });
@@ -104,7 +104,7 @@ test("a drawing saved by the editor places the shapes of the live diagram and me
   const drawio = await (await fetch(`${base}/api/export?view=${encodeURIComponent(view)}&format=drawio`)).text();
   assert.ok(drawio.includes('archdiff_id="src/db/store.ts"'));
   // A wrong body is refused and nothing changes.
-  const bad = await fetch(`${base}/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", body: JSON.stringify({ elements: "no" }) });
+  const bad = await fetch(`${base}/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", body: JSON.stringify({ elements: "no" }) });
   assert.equal(bad.status, 400);
 });
 
@@ -189,7 +189,7 @@ test("the task drawn on a view is read from its saved scene, and the agent runs 
     { id: "arrow-1", type: "arrow", x: 0, y: 0, width: 10, height: 10, startBinding: { elementId: "src/lib/orders.ts" }, endBinding: { elementId: "shape-1" } },
     { id: "note-1", type: "text", x: 0, y: 300, width: 100, height: 20, text: "refunds go through the same store" },
   ];
-  const saved = await fetch(`${base}/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: drawn, mocks: [] }) });
+  const saved = await fetch(`${base}/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: drawn, mocks: [] }) });
   assert.equal(saved.status, 200, await saved.text());
   const plan = await getJson<{ markdown: string; drawn: boolean; plan: { added: { kind: string; name: string; module?: string }[]; edges: { kind: string }[]; notes: string[] } }>(`/api/plan?view=${encodeURIComponent(view)}`);
   assert.equal(plan.drawn, true);
@@ -316,7 +316,7 @@ test("code this folds the drawing into the contract and writes the task; the int
     { id: "drawn-1-text", type: "text", x: lane.x + 30, y: lane.y + lane.height - 55, width: 150, height: 20, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 2, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false, text: "src/lib/vouchers.ts", originalText: "src/lib/vouchers.ts", fontSize: 14, fontFamily: 1, textAlign: "left", verticalAlign: "top", containerId: "drawn-1", lineHeight: 1.25, baseline: 14 },
     { id: "drawn-arrow", type: "arrow", x: orders.x + orders.width, y: orders.y + orders.height / 2, width: 10, height: 10, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 3, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false, points: [[0, 0], [lane.x + 100 - (orders.x + orders.width), lane.y + lane.height - 45 - (orders.y + orders.height / 2)]], lastCommittedPoint: null, startBinding: { elementId: "src/lib/orders.ts", focus: 0, gap: 1 }, endBinding: { elementId: "drawn-1", focus: 0, gap: 1 }, startArrowhead: null, endArrowhead: "arrow" },
   ];
-  const saved = await fetch(`${base}/api/layout?view=${encodeURIComponent("layer:lib")}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ format: 1, view: "layer:lib", elements: drawn, mocks: [] }) });
+  const saved = await fetch(`${base}/api/drawing?view=${encodeURIComponent("layer:lib")}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ format: 1, view: "layer:lib", elements: drawn, mocks: [] }) });
   assert.equal(saved.status, 200, await saved.text());
   const coded = await (await fetch(`${base}/api/code`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layer:lib" }) })).json() as { markdown: string; intent: string; planned: number };
   assert.ok(coded.markdown.includes("A new module `src/lib/vouchers.ts` in layer **lib**"), coded.markdown);
@@ -408,7 +408,7 @@ test("Cursor's stream-json (chat_id, --resume) is read like Claude's: the questi
 
 test("the Flow tab's run: POST /api/flow/run executes the entry with the saved mocks and reports the steps against the prediction", async () => {
   const view = "calls:src/lib/orders.ts#placeOrder";
-  await fetch(`${base}/api/layout?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: [], mocks: [{ id: "src/lib/orders.ts#placeOrder", kind: "input", value: '{"id": "web-1", "total": 7}' }] }) });
+  await fetch(`${base}/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements: [], mocks: [{ id: "src/lib/orders.ts#placeOrder", kind: "input", value: '{"id": "web-1", "total": 7}' }] }) });
   const answer = await fetch(`${base}/api/flow/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view }) });
   assert.equal(answer.status, 200);
   const { run, markdown } = (await answer.json()) as { run: { steps: { id: string }[]; result: { id: string; total: number }; missed: string[] }; markdown: string };
@@ -428,7 +428,7 @@ test("the project map lists every module with its layer and every import; a tag 
   const expanded = await fetch(`${base}/api/expand`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Why? @view:layer:lib and @logic:src/lib/orders.ts#validate", query: "depth=0" }) });
   const { context } = (await expanded.json()) as { context: string };
   assert.ok(context.includes("### @view:layer:lib") && context.includes("# Layer lib"), context.slice(0, 300));
-  assert.ok(context.includes("### @logic:src/lib/orders.ts#validate") && context.includes("Paths: the rules of the function") && context.includes("`order.total < 0: yes`"), context);
+  assert.ok(context.includes("### @logic:src/lib/orders.ts#validate") && context.includes("Rules: every path from the start to an exit") && context.includes("`order.total < 0: yes`"), context);
   // A shape of a logic view has a page like any other shape.
   const node = await getJson<{ markdown: string }>(`/api/shape?view=${encodeURIComponent("logic:src/lib/orders.ts#validate")}&id=n1`);
   assert.ok(node.markdown.startsWith("# order.total < 0"), node.markdown.slice(0, 80));

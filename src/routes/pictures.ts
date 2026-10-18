@@ -10,25 +10,27 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { coverageReport } from "../coverage.ts";
+import { dataFlow, flowMarkdown } from "../flow.ts";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, type ExportFormat } from "../export/index.ts";
 import { toExcalidraw } from "../export/excalidraw.ts";
-import { planFromScene, planMarkdown } from "../plan.ts";
-import { mergeScene, parseLayout, readLayout, writeLayout, type SceneElement } from "../layouts.ts";
+import { planFromScene, taskMarkdown } from "../plan.ts";
+import { mergeScene, parseDrawing, readDrawing, writeDrawing, type SceneElement } from "../drawings.ts";
 import { edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView, viewList } from "../views.ts";
+import type { ViewKind } from "../view-keys.ts";
 import { projectMap } from "../project-map.ts";
 import { standsFor } from "../shape-keys.ts";
 import { failed, json, optionsOf, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
 
-export async function postLayout(ctx: RouteContext, { url, body, response }: RouteRequest): Promise<void> {
+export async function postDrawing(ctx: RouteContext, { url, body, response }: RouteRequest): Promise<void> {
   const { root } = ctx;
   const key = url.searchParams.get("view") ?? "";
 
   if (!parseView(key)) return problem(response, 400, "unknown view");
 
   try {
-    const file = writeLayout(root, parseLayout(parseJson(body), key));
+    const file = writeDrawing(root, parseDrawing(parseJson(body), key));
 
     return json(response, { saved: file });
   } catch (error) {
@@ -40,6 +42,7 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
   const { root } = ctx;
   // The tags of a text (@module:path, @fn:path#name, @layer:name, @dir:path, @flow:path#fn, @type:path#Name, @logic:path#fn,
   // @view:<key>) as context for an agent; `query` carries the picture's options for @view: (the picture as the page shows it).
+  // @flow: is the data flow of an entry with its saved mocks; the call tree of one is @view:calls:<entry>.
   let parsed;
 
   try {
@@ -63,7 +66,13 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
     seenTags.add(tag);
     const kind = match[1]!;
     const subject = match[2]!.replace(/[.,;:)]+$/, "");
-    const key = kind === "fn" ? `calls:${subject}` : kind === "flow" ? `calls:${subject}` : kind === "type" ? `type:${subject}` : kind === "view" ? subject : `${kind}:${subject}`;
+
+    if (kind === "flow") {
+      sections.push(`### ${tag}\n\n${flowMarkdown(dataFlow(analysis, subject, readDrawing(root, `calls:${subject}`)?.mocks ?? [], 4))}`);
+      continue;
+    }
+
+    const key = kind === "fn" ? `calls:${subject}` : kind === "type" ? `type:${subject}` : kind === "view" ? subject : `${kind}:${subject}`;
     const query = kind === "view" ? new URLSearchParams(shown) : new URLSearchParams();
     query.set("view", key);
     const picture = await ctx.picture(query);
@@ -112,10 +121,10 @@ export async function getPlan(ctx: RouteContext, { url, response }: RouteRequest
 
   if (!parseView(key)) return problem(response, 400, "unknown view");
   const analysis = await ctx.fresh();
-  const saved = readLayout(root, key);
+  const saved = readDrawing(root, key);
   const plan = planFromScene(analysis, key, saved?.elements ?? []);
 
-  return json(response, { plan, markdown: planMarkdown(plan, analysis), drawn: saved !== null });
+  return json(response, { plan, markdown: taskMarkdown(plan, analysis), drawn: saved !== null });
 }
 
 export async function getDiagram(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
@@ -191,19 +200,22 @@ export async function getChanges(ctx: RouteContext, { response, request }: Route
   return;
 }
 
+/** The tag a view of the list gives, by its kind: `@layer:`, `@dir:`, `@module:`, `@flow:` (an entry point's data flow), `@type:`, `@logic:`. */
+const TAG_OF_KIND: Partial<Record<ViewKind, string>> = { layer: "layer", dir: "dir", module: "module", calls: "flow", type: "type", logic: "logic" };
+
 export async function getTags(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
   // What `@` can name in the chat: layers, directories, modules, functions, flows (entry points), types; filtered by `q`.
   const q = (url.searchParams.get("q") ?? "").toLowerCase();
   const analysis = await ctx.fresh();
   const tags: { tag: string; title: string }[] = [];
 
+  // A view of the list with a subject gives the tag of its kind: a layer, a directory, a module, an entry's flow, a type, a function's logic.
   for (const entry of viewList(analysis)) {
-    if (entry.kind === "layer") tags.push({ tag: `@layer:${entry.key.slice(6)}`, title: entry.title });
-    else if (entry.kind === "dir") tags.push({ tag: `@dir:${entry.key.slice(4)}`, title: entry.title });
-    else if (entry.kind === "module") tags.push({ tag: `@module:${entry.key.slice(7)}`, title: entry.title });
-    else if (entry.kind === "calls") tags.push({ tag: `@flow:${entry.key.slice(6)}`, title: entry.title });
-    else if (entry.kind === "type") tags.push({ tag: `@type:${entry.key.slice(5)}`, title: entry.title });
-    else if (entry.kind === "logic" && entry.key !== "logic") tags.push({ tag: `@logic:${entry.key.slice(6)}`, title: `${entry.title} — the flowchart and its rules` });
+    const view = parseView(entry.key);
+    const prefix = view ? TAG_OF_KIND[view.kind] : undefined;
+
+    if (!view || prefix === undefined || view.subject === null) continue;
+    tags.push({ tag: `@${prefix}:${view.subject}`, title: prefix === "flow" ? `${entry.title} — its data flow` : prefix === "logic" ? `${entry.title} — the flowchart and its rules` : entry.title });
   }
 
   for (const node of analysis.graph.nodes.values()) if (node.kind === "fn") tags.push({ tag: `@fn:${node.id}`, title: `${node.parent ? `${node.parent}.` : ""}${node.name} (${node.module})` });
@@ -230,7 +242,7 @@ export async function getExport(ctx: RouteContext, { url, response }: RouteReque
 
 /** The handlers by `METHOD /path`. */
 export const routes: Record<string, (ctx: RouteContext, request: RouteRequest) => Promise<void>> = {
-  "POST /api/layout": postLayout,
+  "POST /api/drawing": postDrawing,
   "POST /api/expand": postExpand,
   "GET /api/scene": getScene,
   "GET /api/views": getViews,

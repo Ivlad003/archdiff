@@ -7,7 +7,7 @@
 import { api } from "./api.ts";
 import { element } from "./dom.ts";
 import { page } from "./page.ts";
-import { stateFromHash } from "./state.ts";
+import { currentLink } from "./link.ts";
 import { parseView } from "../../src/view-keys.ts";
 
 /** The entry point a calls view starts from (`calls:<path>#<fn>`), or null on any other view. */
@@ -43,7 +43,7 @@ let mockInput: HTMLTextAreaElement | null = null;
 let mockStorages: { id: string; field: HTMLTextAreaElement }[] = [];
 
 export async function loadFlow(): Promise<void> {
-  const state = stateFromHash();
+  const state = currentLink();
   flowMocks.replaceChildren();
   flowSteps.replaceChildren();
   element("flow-tab").hidden = entryOf(state.view) === null;
@@ -68,7 +68,7 @@ export async function loadFlow(): Promise<void> {
     for (const { id, field } of storageFields) if (field.value.trim() !== "") next.push({ id, kind: "storage", value: field.value.trim() });
     page.setMocks(next);
     const canvas = page.canvas();
-    void (canvas ? api.saveLayout(state.view, canvas.scene(), page.mocks()) : Promise.resolve()).then(() => loadFlow()).catch((error: unknown) => (flowSteps.textContent = error instanceof Error ? error.message : String(error)));
+    void (canvas ? api.saveDrawing(state.view, canvas.scene(), page.mocks()) : Promise.resolve()).then(() => loadFlow()).catch((error: unknown) => (flowSteps.textContent = error instanceof Error ? error.message : String(error)));
   });
   flowMocks.append(apply);
 
@@ -111,7 +111,7 @@ export async function loadFlow(): Promise<void> {
 
 /** Mocks for the entry and the storages: the agent with the description when there is one, else the types; the fields are filled, not saved. */
 async function generateMocks(): Promise<void> {
-  const state = stateFromHash();
+  const state = currentLink();
   const note = element<HTMLInputElement>("mock-description");
 
   if (entryOf(state.view) === null || !mockInput) return;
@@ -133,7 +133,7 @@ async function generateMocks(): Promise<void> {
 
 /** Plays the steps of the flow on the diagram: each step's shape lights up in turn, its row in the panel too, as a run would pass through them. */
 async function playFlow(): Promise<void> {
-  const state = stateFromHash();
+  const state = currentLink();
 
   if (!lastFlow || !page.canvas() || entryOf(state.view) === null) return;
   const button = element<HTMLButtonElement>("flow-play");
@@ -161,7 +161,7 @@ element<HTMLButtonElement>("flow-play").addEventListener("click", () => void pla
 
 /** The entry run for real: the functions it entered light up green, the predicted ones it missed dim; the report goes under the steps. */
 async function runFlowNow(): Promise<void> {
-  const state = stateFromHash();
+  const state = currentLink();
 
   if (entryOf(state.view) === null) return;
   const button = element<HTMLButtonElement>("flow-run");

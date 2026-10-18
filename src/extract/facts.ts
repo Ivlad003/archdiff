@@ -1,11 +1,13 @@
-// Language-independent facts extracted from one source file. Everything the
-// map and the index need; nothing about layers or IDs yet.
+// Language-independent facts extracted from one source file: everything the
+// graph needs — imports, declarations, calls, the constructs not turned
+// into edges (`UnsupportedFact`), the control flow, the facts the framework
+// adapters read — and nothing about layers or IDs yet.
 //
 // The contract between the language frontends (`ts.ts`, `python.ts`,
-// `rust.ts`, `php.ts`) and the graph: source → FileFacts → graph → map/index.
-// Types only; `FileFacts` is the root, with imports, declarations, calls,
-// holes (`UnsupportedFact`) and the framework-facing facts adapters read.
-// Facts are cached on disk between runs (`fact-cache.ts`).
+// `rust.ts`, `php.ts`) and the graph: source → FileFacts → graph. Types,
+// and `reviveFacts`, which gives back the one Set a JSON trip loses. Facts
+// are cached on disk between runs (cache.ts) and cross worker threads
+// (pool.ts). Entry points: `FileFacts`, `reviveFacts`.
 
 /** A decorator of a declaration as the code writes it: `@Get("/x")` → `Get` with its arguments. */
 export interface CodeDecorator {
@@ -90,15 +92,9 @@ export interface FileFacts {
    */
   symbols?: QualifiedSymbol[];
   /**
-   * PHP, a file `outside` the architecture (ADR 0011): its classes and interfaces read as
-   * declarations only — no node, no edge, no hole — so a class of the architecture that
-   * extends one, or a value typed with one, finds its members (`AbstractModel::getData`).
-   */
-  declarations?: OutsideDeclFact[];
-  /**
-   * Places where execution starts, as the code writes them (ADR 0022 п. 5):
-   * a handler registered on a literal path, a script block that calls a fn.
-   * The snapshot resolves each to a fn of the graph (`entries` of the index).
+   * Places where execution starts, as the code writes them: a handler
+   * registered on a literal path, a script block that calls a fn. Read by
+   * no view yet: the entry points come from frameworks.ts and the names.
    */
   entries?: EntryFact[];
   /**
@@ -314,7 +310,7 @@ export type ImportBinding =
   /** `import { a as b } from` — `b` is the export `a`. */
   | { kind: "named"; local: string; imported: string };
 
-/** The kinds of declaration the map shows. */
+/** The kinds of declaration the graph holds. */
 export type DeclKind = "fn" | "class" | "type";
 
 /** A declaration of the file (or a member of one), with what its body calls and mentions. */
@@ -385,10 +381,10 @@ export interface DeclFact {
   /**
    * TypeScript decorators of a class or a member, in source order (`@Controller('orders')`,
    * `@Get(':id')`), and on a constructor those of its parameters (`@Inject(TOKEN)`, with
-   * `param`). A framework adapter reads them as its configuration (ADR 0022); absent without any.
+   * `param`). A framework adapter reads them as its configuration; absent without any.
    */
   decorators?: CodeDecorator[];
-  /** PHP: the attributes written on the class or the method (`#[Route('/x', methods: ['POST'])]`), in order. A framework adapter reads them (ADR 0022). */
+  /** PHP: the attributes written on the class or the method (`#[Route('/x', methods: ['POST'])]`), in order. A framework adapter reads them. */
   attributes?: AttributeFact[];
   /** PHP classes: the properties whose default value is a literal a framework reads (`protected $listen = [OrderPlaced::class => [...]]`). */
   properties?: PropertyFact[];
@@ -451,22 +447,6 @@ export interface FieldFact {
   docblock?: { line: number; col: number };
 }
 
-/**
- * PHP: a class, interface or trait of a file `outside` the architecture, as declarations only.
- * Names are qualified, without the leading `\`.
- */
-export interface OutsideDeclFact {
-  kind: "class" | "interface";
-  /** The qualified name. */
-  name: string;
-  line: number;
-  col: number;
-  base?: string;
-  implements?: string[];
-  traits?: string[];
-  methods: MethodSigFact[];
-  fields: FieldFact[];
-}
 
 /**
  * PHP: a value whose class the graph reads from another declaration — the result of a call
@@ -494,7 +474,7 @@ export interface ResultCallFact {
 
 /**
  * A value PHP code writes as a literal, as far as a framework adapter reads it
- * (ADR 0022): a string without interpolation, `X::class` (`self::class` is the
+ * a string without interpolation, `X::class` (`self::class` is the
  * enclosing class), a class constant `X::NAME`, `new X(…)`, an array of them,
  * a closure literal at its position; anything else is `other`. Class names are
  * qualified as PHP resolves them, without the leading `\`.
@@ -781,4 +761,9 @@ export interface UnsupportedFact {
    * is in how calls of that declaration behave; it adds no dependency.
    */
   symbol?: string;
+}
+
+/** Facts back from JSON (the fact cache) or a structured clone: `exports` is the one Set, written as an array. */
+export function reviveFacts(facts: FileFacts): FileFacts {
+  return facts.exports instanceof Set ? facts : { ...facts, exports: new Set(facts.exports as unknown as string[]) };
 }

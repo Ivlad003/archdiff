@@ -11,7 +11,7 @@
 // not touch yet is named as a warning, not refused.
 //
 // Pure: Analysis + view + scene → Plan → Markdown, or → the intent with
-// the plan folded into it. Entry points: `planFromScene`, `planMarkdown`,
+// the plan folded into it. Entry points: `planFromScene`, `taskMarkdown`,
 // `mergePlan`, `Plan`.
 
 import type { Analysis } from "./analyze.ts";
@@ -289,8 +289,8 @@ export function planIsEmpty(plan: Plan): boolean {
   return plan.added.length === 0 && plan.edges.length === 0 && plan.removed.length === 0 && plan.notes.length === 0;
 }
 
-/** The plan as a task for an agent: what to add, connect and remove, with the code positions it touches, and the rules to keep. */
-export function planMarkdown(plan: Plan, analysis: Analysis): string {
+/** The task for an agent from a plan: what to add, connect and remove, with the code positions it touches, and the rules to keep. */
+export function taskMarkdown(plan: Plan, analysis: Analysis): string {
   const { graph } = analysis;
   const lines = [`<!-- archdiff:generated — plan ${plan.view} -->`, `# Task from the drawing of ${plan.view}`, ""];
 

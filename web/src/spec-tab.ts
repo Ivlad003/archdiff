@@ -7,7 +7,7 @@ import { api } from "./api.ts";
 import { agentNameOf, runState, runTask, taskField } from "./chat.ts";
 import { element } from "./dom.ts";
 import { page } from "./page.ts";
-import { stateFromHash } from "./state.ts";
+import { currentLink } from "./link.ts";
 
 /** The text of the open spec, for the copy button. */
 export function specTextOf(): string {
@@ -65,7 +65,7 @@ async function specTask(mode: "generate" | "update"): Promise<void> {
   const state = element<HTMLSpanElement>("spec-state");
 
   try {
-    const view = stateFromHash().view;
+    const view = currentLink().view;
     const { markdown } = await api.specPrompt(mode, mode === "generate" && view.includes(":") ? view : null);
     taskField.value = markdown;
     page.showTab("chat");

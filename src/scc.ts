@@ -1,7 +1,7 @@
 // Strongly connected components of a directed module graph.
 // A component is cyclic when it has two or more modules, or a self-loop.
-// Works on the graph stage (source → FileFacts → graph): cycle rules in
-// `check`, the map's cycle reports and layering use it. Entry points:
+// Works on the graph stage (source → FileFacts → graph): the cycles views
+// (cycles.ts) find their circles with it. Entry points:
 // `stronglyConnected` (cyclic components only), `components` (all, in Tarjan's
 // order) and `cycleThrough` (one concrete cycle to show in a diagnostic).
 // Every result is deterministic: nodes are visited in sorted order.

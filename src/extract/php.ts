@@ -2,8 +2,7 @@
 // and methods, calls, type hints, `require`/`include` and PHPDoc. This is the
 // source → FileFacts stage for `.php` files: `extractPhp` parses a file with
 // tree-sitter and returns its FileFacts, which the graph turns into nodes and
-// edges; `declarationsOnly` cuts the facts of a file `outside` the architecture
-// down to its class and interface declarations.
+// edges.
 //
 // PHP names a
 // class or a function by its qualified name, never by its file, and a class of
@@ -22,7 +21,7 @@
 // writes, which PHP does not check: provenance `docblock`.
 
 import { asciiLowerCase } from "../languages.ts";
-import type { ArgFact, AttributeFact, CallFact, ChainLinkFact, DeclFact, ExportRow, FieldFact, FileFacts, ImportFact, LiteralFact, MethodSigFact, OutsideDeclFact, ParamFact, PassFact, PropertyFact, ResultCallFact, ResultTypeFact, TypeRefFact, UnsupportedFact, ValueOfFact, ValueRefFact } from "./facts.ts";
+import type { ArgFact, AttributeFact, CallFact, ChainLinkFact, DeclFact, ExportRow, FieldFact, FileFacts, ImportFact, LiteralFact, MethodSigFact, ParamFact, PassFact, PropertyFact, ResultCallFact, ResultTypeFact, TypeRefFact, UnsupportedFact, ValueOfFact, ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, located, startCol, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
 
@@ -58,70 +57,6 @@ export function extractPhp(path: string, src: string): Promise<FileFacts> {
   return withTree("php", src, (tree) => extractTree(path, tree.rootNode));
 }
 
-/**
- * A file `outside` the architecture as declarations only (ADR 0011, business-flows 40): an opaque
- * module — no import, declaration, call or hole of its own — that carries its classes and
- * interfaces with their bases, interfaces, traits, methods, result types and typed properties,
- * names qualified. A file that does not parse carries none: a member it would declare is not known.
- */
-export function declarationsOnly(facts: FileFacts): FileFacts {
-  const declarations: OutsideDeclFact[] = [];
-
-  // A file that does not parse keeps no declarations: half a class would claim members it may not have.
-  if (facts.parseError === null) {
-    const qualified = (written: string): string => qualifiedBy(facts, written);
-    const symbols = (facts.symbols ?? []).filter((s) => s.table === "class");
-
-    // Classes (traits and enums included) and interfaces only; functions carry nothing a caller inside needs.
-    for (const d of facts.decls) {
-      if (d.kind !== "class" && d.kind !== "type") continue;
-      const name = symbols.find((s) => s.name === d.name)?.qualified ?? d.name;
-      const methods = d.kind === "type" ? (d.methods ?? []) : d.members.map(methodSig);
-      const declaration: Omit<OutsideDeclFact, "methods" | "fields"> = { kind: d.kind === "type" ? "interface" : "class", name, line: d.line, col: d.col };
-
-      if (d.base !== undefined) declaration.base = qualified(d.base);
-
-      if (d.implements) declaration.implements = d.implements.map(qualified);
-
-      if (d.traits) declaration.traits = d.traits.map(qualified);
-      // Object.assign appends methods and fields after the optional keys, in the key order of a declaration.
-      declarations.push(Object.assign(declaration, { methods, fields: d.fields ?? [] }));
-    }
-  }
-
-  const opaque: FileFacts = { path: facts.path, endLine: facts.endLine, endCol: facts.endCol, imports: [], decls: [], exports: new Set(), reexportsAll: [], exportRows: [], unsupported: [], valueRefs: [], moduleCalls: [], completeness: "opaque", parseError: null };
-
-  if (declarations.length > 0) opaque.declarations = declarations;
-
-  return opaque;
-}
-
-/** A method declaration reduced to what an `outside` declaration keeps: its name, whether it is static, and its result type. */
-function methodSig(member: DeclFact): MethodSigFact {
-  const sig: MethodSigFact = { name: member.name };
-
-  if (member.static) sig.static = true;
-
-  if (member.result) sig.result = member.result;
-
-  return sig;
-}
-
-/** A class name as the file binds it (`Collector.klass`), qualified through the file's imports: `Foo` with `use A\Foo` → `A\Foo`. */
-function qualifiedBy(facts: FileFacts, written: string): string {
-  // A fully qualified name (`\A\Foo`) needs no import: drop the leading backslash.
-  if (written.startsWith("\\")) return written.replace(/^\\+/, "");
-  const [head, ...rest] = written.split("\\");
-
-  // Find the class import that binds the first segment; function, constant and include imports bind no class.
-  for (const imp of facts.imports) {
-    if (/^(?:function|const|include) /.test(imp.source)) continue;
-
-    if (imp.bindings.some((b) => b.kind === "named" && b.local === head)) return [imp.source.replace(/^\\+/, ""), ...rest].join("\\");
-  }
-
-  return written;
-}
 
 /** What names mean in one namespace: its name and the aliases of its `use` statements (keys in ASCII lower case: PHP class and function names ignore ASCII case). */
 interface Names {

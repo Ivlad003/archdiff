@@ -5,8 +5,8 @@
 // expression is an edge or a hole: a callee archdiff cannot name is a call
 // through a value, never dropped.
 //
-// The Rust frontend of the code pipeline (source → FileFacts → graph →
-// map/index): parses one file with tree-sitter and returns its `FileFacts`.
+// The Rust frontend of the code pipeline (source → FileFacts → graph):
+// parses one file with tree-sitter and returns its `FileFacts`.
 // Entry point: `extractRust`. Terms: decl (an item archdiff indexes), hole (an
 // unsupported fact or an unresolved call), value ref (a fn read as a value,
 // so something else may call it), pass (a fn path given as an argument).
@@ -252,7 +252,7 @@ function members(node: Node): Node[] {
   return (node.childForFieldName("body")?.namedChildren ?? []).filter((item) => !isComment(item) && !testOnly(item));
 }
 
-/** An item under `#[cfg(test)]` (or `cfg(all(test, …))`) or a `#[test]` fn: test code, kept out of the map like test files. */
+/** An item under `#[cfg(test)]` (or `cfg(all(test, …))`) or a `#[test]` fn: test code, kept out of the graph like test files. */
 function testOnly(node: Node): boolean {
   // Any test attribute among those right above the item.
   for (let prev = node.previousNamedSibling; prev && (prev.type === "attribute_item" || isComment(prev)); prev = prev.previousNamedSibling) {

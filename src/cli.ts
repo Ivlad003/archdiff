@@ -13,8 +13,8 @@ import { analyze } from "./analyze.ts";
 import { coverageReport } from "./coverage.ts";
 import { dataFlow, flowMarkdown } from "./flow.ts";
 import { runFlow, runMarkdown } from "./run.ts";
-import { LAYOUTS_DIRECTORY, readLayout, readLayoutFile } from "./layouts.ts";
-import { mergePlan, planFromScene, planMarkdown } from "./plan.ts";
+import { DRAWINGS_DIRECTORY, readDrawing, readDrawingFile } from "./drawings.ts";
+import { mergePlan, planFromScene, taskMarkdown } from "./plan.ts";
 import { agentFromConfig } from "./agent.ts";
 import { metricsMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
@@ -52,6 +52,8 @@ interface Call {
 /** One command of the table. */
 interface Command {
   name: string;
+  /** Older names the command still answers to (`layouts` is `drawings`). */
+  aliases?: readonly string[];
   /** The usage line after the name: `[dir] [--json]`. */
   usage: string;
   /** The help, one line per element, already wrapped. */
@@ -228,7 +230,8 @@ const COMMANDS: readonly Command[] = [
     },
   },
   {
-    name: "layouts",
+    name: "drawings",
+    aliases: ["layouts"],
     usage: "[dir] [--prune]",
     help: ["List the saved drawings (.archdiff/layouts/); --prune deletes those", "whose view the code no longer has (a renamed module, a removed function)"],
     arity: 1,
@@ -236,15 +239,15 @@ const COMMANDS: readonly Command[] = [
     async run(call) {
       const root = call.dir(0);
       const analysis = await analyze(root);
-      const directory = resolve(root, LAYOUTS_DIRECTORY);
+      const directory = resolve(root, DRAWINGS_DIRECTORY);
       const keys = new Set(viewList(analysis).map((view) => view.key));
       const files = existsSync(directory) ? readdirSync(directory).filter((name) => name.endsWith(".json")).sort() : [];
 
       for (const name of files) {
-        const saved = readLayoutFile(resolve(directory, name));
+        const saved = readDrawingFile(resolve(directory, name));
         // A drawing lives while its view does: one the views list names, or a view without a subject (a review, a comparison).
         const alive = saved !== null && (keys.has(saved.view) || parseView(saved.view)?.subject === null);
-        const line = `${LAYOUTS_DIRECTORY}/${name}\t${saved ? saved.view : "(unreadable)"}\t${alive ? "ok" : "orphan"}`;
+        const line = `${DRAWINGS_DIRECTORY}/${name}\t${saved ? saved.view : "(unreadable)"}\t${alive ? "ok" : "orphan"}`;
 
         if (!alive && call.has("prune")) {
           rmSync(resolve(directory, name));
@@ -272,7 +275,7 @@ const COMMANDS: readonly Command[] = [
       const depth = call.has("depth") ? Number(call.text("depth")) : 4;
 
       if (!(Number.isInteger(depth) && depth >= 0)) return fail("flow: --depth must be a whole number");
-      const flow = dataFlow(analysis, view.subject, readLayout(analysis.root, key!)?.mocks ?? [], depth);
+      const flow = dataFlow(analysis, view.subject, readDrawing(analysis.root, key!)?.mocks ?? [], depth);
 
       return writeOut(call.has("json") ? `${JSON.stringify(flow, null, 2)}\n` : flowMarkdown(flow), call.text("out"));
     },
@@ -311,7 +314,7 @@ const COMMANDS: readonly Command[] = [
       const timeout = call.has("timeout") ? Number(call.text("timeout")) : undefined;
 
       if (timeout !== undefined && !(Number.isInteger(timeout) && timeout > 0)) return fail("run: --timeout must be milliseconds");
-      const options: Parameters<typeof runFlow>[2] = { mocks: readLayout(analysis.root, key!)?.mocks ?? [] };
+      const options: Parameters<typeof runFlow>[2] = { mocks: readDrawing(analysis.root, key!)?.mocks ?? [] };
 
       if (input) options.input = input;
 
@@ -481,7 +484,7 @@ const COMMANDS: readonly Command[] = [
       const key = call.text("view");
 
       if (key !== null) {
-        const saved = readLayout(analysis.root, key);
+        const saved = readDrawing(analysis.root, key);
 
         if (!saved) return fail(`intent: ${key} has no saved drawing`);
         intent = mergePlan(intent ?? parseIntent(""), planFromScene(analysis, key, saved.elements), analysis.graph);
@@ -574,12 +577,12 @@ const COMMANDS: readonly Command[] = [
 
       if (!key || !parseView(key)) return fail("plan: a view is required (archdiff views lists them)");
       const analysis = await analyze(call.dir(1));
-      const saved = readLayout(analysis.root, key);
+      const saved = readDrawing(analysis.root, key);
 
       if (!saved) return fail(`plan: ${key} has no saved drawing (draw and save it on the page first)`);
       const plan = planFromScene(analysis, key, saved.elements);
 
-      return writeOut(call.has("json") ? `${JSON.stringify(plan, null, 2)}\n` : planMarkdown(plan, analysis), call.text("out"));
+      return writeOut(call.has("json") ? `${JSON.stringify(plan, null, 2)}\n` : taskMarkdown(plan, analysis), call.text("out"));
     },
   },
   {
@@ -615,7 +618,7 @@ export function helpText(): string {
   const lines: string[] = [];
 
   for (const command of COMMANDS) {
-    lines.push(`  ${command.name} ${command.usage}`.trimEnd());
+    lines.push(`  ${command.name} ${command.usage}${command.aliases ? `  (also: ${command.aliases.join(", ")})` : ""}`.trimEnd());
 
     for (const line of command.help) lines.push(`${" ".repeat(21)}${line}`);
   }
@@ -692,7 +695,7 @@ const require = (await import("node:module")).createRequire(import.meta.url);
 
 export async function main(argv: readonly string[]): Promise<number> {
   const name = argv.find((arg) => !arg.startsWith("--")) ?? null;
-  const command = COMMANDS.find((candidate) => candidate.name === name) ?? null;
+  const command = COMMANDS.find((candidate) => candidate.name === name || (name !== null && candidate.aliases?.includes(name))) ?? null;
   const parsed = parseCall(command, argv.filter((arg) => arg !== name || name === null));
 
   if ("error" in parsed) return fail(parsed.error);

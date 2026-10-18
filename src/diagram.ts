@@ -172,7 +172,7 @@ export interface MatrixData {
   cells: { from: string; to: string; count: number; against: boolean }[];
 }
 
-/** A function's logic as a picture carries it (logic.ts): the paths from the start to every exit, each the conditions taken and what it ends in. */
+/** A function's logic as a picture carries it (logic.ts): its rules — every path from the start to an exit, the conditions taken and what it ends in. */
 export interface LogicData {
   fn: string;
   module: string;
@@ -180,15 +180,15 @@ export interface LogicData {
   decisions: number;
   loops: number;
   exits: number;
-  paths: LogicPath[];
+  rules: LogicRule[];
   /** The body had more statements than the picture holds. */
   truncated?: true;
-  /** More paths than the table lists. */
-  morePaths?: number;
+  /** More rules than the table lists. */
+  moreRules?: number;
 }
 
-/** One way through a function: the branches taken in order (`total < 0: yes`), the calls on the way, and how it ends. */
-export interface LogicPath {
+/** A rule of a function: one way through it — the branches taken in order (`total < 0: yes`), the calls on the way, and how it ends. */
+export interface LogicRule {
   conditions: string[];
   calls: string[];
   /** `return order`, `throw new Error("…")`, or `end` for the end of the body. */

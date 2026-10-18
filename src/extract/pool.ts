@@ -11,7 +11,7 @@
 import { cpus } from "node:os";
 import { existsSync } from "node:fs";
 import { Worker } from "node:worker_threads";
-import type { FileFacts } from "./facts.ts";
+import { reviveFacts, type FileFacts } from "./facts.ts";
 import { extractAny } from "./any.ts";
 
 /** Fewer files than this are parsed on the main thread. */
@@ -35,10 +35,6 @@ function workerUrl(): URL {
   return existsSync(ts) ? ts : new URL("./worker.js", import.meta.url);
 }
 
-/** Revives the Set of `FileFacts` after the structured clone (which keeps Sets, but a JSON transport would not). */
-function revive(facts: FileFacts): FileFacts {
-  return facts.exports instanceof Set ? facts : { ...facts, exports: new Set(facts.exports as unknown as string[]) };
-}
 
 /** Extracts every job, in parallel when there are enough; the result keeps the jobs' order. */
 export async function extractAll(jobs: readonly ExtractJob[], threads = Math.max(1, Math.min(8, cpus().length - 1))): Promise<FileFacts[]> {
@@ -78,7 +74,7 @@ export async function extractAll(jobs: readonly ExtractJob[], threads = Math.max
           return;
         }
 
-        results[index.get(reply.path)!] = revive(reply.facts!);
+        results[index.get(reply.path)!] = reviveFacts(reply.facts!);
         feed();
       });
       worker.on("error", reject);

@@ -1,6 +1,7 @@
 // JSON values at I/O boundaries: what `JSON.parse` returns, named so callers
 // branch on a known contract instead of `unknown`.
-// Used wherever external JSON enters: config, index, LLM replies, LSP/MCP messages.
+// Used wherever external JSON enters: archdiff.json, the fact cache, a saved
+// drawing, a request of the page, a line of an agent's stream.
 // Entry points: `parseJson` plus the `isJson*` narrowing guards.
 
 export type JsonPrimitive = string | number | boolean | null;

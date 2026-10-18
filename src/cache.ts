@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
-import type { FileFacts } from "./extract/facts.ts";
+import { reviveFacts, type FileFacts } from "./extract/facts.ts";
 
 /**
  * The version of the extractors: a hash of their own source files (the
@@ -63,10 +63,6 @@ function stringify(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) => (item instanceof Set ? [...item] : item));
 }
 
-/** Revives the one Set of `FileFacts` (`exports`). */
-function revive(facts: FileFacts): FileFacts {
-  return { ...facts, exports: new Set(facts.exports as unknown as string[]) };
-}
 
 /** The cache of one repository: what was read at the start, what the run adds. */
 export class FactCache {
@@ -87,7 +83,7 @@ export class FactCache {
 
       if (parsed.version !== EXTRACTOR_VERSION || typeof parsed.entries !== "object") return;
 
-      for (const [path, entry] of Object.entries(parsed.entries)) this.entries.set(path, { hash: entry.hash, facts: revive(entry.facts) });
+      for (const [path, entry] of Object.entries(parsed.entries)) this.entries.set(path, { hash: entry.hash, facts: reviveFacts(entry.facts) });
     } catch {
       // An unreadable cache is an empty one: the run extracts everything again and rewrites it.
     }

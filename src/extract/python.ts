@@ -6,8 +6,8 @@
 // Every call expression is an edge or a hole: a callee archdiff cannot name
 // is a call through a value, never dropped.
 //
-// The Python frontend of the code pipeline (source → FileFacts → graph →
-// map/index): parses one file with tree-sitter and returns its `FileFacts`.
+// The Python frontend of the code pipeline (source → FileFacts → graph):
+// parses one file with tree-sitter and returns its `FileFacts`.
 // Entry point: `extractPython`. Terms: decl (a def or class archdiff indexes),
 // export row (a public name, from `__all__` or the `_` convention), hole (an
 // unsupported fact or an unresolved call), value ref (a fn read as a value).

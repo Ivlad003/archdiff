@@ -1,11 +1,16 @@
-// The state of the page: what the link (the hash) says — the view, the
-// review, the branches, and the options of the picture as options.ts
-// names them (depth, limit, weight, hubs, packages, opened modules, hidden
-// lanes, overlays, the review's marks, the Mermaid type, the lanes) — the
-// defaults a browser remembers for links that leave an option out, and
+// The link of the page: what the hash says — the view (a review and a
+// comparison are views too), the head and the heads, and the options of
+// the picture as options.ts names them (depth, limit, weight, hubs,
+// packages, opened modules, hidden lanes, overlays, the review's marks,
+// the Mermaid type, the lanes) — the defaults a browser remembers for
+// links that leave an option out (kept as the query the table reads), and
 // the option sets of the presets (who is reading) and the detail buttons
 // (how much at once). Pure functions of `location` and `localStorage`;
-// app.ts renders from `stateFromHash()` and navigates with `setHash()`.
+// app.ts renders from `currentLink()` and navigates with `setLink()`.
+//
+// Entry points: `Link`, `currentLink`, `setLink`, `refsOf`, `reviewing`,
+// `readDefaults`, `rememberDefaults`, `forgetDefaults`, `PRESETS`,
+// `DETAIL`, `OVERVIEWS`.
 
 import { DEFAULT_PICTURE_OPTIONS, readPictureOptions, writePictureParams, type PictureOptionKey, type PictureOptions } from "../../src/options.ts";
 import { parseView } from "../../src/view-keys.ts";
@@ -13,7 +18,7 @@ import type { Refs } from "./api.ts";
 
 export type { PictureOptions } from "../../src/options.ts";
 
-export interface State extends PictureOptions {
+export interface Link extends PictureOptions {
   view: string;
   /** The head of a review: a ref, or null for the working tree. */
   head: string | null;
@@ -29,33 +34,36 @@ export function reviewing(view: string): boolean {
 }
 
 /** The refs of the link: the base (the base field), the head, the heads. */
-export function refsOf(state: State): Refs {
+export function refsOf(link: Link): Refs {
   const base = (document.getElementById("base") as HTMLInputElement | null)?.value.trim() || null;
 
-  return { base, head: state.head, heads: state.heads };
+  return { base, head: link.head, heads: link.heads };
 }
 
 /** The options a link may leave out: remembered in this browser as defaults ("remember as defaults"). */
 const REMEMBERED = ["depth", "limit", "packages", "overlays", "mermaid", "weight", "hubs", "lanes"] as const satisfies readonly PictureOptionKey[];
 
-export type Defaults = Pick<PictureOptions, (typeof REMEMBERED)[number]>;
-
 /** The option sets of the presets: who is reading, and what they want to see at once. */
-export const PRESETS: Record<string, Partial<State>> = {
+export const PRESETS: Record<string, Partial<Link>> = {
   reviewer: { changes: true, overlays: ["tests"], depth: null, limit: null, weight: null, hubs: true },
   newcomer: { changes: false, overlays: [], depth: 1, limit: 30, weight: null, hubs: true, packages: false },
   architect: { changes: false, overlays: ["heat"], depth: null, limit: 60, weight: 2, hubs: true },
 };
 
-/** The remembered defaults over the built-in ones; a stored value of a wrong shape is ignored. */
+/** Where this browser keeps its defaults: the remembered options as a query, read back through the table of options.ts. */
+const DEFAULTS_KEY = "archdiff.defaults.v2";
+
+/** The remembered defaults over the built-in ones; a stored query the table refuses (an old or a hand-edited one) is ignored. */
 export function readDefaults(): PictureOptions {
   const defaults: PictureOptions = { ...DEFAULT_PICTURE_OPTIONS };
 
   try {
-    const saved = localStorage.getItem("archdiff.defaults");
-    const parsed = saved ? (JSON.parse(saved) as Partial<Record<string, unknown>>) : {};
+    const params = new URLSearchParams(localStorage.getItem(DEFAULTS_KEY) ?? "");
+    const read = readPictureOptions((name) => params.get(name), "param");
 
-    for (const key of REMEMBERED) if (key in parsed && parsed[key] !== undefined) (defaults as Record<string, unknown>)[key] = parsed[key];
+    if (!read.ok) return defaults;
+
+    for (const key of REMEMBERED) if (read.value.given.has(key)) Object.assign(defaults, { [key]: read.value.options[key] });
   } catch {
     // No storage: the built-in defaults.
   }
@@ -63,14 +71,14 @@ export function readDefaults(): PictureOptions {
   return defaults;
 }
 
-/** Writes the remembered defaults of this browser (the options of `state` a link may leave out). */
-export function rememberDefaults(state: State): boolean {
-  const defaults: Partial<Defaults> = {};
+/** Writes the remembered defaults of this browser: the options of `link` a link may leave out, as the query the table reads. */
+export function rememberDefaults(link: Link): boolean {
+  const remembered: PictureOptions = { ...DEFAULT_PICTURE_OPTIONS };
 
-  for (const key of REMEMBERED) (defaults as Record<string, unknown>)[key] = state[key];
+  for (const key of REMEMBERED) Object.assign(remembered, { [key]: link[key] });
 
   try {
-    localStorage.setItem("archdiff.defaults", JSON.stringify(defaults));
+    localStorage.setItem(DEFAULTS_KEY, writePictureParams(remembered).toString());
 
     return true;
   } catch {
@@ -80,13 +88,15 @@ export function rememberDefaults(state: State): boolean {
 
 export function forgetDefaults(): void {
   try {
+    localStorage.removeItem(DEFAULTS_KEY);
+    // The JSON an older page kept: forgotten too.
     localStorage.removeItem("archdiff.defaults");
   } catch {
     // Nothing stored.
   }
 }
 
-export function stateFromHash(): State {
+export function currentLink(): Link {
   const params = new URLSearchParams(location.hash.slice(1));
   const defaults = readDefaults();
   const read = readPictureOptions((name) => params.get(name), "param");
@@ -104,26 +114,26 @@ export function stateFromHash(): State {
   return { ...options, view, head: params.get("head") || null, heads };
 }
 
-export function setHash(state: State): void {
+export function setLink(link: Link): void {
   const params = new URLSearchParams();
-  params.set("view", state.view);
+  params.set("view", link.view);
   const base = (document.getElementById("base") as HTMLInputElement | null)?.value.trim() ?? "";
 
   if (base) params.set("base", base);
 
-  if (state.head) params.set("head", state.head);
+  if (link.head) params.set("head", link.head);
 
-  if (state.heads.length > 0) params.set("heads", state.heads.join(","));
+  if (link.heads.length > 0) params.set("heads", link.heads.join(","));
   // The picture's options, written only when they differ from the remembered defaults, so a plain link stays short; an
-  // explicit "none" when a default is turned off. "only the changes" means nothing without the changes.
-  const picture = writePictureParams({ ...state, onlyChanges: state.onlyChanges && state.changes }, { ...DEFAULT_PICTURE_OPTIONS, ...readDefaults() });
+  // explicit "none" when a default is turned off. "Only the changes" needs marks: the changes laid over, or a review.
+  const picture = writePictureParams({ ...link, onlyChanges: link.onlyChanges && (link.changes || reviewing(link.view)) }, { ...DEFAULT_PICTURE_OPTIONS, ...readDefaults() });
 
   for (const [key, value] of picture) params.set(key, value);
   location.hash = params.toString();
 }
 
 /** The detail presets of the canvas toolbar: how much a picture shows at once. */
-export const DETAIL: Record<string, Partial<State>> = {
+export const DETAIL: Record<string, Partial<Link>> = {
   minimal: { depth: 1, limit: 20, weight: 2, hubs: true },
   normal: { depth: null, limit: null, weight: null, hubs: true },
   full: { depth: null, limit: 200, weight: null, hubs: false },

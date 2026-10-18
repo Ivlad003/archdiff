@@ -13,8 +13,8 @@
 //
 // Part of source → FileFacts: the Rust frontend asks `RustResolver.resolve`
 // for every `use` path, and the `Resolution` decides the graph's edge. The
-// `Cargo.toml` files it reads are recorded in `inputs`, so a cache can tell
-// when a manifest change invalidates the edges.
+// `Cargo.toml` files are read on every analysis, so a changed manifest is
+// seen at once.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
@@ -51,7 +51,6 @@ export class RustResolver implements SourceResolver {
   private readonly workspaces = new Map<string, Map<string, Crate>>();
   /** File → names of the modules it declares with `mod x;` (`files`) and `mod x {}` (`inline`). */
   private readonly declared = new Map<string, { files: Set<string>; inline: Set<string> }>();
-  readonly inputs = new Map<string, string | null>();
   /** Files of the analysis (unsaved buffers included): they exist for resolution, on disk or not. */
   private readonly sources: ReadonlySet<string>;
   /** A file on disk, spelled exactly so: `existsSync` alone finds `User.rs` through `user.rs` on APFS and NTFS. */
@@ -379,18 +378,12 @@ export class RustResolver implements SourceResolver {
     return manifest;
   }
 
-  /** A parsed TOML file, recording its text (or its absence) in `inputs`; a syntax error names the file. */
+  /** A parsed TOML file, or null when it is absent; a syntax error names the file. */
   private readToml(file: string): TomlTable | null {
     const abs = join(this.root, file);
 
-    if (!existsSync(abs)) {
-      this.inputs.set(file, null);
-
-      return null;
-    }
-
+    if (!existsSync(abs)) return null;
     const text = readFileSync(abs, "utf8");
-    this.inputs.set(file, text);
 
     try {
       return parseToml(text);

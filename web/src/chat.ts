@@ -11,7 +11,7 @@
 import { api } from "./api.ts";
 import { element, h } from "./dom.ts";
 import { page } from "./page.ts";
-import { reviewing, setHash, stateFromHash } from "./state.ts";
+import { reviewing, setLink, currentLink } from "./link.ts";
 import { pictureQueryText } from "../../src/options.ts";
 
 export const taskField = element<HTMLTextAreaElement>("task");
@@ -112,7 +112,7 @@ async function withContext(prompt: string): Promise<string> {
   if (!/@(module|fn|layer|dir|flow|type|logic|view):\S/.test(prompt)) return prompt;
 
   try {
-    const context = await api.expand(prompt, pictureQueryText(stateFromHash()).replace(/^&/, ""));
+    const context = await api.expand(prompt, pictureQueryText(currentLink()).replace(/^&/, ""));
 
     return context ? `${prompt}\n\n${context}` : prompt;
   } catch {
@@ -160,7 +160,7 @@ function askQuestion(): void {
   const question = askInput.value.trim();
 
   if (question === "") return;
-  const state = stateFromHash();
+  const state = currentLink();
   const picture = element<HTMLInputElement>("ask-picture").checked && !reviewing(state.view);
   const about = askSubjects.length > 0 ? `\n\nIt is about: ${askSubjects.map((subject) => `${subject.label} (${subject.tag})`).join(", ")}.` : "";
   const prompt = `Answer the question below about this repository: read the code you need, and change no file.\n\nQuestion: ${question}${about}${picture ? `\n\nThe picture I am looking at: @view:${state.view}` : ""}`;
@@ -266,14 +266,14 @@ for (const field of [element<HTMLTextAreaElement>("task"), element<HTMLInputElem
 }
 
 async function readTask(): Promise<void> {
-  const state = stateFromHash();
+  const state = currentLink();
 
   if (reviewing(state.view)) return;
 
   // The current drawing first, so an unsaved stroke counts.
   const canvas = page.canvas();
 
-  if (canvas && page.mode() === "edit") await api.saveLayout(state.view, canvas.scene(), page.mocks());
+  if (canvas && page.mode() === "edit") await api.saveDrawing(state.view, canvas.scene(), page.mocks());
   const { markdown, drawn } = await api.plan(state.view);
   taskField.value = markdown;
   runButton.disabled = !agentName;
@@ -333,7 +333,7 @@ function showQuestion(text: string, run: { sessionId: string | null }): boolean 
 
 /** The Chat tab's commands, by button or by a slash line in the task field. */
 async function runCommand(command: "code" | "diagram" | "doc", argument: string): Promise<void> {
-  const state = stateFromHash();
+  const state = currentLink();
 
   if (command === "doc") {
     const textarea = element<HTMLTextAreaElement>("document");
@@ -353,7 +353,7 @@ async function runCommand(command: "code" | "diagram" | "doc", argument: string)
     // The drawing first, so an unsaved stroke counts; then the contract, then the task.
     const canvas = page.canvas();
 
-    if (canvas && page.mode() === "edit") await api.saveLayout(state.view, canvas.scene(), page.mocks());
+    if (canvas && page.mode() === "edit") await api.saveDrawing(state.view, canvas.scene(), page.mocks());
     runState.textContent = "folding the drawing into the contract…";
     const result = await api.code(state.view);
     taskField.value = result.markdown;
@@ -385,7 +385,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
 
     return;
   }
-  const state = stateFromHash();
+  const state = currentLink();
   runButton.disabled = true;
   runButton.classList.add("running");
   stopButton.disabled = false;
@@ -468,7 +468,7 @@ const documentGo = async (): Promise<void> => {
     state.textContent = `${result.file}: ${result.layers} layers, ${result.modules} modules, ${result.edges} imports (from ${result.source})`;
     element<HTMLTextAreaElement>("document").hidden = true;
     element<HTMLDivElement>("document-row").hidden = true;
-    setHash({ ...stateFromHash(), view: "intent" });
+    setLink({ ...currentLink(), view: "intent" });
     void page.loadViews().then(() => page.load());
   } catch (error) {
     state.textContent = error instanceof Error ? error.message : String(error);

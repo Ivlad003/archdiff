@@ -66,7 +66,7 @@
       <button id="edit" title="Move shapes, draw with the pencil, write notes; saved to .archdiff/layouts/ (e)">✎ edit</button>
       <span id="edit-tools" hidden>
         <button id="save" title="Save the drawing to .archdiff/layouts/<view>.json (Ctrl+S)">save</button>
-        <button id="relayout" title="Redraw the shapes from the code; your drawings and the places of shapes that still exist stay">re-layout</button>
+        <button id="refresh" title="Redraw the shapes from the code; your strokes and the places of the shapes that still exist stay">refresh</button>
         <button id="shot-png" title="Download a PNG of the drawing (or of the selected shapes)">PNG</button>
         <button id="shot-svg" title="Download an SVG of the drawing (or of the selected shapes)">SVG</button>
         <button id="exit" title="Back to reading">done</button>
@@ -113,7 +113,7 @@
               <button id="depth-less">depth −</button><button id="depth-more">depth +</button>
             </span>
             <button id="tool-mix" title="Mix: tap a module to open it in place as a lane of its functions, with the lines landing on the functions they concern; tap it again to close it (m)">mix</button>
-            <button id="tool-focus" title="Dim: tap a shape to dim everything but it and its neighbours; tap nothing to clear (f). Right-click a shape for its focus view: everything joined to it across the modules">dim</button>
+            <button id="tool-dim" title="Dim: tap a shape to dim everything but it and its neighbours; tap nothing to clear (d). Right-click a shape for its focus view: everything joined to it across the modules">dim</button>
             <button id="mix-clear" hidden title="Close every module opened in place">close opened</button>
             <details id="lanes-menu" title="Which lanes the picture shows">
               <summary>lanes</summary>
@@ -121,8 +121,8 @@
             </details>
             <input id="find" type="search" placeholder="find shape (/)" title="Type to light the matching shapes; Enter centres the first and opens it; Esc clears" />
             <button id="tool-split" title="A second picture beside this one, with its own view and options (s)">split</button>
-            <button id="tool-graph" title="The project map: every module as a dot coloured by layer, every import as a line, laid out by forces; the dots of this picture wear a ring (g)">graph</button>
-            <button id="tool-map" title="The minimap at the bottom right: the whole picture small, the viewport as a box; drag it to move (on by default)">map</button>
+            <button id="tool-project" title="The project map: every module as a dot coloured by layer, every import as a line, laid out by forces; the dots of this picture wear a ring (p)">project</button>
+            <button id="tool-minimap" title="The minimap at the bottom right: the whole picture small, the viewport as a box; drag it to move (on by default)">minimap</button>
             <button id="tool-lanes" title="Lanes as rows (bands down the picture) or as columns (blocks across it): a map of many layers reads better across (l)">lanes ↔</button>
           </div>
           <div id="split" hidden><iframe id="split-frame" title="The second picture"></iframe></div>

@@ -33,8 +33,6 @@ export class PythonResolver implements SourceResolver {
   private readonly sourceDirs: ReadonlySet<string>;
   /** Directories above a `.py` source. */
   private readonly pythonDirs: ReadonlySet<string>;
-  /** The resolver reads no configuration files: edges depend only on the indexed sources. */
-  readonly inputs = new Map<string, string | null>();
   /** A file on disk, spelled exactly so: `existsSync` alone finds `User.py` through `user.py` on APFS and NTFS. */
   private readonly onDisk: (file: string) => boolean;
 

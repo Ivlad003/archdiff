@@ -5,12 +5,12 @@
 import { api } from "./api.ts";
 import { element } from "./dom.ts";
 import { page } from "./page.ts";
-import { reviewing, setHash, stateFromHash, type State } from "./state.ts";
+import { reviewing, setLink, currentLink, type Link } from "./link.ts";
 
 const commitList = element<HTMLSelectElement>("commit-list");
 let commits: import("./api.ts").Commit[] = [];
 
-export async function loadCommits(state: State): Promise<void> {
+export async function loadCommits(state: Link): Promise<void> {
   try {
     const result = await api.commits(page.baseInput.value.trim() || null, state.head);
     commits = result.commits;
@@ -42,7 +42,7 @@ function reviewCommit(index: number): void {
   if (!commit) return;
   const previous = commits[index - 1];
   page.baseInput.value = previous ? previous.sha : "";
-  setHash({ ...stateFromHash(), view: "review", head: commit.sha, heads: [] });
+  setLink({ ...currentLink(), view: "review", head: commit.sha, heads: [] });
 }
 
 commitList.addEventListener("change", () => {
@@ -50,7 +50,7 @@ commitList.addEventListener("change", () => {
 
   if (index === -1) {
     page.baseInput.value = "";
-    setHash({ ...stateFromHash(), view: "review", head: null, heads: [] });
+    setLink({ ...currentLink(), view: "review", head: null, heads: [] });
   } else reviewCommit(index);
 });
 element<HTMLButtonElement>("commit-prev").addEventListener("click", () => {
@@ -63,14 +63,14 @@ element<HTMLButtonElement>("commit-next").addEventListener("click", () => {
 });
 // The head input itself is reached directly here: this listener is attached at import, before the page is bound.
 element<HTMLInputElement>("head").addEventListener("change", () => {
-  if (reviewing(stateFromHash().view)) setHash({ ...stateFromHash(), head: page.headInput.value.trim() || null });
+  if (reviewing(currentLink().view)) setLink({ ...currentLink(), head: page.headInput.value.trim() || null });
 });
 
 // ── The branches: a base and any number of heads to compare ────────────────
 
 let branchesLoaded = false;
 
-export async function loadBranches(state: State): Promise<void> {
+export async function loadBranches(state: Link): Promise<void> {
   const note = element<HTMLSpanElement>("compare-note");
 
   try {
@@ -127,7 +127,7 @@ export async function loadBranches(state: State): Promise<void> {
 
 element<HTMLSelectElement>("base-select").addEventListener("change", () => {
   page.baseInput.value = element<HTMLSelectElement>("base-select").value;
-  setHash(stateFromHash());
+  setLink(currentLink());
 });
 element<HTMLButtonElement>("compare").addEventListener("click", () => {
   const heads = [...element("head-list").querySelectorAll<HTMLInputElement>("input:checked")].map((box) => box.value);
@@ -139,7 +139,7 @@ element<HTMLButtonElement>("compare").addEventListener("click", () => {
   }
 
   // One head that is the working tree is the plain review; one ref its review; two or more a comparison.
-  if (heads.length === 1 && heads[0] === "WORKTREE") setHash({ ...stateFromHash(), view: "review", head: null, heads: [] });
-  else if (heads.length === 1) setHash({ ...stateFromHash(), view: "review", head: heads[0]!, heads: [] });
-  else setHash({ ...stateFromHash(), view: "compare", head: null, heads });
+  if (heads.length === 1 && heads[0] === "WORKTREE") setLink({ ...currentLink(), view: "review", head: null, heads: [] });
+  else if (heads.length === 1) setLink({ ...currentLink(), view: "review", head: heads[0]!, heads: [] });
+  else setLink({ ...currentLink(), view: "compare", head: null, heads });
 });

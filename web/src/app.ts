@@ -19,10 +19,10 @@ import { loadSpecs, specTextOf } from "./spec-tab.ts";
 import "./theme.ts";
 import { closeMenu, menuOpen, openMenu, type MenuItem } from "./menu.ts";
 import { mapDots, mapSettled, projectMapOpen, refreshProjectMap, toggleProjectMap } from "./project-map.ts";
-import { chainFrom, findShapes, neighbourhoodOf, pathBetween } from "./graph.ts";
+import { chainFrom, findShapes, neighbourhoodOf, chainBetween } from "./chains.ts";
 import { crumbsOf, siblingViews } from "./navigation.ts";
 import { lineElementId, opensView, standsFor, subjectView, tagOf } from "../../src/shape-keys.ts";
-import { DETAIL, OVERVIEWS, PRESETS, forgetDefaults, refsOf, rememberDefaults, reviewing, setHash, stateFromHash, type State } from "./state.ts";
+import { DETAIL, OVERVIEWS, PRESETS, forgetDefaults, refsOf, rememberDefaults, reviewing, setLink, currentLink, type Link } from "./link.ts";
 import { parseView } from "../../src/view-keys.ts";
 import { MERMAID_STYLES, OVERLAYS, type MermaidStyle, type Overlay } from "../../src/options.ts";
 
@@ -76,7 +76,7 @@ bindPage({
 });
 
 
-function renderCrumbs(state: State): void {
+function renderCrumbs(state: Link): void {
   const box = element<HTMLSpanElement>("crumbs");
   box.replaceChildren();
 
@@ -90,7 +90,7 @@ function renderCrumbs(state: State): void {
     } else {
       const link = document.createElement("a");
       link.textContent = crumb.label;
-      link.addEventListener("click", () => setHash({ ...stateFromHash(), view: crumb.key }));
+      link.addEventListener("click", () => setLink({ ...currentLink(), view: crumb.key }));
       box.append(link);
     }
   }
@@ -98,7 +98,7 @@ function renderCrumbs(state: State): void {
 
 // ── The viewport of every view, remembered in this browser ──────────────────
 
-function viewportKey(state: State): string {
+function viewportKey(state: Link): string {
   return `archdiff.viewport.${state.view}`;
 }
 
@@ -108,13 +108,13 @@ function rememberViewport(): void {
   if (!viewport) return;
 
   try {
-    localStorage.setItem(viewportKey(stateFromHash()), JSON.stringify(viewport));
+    localStorage.setItem(viewportKey(currentLink()), JSON.stringify(viewport));
   } catch {
     // No storage: the viewport is not remembered.
   }
 }
 
-function restoreViewport(state: State): boolean {
+function restoreViewport(state: Link): boolean {
   try {
     const saved = localStorage.getItem(viewportKey(state));
 
@@ -290,7 +290,7 @@ async function showCode(node: Shape): Promise<void> {
 }
 
 async function showNode(id: string | null): Promise<void> {
-  const state = stateFromHash();
+  const state = currentLink();
   const node = id === null ? null : nodes.get(id);
 
   if (!node) {
@@ -350,7 +350,7 @@ function renderNeighbours(node: Shape | null): void {
       if (event.shiftKey) {
         const own = nodes.has(id) ? opensView(nodes.get(id)!) : null;
 
-        if (own) setHash({ ...stateFromHash(), view: own });
+        if (own) setLink({ ...currentLink(), view: own });
       } else pickShape(id);
     });
 
@@ -403,7 +403,7 @@ function renderSelection(): void {
 
 /**
  * Selects shapes: one is picked (its page, its neighbours), two light the
- * shortest path between them, more list themselves with the lines among
+ * shortest chain of lines between them, more list themselves with the lines among
  * them; an empty list clears everything back to the picture's page.
  */
 function select(ids: string[], centre = false): void {
@@ -416,7 +416,7 @@ function select(ids: string[], centre = false): void {
 
     if (centre) canvas?.centreOn(lastPicked);
     void showNode(lastPicked);
-  } else if (selected.length === 2) showPath(selected[0]!, selected[1]!);
+  } else if (selected.length === 2) showChain(selected[0]!, selected[1]!);
   else if (selected.length > 2) showSelection();
   else void showNode(null);
 }
@@ -457,8 +457,8 @@ function openLabel(key: string): string {
 
 /** The menu of a right click: on a shape (its views, the selection, the agent, its code), on a line, or on the empty canvas. */
 function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
-  const now = stateFromHash();
-  const go = (key: string) => () => setHash({ ...now, view: key });
+  const now = currentLink();
+  const go = (key: string) => () => setLink({ ...now, view: key });
   const node = id ? nodes.get(id) : undefined;
 
   if (node) {
@@ -493,7 +493,7 @@ function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
 
   return [
     { label: "Ask the agent about this picture", run: () => askSelected([]) },
-    { label: "Project map", hint: "g", run: () => toggleProjectMap(true) },
+    { label: "Project map", hint: "p", run: () => toggleProjectMap(true) },
     { label: "Fit the picture", hint: "0", run: () => canvas?.scrollToContent() },
     { label: "Clear the selection", hint: "Esc", disabled: selected.length === 0, run: () => select([]) },
     { label: "Edit the drawing", hint: "e", run: () => setMode("edit") },
@@ -530,16 +530,16 @@ let walked: { direction: string; from: string; index: number } = { direction: ""
 /** The options that change which shapes a picture has, as query parameters, so a shape's page is asked for the picture the page shows. */
 
 /** The tools of the canvas that change what a tap does. */
-const tools = { mix: false, focus: false };
+const tools = { mix: false, dim: false };
 
 /** The shape picked last, the start of a path when the next tap holds Shift. */
 let lastPicked: string | null = null;
 
-/** Lights the shortest path between two shapes and writes it to the Markdown panel. */
-function showPath(from: string, to: string): void {
-  const directed = pathBetween(edges, from, to, true);
-  const chain = directed ?? pathBetween(edges, from, to, false);
-  const title = `# Path: ${labelOf(from)} → ${labelOf(to)}`;
+/** Lights the shortest chain of lines between two shapes and writes it to the Markdown panel. */
+function showChain(from: string, to: string): void {
+  const directed = chainBetween(edges, from, to, true);
+  const chain = directed ?? chainBetween(edges, from, to, false);
+  const title = `# Chain: ${labelOf(from)} → ${labelOf(to)}`;
 
   if (!chain) {
     canvas?.highlight([from, to]);
@@ -566,7 +566,7 @@ function showPath(from: string, to: string): void {
 }
 
 /** The lanes menu: a box per lane of the picture (and per hidden lane, to bring it back). */
-function renderLanes(state: State, groups: readonly { id: string; label: string }[]): void {
+function renderLanes(state: Link, groups: readonly { id: string; label: string }[]): void {
   const list = element<HTMLDivElement>("lanes");
   list.replaceChildren();
   const all = [...groups.map((group) => ({ id: group.id, label: group.label })), ...state.hideLanes.filter((id) => !groups.some((group) => group.id === id)).map((id) => ({ id, label: id }))];
@@ -578,8 +578,8 @@ function renderLanes(state: State, groups: readonly { id: string; label: string 
     box.type = "checkbox";
     box.checked = !state.hideLanes.includes(lane.id);
     box.addEventListener("change", () => {
-      const now = stateFromHash();
-      setHash({ ...now, hideLanes: box.checked ? now.hideLanes.filter((id) => id !== lane.id) : [...now.hideLanes, lane.id] });
+      const now = currentLink();
+      setLink({ ...now, hideLanes: box.checked ? now.hideLanes.filter((id) => id !== lane.id) : [...now.hideLanes, lane.id] });
     });
     label.append(box, lane.label);
     list.append(label);
@@ -652,7 +652,7 @@ function drawMinimap(): void {
 function updateMinimap(): void {
   const shown = minimapWanted ?? true;
   minimap.hidden = !shown || document.body.classList.contains("editing");
-  element<HTMLButtonElement>("tool-map").classList.toggle("active", shown);
+  element<HTMLButtonElement>("tool-minimap").classList.toggle("active", shown);
 
   if (minimapTimer) clearInterval(minimapTimer);
   minimapTimer = null;
@@ -690,7 +690,7 @@ minimap.addEventListener("pointerup", () => (minimapDragging = false));
 minimap.addEventListener("pointercancel", () => (minimapDragging = false));
 
 /** The canvas toolbar: the picture select (this subject's pictures, then the overviews), the detail buttons and the tool states. */
-function renderCanvasTools(state: State): void {
+function renderCanvasTools(state: Link): void {
   const select = element<HTMLSelectElement>("picture");
   select.replaceChildren();
   const siblings = siblingViews(state.view);
@@ -714,11 +714,11 @@ function renderCanvasTools(state: State): void {
 
   for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) button.classList.toggle("active", button.dataset["detail"] === detail);
   element<HTMLButtonElement>("tool-mix").classList.toggle("active", tools.mix);
-  element<HTMLButtonElement>("tool-focus").classList.toggle("active", tools.focus);
+  element<HTMLButtonElement>("tool-dim").classList.toggle("active", tools.dim);
   element<HTMLButtonElement>("mix-clear").hidden = state.expand.length === 0;
   element<HTMLButtonElement>("mix-clear").textContent = `close opened (${state.expand.length})`;
   element<HTMLButtonElement>("tool-split").classList.toggle("active", document.body.classList.contains("split"));
-  element<HTMLButtonElement>("tool-graph").classList.toggle("active", projectMapOpen());
+  element<HTMLButtonElement>("tool-project").classList.toggle("active", projectMapOpen());
   renderLanes(state, currentGroups);
   updateMinimap();
 }
@@ -772,7 +772,7 @@ function labelOf(id: string): string {
  * the tap, and `follow` to light the chain onward from the line (Shift+tap does the same) with the shapes it reaches.
  */
 async function showEdge(lines: PickedLine[], follow: boolean): Promise<void> {
-  const state = stateFromHash();
+  const state = currentLink();
   const line = lines[0]!;
   const chain = follow ? chainFrom(edges, line) : null;
   canvas?.highlight(chain ? [...chain.lineIds, ...chain.nodeIds] : [...new Set(lines.flatMap((each) => [each.id, each.from, each.to]))]);
@@ -828,7 +828,7 @@ async function showEdge(lines: PickedLine[], follow: boolean): Promise<void> {
 // ── The left panel ───────────────────────────────────────────────────────────
 
 function renderViews(filter: string): void {
-  const state = stateFromHash();
+  const state = currentLink();
   viewsList.replaceChildren();
   const needle = filter.trim().toLowerCase();
   const groups: [string, string[]][] = [
@@ -836,7 +836,7 @@ function renderViews(filter: string): void {
     ["State machines", ["machine"]],
     ["Layers", ["layer"]],
     ["Directories", ["dir"]],
-    ["Entry points (call flows)", ["calls"]],
+    ["Entry points (call trees)", ["calls"]],
     ["Types (where they flow)", ["type"]],
     ["Modules", ["module"]],
   ];
@@ -857,7 +857,7 @@ function renderViews(filter: string): void {
       item.textContent = view.title;
       item.title = view.key;
       item.classList.toggle("active", view.key === state.view);
-      item.addEventListener("click", () => setHash({ ...state, view: view.key }));
+      item.addEventListener("click", () => setLink({ ...state, view: view.key }));
       viewsList.append(item);
     }
 
@@ -873,7 +873,7 @@ function renderViews(filter: string): void {
 search.addEventListener("input", () => renderViews(search.value));
 
 /** The export menu: the picture as the link shows it (every option of options.ts, the refs) in every format, and the Mermaid types that fit the view. */
-function renderExports(state: State): void {
+function renderExports(state: Link): void {
   exportLinks.replaceChildren();
   const refs = refsOf(state);
 
@@ -897,13 +897,13 @@ function download(blob: Blob, name: string): void {
 }
 
 function fileName(extension: string): string {
-  return `${stateFromHash().view.replace(/[^A-Za-z0-9._-]+/g, "_")}${extension}`;
+  return `${currentLink().view.replace(/[^A-Za-z0-9._-]+/g, "_")}${extension}`;
 }
 
 async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[]): Promise<CanvasHandle> {
   if (canvas) {
     canvas.replace(elements);
-    restoreViewport(stateFromHash());
+    restoreViewport(currentLink());
 
     return canvas;
   }
@@ -936,21 +936,21 @@ async function ensureCanvas(elements: import("../../src/scene.ts").SceneElement[
       // The mix tool: a module opens in place, an opened module's "rest" shape closes it.
       if (tools.mix && node && (node.kind === "module" || node.kind === "participant")) {
         const module = standsFor(node);
-        const now = stateFromHash();
-        setHash({ ...now, expand: now.expand.includes(module) ? now.expand.filter((each) => each !== module) : [...now.expand, module] });
+        const now = currentLink();
+        setLink({ ...now, expand: now.expand.includes(module) ? now.expand.filter((each) => each !== module) : [...now.expand, module] });
 
         return;
       }
 
       // The dim tool: everything but the shape and its neighbours dims; a tap on nothing clears it.
-      if (tools.focus) canvas?.dim(node ? neighbourhoodOf(edges, node.id) : null);
+      if (tools.dim) canvas?.dim(node ? neighbourhoodOf(edges, node.id) : null);
       select(node ? [node.id] : []);
     },
     open: (id, link) => {
       // The shape's own view, as the export wrote it into the scene; a shape of an older drawing by its link.
       const key = nodes.has(id) ? opensView(nodes.get(id)!) : link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : null;
 
-      if (key && mode === "view") setHash({ ...stateFromHash(), view: key });
+      if (key && mode === "view") setLink({ ...currentLink(), view: key });
     },
     changed: () => {
       if (mode === "edit") {
@@ -981,7 +981,7 @@ function setMode(next: "view" | "edit"): void {
 
 async function saveDrawing(): Promise<void> {
   if (!canvas) return;
-  const { saved } = await api.saveLayout(stateFromHash().view, canvas.scene(), mocks);
+  const { saved } = await api.saveDrawing(currentLink().view, canvas.scene(), mocks);
   dirty = false;
   saveButton.classList.remove("dirty");
   reason.textContent = `saved to ${saved}`;
@@ -996,10 +996,11 @@ function leaveEdit(): boolean {
   return true;
 }
 
-async function relayout(): Promise<void> {
+/** A fresh picture of the code merged into the drawing: shapes that still exist keep their place, the strokes stay, stale shapes go. */
+async function refreshFromCode(): Promise<void> {
   if (!canvas) return;
   await saveDrawing();
-  const now = stateFromHash();
+  const now = currentLink();
   const scene = await api.scene(now.view, { ...now, onlyChanges: false, changes: false }, refsOf(now));
   canvas.replace(scene.elements);
 }
@@ -1007,7 +1008,7 @@ async function relayout(): Promise<void> {
 // ── Loading ──────────────────────────────────────────────────────────────────
 
 async function load(): Promise<void> {
-  const state = stateFromHash();
+  const state = currentLink();
   const base = new URLSearchParams(location.hash.slice(1)).get("base");
   // A new picture: nothing selected in it yet.
   selected = [];
@@ -1105,53 +1106,53 @@ api.changes((path) => {
 // ── Controls ─────────────────────────────────────────────────────────────────
 
 element<HTMLButtonElement>("fit").addEventListener("click", () => canvas?.scrollToContent());
-element<HTMLSelectElement>("picture").addEventListener("change", () => setHash({ ...stateFromHash(), view: element<HTMLSelectElement>("picture").value, expand: [] }));
+element<HTMLSelectElement>("picture").addEventListener("change", () => setLink({ ...currentLink(), view: element<HTMLSelectElement>("picture").value, expand: [] }));
 
 for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) {
-  button.addEventListener("click", () => applyOptions({ ...stateFromHash(), ...DETAIL[button.dataset["detail"]!] }));
+  button.addEventListener("click", () => applyOptions({ ...currentLink(), ...DETAIL[button.dataset["detail"]!] }));
 }
 
 element<HTMLButtonElement>("depth-less").addEventListener("click", () => {
-  const now = stateFromHash();
+  const now = currentLink();
   const current = now.depth ?? (Number(depthInput.placeholder) || 1);
-  setHash({ ...now, depth: Math.max(0, current - 1) });
+  setLink({ ...now, depth: Math.max(0, current - 1) });
 });
 element<HTMLButtonElement>("depth-more").addEventListener("click", () => {
-  const now = stateFromHash();
+  const now = currentLink();
   const current = now.depth ?? (Number(depthInput.placeholder) || 1);
-  setHash({ ...now, depth: Math.min(12, current + 1) });
+  setLink({ ...now, depth: Math.min(12, current + 1) });
 });
 element<HTMLButtonElement>("tool-mix").addEventListener("click", () => {
   tools.mix = !tools.mix;
 
-  if (tools.mix) tools.focus = false;
-  renderCanvasTools(stateFromHash());
+  if (tools.mix) tools.dim = false;
+  renderCanvasTools(currentLink());
   reason.textContent = tools.mix ? "mix: tap a module to open it in place; tap its rest shape to close it" : (reason.title || "");
 });
-element<HTMLButtonElement>("tool-focus").addEventListener("click", () => {
-  tools.focus = !tools.focus;
+element<HTMLButtonElement>("tool-dim").addEventListener("click", () => {
+  tools.dim = !tools.dim;
 
-  if (tools.focus) tools.mix = false;
+  if (tools.dim) tools.mix = false;
   else canvas?.dim(null);
-  renderCanvasTools(stateFromHash());
-  reason.textContent = tools.focus ? "focus: tap a shape to dim all but its neighbours; tap nothing to clear" : (reason.title || "");
+  renderCanvasTools(currentLink());
+  reason.textContent = tools.dim ? "dim: tap a shape to dim all but its neighbours; tap nothing to clear" : (reason.title || "");
 });
-element<HTMLButtonElement>("mix-clear").addEventListener("click", () => setHash({ ...stateFromHash(), expand: [] }));
+element<HTMLButtonElement>("mix-clear").addEventListener("click", () => setLink({ ...currentLink(), expand: [] }));
 element<HTMLButtonElement>("tool-split").addEventListener("click", () => toggleSplit());
 window.addEventListener("resize", () => {
   if (document.body.classList.contains("split")) document.body.classList.toggle("stacked", window.innerWidth < SPLIT_SIDE_BY_SIDE);
 });
 element<HTMLButtonElement>("tool-lanes").addEventListener("click", () => {
   // Rows ↔ columns, from what the picture shows (the layout says how it laid the lanes), so the first press always flips it.
-  setHash({ ...stateFromHash(), lanes: currentLanes === "rows" ? "columns" : "rows" });
+  setLink({ ...currentLink(), lanes: currentLanes === "rows" ? "columns" : "rows" });
 });
-element<HTMLButtonElement>("tool-map").addEventListener("click", () => {
+element<HTMLButtonElement>("tool-minimap").addEventListener("click", () => {
   minimapWanted = !(minimapWanted ?? true);
   remember("archdiff.minimap.off", !minimapWanted);
   updateMinimap();
 });
-element<HTMLButtonElement>("tool-graph").addEventListener("click", () => toggleProjectMap());
-element<HTMLInputElement>("only-changes").addEventListener("change", () => setHash({ ...stateFromHash(), onlyChanges: element<HTMLInputElement>("only-changes").checked, changes: element<HTMLInputElement>("only-changes").checked ? true : stateFromHash().changes }));
+element<HTMLButtonElement>("tool-project").addEventListener("click", () => toggleProjectMap());
+element<HTMLInputElement>("only-changes").addEventListener("change", () => setLink({ ...currentLink(), onlyChanges: element<HTMLInputElement>("only-changes").checked, changes: element<HTMLInputElement>("only-changes").checked ? true : currentLink().changes }));
 
 const findInput = element<HTMLInputElement>("find");
 findInput.addEventListener("input", () => {
@@ -1172,7 +1173,7 @@ findInput.addEventListener("keydown", (event) => {
 
       if (entry) {
         reason.textContent = `not in this picture: opening ${entry.key}`;
-        setHash({ ...stateFromHash(), view: entry.key });
+        setLink({ ...currentLink(), view: entry.key });
       }
     }
   } else if (event.key === "Escape") {
@@ -1189,45 +1190,45 @@ findInput.addEventListener("keydown", (event) => {
 if (new URLSearchParams(location.search).get("embed") === "1") document.body.classList.add("embed");
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 element<HTMLButtonElement>("review").addEventListener("click", () => {
-  if (leaveEdit()) setHash({ ...stateFromHash(), view: "review", head: headInput.value.trim() || null, heads: [] });
+  if (leaveEdit()) setLink({ ...currentLink(), view: "review", head: headInput.value.trim() || null, heads: [] });
 });
 element<HTMLButtonElement>("edit").addEventListener("click", () => (mode === "edit" ? leaveEdit() : setMode("edit")));
 saveButton.addEventListener("click", () => void saveDrawing().catch((error: unknown) => (reason.textContent = error instanceof Error ? error.message : String(error))));
-element<HTMLButtonElement>("relayout").addEventListener("click", () => void relayout());
+element<HTMLButtonElement>("refresh").addEventListener("click", () => void refreshFromCode());
 element<HTMLButtonElement>("exit").addEventListener("click", () => leaveEdit());
 element<HTMLButtonElement>("shot-png").addEventListener("click", () => void canvas?.screenshot("png").then((blob) => download(blob, fileName(".png"))));
 element<HTMLButtonElement>("shot-svg").addEventListener("click", () => void canvas?.screenshot("svg").then((blob) => download(blob, fileName(".svg"))));
 element<HTMLDivElement>("export").addEventListener("click", () => element<HTMLDetailsElement>("export-menu").removeAttribute("open"));
 depthInput.addEventListener("change", () => {
   const typed = Number(depthInput.value);
-  setHash({ ...stateFromHash(), depth: depthInput.value === "" || !Number.isFinite(typed) ? null : Math.max(0, Math.min(12, Math.floor(typed))) });
+  setLink({ ...currentLink(), depth: depthInput.value === "" || !Number.isFinite(typed) ? null : Math.max(0, Math.min(12, Math.floor(typed))) });
 });
-packagesInput.addEventListener("change", () => setHash({ ...stateFromHash(), packages: packagesInput.checked }));
-changesInput.addEventListener("change", () => setHash({ ...stateFromHash(), changes: changesInput.checked }));
+packagesInput.addEventListener("change", () => setLink({ ...currentLink(), packages: packagesInput.checked }));
+changesInput.addEventListener("change", () => setLink({ ...currentLink(), changes: changesInput.checked }));
 element<HTMLInputElement>("limit").addEventListener("change", () => {
   const value = element<HTMLInputElement>("limit").value;
-  setHash({ ...stateFromHash(), limit: value === "" ? null : Math.max(1, Number(value)) });
+  setLink({ ...currentLink(), limit: value === "" ? null : Math.max(1, Number(value)) });
 });
 element<HTMLSelectElement>("mermaid").addEventListener("change", () => {
   const value = element<HTMLSelectElement>("mermaid").value;
-  setHash({ ...stateFromHash(), mermaid: MERMAID_STYLES.includes(value as MermaidStyle) ? (value as MermaidStyle) : "auto" });
+  setLink({ ...currentLink(), mermaid: MERMAID_STYLES.includes(value as MermaidStyle) ? (value as MermaidStyle) : "auto" });
 });
 element<HTMLInputElement>("weight").addEventListener("change", () => {
   const value = element<HTMLInputElement>("weight").value;
-  setHash({ ...stateFromHash(), weight: value === "" || Number(value) <= 1 ? null : Math.floor(Number(value)) });
+  setLink({ ...currentLink(), weight: value === "" || Number(value) <= 1 ? null : Math.floor(Number(value)) });
 });
-element<HTMLInputElement>("hubs").addEventListener("change", () => setHash({ ...stateFromHash(), hubs: element<HTMLInputElement>("hubs").checked }));
+element<HTMLInputElement>("hubs").addEventListener("change", () => setLink({ ...currentLink(), hubs: element<HTMLInputElement>("hubs").checked }));
 element<HTMLSelectElement>("preset").addEventListener("change", () => {
   const preset = PRESETS[element<HTMLSelectElement>("preset").value];
   element<HTMLSelectElement>("preset").value = "";
 
-  if (preset) applyOptions({ ...stateFromHash(), ...preset });
+  if (preset) applyOptions({ ...currentLink(), ...preset });
 });
 
 for (const box of document.querySelectorAll<HTMLInputElement>("#options .overlay")) {
   box.addEventListener("change", () => {
     const overlays = [...document.querySelectorAll<HTMLInputElement>("#options .overlay:checked")].map((checked) => checked.value).filter((value): value is Overlay => OVERLAYS.includes(value as Overlay));
-    setHash({ ...stateFromHash(), overlays });
+    setLink({ ...currentLink(), overlays });
   });
 }
 
@@ -1247,25 +1248,25 @@ document.addEventListener("pointerdown", (event) => {
   if (menu.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
 });
 
-/** Sets the hash as `setHash` does; when the link does not change (the options equal the defaults now), the page still reloads to show them. */
-function applyOptions(state: State): void {
+/** Sets the hash as `setLink` does; when the link does not change (the options equal the defaults now), the page still reloads to show them. */
+function applyOptions(state: Link): void {
   const before = location.hash;
-  setHash(state);
+  setLink(state);
 
   if (location.hash === before) void load();
 }
 
 element<HTMLButtonElement>("options-default").addEventListener("click", () => {
-  const now = stateFromHash();
+  const now = currentLink();
   reason.textContent = rememberDefaults(now) ? "options remembered as the defaults of this browser" : "no storage: the options last this page";
   applyOptions(now);
 });
 element<HTMLButtonElement>("options-reset").addEventListener("click", () => {
   forgetDefaults();
-  applyOptions({ ...stateFromHash(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false, weight: null, hubs: true, expand: [], lanes: "auto" });
+  applyOptions({ ...currentLink(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false, weight: null, hubs: true, expand: [], lanes: "auto" });
 });
 baseInput.addEventListener("change", () => {
-  if (reviewing(stateFromHash().view)) setHash(stateFromHash());
+  if (reviewing(currentLink().view)) setLink(currentLink());
 });
 window.addEventListener("beforeunload", (event) => {
   if (dirty) event.preventDefault();
@@ -1301,7 +1302,7 @@ if (remembered("archdiff.hide-right")) document.body.classList.add("hide-right")
 window.addEventListener("keydown", (event) => {
   const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
 
-  // The project map and the menu take Escape first; `g` opens and closes the map from anywhere but a field.
+  // The project map and the menu take Escape first; `p` opens and closes the project map from anywhere but a field.
   if (event.key === "Escape" && (menuOpen() || projectMapOpen())) {
     closeMenu();
     toggleProjectMap(false);
@@ -1309,7 +1310,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.key === "g" && !typing && mode === "view" && !reviewing(stateFromHash().view)) {
+  if (event.key === "p" && !typing && mode === "view" && !reviewing(currentLink().view)) {
     toggleProjectMap();
 
     return;
@@ -1343,17 +1344,17 @@ window.addEventListener("keydown", (event) => {
     // Enter: into the picked shape's own view (deeper), as a second tap would.
     const own = opensView(nodes.get(lastPicked)!);
 
-    if (own) setHash({ ...stateFromHash(), view: own });
+    if (own) setLink({ ...currentLink(), view: own });
   } else if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) {
     event.preventDefault();
     element<HTMLInputElement>("find").focus();
-  } else if (event.key === "s" && !reviewing(stateFromHash().view) && !document.body.classList.contains("embed")) {
+  } else if (event.key === "s" && !reviewing(currentLink().view) && !document.body.classList.contains("embed")) {
     toggleSplit();
-  } else if (event.key === "m" && !reviewing(stateFromHash().view)) {
+  } else if (event.key === "m" && !reviewing(currentLink().view)) {
     element<HTMLButtonElement>("tool-mix").click();
-  } else if (event.key === "f" && !reviewing(stateFromHash().view)) {
-    element<HTMLButtonElement>("tool-focus").click();
-  } else if (event.key === "e" && !reviewing(stateFromHash().view)) {
+  } else if (event.key === "d" && !reviewing(currentLink().view)) {
+    element<HTMLButtonElement>("tool-dim").click();
+  } else if (event.key === "e" && !reviewing(currentLink().view)) {
     setMode("edit");
   } else if (event.key === "Escape") {
     select([]);
@@ -1367,7 +1368,7 @@ window.addEventListener("beforeunload", rememberViewport);
 setInterval(rememberViewport, 2000);
 
 // A handle for the browser tests and for debugging in the console: the canvas and the state of the page.
-(window as unknown as { archdiff: unknown }).archdiff = { canvas: () => canvas, state: stateFromHash, nodes: () => nodes, selected: () => selected, mapDots, mapSettled, menuOpen };
+(window as unknown as { archdiff: unknown }).archdiff = { canvas: () => canvas, state: currentLink, nodes: () => nodes, selected: () => selected, mapDots, mapSettled, menuOpen };
 
 void (async () => {
   await loadViews();

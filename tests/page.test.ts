@@ -132,7 +132,7 @@ test("the options panel sets the overlays and the fold limit, writes them to the
   await page!.click("#options-menu summary");
   await page!.click("#options-reset");
   await page!.waitForFunction(`document.querySelector("#limit").value === "" && !document.querySelector("#options .overlay[value='storages']").checked`);
-  assert.equal(await page!.evaluate("localStorage.getItem('archdiff.defaults')"), null);
+  assert.equal(await page!.evaluate("localStorage.getItem('archdiff.defaults.v2')"), null);
 });
 
 test("a tap on a line lights it with its ends and shows where it leads", { skip: !CHROME && "no Chrome installed" }, async () => {
@@ -197,7 +197,7 @@ async function screenPointOf(view: string, elementId: string, extra = ""): Promi
   return { x: box.left + (target.x + target.width / 2 + scrollX) * zoom, y: box.top + (target.y + target.height / 2 + scrollY) * zoom };
 }
 
-test("find, lanes, split, the path between two shapes and the minimap", { skip: !CHROME && "no Chrome installed" }, async () => {
+test("find, lanes, split, the chain between two shapes and the minimap", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.evaluate("localStorage.clear()");
   await page!.goto(`${base}/?fresh=7#view=layer%3Alib`);
   await page!.waitForSelector(".excalidraw canvas");
@@ -211,7 +211,7 @@ test("find, lanes, split, the path between two shapes and the minimap", { skip: 
   await page!.keyboard.down("Shift");
   await page!.mouse.click(log.x, log.y);
   await page!.keyboard.up("Shift");
-  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "Path: src/lib/orders.ts → src/lib/log.ts"`, undefined, { timeout: 8000 });
+  await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "Chain: src/lib/orders.ts → src/lib/log.ts"`, undefined, { timeout: 8000 });
   assert.ok((await page!.textContent("#markdown"))?.includes("src/lib/orders.ts → src/lib/log.ts"));
   // Find: typing counts the matches, Enter centres the first and opens it (the viewport moves: taps by position come before this).
   await page!.fill("#find", "store");
@@ -227,10 +227,10 @@ test("find, lanes, split, the path between two shapes and the minimap", { skip: 
   await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("lanes hidden: routes")`);
   // The minimap is on by default; the button hides it (remembered) and shows it again; then the split pane with the embedded page.
   await page!.waitForFunction(`!document.querySelector("#minimap").hidden`);
-  await page!.click("#tool-map");
+  await page!.click("#tool-minimap");
   await page!.waitForFunction(`document.querySelector("#minimap").hidden`);
   assert.equal(await page!.evaluate("localStorage.getItem('archdiff.minimap.off')"), "1");
-  await page!.click("#tool-map");
+  await page!.click("#tool-minimap");
   await page!.waitForFunction(`!document.querySelector("#minimap").hidden`);
   await page!.click("#tool-split");
   await page!.waitForFunction(`document.body.classList.contains("split") && document.querySelector("#split-frame").src.includes("embed=1")`);
@@ -366,7 +366,7 @@ test("copy takes the active tab's text; the Spec tab lists the repository's spec
   assert.equal(await page!.isVisible("#spec-generate"), true);
 });
 
-test("Shift or Ctrl+tap selects several shapes; a right click opens the menu; the project map opens with g and a dot opens its module", { skip: !CHROME && "no Chrome installed" }, async () => {
+test("Shift or Ctrl+tap selects several shapes; a right click opens the menu; the project map opens with p and a dot opens its module", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.evaluate("localStorage.clear()");
   await page!.goto(`${base}/?fresh=9#view=layer%3Alib`);
   await page!.waitForSelector(".excalidraw canvas");
@@ -395,7 +395,7 @@ test("Shift or Ctrl+tap selects several shapes; a right click opens the menu; th
   await page!.waitForFunction(`location.hash.includes("focus%3Asrc%2Flib%2Forders.ts")`);
   await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.startsWith("Everything joined to")`);
   // The project map: a dot per module; a click on one opens its view and closes the map.
-  await page!.keyboard.press("g");
+  await page!.keyboard.press("p");
   await page!.waitForFunction(`!document.querySelector("#project-map").hidden`);
   await page!.waitForFunction(`window.archdiff.mapSettled()`, undefined, { timeout: 20_000 });
   const dots = (await page!.evaluate("window.archdiff.mapDots()")) as { id: string; x: number; y: number }[];

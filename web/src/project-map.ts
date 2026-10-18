@@ -11,7 +11,7 @@
 import { api, type ProjectMap } from "./api.ts";
 import { element, h } from "./dom.ts";
 import { page } from "./page.ts";
-import { setHash, stateFromHash } from "./state.ts";
+import { setLink, currentLink } from "./link.ts";
 
 interface Dot {
   id: string;
@@ -358,7 +358,7 @@ export function toggleProjectMap(force?: boolean): void {
   const box = overlay();
   const show = force ?? box.hidden;
   box.hidden = !show;
-  element<HTMLButtonElement>("tool-graph").classList.toggle("active", show);
+  element<HTMLButtonElement>("tool-project").classList.toggle("active", show);
 
   if (!show) return;
 
@@ -456,7 +456,7 @@ target.addEventListener("pointerup", (event) => {
   // A click on a dot: its view (Shift: everything joined to it); the map closes and the picture opens.
   const key = viewOfDot(was.id, event.shiftKey ? "focus" : "open");
   toggleProjectMap(false);
-  setHash({ ...stateFromHash(), view: key });
+  setLink({ ...currentLink(), view: key });
 });
 
 target.addEventListener("dblclick", (event) => {
@@ -464,7 +464,7 @@ target.addEventListener("dblclick", (event) => {
 
   if (!dot) return;
   toggleProjectMap(false);
-  setHash({ ...stateFromHash(), view: viewOfDot(dot.id, "inside") });
+  setLink({ ...currentLink(), view: viewOfDot(dot.id, "inside") });
 });
 
 target.addEventListener("pointerleave", () => {
