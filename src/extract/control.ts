@@ -33,6 +33,8 @@ export interface ControlGrammar {
   /** The functions a declaration's body is found under, for `within`. */
   functions: ReadonlySet<string>;
   classes: ReadonlySet<string>;
+  /** The two sides of an equality at a node (`a === b`, `a == b`; Python's `a == b`, `a is b`); null for any other node. */
+  equality(node: Node): [Node, Node] | null;
 }
 
 export const TS_CONTROL: ControlGrammar = {
@@ -46,6 +48,7 @@ export const TS_CONTROL: ControlGrammar = {
   ternaries: new Set(["ternary_expression"]),
   functions: new Set(["function_declaration", "generator_function_declaration", "method_definition", "arrow_function", "function_expression", "function", "generator_function"]),
   classes: new Set(["class_declaration", "abstract_class_declaration", "class"]),
+  equality: tsEquality,
 };
 
 export const PY_CONTROL: ControlGrammar = {
@@ -59,7 +62,27 @@ export const PY_CONTROL: ControlGrammar = {
   ternaries: new Set(["conditional_expression"]),
   functions: new Set(["function_definition", "lambda"]),
   classes: new Set(["class_definition"]),
+  equality: pyEquality,
 };
+
+/** `a === b` or `a == b`: a binary expression with an equality operator. */
+function tsEquality(node: Node): [Node, Node] | null {
+  if (node.type !== "binary_expression") return null;
+  const operator = node.childForFieldName("operator")?.text ?? node.children.find((child) => child.type === "===" || child.type === "==")?.type;
+  const left = node.childForFieldName("left");
+  const right = node.childForFieldName("right");
+
+  return (operator === "===" || operator === "==") && left && right ? [left, right] : null;
+}
+
+/** Python's `a == b` or `a is b`: a comparison of exactly two operands (its node has no fields to read them by). */
+function pyEquality(node: Node): [Node, Node] | null {
+  if (node.type !== "comparison_operator" || node.namedChildren.length !== 2) return null;
+  const operator = node.children.find((child) => child.type === "==" || child.type === "is");
+  const [left, right] = node.namedChildren;
+
+  return operator && left && right ? [left, right] : null;
+}
 
 /** The text of a condition or a header on one line, cut at 60 characters. */
 export function short(text: string): string {
@@ -217,39 +240,18 @@ function literalOf(node: Node): string | null {
 }
 
 /** The `subject == "literal"` comparisons (equality only) inside a condition, as `[subject, value]` pairs. */
-function comparisonsIn(node: Node, grammar: "ts" | "py"): [string, string][] {
+function comparisonsIn(node: Node, grammar: ControlGrammar): [string, string][] {
   const out: [string, string][] = [];
   const stack = [node];
 
   while (stack.length > 0) {
     const at = stack.pop()!;
+    const sides = grammar.equality(at);
+    const pair = sides ? pairOf(sides[0], sides[1]) : null;
 
-    if (grammar === "ts" && at.type === "binary_expression") {
-      const operator = at.childForFieldName("operator")?.text ?? at.children.find((child) => child.type === "===" || child.type === "==" )?.type;
-      const left = at.childForFieldName("left");
-      const right = at.childForFieldName("right");
-
-      if ((operator === "===" || operator === "==") && left && right) {
-        const pair = pairOf(left, right);
-
-        if (pair) {
-          out.push(pair);
-          continue;
-        }
-      }
-    }
-
-    if (grammar === "py" && at.type === "comparison_operator") {
-      const [left, operator, right] = [at.namedChildren[0], at.children.find((child) => child.type === "==" || child.type === "is"), at.namedChildren[1]];
-
-      if (left && operator && right && at.namedChildren.length === 2) {
-        const pair = pairOf(left, right);
-
-        if (pair) {
-          out.push(pair);
-          continue;
-        }
-      }
+    if (pair) {
+      out.push(pair);
+      continue;
     }
 
     for (const child of at.namedChildren) stack.push(child);
@@ -271,7 +273,7 @@ function pairOf(a: Node, b: Node): [string, string] | null {
 }
 
 /** The states an assignment to `subject` at `node` moves from: the values of the enclosing `case` (and the cases falling through into it) or `if` on the same subject; the nearest such guard wins. */
-function underOf(node: Node, subject: string, lang: "ts" | "py", grammar: ControlGrammar): string[] | undefined {
+function underOf(node: Node, subject: string, grammar: ControlGrammar): string[] | undefined {
   let child: Node = node;
 
   for (let at = node.parent; at; child = at, at = at.parent) {
@@ -311,7 +313,7 @@ function underOf(node: Node, subject: string, lang: "ts" | "py", grammar: Contro
       const condition = at.childForFieldName("condition");
 
       if (consequence && consequence.id === child.id && condition) {
-        const values = comparisonsIn(condition, lang).filter(([name]) => name === subject).map(([, value]) => value);
+        const values = comparisonsIn(condition, grammar).filter(([name]) => name === subject).map(([, value]) => value);
 
         if (values.length > 0) return [...new Set(values)];
       }
@@ -352,7 +354,7 @@ export function collectTsStates(root: Node, language: Language, g: Grammar): Sta
       if (subject === null || value === null) continue;
       const node = at("assign")!;
       const fact: StateFact = { subject, kind: "assign", value, within: enclosingDeclaration(node, TS_CONTROL), line: node.startPosition.row + 1, col: startCol(node) };
-      const under = underOf(node, subject, "ts", TS_CONTROL);
+      const under = underOf(node, subject, TS_CONTROL);
 
       if (under) fact.under = under;
       push(fact);
@@ -412,7 +414,7 @@ export function collectPyStates(root: Node): StateFact[] {
 
       if (subject !== null && value !== null && !/^[A-Z_0-9]+$/.test(subject)) {
         const fact: StateFact = { subject, kind: "assign", value, within: enclosingDeclaration(node, PY_CONTROL), line: node.startPosition.row + 1, col: startCol(node) };
-        const under = underOf(node, subject, "py", PY_CONTROL);
+        const under = underOf(node, subject, PY_CONTROL);
 
         if (under) fact.under = under;
 
@@ -420,7 +422,7 @@ export function collectPyStates(root: Node): StateFact[] {
         out.push(fact);
       }
     } else if (node.type === "comparison_operator") {
-      for (const [subject, value] of comparisonsIn(node, "py")) out.push({ subject, kind: "compare", value, within: enclosingDeclaration(node, PY_CONTROL), line: node.startPosition.row + 1, col: startCol(node) });
+      for (const [subject, value] of comparisonsIn(node, PY_CONTROL)) out.push({ subject, kind: "compare", value, within: enclosingDeclaration(node, PY_CONTROL), line: node.startPosition.row + 1, col: startCol(node) });
 
       continue;
     } else if (node.type === "match_statement") {
