@@ -76,8 +76,19 @@ const CANVAS_EVENTS = {
   menu: (id: string | null, at: { x: number; y: number }, lines: Parameters<typeof menuItems>[1]) => openMenu(menuItems(id, lines), at),
 };
 
-/** Draws the picture the link names: the fields and bars from the link, then the scene, the title, the page and the tabs. */
+/** The loads started so far: a load that a newer one overtook (the link changed while it waited) stops where it is. */
+let loads = 0;
+/** The view whose picture the canvas shows, once its load drew it: for the browser tests. */
+let drawn: string | null = null;
+
+/**
+ * Draws the picture the link names: the fields and bars from the link, then the scene, the title, the page and the
+ * tabs. The link may change while the scene is asked for; the newest load draws, and an older one that is still
+ * waiting writes nothing more, so a slow picture never lands over the one the link names now.
+ */
 async function load(): Promise<void> {
+  const generation = ++loads;
+  const overtaken = (): boolean => generation !== loads;
   const state = currentLink();
   // A new picture: nothing selected in it yet.
   resetSelection();
@@ -97,12 +108,17 @@ async function load(): Promise<void> {
     renderCrumbs(state);
     showReviewBars(state);
     const result = await api.scene(state.view, state, refsOf(state));
+
+    if (overtaken()) return;
     showTitle(result.diagram, result.change, result.drawn);
     nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
     edges = result.diagram.edges;
     mocks = result.mocks;
     setPictureLanes(state, result.diagram.groups, result.diagram.lanes ?? "rows");
     await showScene(result.elements, CANVAS_EVENTS);
+
+    if (overtaken()) return;
+    drawn = state.view;
     updateMinimap();
     // A value of the link the options table refuses is left out of the picture, and said first.
     const wrong = wrongInLink().map((problem) => `⚠ ignored in the link: ${problem}`);
@@ -116,12 +132,13 @@ async function load(): Promise<void> {
     refreshProjectMap();
     await loadFlow();
   } catch (error) {
+    if (overtaken()) return;
     showNoTitle();
     setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
     showTab("markdown");
   }
 
-  showPendingNotice();
+  if (!overtaken()) showPendingNotice();
 }
 
 // Live reload: the server watches the sources; a drawing in progress stays until the editor is left.
@@ -145,7 +162,7 @@ if (new URLSearchParams(location.search).get("embed") === "1") document.body.cla
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 
 // A handle for the browser tests and for debugging in the console: the canvas and the state of the page.
-(window as unknown as { archdiff: unknown }).archdiff = { canvas: canvasHandle, state: currentLink, nodes: () => nodes, selected: selection, mapDots, mapSettled, menuOpen };
+(window as unknown as { archdiff: unknown }).archdiff = { canvas: canvasHandle, state: currentLink, nodes: () => nodes, drawn: () => drawn, selected: selection, mapDots, mapSettled, menuOpen };
 
 void (async () => {
   await loadViews();

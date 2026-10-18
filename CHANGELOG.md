@@ -14,6 +14,10 @@ The options of a picture, checked case by case on the page and fixed.
 - The reasons count one shape, one storage, one state and one transition in the singular, and name a commit by seven characters.
 - `archdiff web` says when it cannot follow the code. Node's recursive watch on Linux gives neither events nor an error once the system's file watchers are used up (ENOSPC), so the page silently stopped reloading; a plain watch of the root probes for it first, and the server's first line, `/api/views` (`watching`) and the stats in the page's header say why.
 
+Switching between the pictures, walked on a browser extension's repository (scripts without functions, modules nothing imports) and fixed.
+
+- A view opened while the first picture was still mounting the canvas left the canvas blank for good: a second Excalidraw was mounted into the same container. The canvas mounts once, and a picture that comes meanwhile waits for it. A picture slower than the next link (a big one, a slow machine) no longer lands over the picture the link names now: a load the link overtook draws nothing.
+
 ## 0.5.0 — 2026-10-18
 
 A contract the code is checked against, the business logic and the state machines of the code as pictures, a real run of an entry with its storages mocked, and a page that selects shapes, asks the agent about them and walks the whole project.

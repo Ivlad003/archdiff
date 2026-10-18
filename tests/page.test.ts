@@ -82,6 +82,47 @@ test("the page lists the views, draws the layers and walks to a module and its c
   assert.ok((await page!.textContent("#code"))?.includes("export function placeOrder"));
 });
 
+/** The canvas against the page's own picture: how many Excalidraws are mounted, and whether the canvas shows the shapes of the picture the page holds. */
+async function canvasState(): Promise<{ canvases: number; drawn: string | null; same: boolean; shapes: number }> {
+  return (await page!.evaluate(`(() => {
+    const handle = window.archdiff;
+    const shapes = new Set((handle.canvas()?.scene() ?? []).filter((element) => element.customData?.archdiff === "node" && !element.isDeleted).map((element) => element.id));
+    const nodes = [...handle.nodes().keys()];
+    return { canvases: document.querySelectorAll("#canvas .excalidraw").length, drawn: handle.drawn(), same: nodes.length === shapes.size && nodes.every((id) => shapes.has(id)), shapes: shapes.size };
+  })()`)) as { canvases: number; drawn: string | null; same: boolean; shapes: number };
+}
+
+test("a link that changes while the canvas mounts, and links faster than the pictures, end on the newest picture on one canvas", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/?fresh=race0#view=layers`);
+  await page!.evaluate("localStorage.clear()");
+  // A slow machine: mounting Excalidraw takes longer than the server takes to answer, as on a big page.
+  const cdp = await page!.context().newCDPSession(page!);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 10 });
+  await page!.goto(`${base}/?fresh=race#view=layers`);
+  // The first picture came and is mounting the canvas (its title is up, the canvas's handle not yet): the link changes twice.
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent === "Layers" && window.archdiff.canvas() === null`, undefined, { polling: 5 });
+  await page!.evaluate(`location.hash = "view=modules"; setTimeout(() => (location.hash = "view=layer%3Alib"), 30)`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`, undefined, { timeout: 20_000 });
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+  await cdp.detach();
+  let state = await canvasState();
+  assert.equal(state.canvases, 1, "a second Excalidraw was mounted into the canvas");
+  assert.ok(state.same && state.shapes > 0, JSON.stringify(state));
+  // A slow picture overtaken by a quick one: the quick one is drawn, and the slow one, when it comes, is dropped.
+  await page!.route("**/api/scene?view=modules*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+  await page!.evaluate(`location.hash = "view=modules"; setTimeout(() => (location.hash = "view=module%3Asrc%2Fdb%2Fstore.ts"), 50)`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/db/store.ts"`, undefined, { timeout: 10_000 });
+  // The slow answer comes now.
+  await page!.waitForTimeout(1500);
+  await page!.unroute("**/api/scene?view=modules*");
+  state = await canvasState();
+  assert.ok(state.same && state.canvases === 1 && state.drawn === "module:src/db/store.ts", JSON.stringify(state));
+  assert.equal(await page!.textContent("#title-text"), "src/db/store.ts");
+});
+
 test("the editor opens and closes, and the Chat tab reads the task from the drawing", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.goto(`${base}/#view=module%3Asrc%2Flib%2Forders.ts`);
   await page!.waitForSelector(".excalidraw canvas");

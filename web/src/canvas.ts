@@ -19,6 +19,8 @@ import type { SceneElement } from "../../src/scene.ts";
 const saveButton = element<HTMLButtonElement>("save");
 
 let canvas: CanvasHandle | null = null;
+/** The canvas while it mounts: a scene that comes meanwhile waits for it, so the page has one Excalidraw. */
+let mounting: Promise<CanvasHandle> | null = null;
 let mode: "view" | "edit" = "view";
 /** The drawing changed since it was saved or the editor opened. */
 let dirty = false;
@@ -70,24 +72,27 @@ setInterval(rememberViewport, 2000);
 /**
  * Shows a picture's scene: the first mounts the canvas with the page's handlers of a tap, a double tap, a selection
  * and a right click (`events`, the same every time); each next one replaces the scene where this browser left the
- * view's viewport.
+ * view's viewport. A scene that comes while the canvas mounts (the link changed meanwhile) waits for that canvas:
+ * a second Excalidraw mounted into the same container would leave the page drawing nowhere.
  */
 export async function showScene(elements: SceneElement[], events: Omit<CanvasEvents, "changed">): Promise<void> {
-  if (canvas) {
-    canvas.replace(elements);
-    restoreViewport(currentLink());
+  if (!canvas && !mounting) {
+    mounting = mountCanvas(element("canvas"), elements, {
+      ...events,
+      changed: () => {
+        if (mode !== "edit") return;
+        dirty = true;
+        saveButton.classList.add("dirty");
+      },
+    });
+    canvas = await mounting;
 
     return;
   }
 
-  canvas = await mountCanvas(element("canvas"), elements, {
-    ...events,
-    changed: () => {
-      if (mode !== "edit") return;
-      dirty = true;
-      saveButton.classList.add("dirty");
-    },
-  });
+  canvas ??= await mounting!;
+  canvas.replace(elements);
+  restoreViewport(currentLink());
 }
 
 // ── Drawing over the picture ─────────────────────────────────────────────────

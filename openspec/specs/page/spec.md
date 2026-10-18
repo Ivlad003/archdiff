@@ -57,6 +57,15 @@ The system SHALL, on a tap on a line, light it with its two ends and show its pa
 - **WHEN** five lines run within eight pixels of the tap
 - **THEN** the panel says "5 lines under the tap" with each as a button, the nearest shown
 
+### Requirement: The canvas shows the picture the link names
+
+The system SHALL draw the picture of the link on one canvas, however fast the link changes: a view opened while the first picture is still mounting the canvas waits for that canvas, and a picture that comes after a newer link is dropped.
+
+#### Scenario: Links faster than the pictures
+
+- **WHEN** a reader opens a view while the first picture is still mounting the canvas, and a slow picture is overtaken by a quick one
+- **THEN** the page holds one canvas, and it shows the picture of the last link
+
 ### Requirement: The canvas has tools
 
 The system SHALL offer on the canvas: a picture select (the pictures of this subject, then the overviews), detail presets minimal / normal / full (full one step deeper than the view by itself) and depth −/+ (from the view's own depth, without a ceiling, off on a view that goes no depth), mix (a tapped module opens in place), dim (all but a shape and its neighbours dims), the lanes menu and lanes ↔ (rows or columns), find (`/`, Enter centres the first match or opens the matching view), split (a second embedded picture, stacked below 1520 pixels), project (the project map), a minimap (on by default, remembered when hidden; the shapes and lines small with the viewport as a box, moved by a tap or a drag), and the shortest chain of lines between two shapes on Shift+tap.
