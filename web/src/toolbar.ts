@@ -11,13 +11,14 @@
 import { findShapes } from "./chains.ts";
 import { element } from "./dom.ts";
 import { clearNotice, notice } from "./title.ts";
-import { DETAIL, OVERVIEWS, currentLink, setLink, type Link } from "./link.ts";
+import { OVERVIEWS, currentLink, detailPresets, setLink, type Detail, type Link } from "./link.ts";
 import { updateMinimap, toggleMinimap } from "./minimap.ts";
 import { siblingViews } from "./navigation.ts";
-import { MAX_DEPTH, applyOptions } from "./options-panel.ts";
+import { applyOptions } from "./options-panel.ts";
 import { page } from "./page.ts";
 import { select, tools } from "./picking.ts";
 import { projectMapOpen, toggleProjectMap } from "./project-map.ts";
+import { defaultDepth, parseView, usesDepth } from "../../src/view-keys.ts";
 
 /** Two canvases side by side need the room Excalidraw's desktop layout wants; below it the split stacks. */
 const SPLIT_SIDE_BY_SIDE = 1520;
@@ -76,9 +77,19 @@ export function renderCanvasTools(state: Link): void {
   picture.append(overview);
 
   if (!siblings.some((sibling) => sibling.key === state.view) && !OVERVIEWS.some(([key]) => key === state.view)) picture.prepend(new Option(state.view, state.view, true, true));
-  const detail = Object.entries(DETAIL).find(([, preset]) => (preset.depth ?? null) === state.depth && (preset.limit ?? null) === state.limit && (preset.weight ?? null) === state.weight && preset.hubs === state.hubs)?.[0];
+  const detail = Object.entries(detailPresets(state.view)).find(([, preset]) => (preset.depth ?? null) === state.depth && (preset.limit ?? null) === state.limit && (preset.weight ?? null) === state.weight && preset.hubs === state.hubs)?.[0];
 
   for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) button.classList.toggle("active", button.dataset["detail"] === detail);
+  // A view that goes no depth from a subject (the layers, a matrix) has no depth to step.
+  const kind = parseView(state.view)?.kind;
+  const stepped = kind !== undefined && usesDepth(kind);
+
+  for (const id of ["depth-less", "depth-more"]) {
+    const button = element<HTMLButtonElement>(id);
+    button.disabled = !stepped;
+    button.title = stepped ? "One step less or more from the subject (no ceiling: past 12 the picture warns)" : "This view does not go a depth from a subject";
+  }
+
   element<HTMLButtonElement>("tool-mix").classList.toggle("active", tools.mix);
   element<HTMLButtonElement>("tool-dim").classList.toggle("active", tools.dim);
   element<HTMLButtonElement>("mix-clear").hidden = state.expand.length === 0;
@@ -122,18 +133,22 @@ export function flipLanes(): void {
   setLink({ ...currentLink(), lanes: pictureLanes === "rows" ? "columns" : "rows" });
 }
 
-/** One step of depth, from the link's depth or the picture's own (the field's placeholder). */
+/** One step of depth, from the link's depth or the view's own (no ceiling: a deep picture says so in its reason). */
 function stepDepth(step: -1 | 1): void {
   const now = currentLink();
-  const current = now.depth ?? (Number(element<HTMLInputElement>("depth").placeholder) || 1);
-  setLink({ ...now, depth: Math.max(0, Math.min(MAX_DEPTH, current + step)) });
+  const kind = parseView(now.view)?.kind;
+  const current = now.depth ?? (kind === undefined ? 1 : defaultDepth(kind));
+  setLink({ ...now, depth: Math.max(0, current + step) });
 }
 
 element<HTMLButtonElement>("fit").addEventListener("click", () => page.canvas()?.scrollToContent());
 element<HTMLSelectElement>("picture").addEventListener("change", () => setLink({ ...currentLink(), view: element<HTMLSelectElement>("picture").value, expand: [] }));
 
 for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) {
-  button.addEventListener("click", () => applyOptions({ ...currentLink(), ...DETAIL[button.dataset["detail"]!] }));
+  button.addEventListener("click", () => {
+    const now = currentLink();
+    applyOptions({ ...now, ...detailPresets(now.view)[button.dataset["detail"] as Detail] });
+  });
 }
 
 element<HTMLButtonElement>("depth-less").addEventListener("click", () => stepDepth(-1));

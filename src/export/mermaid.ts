@@ -1,9 +1,13 @@
 // A Diagram as a Mermaid flowchart: lanes as subgraphs, shapes by kind,
 // imports as solid arrows, calls as thick ones, references dotted; the
 // marks of a diff as classes. Text only, byte-stable for the same diagram,
-// so it pastes into a pull request comment or a Markdown file.
+// so it pastes into a pull request comment or a Markdown file. A type asked
+// for that does not fit the picture (a gitGraph of no timeline, a state
+// diagram of no machine) is not drawn empty: the picture is written as its
+// own type, with a comment saying why.
 //
-// Entry points: `toMermaid`, `mermaidStyleFor`, `MERMAID_STYLES`.
+// Entry points: `toMermaid`, `mermaidStyleFor`, `mermaidMismatch`,
+// `MERMAID_STYLES`.
 
 import type { Diagram, Shape } from "../diagram.ts";
 
@@ -162,7 +166,8 @@ function classMermaid(diagram: Diagram): string {
   return `${lines.join("\n")}\n`;
 }
 
-import type { MermaidStyle } from "../options.ts";
+import { MERMAID_ONLY_FOR, type MermaidStyle } from "../options.ts";
+import { parseView } from "../view-keys.ts";
 
 export { MERMAID_STYLES, type MermaidStyle } from "../options.ts";
 
@@ -280,7 +285,28 @@ export function mermaidStyleFor(diagram: Diagram, style: MermaidStyle): Exclude<
   return "flowchart";
 }
 
+/** Why a Mermaid type asked for does not fit a picture, or null when it does: a gitGraph draws the commits of the timeline, a state diagram a machine. */
+export function mermaidMismatch(diagram: Diagram, style: MermaidStyle): string | null {
+  const only = MERMAID_ONLY_FOR[style];
+
+  return only && parseView(diagram.view)?.kind !== only.kind ? `${style} draws ${only.what}` : null;
+}
+
+/** The text with a Mermaid comment after its first line (the generated mark). */
+function withNote(text: string, note: string): string {
+  const at = text.indexOf("\n");
+
+  return `${text.slice(0, at + 1)}%% ${note}\n${text.slice(at + 1)}`;
+}
+
 export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): string {
+  const mismatch = mermaidMismatch(diagram, style);
+
+  if (mismatch) return withNote(toMermaid(diagram, "auto"), `--mermaid ${style}: ${mismatch}, so the picture is written as its own type`);
+
+  // A flowchart asked for is a flowchart, whatever type the view has of its own.
+  if (style === "flowchart") return flowchartMermaid(diagram);
+
   if (diagram.sequence) return sequenceMermaid(diagram);
 
   if (diagram.classes) return classMermaid(diagram);
@@ -297,7 +323,15 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
   if (chosen === "gitgraph") return gitgraphMermaid(diagram);
 
   if (chosen === "mindmap") return mindmapMermaid(diagram);
-  const ids = mermaidIds(diagram.nodes);
+
+  return flowchartMermaid(diagram);
+}
+
+/** The picture as a flowchart: lanes as subgraphs, shapes by kind, the lines by kind, the marks as classes. */
+function flowchartMermaid(diagram: Diagram): string {
+  // The feet of a sequence's lifelines and its frames are no shapes of a flowchart; its participants and messages are.
+  const nodes = diagram.nodes.filter((node) => node.kind !== "anchor" && node.kind !== "fragment");
+  const ids = mermaidIds(nodes);
   const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram)];
 
   if (diagram.reason) lines.push(`%% ${diagram.reason}`);
@@ -305,7 +339,7 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
   lines.push(`flowchart ${diagram.direction === "down" || diagram.logic ? "TB" : "LR"}`);
   const byGroup = new Map<string | undefined, Shape[]>();
 
-  for (const node of diagram.nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);
+  for (const node of nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);
 
   for (const group of diagram.groups) {
     const members = byGroup.get(group.id);
@@ -317,7 +351,7 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
     lines.push("  end");
   }
 
-  for (const node of diagram.nodes) if (node.group === undefined || !diagram.groups.some((group) => group.id === node.group)) lines.push(`  ${shape(node, ids.get(node.id)!)}`);
+  for (const node of nodes) if (node.group === undefined || !diagram.groups.some((group) => group.id === node.group)) lines.push(`  ${shape(node, ids.get(node.id)!)}`);
 
   for (const edge of diagram.edges) {
     const from = ids.get(edge.from);
@@ -329,7 +363,7 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
     lines.push(`  ${from} ${arrow}${text} ${to}`);
   }
 
-  const marked = diagram.nodes.filter((node) => node.diff);
+  const marked = nodes.filter((node) => node.diff);
 
   if (marked.length > 0) {
     lines.push("  classDef added stroke:#2e7d32,stroke-width:3px", "  classDef removed stroke:#c62828,stroke-width:3px,stroke-dasharray:5 5", "  classDef changed stroke:#ef6c00,stroke-width:3px", "  classDef warning stroke:#ef6c00,stroke-width:3px", "  classDef planned stroke:#1565c0,stroke-width:3px,stroke-dasharray:5 5");

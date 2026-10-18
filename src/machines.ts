@@ -160,7 +160,7 @@ export function machineView(analysis: Analysis, id: string): PictureContent {
 
   const unset = machine.states.filter((state) => !state.assigned).length;
   const fromAny = machine.transitions.filter((transition) => transition.from === "*").length;
-  const notes = [machine.kind === "explicit" ? `declared with ${machine.library}` : `written with literals in ${machine.module}: states from assignments, comparisons${machine.states.some((state) => state.declared) ? " and the type" : ""}`, unset > 0 ? `${unset} states never set (dashed)` : "", fromAny > 0 ? `${fromAny} transitions from any state: set outside a case or an if on ${machine.name}` : ""].filter(Boolean);
+  const notes = [machine.kind === "explicit" ? `declared with ${machine.library}` : `written with literals in ${machine.module}: states from assignments, comparisons${machine.states.some((state) => state.declared) ? " and the type" : ""}`, unset > 0 ? `${unset} ${unset === 1 ? "state" : "states"} never set (dashed)` : "", fromAny > 0 ? `${fromAny} ${fromAny === 1 ? "transition" : "transitions"} from any state: set outside a case or an if on ${machine.name}` : ""].filter(Boolean);
   const data: MachineData = { name: machine.name, module: machine.module, initial: machine.initial, states: machine.states, transitions: machine.transitions };
 
   return unplaced(`State machine ${machine.name} (${machine.module})`, nodes, edges, [], { machine: data, reason: notes.join("; ") });

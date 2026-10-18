@@ -642,7 +642,33 @@ test("review without --base measures from the merge-base with develop when the r
     const { status, stdout } = archdiff(["review", dir]);
     assert.equal(status, 0, stdout);
     assert.ok(stdout.includes("- fn `log` — src/lib/log.ts:1 (body)"), stdout);
+    // The changes laid over a picture name the base commit as git shows it, by seven characters, and count in the singular.
+    const marked = JSON.parse(archdiff(["diagram", "modules", dir, "--changes", "--format", "json"]).stdout) as { title: string; reason: string };
+    assert.match(marked.reason, /^1 shape changed since [0-9a-f]{7}(;|$)/);
+    assert.match(marked.title, / — changes since [0-9a-f]{7}$/);
   }));
+
+test("a deep depth is drawn with a warning, not refused; a Mermaid type asked for is written, or the picture's own type with the reason", () => {
+  const deep = archdiff(["diagram", "calls:src/routes/checkout.tsx#action", fixture, "--depth", "20"]);
+  assert.equal(deep.status, 0, deep.stderr);
+  assert.equal(deep.stderr, "archdiff: ⚠ depth 20 is deeper than 12: the picture may be big and slow to draw (the fold keeps it readable)\n");
+  assert.ok(deep.stdout.includes("_⚠ depth 20 is deeper than 12: the picture may be big and slow to draw (the fold keeps it readable)"), deep.stdout);
+  // A view the depth does not change says nothing of it.
+  assert.equal(archdiff(["diagram", "layers", fixture, "--depth", "20"]).stderr, "");
+  const mermaid = (view: string, dir: string, style: string): string => archdiff(["diagram", view, dir, "--format", "mermaid", "--mermaid", style]).stdout;
+  const machines = join(root, "tests/fixtures/machines");
+  // A gitGraph of no timeline, a state diagram of no machine: the picture's own type, and why.
+  const gitgraph = mermaid("module:src/lib/orders.ts", fixture, "gitgraph");
+  assert.ok(gitgraph.includes("%% --mermaid gitgraph: gitgraph draws the commits of the timeline, so the picture is written as its own type\n") && gitgraph.includes("\nflowchart LR\n"), gitgraph);
+  const state = mermaid("module:src/lib/orders.ts", fixture, "state");
+  assert.ok(state.includes("%% --mermaid state: state draws a machine, so the picture is written as its own type") && state.includes("\nflowchart LR\n"), state);
+  assert.ok(mermaid("machine:src/order.ts#status", machines, "state").includes("\nstateDiagram-v2\n"));
+  // A flowchart asked for is a flowchart, whatever the view's own type: a machine's states, a sequence's participants and messages.
+  const machine = mermaid("machine:src/order.ts#status", machines, "flowchart");
+  assert.ok(machine.includes("\nflowchart LR\n") && !machine.includes("stateDiagram"), machine);
+  const sequence = mermaid("sequence:src/routes/checkout.tsx#action", fixture, "flowchart");
+  assert.ok(sequence.includes('src_routes_checkout_tsx ==>|"1. OrderService()"| src_lib_orders_ts') && !sequence.includes("foot_") && !sequence.includes("sequenceDiagram"), sequence);
+});
 
 test("a sequence keeps twelve lifelines, the rest sharing one, and a call repeated in a row is one message ×N", () =>
   withTempDir("archdiff-sequence-", (dir) => {
@@ -829,7 +855,7 @@ test("--overlay marks untested modules, labels storages and shades by calls in, 
   assert.ok(store.label.includes("⛁ the file system"), store.label);
   assert.ok(store.label.includes("no tests") && store.diff === "warning", store.label);
   assert.ok((store.heat ?? 0) > 0 && store.label.includes("calls in"), store.label);
-  assert.ok(json.reason?.includes("storages") && json.reason.includes("no test"), json.reason);
+  assert.ok(json.reason?.includes("1 storage (⛁)") && json.reason.includes("no test"), json.reason);
   assert.equal(archdiff(["diagram", "layers", fixture, "--overlay", "nope"]).status, 2);
 });
 

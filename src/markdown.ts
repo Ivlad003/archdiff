@@ -28,7 +28,7 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
   if (diagram.question) lines.push(`_${diagram.question[0]!.toUpperCase()}${diagram.question.slice(1)}._`, "");
 
   if (diagram.reason) lines.push(`_${diagram.reason}_`, "");
-  lines.push(`${diagram.nodes.length} shapes, ${diagram.edges.length} lines; ${analysis.files.length} files analysed.`, "", "```mermaid", toMermaid(diagram, mermaid).trimEnd(), "```", "");
+  lines.push(`${diagram.nodes.length} ${diagram.nodes.length === 1 ? "shape" : "shapes"}, ${diagram.edges.length} ${diagram.edges.length === 1 ? "line" : "lines"}; ${analysis.files.length} ${analysis.files.length === 1 ? "file" : "files"} analysed.`, "", "```mermaid", toMermaid(diagram, mermaid).trimEnd(), "```", "");
 
   // The matrix reads as a table: rows import columns.
   if (diagram.matrix) {

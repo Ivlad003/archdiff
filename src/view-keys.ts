@@ -10,7 +10,7 @@
 // pipeline.ts shapes them, the page and the CLI name views by them.
 //
 // Entry points: `VIEW_KINDS`, `View`, `ViewKind`, `parseView`, `viewKey`,
-// `questionOf`, `defaultDepth`, `isModuleView`, `isMapView`.
+// `questionOf`, `defaultDepth`, `usesDepth`, `isModuleView`, `isMapView`.
 
 /** What one kind of view is: how its key is written, what it answers, how deep it goes by default. */
 interface KindSpec {
@@ -110,6 +110,13 @@ export function defaultDepth(kind: ViewKind): number {
   const spec: KindSpec = VIEW_KINDS[kind];
 
   return spec.depth ?? 0;
+}
+
+/** Whether the pictures of a kind go a depth from their subject (`--depth` changes them); the others ignore it. */
+export function usesDepth(kind: ViewKind): boolean {
+  const spec: KindSpec = VIEW_KINDS[kind];
+
+  return spec.depth !== undefined;
 }
 
 /** The kinds that draw a map of modules in lanes, which reads better across (columns) when the lanes are many. */

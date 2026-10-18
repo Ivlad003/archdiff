@@ -37,7 +37,7 @@ export function overlayTests(diagram: Diagram, graph: Graph): Diagram {
     return { ...node, label: `${node.label}\nno tests`, diff: node.diff ?? ("warning" as const) };
   });
 
-  return { ...diagram, nodes, reason: [diagram.reason, `${untested} shapes of modules no test imports (orange)`].filter(Boolean).join("; ") };
+  return { ...diagram, nodes, reason: [diagram.reason, `${untested} ${untested === 1 ? "shape of a module" : "shapes of modules"} no test imports (orange)`].filter(Boolean).join("; ") };
 }
 
 /** Modules that hold data are labelled with what they are. */
@@ -61,7 +61,7 @@ export function overlayStorages(diagram: Diagram, analysis: Analysis): Diagram {
     return { ...node, label: `${node.label}\n⛁ ${storage}` };
   });
 
-  return { ...diagram, nodes, reason: [diagram.reason, `${found} storages (⛁)`].filter(Boolean).join("; ") };
+  return { ...diagram, nodes, reason: [diagram.reason, `${found} ${found === 1 ? "storage" : "storages"} (⛁)`].filter(Boolean).join("; ") };
 }
 
 /** Every module or function shaded by the calls into it from other modules. */

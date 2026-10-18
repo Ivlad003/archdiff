@@ -8,12 +8,12 @@
 // (how much at once). Pure functions of `location` and `localStorage`;
 // the page renders from `currentLink()` and navigates with `setLink()`.
 //
-// Entry points: `Link`, `currentLink`, `setLink`, `refsOf`, `reviewing`,
-// `readDefaults`, `rememberDefaults`, `forgetDefaults`, `PRESETS`,
-// `DETAIL`, `OVERVIEWS`.
+// Entry points: `Link`, `currentLink`, `setLink`, `wrongInLink`, `refsOf`,
+// `reviewing`, `readDefaults`, `rememberDefaults`, `forgetDefaults`,
+// `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`.
 
-import { DEFAULT_PICTURE_OPTIONS, readPictureOptions, writePictureParams, type PictureOptionKey, type PictureOptions } from "../../src/options.ts";
-import { parseView } from "../../src/view-keys.ts";
+import { DEFAULT_PICTURE_OPTIONS, readEachPictureOption, writePictureParams, type PictureOptionKey, type PictureOptions } from "../../src/options.ts";
+import { defaultDepth, parseView, usesDepth } from "../../src/view-keys.ts";
 import type { Refs } from "./api.ts";
 
 export type { PictureOptions } from "../../src/options.ts";
@@ -53,17 +53,15 @@ export const PRESETS: Record<string, Partial<Link>> = {
 /** Where this browser keeps its defaults: the remembered options as a query, read back through the table of options.ts. */
 const DEFAULTS_KEY = "archdiff.defaults.v2";
 
-/** The remembered defaults over the built-in ones; a stored query the table refuses (an old or a hand-edited one) is ignored. */
+/** The remembered defaults over the built-in ones; a stored value the table refuses (an old or a hand-edited one) is left out alone. */
 export function readDefaults(): PictureOptions {
   const defaults: PictureOptions = { ...DEFAULT_PICTURE_OPTIONS };
 
   try {
     const params = new URLSearchParams(localStorage.getItem(DEFAULTS_KEY) ?? "");
-    const read = readPictureOptions((name) => params.get(name), "param");
+    const read = readEachPictureOption((name) => params.get(name));
 
-    if (!read.ok) return defaults;
-
-    for (const key of REMEMBERED) if (read.value.given.has(key)) Object.assign(defaults, { [key]: read.value.options[key] });
+    for (const key of REMEMBERED) if (read.given.has(key)) Object.assign(defaults, { [key]: read.options[key] });
   } catch {
     // No storage: the built-in defaults.
   }
@@ -99,19 +97,25 @@ export function forgetDefaults(): void {
 export function currentLink(): Link {
   const params = new URLSearchParams(location.hash.slice(1));
   const defaults = readDefaults();
-  const read = readPictureOptions((name) => params.get(name), "param");
-  // A wrong value in the hash reads as the defaults rather than an error: the link may be old or typed.
-  const picture = read.ok ? read.value : { options: { ...DEFAULT_PICTURE_OPTIONS }, given: new Set<PictureOptionKey>() };
-  const options = { ...picture.options };
+  // A wrong value in the hash is left out alone, not an error (the link may be old or typed); `wrongInLink` names it.
+  const read = readEachPictureOption((name) => params.get(name));
+  const options = { ...read.options };
 
   // A link without an option takes the remembered default; `packages=0`, `overlay=none`, `depth=` say "none" explicitly.
-  for (const key of REMEMBERED) if (!picture.given.has(key)) (options as Record<string, unknown>)[key] = defaults[key];
+  for (const key of REMEMBERED) if (!read.given.has(key)) (options as Record<string, unknown>)[key] = defaults[key];
 
   const heads = (params.get("heads") ?? "").split(",").filter((head) => head !== "");
   // A link of an older page said `review=1` beside another view: the review, or the comparison of its heads.
   const view = params.get("review") === "1" ? (heads.length > 1 ? "compare" : "review") : (params.get("view") ?? "layers");
 
   return { ...options, view, head: params.get("head") || null, heads };
+}
+
+/** The values of the link the options table refuses (`limit=1.5 (limit must be a whole number of at least 1)`), each left out of the picture. */
+export function wrongInLink(): string[] {
+  const params = new URLSearchParams(location.hash.slice(1));
+
+  return readEachPictureOption((name) => params.get(name)).wrong;
 }
 
 export function setLink(link: Link): void {
@@ -132,12 +136,25 @@ export function setLink(link: Link): void {
   location.hash = params.toString();
 }
 
-/** The detail presets of the canvas toolbar: how much a picture shows at once. */
-export const DETAIL: Record<string, Partial<Link>> = {
-  minimal: { depth: 1, limit: 20, weight: 2, hubs: true },
-  normal: { depth: null, limit: null, weight: null, hubs: true },
-  full: { depth: null, limit: 200, weight: null, hubs: false },
-};
+/** The detail buttons of the canvas toolbar. */
+export type Detail = "minimal" | "normal" | "full";
+
+/**
+ * How much a picture of a view shows at once: minimal (one step deep, 20
+ * shapes, lines of weight 2 and more), normal (the defaults), full (one
+ * step deeper than the view goes by itself, 200 shapes, every line, the
+ * hubs drawn). A view the depth does not change keeps its depth unset.
+ */
+export function detailPresets(view: string): Record<Detail, Partial<Link>> {
+  const kind = parseView(view)?.kind;
+  const own = kind !== undefined && usesDepth(kind) ? defaultDepth(kind) : null;
+
+  return {
+    minimal: { depth: own === null ? null : 1, limit: 20, weight: 2, hubs: true },
+    normal: { depth: null, limit: null, weight: null, hubs: true },
+    full: { depth: own === null ? null : own + 1, limit: 200, weight: null, hubs: false },
+  };
+}
 
 /** The overview pictures of the picture select, after those of the current subject. */
 export const OVERVIEWS: [string, string][] = [["layers", "layers"], ["modules", "every module and import"], ["intent", "the intent against the code"], ["matrix", "matrix of the layers"], ["cycles", "import cycles"], ["cycles:fns", "call cycles"], ["metrics", "coupling and cohesion"], ["machines", "state machines"], ["classes", "class diagram"], ["hotspots", "hotspots"], ["tests", "test coverage"], ["events", "events"], ["packages", "packages"], ["coverage", "blind spots"], ["timeline", "timeline"]];

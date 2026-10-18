@@ -25,7 +25,7 @@ import { loadTasks } from "./chat.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
 import { loadFlow } from "./flow-tab.ts";
-import { currentLink, refsOf, reviewing } from "./link.ts";
+import { currentLink, refsOf, reviewing, wrongInLink } from "./link.ts";
 import { closeMenu, menuOpen, openMenu } from "./menu.ts";
 import { updateMinimap } from "./minimap.ts";
 import { showOptions } from "./options-panel.ts";
@@ -37,9 +37,11 @@ import { loadBranches, loadCommits, showReviewBars } from "./review.ts";
 import { menuItems } from "./shape-menu.ts";
 import "./shortcuts.ts";
 import "./theme.ts";
-import { notice, renderCrumbs, setReason, showNoTitle, showTitle } from "./title.ts";
+import { notice, renderCrumbs, setReason, showNoTitle, showPendingNotice, showTitle } from "./title.ts";
 import { renderCanvasTools, setPictureLanes } from "./toolbar.ts";
 import { loadViews, renderViews, viewEntries } from "./views-list.ts";
+import { depthWarning } from "../../src/options.ts";
+import { parseView, usesDepth } from "../../src/view-keys.ts";
 
 /** The shapes of the current picture by ID. */
 let nodes = new Map<string, Shape>();
@@ -83,7 +85,10 @@ async function load(): Promise<void> {
   showOptions(state);
   renderCanvasTools(state);
   renderViews();
-  setReason("");
+  // While a deep picture is drawn, which may take a while, the line says why.
+  const kind = parseView(state.view)?.kind;
+  const deep = kind !== undefined && usesDepth(kind) ? depthWarning(state.depth) : null;
+  setReason(deep ? `⚠ ${deep}` : "");
   // A review and a comparison are read, not drawn on; the chat has nothing to build from them.
   element<HTMLButtonElement>("edit").disabled = reviewing(state.view);
   element("chat-tab").hidden = reviewing(state.view);
@@ -99,7 +104,9 @@ async function load(): Promise<void> {
     setPictureLanes(state, result.diagram.groups, result.diagram.lanes ?? "rows");
     await showScene(result.elements, CANVAS_EVENTS);
     updateMinimap();
-    setReason(result.diagram.reason ?? "");
+    // A value of the link the options table refuses is left out of the picture, and said first.
+    const wrong = wrongInLink().map((problem) => `⚠ ignored in the link: ${problem}`);
+    setReason([...wrong, result.diagram.reason ?? ""].filter(Boolean).join("; "));
     renderExports(state);
 
     if (state.view === "review") void loadCommits(state);
@@ -113,6 +120,8 @@ async function load(): Promise<void> {
     setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
     showTab("markdown");
   }
+
+  showPendingNotice();
 }
 
 // Live reload: the server watches the sources; a drawing in progress stays until the editor is left.

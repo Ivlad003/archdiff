@@ -25,13 +25,14 @@ import { drawPicture, type Picture, type Refs } from "./picture.ts";
 import { history } from "./review.ts";
 import { defaultBase, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { serve } from "./server.ts";
+import { usesDepth } from "./view-keys.ts";
 import { parseView, viewList, type View } from "./views.ts";
 import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
 import { listSpecs, specPrompt, specSubject, validateSpecs } from "./spec.ts";
 import { writeTestSkeletons } from "./gherkin.ts";
 import { FEATURES_DIRECTORY as FEATURES_DIRECTORY_NAME } from "./spec.ts";
-import { DEFAULT_PICTURE_OPTIONS, pictureFlags, pictureOptionsHelp, readPictureOptions, type PictureOptions } from "./options.ts";
+import { DEFAULT_PICTURE_OPTIONS, depthWarning, pictureFlags, pictureOptionsHelp, readPictureOptions, type PictureOptions } from "./options.ts";
 import { metricsOf } from "./metrics.ts";
 
 /** A flag a command knows: its name after `--`, and whether a value follows it. */
@@ -85,6 +86,10 @@ function refsOf(call: Call): Refs {
  * `main` reports (exit 2). The picture comes back for the exit code.
  */
 async function writePicture(call: Call, command: string, root: string, view: View, options: PictureOptions, format: ExportFormat | "md", json: (picture: Picture) => string = (picture) => exportDiagram(picture.diagram, "json")): Promise<{ code: number; picture: Picture | null }> {
+  // A deep picture is drawn, not refused: the warning goes to stderr (and first into the picture's reason).
+  const deep = usesDepth(view.kind) ? depthWarning(options.depth) : null;
+
+  if (deep) process.stderr.write(`archdiff: ⚠ ${deep}\n`);
   const picture = await drawPicture(await analyze(root), { view, options, refs: refsOf(call) });
 
   // A missing subject: the reason, and where the subjects are listed, unless the reason says so already (a machine's).

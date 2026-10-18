@@ -22,12 +22,17 @@ The system SHALL listen on `--port` (on `--host`, localhost by default), or on 7
 
 ### Requirement: Every option travels in the link
 
-The system SHALL keep the view (a review and a comparison are views), the picture's options as `src/options.ts` names them (depth, fold limit, weight, hubs, packages, changes, only-changes, overlays, Mermaid type, expanded modules, hidden lanes, lanes), the base, the head and the heads in the hash of the URL, so a link opens the same picture; a browser MAY remember defaults for the options a link leaves out.
+The system SHALL keep the view (a review and a comparison are views), the picture's options as `src/options.ts` names them (depth, fold limit, weight, hubs, packages, changes, only-changes, overlays, Mermaid type, expanded modules, hidden lanes, lanes), the base, the head and the heads in the hash of the URL, so a link opens the same picture; a browser MAY remember defaults for the options a link leaves out. A value of the link the options table refuses SHALL be left out alone — its option at the default, every other option as the link says — and the line under the picture SHALL name it; a field SHALL write only what the table takes (a fold of 1.5 is 1) and show the value in force when it corrected one.
 
 #### Scenario: A shared link
 
 - **WHEN** a reader opens `#view=layer%3Alib&overlay=storages&limit=1`
 - **THEN** the lib layer is drawn with the storages overlay and folded above one shape
+
+#### Scenario: A wrong value in a link
+
+- **WHEN** a reader opens `#view=modules&depth=2&overlay=tests&limit=1.5`
+- **THEN** the picture has depth 2 and the tests overlay, the fold is the default, and the line under it starts with `⚠ ignored in the link: limit=1.5 (limit must be a whole number of at least 1)`
 
 #### Scenario: Remembered defaults
 
@@ -54,7 +59,7 @@ The system SHALL, on a tap on a line, light it with its two ends and show its pa
 
 ### Requirement: The canvas has tools
 
-The system SHALL offer on the canvas: a picture select (the pictures of this subject, then the overviews), detail presets minimal / normal / full and depth −/+, mix (a tapped module opens in place), dim (all but a shape and its neighbours dims), the lanes menu and lanes ↔ (rows or columns), find (`/`, Enter centres the first match or opens the matching view), split (a second embedded picture, stacked below 1520 pixels), project (the project map), a minimap (on by default, remembered when hidden; the shapes and lines small with the viewport as a box, moved by a tap or a drag), and the shortest chain of lines between two shapes on Shift+tap.
+The system SHALL offer on the canvas: a picture select (the pictures of this subject, then the overviews), detail presets minimal / normal / full (full one step deeper than the view by itself) and depth −/+ (from the view's own depth, without a ceiling, off on a view that goes no depth), mix (a tapped module opens in place), dim (all but a shape and its neighbours dims), the lanes menu and lanes ↔ (rows or columns), find (`/`, Enter centres the first match or opens the matching view), split (a second embedded picture, stacked below 1520 pixels), project (the project map), a minimap (on by default, remembered when hidden; the shapes and lines small with the viewport as a box, moved by a tap or a drag), and the shortest chain of lines between two shapes on Shift+tap.
 
 #### Scenario: Mix
 
@@ -160,7 +165,7 @@ The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or
 
 ### Requirement: The browser remembers the reader's choices
 
-The system SHALL remember in the browser, and only there, the zoom and place of every view, the folded side panels, a hidden minimap, the theme (the system's at first) and the options kept with *remember as defaults*; the options menu SHALL offer the presets of who reads — reviewer (the changes and the tests overlay), newcomer (one step deep, thirty shapes) and architect (the heat, sixty shapes, lines of weight two) — and *reset* back to the built-in options. A private window without storage SHALL work the same, forgetting.
+The system SHALL remember in the browser, and only there, the zoom and place of every view, the folded side panels, a hidden minimap, the theme (the system's at first) and the options kept with *remember as defaults*; the options menu SHALL offer the presets of who reads — reviewer (the changes and the tests overlay), newcomer (one step deep, thirty shapes) and architect (the heat, sixty shapes, lines of weight two) — and *reset*, which forgets the remembered defaults and sets every option of the picture back to the built-in one (opened modules, hidden lanes and type-only imports too). Both SHALL say what they did once the picture is drawn again. A private window without storage SHALL work the same, forgetting.
 
 #### Scenario: Back to a view
 

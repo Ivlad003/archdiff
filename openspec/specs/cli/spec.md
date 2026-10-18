@@ -55,12 +55,17 @@ The system SHALL write the result of a command (Markdown, JSON, an export) to st
 
 ### Requirement: Validation names the field
 
-The system SHALL validate flags (`--depth` a whole number, `--limit` and `--weight` above 0, `--port` a port, `--format` and `--mermaid` from their lists, `--overlay` from its names, `--template` and `--lang` from theirs) and answer with the rule when one is wrong.
+The system SHALL validate flags (`--depth` a whole number of 0 or more, `--limit` and `--weight` above 0, `--port` a port, `--format` and `--mermaid` from their lists, `--overlay` from its names, `--template` and `--lang` from theirs) and a query's values (a boolean `1` or `0`, `true`/`false`, `yes`/`no`), and answer with the rule when one is wrong. A depth SHALL have no ceiling: on a view the depth changes, past 12 the picture SHALL be drawn with a warning that it may be big, first in its reason and on stderr.
 
 #### Scenario: A bad overlay
 
 - **WHEN** `archdiff diagram layers --overlay nope` runs
 - **THEN** it exits 2 naming the overlays allowed
+
+#### Scenario: A deep call tree
+
+- **WHEN** `archdiff diagram calls:src/routes/checkout.tsx#action --depth 20` runs
+- **THEN** it exits 0, stderr says `⚠ depth 20 is deeper than 12: the picture may be big and slow to draw (the fold keeps it readable)` and the reason starts with the same warning; on `layers`, which goes no depth, nothing is said
 
 ### Requirement: The options of a picture are one table
 

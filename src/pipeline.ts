@@ -5,8 +5,9 @@
 // fold (they would eat its budget), the question is set, the tail folds,
 // light lines go after the fold (on the merged lines), the review's marks
 // and the overlays come last so they sit on the shapes that stay, and the
-// lanes are set as rows or columns for the layout. Every step appends to
-// `reason`, so a picture says what was done to it.
+// lanes are set as rows or columns for the layout, and a depth past
+// `DEEP_DEPTH` puts its warning first. Every step adds to `reason`, so a
+// picture says what was done to it.
 //
 // Sits between views.ts (which builds the full picture) and layout.
 // Entry points: `STEPS`, `runSteps`, `Step`, `StepContext`.
@@ -17,8 +18,8 @@ import { onlyChanged, overlayDiff } from "./diff.ts";
 import type { Graph } from "./graph.ts";
 import { applyOverlays } from "./overlays.ts";
 import { dropLightLines, expandInPlace, fold, hideLanes, hubsAsBadges, MAX_SHAPES } from "./shape.ts";
-import type { PictureOptions } from "./options.ts";
-import { isMapView, isModuleView, questionOf, type View } from "./view-keys.ts";
+import { depthWarning, type PictureOptions } from "./options.ts";
+import { isMapView, isModuleView, questionOf, usesDepth, type View } from "./view-keys.ts";
 import type { EdgeReads } from "./views.ts";
 
 export interface StepContext {
@@ -59,6 +60,8 @@ export const STEPS: readonly Step[] = [
   { name: "overlays", applies: ({ options }) => options.overlays.length > 0, run: (diagram, { analysis, options }) => applyOverlays(diagram, analysis, options.overlays) },
   // Rows or columns, said once, here: `layout` lays the lanes as the picture says and writes back what it could do.
   { name: "lane mode", applies: () => true, run: (diagram, { options, view }) => ({ ...diagram, lanes: options.lanes !== "auto" ? options.lanes : isMapView(view.kind) && diagram.groups.length > COLUMNS_ABOVE ? "columns" : "rows" }) },
+  // A depth has no ceiling: past DEEP_DEPTH the picture says first that it may be big, on a view the depth changes.
+  { name: "deep", applies: ({ options, view }) => usesDepth(view.kind) && depthWarning(options.depth) !== null, run: (diagram, { options }) => ({ ...diagram, reason: [`⚠ ${depthWarning(options.depth)!}`, diagram.reason].filter(Boolean).join("; ") }) },
 ];
 
 /** The picture after every step that applies, in order. */

@@ -3,10 +3,12 @@
 // under the canvas — the reason the picture looks as it does, or for a
 // moment a notice from a tool (a count of matches, a save, a file that
 // changed). app.ts sets the title and the reason on every load; a tool
-// gives its notice and clears it, and the reason comes back.
+// gives its notice and clears it, and the reason comes back. A button that
+// reloads the picture keeps its notice for after the load
+// (`noticeAfterLoad`), which would otherwise clear it.
 //
 // Entry points: `showTitle`, `showNoTitle`, `renderCrumbs`, `setReason`,
-// `notice`, `clearNotice`.
+// `notice`, `clearNotice`, `noticeAfterLoad`, `showPendingNotice`.
 
 import type { ChangeSummary } from "./api.ts";
 import { element } from "./dom.ts";
@@ -78,4 +80,19 @@ export function notice(text: string): void {
 /** The picture's reason back under the title, after a notice. */
 export function clearNotice(): void {
   reason.textContent = reason.title || "";
+}
+
+/** A notice kept for after the picture now being drawn: the load that a button starts clears the line first. */
+let pending: string | null = null;
+
+/** A notice to give once the next picture is drawn (`remember as defaults`, `reset`). */
+export function noticeAfterLoad(text: string): void {
+  pending = text;
+}
+
+/** The kept notice, given now that the picture is drawn. */
+export function showPendingNotice(): void {
+  if (pending === null) return;
+  notice(pending);
+  pending = null;
 }

@@ -10,11 +10,13 @@
 // picture had the page's).
 //
 // Free of Node and of the analysis: the page bundles it. Sits with the
-// config in the core; `viewOptionsOf` in views.ts is the bridge to
-// `ViewOptions`.
+// config in the core; the views take `PictureOptions` as they are. A depth
+// has no ceiling: past `DEEP_DEPTH` the picture says it may be big
+// (`depthWarning`), and the CLI and the page say so too.
 // Entry points: `PICTURE_OPTIONS`, `PictureOptions`, `readPictureOptions`,
-// `writePictureParams`, `pictureOptionsHelp`, `DEFAULT_PICTURE_OPTIONS`,
-// `OVERLAYS`, `MERMAID_STYLES`, `LANE_MODES`.
+// `readEachPictureOption`, `writePictureParams`, `pictureOptionsHelp`,
+// `DEFAULT_PICTURE_OPTIONS`, `DEEP_DEPTH`, `depthWarning`, `OVERLAYS`,
+// `MERMAID_STYLES`, `MERMAID_ONLY_FOR`, `LANE_MODES`.
 
 import { ok, wrong, type Result } from "./result.ts";
 
@@ -27,6 +29,12 @@ export type Overlay = (typeof OVERLAYS)[number];
 export const MERMAID_STYLES = ["auto", "flowchart", "c4", "quadrant", "pie", "gitgraph", "mindmap", "state"] as const;
 
 export type MermaidStyle = (typeof MERMAID_STYLES)[number];
+
+/** The Mermaid types that draw one kind of view alone (a machine, the timeline): elsewhere a picture is written as its own type, with a comment saying why. */
+export const MERMAID_ONLY_FOR: Partial<Record<MermaidStyle, { kind: string; what: string }>> = {
+  state: { kind: "machine", what: "a machine" },
+  gitgraph: { kind: "timeline", what: "the commits of the timeline" },
+};
 
 /** How the lanes lie: `auto` (rows, columns on a map of many lanes), `rows` (bands down the picture), `columns` (blocks across it). */
 export const LANE_MODES = ["auto", "rows", "columns"] as const;
@@ -87,13 +95,18 @@ export interface ReadOptions {
   given: Set<PictureOptionKey>;
 }
 
+/** A query's yes for a boolean (`1`, `true`, `yes`), its no (`0`, `false`, `no`, empty); anything else is wrong. */
+const QUERY_YES = new Set(["1", "true", "yes"]);
+const QUERY_NO = new Set(["0", "false", "no", ""]);
+
 /**
  * Reads the options from a source of named values: the CLI's flags
  * (`source: "flag"`, a flag without a value reads as `true`) or a query's
  * parameters (`source: "param"`). A query writes an unset number as an
- * empty value, an empty list as `none`, a boolean as `1` or `0`; a flag
- * takes a number or a comma-separated list after it. A wrong value is a
- * problem naming the option.
+ * empty value, an empty list as `none`, a boolean as `1` or `0` (and reads
+ * `true`/`false` and `yes`/`no` too); a flag takes a number or a
+ * comma-separated list after it. A wrong value is a problem naming the
+ * option.
  */
 export function readPictureOptions(get: (name: string) => string | true | null | undefined, source: "flag" | "param"): Result<ReadOptions> {
   const options: Record<string, unknown> = { ...DEFAULT_PICTURE_OPTIONS };
@@ -108,7 +121,9 @@ export function readPictureOptions(get: (name: string) => string | true | null |
 
     if (spec.type === "bool") {
       if (source === "flag") options[spec.key] = spec.negatedFlag ? false : true;
-      else options[spec.key] = raw === "1" || (spec.paramValue !== undefined && raw === spec.paramValue) ? true : raw === "0" || raw === "" ? false : spec.default;
+      else if (raw === true || QUERY_YES.has(raw) || (spec.paramValue !== undefined && raw === spec.paramValue)) options[spec.key] = true;
+      else if (QUERY_NO.has(raw)) options[spec.key] = false;
+      else return wrong(`${name(spec)} must be 1 or 0`);
       continue;
     }
 
@@ -145,6 +160,49 @@ export function readPictureOptions(get: (name: string) => string | true | null |
   }
 
   return ok({ options: options as PictureOptions, given });
+}
+
+/** What a lenient reading found: the options and the keys given, and the values it left out, each with why. */
+export interface LenientOptions extends ReadOptions {
+  /** `limit=1.5 (limit must be a whole number of at least 1)`, one per value left out. */
+  wrong: string[];
+}
+
+/**
+ * Reads a query's options one by one, for a link that may be old or typed
+ * by hand: a wrong value is left out alone (its option keeps the default)
+ * and named in `wrong`, and every other option is read as given. The CLI
+ * and the API read strictly (`readPictureOptions`) and refuse instead.
+ */
+export function readEachPictureOption(get: (name: string) => string | null | undefined): LenientOptions {
+  const options: Record<string, unknown> = { ...DEFAULT_PICTURE_OPTIONS };
+  const given = new Set<PictureOptionKey>();
+  const wrongs: string[] = [];
+
+  for (const spec of SPECS) {
+    const raw = get(spec.param);
+
+    if (raw === undefined || raw === null) continue;
+    const read = readPictureOptions((name) => (name === spec.param ? raw : null), "param");
+
+    if (!read.ok) {
+      wrongs.push(`${spec.param}=${raw} (${read.problem.message})`);
+      continue;
+    }
+
+    options[spec.key] = read.value.options[spec.key as PictureOptionKey];
+    given.add(spec.key as PictureOptionKey);
+  }
+
+  return { options: options as PictureOptions, given, wrong: wrongs };
+}
+
+/** Past this depth a picture can grow big and slow to draw: archdiff warns, it does not refuse. */
+export const DEEP_DEPTH = 12;
+
+/** The warning of a depth past `DEEP_DEPTH`, or null (no depth, or a shallow one). */
+export function depthWarning(depth: number | null): string | null {
+  return depth !== null && depth > DEEP_DEPTH ? `depth ${depth} is deeper than ${DEEP_DEPTH}: the picture may be big and slow to draw (the fold keeps it readable)` : null;
 }
 
 /**

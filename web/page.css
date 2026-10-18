@@ -952,6 +952,13 @@ body.editing #reason {
   max-width: 260px;
 }
 
+/* A depth past DEEP_DEPTH is drawn, not refused: the field is marked and its title says why. */
+#options input.warn,
+html.dark #options input.warn {
+  border-color: #ef6c00;
+  box-shadow: 0 0 0 1px #ef6c00;
+}
+
 #options .row {
   display: flex;
   gap: 6px;

@@ -110,7 +110,7 @@ test("the options panel sets the overlays and the fold limit, writes them to the
   await page!.check("#options .overlay[value='storages']");
   await page!.waitForFunction(`location.hash.includes("overlay=storages")`);
   // The Markdown of the view names the overlay's finding.
-  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("storages")`);
+  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("storage")`);
   await page!.fill("#limit", "1");
   await page!.press("#limit", "Enter");
   await page!.dispatchEvent("#limit", "change");
@@ -126,6 +126,67 @@ test("the options panel sets the overlays and the fold limit, writes them to the
   await page!.click("#options-menu summary");
   await page!.click("#options-reset");
   await page!.waitForFunction(`document.querySelector("#limit").value === "" && !document.querySelector("#options .overlay[value='storages']").checked`);
+  assert.equal(await page!.evaluate("localStorage.getItem('archdiff.defaults.v2')"), null);
+});
+
+test("the options keep every good value of a link, round what the fields need, step the depth from the view's own, warn past 12, reset everything and say so", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.evaluate("localStorage.clear()");
+  const reason = async (): Promise<string> => (await page!.textContent("#reason")) ?? "";
+  const open = async (hash: string): Promise<void> => {
+    await page!.goto(`${base}/?fresh=${Math.random()}#${hash}`);
+    await page!.waitForSelector(".excalidraw canvas");
+    await page!.waitForFunction(`document.querySelector("#title-text")?.textContent !== ""`);
+  };
+  const options = async (): Promise<void> => {
+    if (!(await page!.evaluate(`document.querySelector("#options-menu").open`))) await page!.click("#options-menu summary");
+  };
+  // A wrong value of a link is left out alone and named; the good ones stay.
+  await open("view=modules&depth=2&overlay=tests&limit=1.5&mermaid=xyz");
+  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").startsWith("⚠ ignored in the link: limit=1.5")`);
+  assert.ok((await reason()).includes("⚠ ignored in the link: mermaid=xyz"), await reason());
+  assert.equal(await page!.inputValue("#depth"), "2");
+  assert.ok(await page!.evaluate(`document.querySelector("#options .overlay[value='tests']").checked`));
+  // A fold of 1.5 is a fold of 1; a fold of 0 shows 1 in the field, the value in force.
+  await options();
+  await page!.fill("#limit", "1.5");
+  await page!.press("#limit", "Enter");
+  await page!.waitForFunction(`location.hash.includes("limit=1&") || location.hash.endsWith("limit=1")`);
+  assert.ok(String(await page!.evaluate("location.hash")).includes("depth=2"));
+  await page!.fill("#limit", "0");
+  await page!.press("#limit", "Enter");
+  await page!.waitForFunction(`document.querySelector("#limit").value === "1"`);
+  // depth − and + start from the view's own depth (3 for a call tree), with no ceiling; past 12 the picture warns.
+  await open("view=calls%3Asrc%2Froutes%2Fcheckout.tsx%23action");
+  assert.equal(await page!.getAttribute("#depth", "placeholder"), "auto (3)");
+  await page!.click("#depth-more");
+  await page!.waitForFunction(`location.hash.includes("depth=4")`);
+  await open("view=calls%3Asrc%2Froutes%2Fcheckout.tsx%23action");
+  await page!.click("#depth-less");
+  await page!.waitForFunction(`location.hash.includes("depth=2")`);
+  await options();
+  await page!.fill("#depth", "20");
+  await page!.press("#depth", "Enter");
+  await page!.waitForFunction(`location.hash.includes("depth=20")`);
+  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").startsWith("⚠ depth 20 is deeper than 12")`);
+  assert.ok(await page!.evaluate(`document.querySelector("#depth").classList.contains("warn")`));
+  // full goes one step deeper than the view by itself.
+  await open("view=calls%3Asrc%2Froutes%2Fcheckout.tsx%23action");
+  await page!.click("#canvas-tools [data-detail='full']");
+  await page!.waitForFunction(`location.hash.includes("depth=4") && document.querySelector("#canvas-tools [data-detail='full']").classList.contains("active")`);
+  // The Mermaid types of one kind of view: a machine's state diagram is listed and kept; a gitGraph is greyed out off the timeline.
+  await open("view=module%3Asrc%2Flib%2Forders.ts&mermaid=state");
+  assert.equal(await page!.inputValue("#mermaid"), "state");
+  assert.ok(await page!.evaluate(`document.querySelector("#mermaid option[value='gitgraph']").disabled`));
+  // Remember says so after the reload it starts; reset sets every option back, the toolbar's and the lanes menu's too.
+  await options();
+  await page!.click("#options-default");
+  await page!.waitForTimeout(800);
+  assert.equal(await reason(), "options remembered as the defaults of this browser");
+  await open("view=modules&changes=1&only=changes&hide=db&types=1&expand=src%2Flib%2Forders.ts");
+  await options();
+  await page!.click("#options-reset");
+  await page!.waitForFunction(`location.hash === "#view=modules"`);
+  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "") === "every option back to the built-in one; the remembered defaults are forgotten"`);
   assert.equal(await page!.evaluate("localStorage.getItem('archdiff.defaults.v2')"), null);
 });
 
@@ -288,9 +349,16 @@ test("the canvas toolbar switches the picture, sets the detail and opens a modul
   assert.ok(options.includes("metrics") && options.includes("cycles:fns"), options.join(", "));
   await page!.selectOption("#picture", "layers");
   await page!.waitForFunction(`location.hash === "#view=layers"`);
+  // The layers do not go a depth from a subject: minimal sets the fold and the weight alone, and the depth steps are off.
   await page!.click("#canvas-tools [data-detail='minimal']");
-  await page!.waitForFunction(`location.hash.includes("limit=20") && location.hash.includes("weight=2") && location.hash.includes("depth=1")`);
+  await page!.waitForFunction(`location.hash.includes("limit=20") && location.hash.includes("weight=2") && !location.hash.includes("depth=")`);
   await page!.waitForFunction(`document.querySelector("#canvas-tools [data-detail='minimal']").classList.contains("active")`);
+  assert.ok(await page!.evaluate(`document.querySelector("#depth-more").disabled && document.querySelector("#depth-less").disabled`));
+  // A layer goes one step from its modules; minimal keeps it there, and depth + goes a step further.
+  await page!.goto(`${base}/?fresh=5b#view=layer%3Alib`);
+  await page!.waitForSelector(".excalidraw canvas");
+  await page!.click("#canvas-tools [data-detail='minimal']");
+  await page!.waitForFunction(`location.hash.includes("depth=1") && location.hash.includes("limit=20")`);
   await page!.click("#depth-more");
   await page!.waitForFunction(`location.hash.includes("depth=2")`);
   // The mix tool: a tap on the single module of a depth-0 module view opens it in place.

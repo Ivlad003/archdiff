@@ -488,9 +488,11 @@ export function overlayDiff(diagram: Diagram, diff: GraphDiff): Diagram {
     return added.has(key) || calls.has(key) ? { ...edge, diff: "added" as const } : edge;
   });
   const removed = diff.modulesRemoved.length + diff.nodesRemoved.length;
-  const reason = `${marked} shapes changed since ${diff.base}${removed > 0 ? `; ${removed} removed (not drawn)` : ""}${diagram.reason ? `; ${diagram.reason}` : ""}`;
+  // A commit is named by its first seven characters, as git shows it; a branch or a range as written.
+  const since = diff.base.replace(/\b[0-9a-f]{40}\b/g, (sha) => sha.slice(0, 7));
+  const reason = `${marked} ${marked === 1 ? "shape" : "shapes"} changed since ${since}${removed > 0 ? `; ${removed} removed (not drawn)` : ""}${diagram.reason ? `; ${diagram.reason}` : ""}`;
 
-  return { ...diagram, nodes, edges, reason, title: `${diagram.title} — changes since ${diff.base}` };
+  return { ...diagram, nodes, edges, reason, title: `${diagram.title} — changes since ${since}` };
 }
 
 /**

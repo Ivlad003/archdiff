@@ -145,7 +145,7 @@ test("a line's page names its ends and the imports and calls behind it", async (
   assert.equal((await fetch(`${base}/api/line?view=layers&from=lib&to=nowhere`)).status, 404);
 });
 
-test("the scene takes the options of the page: limit, overlays, the Mermaid type", async () => {
+test("the scene takes the options of the page: limit, overlays, the Mermaid type; the changes outside git; a wrong boolean", async () => {
   const view = "layer:lib";
   const scene = await getJson<{ diagram: { nodes: { id: string; label: string; kind: string }[]; reason?: string }; markdown: string }>(`/api/scene?view=${encodeURIComponent(view)}&limit=1&overlay=storages&mermaid=mindmap`);
   assert.ok(scene.diagram.nodes.some((node) => node.kind === "more"), JSON.stringify(scene.diagram.nodes.map((node) => node.id)));
@@ -155,6 +155,15 @@ test("the scene takes the options of the page: limit, overlays, the Mermaid type
   assert.equal(light.diagram.edges.length, 0);
   // The server runs on a scratch copy outside git here, so the stamp is absent rather than wrong.
   assert.equal(light.diagram.stamp, undefined);
+  // Outside git the changes cannot be laid over: the picture is drawn without them and says why.
+  const unchanged = await getJson<{ diagram: { nodes: { diff?: string }[]; reason?: string } }>(`/api/scene?view=${encodeURIComponent(view)}&changes=1&overlay=heat`);
+  assert.ok(unchanged.diagram.nodes.length > 0 && unchanged.diagram.nodes.every((node) => node.diff === undefined));
+  assert.match(unchanged.diagram.reason ?? "", /⚠ the changes are not laid over: .* is not a git repository$/);
+  // The API reads its query strictly: a boolean is 1 or 0 (true/false, yes/no), anything else is refused.
+  assert.equal((await fetch(`${base}/api/scene?view=layers&hubs=true`)).status, 200);
+  const maybe = await fetch(`${base}/api/scene?view=layers&hubs=maybe`);
+  assert.equal(maybe.status, 400);
+  assert.deepEqual(await maybe.json(), { error: "hubs must be 1 or 0" });
 });
 
 test("a foreign Host header and a path out of the page directory are refused", async () => {

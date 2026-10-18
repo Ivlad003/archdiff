@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { withTempDir } from "./temp-dir.ts";
-import { DEFAULT_PICTURE_OPTIONS, pictureOptionsHelp, pictureQueryText, readPictureOptions, writePictureParams, type PictureOptions } from "../src/options.ts";
+import { DEFAULT_PICTURE_OPTIONS, DEEP_DEPTH, depthWarning, pictureOptionsHelp, pictureQueryText, readEachPictureOption, readPictureOptions, writePictureParams, type PictureOptions } from "../src/options.ts";
 import { components, cycleThrough, stronglyConnected } from "../src/scc.ts";
 import { firstMatchingGlob, matchesGlob } from "../src/glob.ts";
 import { attempt, ok, wrong } from "../src/result.ts";
@@ -50,6 +50,31 @@ test("a wrong option names itself: a word for a number, an unknown overlay, a ba
   // The help has one line per option, the flag first.
   assert.ok(pictureOptionsHelp().some((line) => line.startsWith("--no-hubs")));
   assert.equal(pictureOptionsHelp().length, 13);
+  // A query's boolean is 1/0, true/false or yes/no; anything else names the option.
+  const yes = readPictureOptions((name) => new URLSearchParams("packages=true&hubs=no&only=changes").get(name), "param");
+  assert.ok(yes.ok && yes.value.options.packages && !yes.value.options.hubs && yes.value.options.onlyChanges);
+  const maybe = readPictureOptions((name) => (name === "hubs" ? "maybe" : null), "param");
+  assert.ok(!maybe.ok && maybe.problem.message === "hubs must be 1 or 0");
+});
+
+test("a link read leniently leaves out each wrong value alone and names it; a depth has no ceiling, only a warning past DEEP_DEPTH", () => {
+  const params = new URLSearchParams("limit=1.5&depth=2&overlay=tests&mermaid=xyz&hubs=0");
+  const read = readEachPictureOption((name) => params.get(name));
+  assert.equal(read.options.depth, 2);
+  assert.deepEqual(read.options.overlays, ["tests"]);
+  assert.equal(read.options.hubs, false);
+  // The wrong ones keep their defaults and are not counted as given (a remembered default may take their place).
+  assert.equal(read.options.limit, null);
+  assert.equal(read.options.mermaid, "auto");
+  assert.ok(!read.given.has("limit") && !read.given.has("mermaid") && read.given.has("depth"));
+  assert.deepEqual(read.wrong, ["limit=1.5 (limit must be a whole number of at least 1)", "mermaid=xyz (mermaid must be one of auto, flowchart, c4, quadrant, pie, gitgraph, mindmap, state)"]);
+  assert.deepEqual(readEachPictureOption(() => null).wrong, []);
+  // Any depth reads; past DEEP_DEPTH it carries a warning, none at it or below.
+  const deep = readPictureOptions((name) => (name === "depth" ? "40" : null), "param");
+  assert.ok(deep.ok && deep.value.options.depth === 40);
+  assert.equal(depthWarning(DEEP_DEPTH), null);
+  assert.equal(depthWarning(null), null);
+  assert.equal(depthWarning(DEEP_DEPTH + 1), `depth ${DEEP_DEPTH + 1} is deeper than ${DEEP_DEPTH}: the picture may be big and slow to draw (the fold keeps it readable)`);
 });
 
 test("strongly connected components: the cycles, Tarjan's order, and one concrete cycle through a module", () => {

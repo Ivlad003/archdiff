@@ -19,7 +19,7 @@
       <details id="options-menu">
         <summary title="Depth, folding, packages, overlays, the Mermaid type: the options of every picture (o)">⚙ options</summary>
         <div id="options">
-          <label title="How far from the subject the picture goes">depth <input id="depth" type="number" min="0" max="12" value="" placeholder="auto" /></label>
+          <label title="How far from the subject the picture goes; no ceiling, past 12 the picture says it may be big">depth <input id="depth" type="number" min="0" value="" placeholder="auto" /></label>
           <label title="Who is reading: sets the options below at once">preset
             <select id="preset">
               <option value="">—</option>
@@ -43,13 +43,14 @@
           </fieldset>
           <label title="The Mermaid type of the Markdown and the export">Mermaid
             <select id="mermaid">
-              <option value="auto">auto (flowchart; sequence, class, gitGraph where they fit)</option>
+              <option value="auto">auto (the view's own: sequence, class, state, quadrant, gitGraph; else a flowchart)</option>
               <option value="flowchart">flowchart</option>
               <option value="c4">C4 context (layers, packages)</option>
               <option value="quadrant">quadrant chart (hotspots)</option>
               <option value="pie">pie (modules per lane)</option>
               <option value="mindmap">mindmap (a directory or layer)</option>
               <option value="gitgraph">gitGraph (timeline)</option>
+              <option value="state">state diagram (a machine)</option>
             </select>
           </label>
           <div class="row">

@@ -22,7 +22,12 @@ The system SHALL write `md`, `mermaid`, `json`, `drawio`, `excalidraw` and `arch
 
 ### Requirement: The Mermaid type fits the view
 
-The system SHALL write a `sequenceDiagram` for a sequence view, a `classDiagram` for a class view, a `stateDiagram-v2` for a machine, a `quadrantChart` for the metrics, a `gitGraph` for the timeline, and a `flowchart` otherwise (top down, with diamonds, for a function's logic); `--mermaid flowchart|c4|quadrant|pie|gitgraph|mindmap|state` SHALL pick another type where it fits; marks SHALL be `classDef` classes.
+The system SHALL write a `sequenceDiagram` for a sequence view, a `classDiagram` for a class view, a `stateDiagram-v2` for a machine, a `quadrantChart` for the metrics, a `gitGraph` for the timeline, and a `flowchart` otherwise (top down, with diamonds, for a function's logic); `--mermaid flowchart|c4|quadrant|pie|gitgraph|mindmap|state` SHALL pick another type, `flowchart` for any picture (a sequence as its modules and numbered messages); a type that draws one kind of view only (a gitGraph the timeline, a state diagram a machine) SHALL leave another picture in its own type, with a comment saying why, never empty; marks SHALL be `classDef` classes.
+
+#### Scenario: A gitGraph of a module
+
+- **WHEN** `archdiff diagram module:src/lib/orders.ts --format mermaid --mermaid gitgraph` runs
+- **THEN** the output is the module's flowchart, with `%% --mermaid gitgraph: gitgraph draws the commits of the timeline, so the picture is written as its own type`
 
 #### Scenario: A sequence in Mermaid
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+The options of a picture, checked case by case on the page and fixed.
+
+- A depth has no ceiling (the page stopped at 12): past 12 the picture is drawn with a warning that it may be big and slow to draw, first in its reason and on stderr for the CLI, and the depth field turns orange; a view that goes no depth, like the layers, says nothing.
+- depth − and + step from the view's own depth (on a call tree, whose own depth is 3, they went to 2 and 0) and are off on a view that goes no depth; *full* goes one step deeper than the view by itself, as its tooltip said; the depth's placeholder is the view's own depth.
+- One wrong value in a link (`limit=1.5`, `overlay=nope`, an old link's) reset every option of the picture, silently; it is left out alone now, the rest of the link kept, and the line under the picture names it. A fold of 1.5 typed in the field is a fold of 1 (the field wrote what its own table refused), and a field shows the value in force when it corrected one.
+- *changes since base* outside git, or the *reviewer* preset there, broke the picture: it is drawn without the marks and says why.
+- *reset* left the opened modules, the hidden lanes, type-only imports and *only the changed* on; it sets every option back. *remember as defaults* and *reset* say so after the reload they start (the notice was gone in a fifth of a second).
+- Mermaid: the select lists the state diagram (a link with `mermaid=state` showed it blank) and greys out the types of another kind of view; a gitGraph or a state diagram asked for a picture it does not fit gives the picture's own type with a comment, not an empty block; `--mermaid flowchart` draws any picture as a flowchart (a machine's or a sequence's was ignored).
+- A query's boolean reads `true`/`false` and `yes`/`no` beside `1`/`0`; anything else is refused by the API, and left out by the page with its name.
+- The reasons count one shape, one storage, one state and one transition in the singular, and name a commit by seven characters.
+
 ## 0.5.0 — 2026-10-18
 
 A contract the code is checked against, the business logic and the state machines of the code as pictures, a real run of an entry with its storages mocked, and a page that selects shapes, asks the agent about them and walks the whole project.

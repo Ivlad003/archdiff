@@ -84,8 +84,11 @@ export function drawPicture(analysis: Analysis, request: PictureRequest): Promis
 }
 
 async function draw(analysis: Analysis, { view, options, refs }: PictureRequest, drawing: DrawingFile | null): Promise<Picture> {
-  const { reads, change } = await readAtTheEdge(analysis, view, options, refs);
-  const placed = layout(viewOf(analysis, view, options, reads), positionsOf(drawing?.elements ?? null));
+  const { reads, change, notes } = await readAtTheEdge(analysis, view, options, refs);
+  const content = viewOf(analysis, view, options, reads);
+  // What the edge could not read for the picture (the changes outside git) is said after what the picture says itself.
+  const said = notes.length > 0 ? { ...content, reason: [content.reason, ...notes].filter(Boolean).join("; ") } : content;
+  const placed = layout(said, positionsOf(drawing?.elements ?? null));
   const stamp = revisionStamp(analysis.root);
   const diagram = stamp ? { ...placed, stamp } : placed;
   const markdown = change?.kind === "review" ? reviewMarkdown(change.diff, diagram, change.contract) : change?.kind === "compare" ? comparisonMarkdown(change.base, change.heads, diagram) : diagramMarkdown(diagram, analysis, options.mermaid);
@@ -97,37 +100,47 @@ async function draw(analysis: Analysis, { view, options, refs }: PictureRequest,
  * What a view reads beside the analysis, by its kind: the commits of the
  * range for a timeline, the two analyses of a review, the heads of a
  * comparison, a function's body for its logic; and, with `changes` on any
- * other view, the review's diff to lay its marks over the picture.
+ * other view, the review's diff to lay its marks over the picture. A view
+ * that is a change (a timeline, a review, a comparison) fails when git
+ * refuses; the changes laid over another view are only left out, with a
+ * note saying why (`notes`), and the picture is drawn without them.
  */
-async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOptions, refs: Refs): Promise<{ reads: EdgeReads; change?: Change }> {
+async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOptions, refs: Refs): Promise<{ reads: EdgeReads; change?: Change; notes: string[] }> {
   const { root } = analysis;
 
   if (view.kind === "timeline") {
     const base = refs.base ?? mergeBase(root);
     const head = refs.head ?? "HEAD";
 
-    return { reads: { timeline: { rows: await history(root, base, head), base, head } } };
+    return { reads: { timeline: { rows: await history(root, base, head), base, head } }, notes: [] };
   }
 
   if (view.kind === "review") {
     const result = await review(root, refs.base, refs.head, analysis);
 
-    return { reads: { review: { diff: result.diff, base: result.base.graph, head: result.head.graph } }, change: { kind: "review", diff: result.diff, contract: result.contract } };
+    return { reads: { review: { diff: result.diff, base: result.base.graph, head: result.head.graph } }, change: { kind: "review", diff: result.diff, contract: result.contract }, notes: [] };
   }
 
   if (view.kind === "compare") {
     const result = await compareBranches(root, refs.base, refs.heads.length > 0 ? refs.heads : ["WORKTREE"]);
 
-    return { reads: { compare: result }, change: { kind: "compare", base: result.base, heads: result.heads } };
+    return { reads: { compare: result }, change: { kind: "compare", base: result.base, heads: result.heads }, notes: [] };
   }
 
   const reads: EdgeReads = {};
+  const notes: string[] = [];
 
   if (view.kind === "logic" && view.subject !== null) reads.logic = await logicOf(analysis, view.subject);
 
-  if (options.changes) reads.diff = (await review(root, refs.base, refs.head, analysis)).diff;
+  if (options.changes) {
+    try {
+      reads.diff = (await review(root, refs.base, refs.head, analysis)).diff;
+    } catch (error) {
+      notes.push(`⚠ the changes are not laid over: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
-  return { reads };
+  return { reads, notes };
 }
 
 /** The flowchart of a function, read from its file now; null when the file or the function cannot be read. */

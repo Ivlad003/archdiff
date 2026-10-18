@@ -2,19 +2,20 @@
 // the fold limit, the line weight, hubs, the Mermaid type, the overlays
 // and the presets. Each change goes into the link, so the picture is
 // asked for again; "remember" keeps the options as this browser's
-// defaults, "reset" forgets them. `showOptions` fills the fields from the
-// link on every load.
+// defaults, "reset" forgets them and sets every option of the picture back
+// to the built-in one. `showOptions` fills the fields from the link on
+// every load: the depth's placeholder is the view's own depth, a depth
+// past DEEP_DEPTH is marked with its warning (there is no ceiling), and
+// the Mermaid types that draw another kind of view are greyed out.
 //
-// Entry points: `showOptions`, `applyOptions`, `toggleOptions`, `MAX_DEPTH`.
+// Entry points: `showOptions`, `applyOptions`, `toggleOptions`.
 
 import { element } from "./dom.ts";
-import { notice } from "./title.ts";
+import { notice, noticeAfterLoad } from "./title.ts";
 import { PRESETS, currentLink, forgetDefaults, rememberDefaults, setLink, type Link } from "./link.ts";
 import { page } from "./page.ts";
-import { MERMAID_STYLES, OVERLAYS, type MermaidStyle, type Overlay } from "../../src/options.ts";
-
-/** The deepest depth the page offers (the field's `max`): the depth field and the −/+ buttons stop there. */
-export const MAX_DEPTH = 12;
+import { DEFAULT_PICTURE_OPTIONS, MERMAID_ONLY_FOR, MERMAID_STYLES, OVERLAYS, depthWarning, type MermaidStyle, type Overlay } from "../../src/options.ts";
+import { defaultDepth, parseView, usesDepth } from "../../src/view-keys.ts";
 
 const menu = element<HTMLDetailsElement>("options-menu");
 const depthInput = element<HTMLInputElement>("depth");
@@ -32,15 +33,36 @@ function isMermaidStyle(value: string): value is MermaidStyle {
   return (MERMAID_STYLES as readonly string[]).includes(value);
 }
 
-/** The fields of the options as the link has them. */
+/** A typed whole number, or null for an empty or unreadable field (a number field holds "" for what it cannot read). */
+function wholeNumber(input: HTMLInputElement): number | null {
+  const typed = Number(input.value);
+
+  return input.value.trim() === "" || !Number.isFinite(typed) ? null : Math.floor(typed);
+}
+
+/** The fields of the options as the link has them, the depth's placeholder and warning, and the Mermaid types the view can be. */
 export function showOptions(state: Link): void {
+  const kind = parseView(state.view)?.kind;
+  const own = kind !== undefined && usesDepth(kind) ? defaultDepth(kind) : null;
+  const warning = own === null ? null : depthWarning(state.depth);
   depthInput.value = state.depth === null ? "" : String(state.depth);
+  depthInput.placeholder = own === null ? "not used here" : `auto (${own})`;
+  depthInput.classList.toggle("warn", warning !== null);
+  depthInput.title = warning ?? (own === null ? "This view does not go a depth from a subject" : `How far from the subject the picture goes; ${own} by default`);
   packagesInput.checked = state.packages;
   changesInput.checked = state.changes;
   limitInput.value = state.limit === null ? "" : String(state.limit);
   weightInput.value = state.weight === null ? "" : String(state.weight);
   hubsInput.checked = state.hubs;
   element<HTMLInputElement>("only-changes").checked = state.onlyChanges;
+
+  // A type that draws another kind of view (a state diagram of no machine, a gitGraph of no timeline) is greyed out.
+  for (const option of mermaidSelect.options) {
+    const only = isMermaidStyle(option.value) ? MERMAID_ONLY_FOR[option.value] : undefined;
+    option.disabled = only !== undefined && only.kind !== kind && option.value !== state.mermaid;
+    option.title = only !== undefined && only.kind !== kind ? `draws ${only.what} only` : "";
+  }
+
   mermaidSelect.value = state.mermaid;
 
   for (const box of overlayBoxes()) box.checked = state.overlays.includes(box.value as Overlay);
@@ -54,24 +76,39 @@ export function applyOptions(state: Link): void {
   if (location.hash === before) void page.load();
 }
 
+/** Sets one option; when the link stays the same (a value the field had to correct to the one in force), the fields are shown again. */
+function setOption(next: Link): void {
+  const before = location.hash;
+  setLink(next);
+
+  if (location.hash === before) showOptions(currentLink());
+}
+
 /** Opens or closes the options (the `o` key). */
 export function toggleOptions(): void {
   menu.open = !menu.open;
 }
 
 depthInput.addEventListener("change", () => {
-  const typed = Number(depthInput.value);
-  setLink({ ...currentLink(), depth: depthInput.value === "" || !Number.isFinite(typed) ? null : Math.max(0, Math.min(MAX_DEPTH, Math.floor(typed))) });
+  // No ceiling: a deep picture is drawn, and the reason says it may be big.
+  const typed = wholeNumber(depthInput);
+  setOption({ ...currentLink(), depth: typed === null ? null : Math.max(0, typed) });
 });
-packagesInput.addEventListener("change", () => setLink({ ...currentLink(), packages: packagesInput.checked }));
-changesInput.addEventListener("change", () => setLink({ ...currentLink(), changes: changesInput.checked }));
-limitInput.addEventListener("change", () => setLink({ ...currentLink(), limit: limitInput.value === "" ? null : Math.max(1, Number(limitInput.value)) }));
+packagesInput.addEventListener("change", () => setOption({ ...currentLink(), packages: packagesInput.checked }));
+changesInput.addEventListener("change", () => setOption({ ...currentLink(), changes: changesInput.checked }));
+limitInput.addEventListener("change", () => {
+  const typed = wholeNumber(limitInput);
+  setOption({ ...currentLink(), limit: typed === null ? null : Math.max(1, typed) });
+});
 mermaidSelect.addEventListener("change", () => {
   const value = mermaidSelect.value;
-  setLink({ ...currentLink(), mermaid: isMermaidStyle(value) ? value : "auto" });
+  setOption({ ...currentLink(), mermaid: isMermaidStyle(value) ? value : "auto" });
 });
-weightInput.addEventListener("change", () => setLink({ ...currentLink(), weight: weightInput.value === "" || Number(weightInput.value) <= 1 ? null : Math.floor(Number(weightInput.value)) }));
-hubsInput.addEventListener("change", () => setLink({ ...currentLink(), hubs: hubsInput.checked }));
+weightInput.addEventListener("change", () => {
+  const typed = wholeNumber(weightInput);
+  setOption({ ...currentLink(), weight: typed === null || typed <= 1 ? null : typed });
+});
+hubsInput.addEventListener("change", () => setOption({ ...currentLink(), hubs: hubsInput.checked }));
 presetSelect.addEventListener("change", () => {
   const preset = PRESETS[presetSelect.value];
   presetSelect.value = "";
@@ -85,7 +122,7 @@ for (const box of overlayBoxes()) {
       .filter((each) => each.checked)
       .map((checked) => checked.value)
       .filter((value): value is Overlay => OVERLAYS.includes(value as Overlay));
-    setLink({ ...currentLink(), overlays });
+    setOption({ ...currentLink(), overlays });
   });
 }
 
@@ -103,10 +140,22 @@ document.addEventListener("pointerdown", (event) => {
 
 element<HTMLButtonElement>("options-default").addEventListener("click", () => {
   const now = currentLink();
-  notice(rememberDefaults(now) ? "options remembered as the defaults of this browser" : "no storage: the options last this page");
+  // The reload that follows clears the line: the notice comes once the picture is drawn.
+  noticeAfterLoad(rememberDefaults(now) ? "options remembered as the defaults of this browser" : "no storage: the options last this page");
   applyOptions(now);
 });
 element<HTMLButtonElement>("options-reset").addEventListener("click", () => {
   forgetDefaults();
-  applyOptions({ ...currentLink(), depth: null, limit: null, packages: false, overlays: [], mermaid: "auto", changes: false, weight: null, hubs: true, expand: [], lanes: "auto" });
+  noticeAfterLoad("every option back to the built-in one; the remembered defaults are forgotten");
+  // Every option of the picture, the ones of the toolbar and the lanes menu too (opened modules, hidden lanes, type-only imports).
+  applyOptions({ ...currentLink(), ...DEFAULT_PICTURE_OPTIONS });
+});
+
+// A notice of the field itself, given at once: the picture of a deep depth may take a while to come.
+depthInput.addEventListener("input", () => {
+  const typed = wholeNumber(depthInput);
+  const warning = depthWarning(typed);
+  depthInput.classList.toggle("warn", warning !== null);
+
+  if (warning) notice(`⚠ ${warning}`);
 });
