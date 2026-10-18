@@ -102,7 +102,7 @@ export interface FileFacts {
    * to keep the function, with their literal arguments. A framework adapter
    * reads a registration in them (`@router.get("/x")`, `@shared_task`,
    * `@receiver(post_save, sender=Order)`); the extractor still records each
-   * as a hole of the declaration, which the adapter lifts for a decorator it
+   * as an unsupported fact of the declaration, which the adapter lifts for a decorator it
    * recognises.
    */
   decorators?: DecoratorFact[];
@@ -534,7 +534,7 @@ export interface CallFact {
   /**
    * The callee is an expression archdiff does not name (`f()()`, `(a || b)()`,
    * `new (load())()`, a chain too long to read): never an edge, always a
-   * `dynamic-call` hole. Every call in the code is an edge or a hole.
+   * `dynamic` gap. Every call in the code is an edge or a gap.
    */
   opaque?: true;
   /** The head of the callee is bound in a scope between the call and the module; for `this.m`, `this` is not the class. */
@@ -747,7 +747,7 @@ export interface ExportRow {
   from?: string;
 }
 
-/** A construct the extractor does not turn into an edge: a hole, with its source fragment and why. */
+/** A construct the extractor read but does not turn into an edge (an unsupported fact): its source fragment and why. */
 export interface UnsupportedFact {
   line: number;
   col: number;
@@ -757,8 +757,8 @@ export interface UnsupportedFact {
   reason: string;
   /**
    * The declaration the construct changes, as a dotted path in the file
-   * (`place`, `Order.save`): a decorator that may replace a fn. Such a hole
-   * is in how calls of that declaration behave; it adds no dependency.
+   * (`place`, `Order.save`): a decorator that may replace a fn. Such a fact
+   * is about how calls of that declaration behave; it adds no dependency.
    */
   symbol?: string;
 }

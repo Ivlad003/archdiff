@@ -1,15 +1,16 @@
 // Rust facts: items, `impl` members, `use` trees, calls. A `use` leaf is one
 // import whose specifier is the full path (`crate::domain::order::place`);
 // the resolver decides how much of it is a module. Calls through values,
-// traits and macros are not guessed: they stay holes in coverage. Every call
-// expression is an edge or a hole: a callee archdiff cannot name is a call
+// traits and macros are not guessed: they stay gaps in coverage. Every call
+// expression is an edge or a gap: a callee archdiff cannot name is a call
 // through a value, never dropped.
 //
 // The Rust frontend of the code pipeline (source → FileFacts → graph):
 // parses one file with tree-sitter and returns its `FileFacts`.
-// Entry point: `extractRust`. Terms: decl (an item archdiff indexes), hole (an
-// unsupported fact or an unresolved call), value ref (a fn read as a value,
-// so something else may call it), pass (a fn path given as an argument).
+// Entry point: `extractRust`. Terms: decl (an item archdiff indexes),
+// unsupported (a construct read but not followed, with its reason), gap (a
+// call the graph cannot follow), value ref (a fn read as a value, so
+// something else may call it), pass (a fn path given as an argument).
 
 import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, PassFact, ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
@@ -39,7 +40,7 @@ const IMPLICIT_TRAITS = new Set(
 /** Nodes whose identifiers bind names instead of reading them. */
 const PATTERN_NODES = new Set(["tuple_struct_pattern", "struct_pattern", "tuple_pattern", "slice_pattern", "ref_pattern", "mut_pattern", "or_pattern", "captured_pattern", "field_pattern", "match_pattern", "range_pattern", "reference_pattern"]);
 
-/** The facts of one Rust file: imports, items with their calls, holes and value references. */
+/** The facts of one Rust file: imports, items with their calls, the constructs it did not follow, and value references. */
 export function extractRust(path: string, src: string): Promise<FileFacts> {
   return withTree("rust", src, (tree) => extractTree(path, tree.rootNode));
 }
@@ -75,8 +76,8 @@ function extractTree(path: string, root: Node): FileFacts {
     if (body) facts.moduleCalls.push(...bodyCalls(body, { owner, self: owner !== null, bound: new Map(), names, imports }, facts).map((c) => ({ ...c, closure: true as const })));
   };
 
-  // Items: each top-level item becomes a declaration, an export row, a hole,
-  // or code that runs outside any indexed fn (`detached`).
+  // Items: each top-level item becomes a declaration, an export row, an
+  // unsupported fact, or code that runs outside any indexed fn (`detached`).
   for (const node of items) {
     const name = node.childForFieldName("name")?.text;
 
@@ -264,9 +265,10 @@ function testOnly(node: Node): boolean {
 
 /**
  * An attribute macro archdiff does not know (`#[get("/")]`, `#[tauri::command]`)
- * may replace the fn: calls of the name may not reach the body (a hole of that
- * fn), and the macro holds the fn, so a framework may call it. A method of
- * an `impl` for a type of another file is not indexed: its hole has no symbol.
+ * may replace the fn: calls of the name may not reach the body (an unsupported
+ * fact of that fn), and the macro holds the fn, so a framework may call it. A
+ * method of an `impl` for a type of another file is not indexed: its
+ * unsupported fact has no symbol.
  */
 function noteAttributes(node: Node, symbol: string, member: boolean, facts: FileFacts): void {
   for (let prev = node.previousNamedSibling; prev && (prev.type === "attribute_item" || isComment(prev)); prev = prev.previousNamedSibling) {
@@ -275,7 +277,7 @@ function noteAttributes(node: Node, symbol: string, member: boolean, facts: File
     const path = prev.namedChildren[0]?.namedChildren[0]?.text.replace(/\s+/g, "") ?? "";
 
     if (KEEPING_ATTRIBUTES.has(path) || /^(clippy|rustfmt|diagnostic)::/.test(path)) continue;
-    // An unknown attribute: a hole for the fn, and a value ref, since the
+    // An unknown attribute: an unsupported fact for the fn, and a value ref, since the
     // macro holds the fn and a framework may call it.
     facts.unsupported.push({ ...unsupportedAt(prev, `attribute \`${path}\` may replace \`${symbol}\``), symbol });
     const at = located(prev);
@@ -474,7 +476,7 @@ type ClosureState = null | "stored" | { line: number; col: number };
 /** A call fact before its position is known. */
 type UnplacedCall = Omit<CallFact, "line" | "col" | "endLine" | "endCol">;
 
-/** Every call in a body as a call fact (with closure state and fn arguments), and a hole for each unknown macro. */
+/** Every call in a body as a call fact (with closure state and fn arguments), and an unsupported fact for each unknown macro. */
 function bodyCalls(body: Node, scope: CallScope, facts: FileFacts): CallFact[] {
   const out: CallFact[] = [];
 
@@ -635,7 +637,7 @@ function pathCall(fn: Node, scope: CallScope, facts: FileFacts): Callee | null {
   if (via && !via.source.includes("*")) segments = [...via.source.split("::"), ...segments.slice(1)];
   const head = segments[0]!;
 
-  // Inside an inline module paths are relative to it: not an import, a hole.
+  // Inside an inline module paths are relative to it: not an import, a call of a local name.
   if (!scope.imports) return { callee: segments.join("::"), bound: "local" };
 
   if (head === "crate" || head === "super" || head === "self" || via || (/^[a-z_]/.test(head) && !bound.has(head) && !names.has(head))) {
@@ -658,7 +660,7 @@ function pathCall(fn: Node, scope: CallScope, facts: FileFacts): Callee | null {
   return { callee: segments.join(".") };
 }
 
-/** A call archdiff cannot name, as written: a `dynamic-call` hole, never an edge. */
+/** A call archdiff cannot name, as written: a call through a value, a gap in the graph, never an edge. */
 function throughValue(fn: Node): Callee {
   return { callee: compact(fn.text), bound: "local" };
 }

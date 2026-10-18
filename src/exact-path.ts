@@ -2,7 +2,7 @@
 // spelling. `existsSync` answers for the file system: on APFS and NTFS
 // `src/models/User.rs` exists when `src/models/user.rs` does, so a resolver
 // that trusts it names a file the index does not have, and a `use
-// crate::models::User` that Linux resolves to `models/mod.rs` becomes a hole
+// crate::models::User` that Linux resolves to `models/mod.rs` becomes a gap
 // on a developer's laptop. The directory listing carries the real spelling,
 // so every segment of the path is compared with the listing of its parent.
 // Names are compared in NFC: HFS+ lists them in NFD.

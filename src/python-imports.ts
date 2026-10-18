@@ -85,7 +85,7 @@ export class PythonResolver implements SourceResolver {
 
       if (found) return found;
 
-      // `import nsp` binding the namespace package of `import nsp.inner.mod`: no module, so no edge, but no hole either.
+      // `import nsp` binding the namespace package of `import nsp.inner.mod`: no module, so no edge, but no gap either.
       if (!isModule && !glob && segments.length === 1) return { kind: "generated" };
 
       return { kind: "unresolved" };

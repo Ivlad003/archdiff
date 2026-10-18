@@ -32,6 +32,14 @@ _Avoid_: hole (for the fact), unresolved edge
 A gap into the repository's own code — a computed callee, an unknown member, an interface — as opposed to a call into a package or the language.
 _Avoid_: gap (when the distinction matters)
 
+**Unsupported**:
+A construct a frontend read but does not follow — an `eval`, a decorator that may replace a function, a computed include — kept with its source and the reason; the coverage report lists them.
+_Avoid_: hole (for the fact)
+
+**Hole**:
+A gap drawn in a picture: a dashed diamond where a call leads nowhere archdiff could follow.
+_Avoid_: gap (for the shape)
+
 **Entry point**:
 A declaration execution starts from: a route, a hook, a `main`, an exported function nothing in the repository calls.
 _Avoid_: entry, handler

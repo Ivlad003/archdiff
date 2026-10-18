@@ -2,15 +2,16 @@
 // is one import whose specifier is the dotted path (`..pkg.mod.f`); the
 // resolver decides how much of it is a module. Methods through values whose
 // class no annotation or `X(…)` names,
-// `getattr`, dynamic imports and replacing decorators are holes, not edges.
-// Every call expression is an edge or a hole: a callee archdiff cannot name
+// `getattr`, dynamic imports and replacing decorators are gaps or unsupported
+// facts, not edges. Every call expression is an edge or a gap: a callee archdiff cannot name
 // is a call through a value, never dropped.
 //
 // The Python frontend of the code pipeline (source → FileFacts → graph):
 // parses one file with tree-sitter and returns its `FileFacts`.
 // Entry point: `extractPython`. Terms: decl (a def or class archdiff indexes),
-// export row (a public name, from `__all__` or the `_` convention), hole (an
-// unsupported fact or an unresolved call), value ref (a fn read as a value).
+// export row (a public name, from `__all__` or the `_` convention),
+// unsupported (a construct read but not followed, with its reason), gap (a
+// call the graph cannot follow), value ref (a fn read as a value).
 
 import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, Kwarg, LiteralValue, PassFact, StatementFact, ValueRefFact } from "./facts.ts";
 import { isLicense, nonEmpty } from "./doc-comments.ts";
@@ -28,7 +29,7 @@ const ACCESSOR_DECORATORS = new Set(["property", "cached_property", "functools.c
 /** Nodes whose identifiers name what is bound, not what is read. */
 const BINDING_PARENTS = new Set(["parameters", "lambda_parameters", "global_statement", "nonlocal_statement", "dotted_name", "aliased_import", "import_statement", "import_from_statement", "decorator", "list_splat_pattern", "dictionary_splat_pattern", "pattern_list", "tuple_pattern", "list_pattern", "type", "as_pattern_target"]);
 
-/** The facts of one Python file: imports, defs and classes with their calls, exports, entries and holes. */
+/** The facts of one Python file: imports, defs and classes with their calls, exports, entries and what it did not follow. */
 export function extractPython(path: string, src: string): Promise<FileFacts> {
   return withTree("python", src, (tree) => extractTree(path, tree.rootNode));
 }
@@ -236,13 +237,13 @@ function isAccessor(name: string): boolean {
 
 /**
  * A decorator archdiff does not know may return another function: calls of
- * the name may not reach the body (a hole of that declaration), and the
+ * the name may not reach the body (an unsupported fact of that declaration), and the
  * decorator holds the function as a value, so code archdiff cannot follow may
  * call it (a framework calling a registered handler).
  */
 function noteDecorators(node: Node, symbol: string, member: boolean, facts: FileFacts): void {
   // For each unknown decorator: a decorator fact (with literal arguments for
-  // framework adapters), a hole on the symbol, and a value ref to it.
+  // framework adapters), an unsupported fact on the symbol, and a value ref to it.
   for (const decorator of decorators(node)) {
     if (KEEPING_DECORATORS.has(decorator.name) || isAccessor(decorator.name)) continue;
     const at = located(decorator.node);
@@ -847,7 +848,7 @@ function assigned(node: Node, parent: Node): boolean {
 /**
  * `getattr(x, name)`, `importlib.import_module(name)`, `__import__(name)`,
  * `exec`/`eval`: what they reach is decided at run time. A `getattr` in a
- * `def` is a hole of that function's calls; the others may import anything.
+ * `def` is an unsupported fact of that function's calls; the others may import anything.
  */
 function collectDynamic(root: Node, facts: FileFacts): void {
   // Every call in the file, by its callee as written (an aliased

@@ -246,7 +246,7 @@ function modulesView(graph: Graph): PictureContent {
   return unplaced(`Modules: ${ids.length} in ${graph.layers.length} layers`, nodes, depEdges(graph, new Set(ids), false), lanesOf(graph, nodes));
 }
 
-/** The call tree from a function: the functions it calls, and theirs, `depth` levels (default 3); gaps as holes. */
+/** The call tree from a function: the functions it calls, and theirs, `depth` levels (default 3); its gaps drawn as hole shapes. */
 function callsView(graph: Graph, id: string, depth: number): PictureContent {
   const start = graph.nodes.get(id);
 

@@ -5,8 +5,9 @@
 // The graph resolves the import sources, callee texts and export
 // rows recorded here; nothing here touches other files. Entry points:
 // `extractTs` for one file and `withTsTree` for callers that need the parsed
-// tree. Key terms: a *hole* is a call kept as text because it does not name a
-// resolvable symbol; a *pass* is a function handed to a call as a value.
+// tree. Key terms: an *opaque* call is kept as text because it does not name
+// a resolvable symbol (the graph makes it a gap); a *pass* is a function
+// handed to a call as a value.
 
 import { builtinModules } from "node:module";
 import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, TypeFieldFact, TypeRefFact, ValueRefFact } from "./facts.ts";
@@ -14,7 +15,7 @@ import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmp
 import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Query, type Tree } from "./treesitter.ts";
 import { collectTsMachines, collectTsStates, countBranches, guardsOf, TS_CONTROL } from "./control.ts";
 
-// Every call and `new`, whatever its callee: each becomes an edge or a hole, never nothing.
+// Every call and `new`, whatever its callee: each becomes an edge or a gap, never nothing.
 const CALLS_QUERY = `
 (call_expression function: (_) @call)
 (new_expression constructor: (_) @new)
@@ -37,7 +38,7 @@ const REQUIRE_QUERY = `
 (call_expression function: (import) arguments: (arguments (string (string_fragment) @source)))
 `;
 
-/** A callee longer than this is not a name archdiff resolves; it stays a hole with a shortened text. */
+/** A callee longer than this is not a name archdiff resolves; it stays a gap with a shortened text. */
 const MAX_CALLEE = 80;
 
 /** Members whose first string argument framework adapters read: the global route prefix (`CallFact.literal`). */
@@ -62,7 +63,7 @@ export function maskImportTypes(src: string): string {
   return src.replace(/typeof\s+import\(\s*["'][^"']*["']\s*\)/g, (text) => mask(text)).replace(/import\(\s*["'][^"']*["']\s*\)(?=\s*\.\s*[A-Z_$])/g, (text) => mask(text));
 }
 
-/** The facts of one TypeScript or JavaScript file: what the graph reads to build nodes, edges and holes. */
+/** The facts of one TypeScript or JavaScript file: what the graph reads to build its declarations, edges and gaps. */
 export function extractTs(path: string, src: string): Promise<FileFacts> {
   const g = grammarFor(path);
 
@@ -839,7 +840,7 @@ function callFact(callee: string, node: Node): CallFact {
   return { callee, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol };
 }
 
-/** A call through an expression archdiff does not name: a hole with the source text. */
+/** A call through an expression archdiff does not name: an opaque call with the source text, a gap in the graph. */
 function opaqueCall(node: Node): CallFact {
   const text = collapse(node.text);
 
@@ -851,7 +852,7 @@ function opaqueCall(node: Node): CallFact {
  * archdiff records another way: `require()` and `import()` (imports),
  * `import.meta.resolve()` (an import), a function literal called in place
  * (the calls of its body are read where they are), a class expression under
- * `new`, `obj[k]()` (an `unsupported` hole). Any other callee archdiff cannot
+ * `new`, `obj[k]()` (an `unsupported` fact). Any other callee archdiff cannot
  * name is an `opaque` fact.
  */
 function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact | null {
@@ -880,7 +881,7 @@ function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact 
       const fact = calleeFact(n, body, cls);
 
       if (fact) return fact;
-      // `a.b.c()`, `f().m()`, `super.m()`: the text keeps the head, which the graph resolves or leaves a hole.
+      // `a.b.c()`, `f().m()`, `super.m()`: the text keeps the head, which the graph resolves or leaves a gap.
       const text = n.text.replace(/\s+/g, "");
 
       return text.length < MAX_CALLEE ? callFact(text, n) : opaqueCall(n);
@@ -894,7 +895,7 @@ function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact 
     case "class":
       return null;
     default:
-      // A function literal called in place has its calls read where they are; anything else is an opaque hole.
+      // A function literal called in place has its calls read where they are; anything else is an opaque call, a gap.
       return FUNCTION_VALUES.has(n.type) ? null : opaqueCall(n);
   }
 }
@@ -905,7 +906,7 @@ function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact 
  * when the tag is not a component: an intrinsic element (`<div />`,
  * `<my-button />`: a lowercase first letter), a namespace name
  * (`<svg:path />`), or a fragment (no name). A tag through a parameter or
- * local (`<Comp />`) is bound, a hole, as the call of a parameter is.
+ * local (`<Comp />`) is bound, a gap, as the call of a parameter is.
  */
 function componentOfTag(name: Node, body: Node, cls: ClassScope | null): CallFact | null {
   if (name.type === "identifier") {
@@ -921,7 +922,7 @@ function componentOfTag(name: Node, body: Node, cls: ClassScope | null): CallFac
   const fact = calleeFact(name, body, cls);
 
   if (fact) return fact;
-  // A member tag with no binding to resolve: its text, or an opaque hole when it is too long.
+  // A member tag with no binding to resolve: its text, or an opaque call when it is too long.
   const text = collapse(name.text);
 
   return text.length < MAX_CALLEE ? callFact(text, name) : opaqueCall(name);
@@ -2314,7 +2315,7 @@ function moduleUrlSpecs(node: Node): { spec: string; optional: boolean }[] | nul
   if (!spec) return [];
 
   // `new URL(spec, import.meta.url)`: relative module files only; extensionless ones are optional.
-  // A computed spec whose literal tail names a non-module file (`.png`) is no import; any other computed spec is a hole.
+  // A computed spec whose literal tail names a non-module file (`.png`) is no import; any other computed spec is an unsupported fact.
   if (node.type === "new_expression" && node.childForFieldName("constructor")?.text === "URL" && isImportMetaUrl(base)) {
     const strings = stringsOf(spec);
 

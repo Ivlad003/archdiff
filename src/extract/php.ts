@@ -14,8 +14,8 @@
 // first use: an edge when a file declares that name, nothing otherwise. An
 // unqualified function falls back to the global namespace, as PHP does. Calls
 // PHP resolves at run time (`$f()`, `$obj->$m()`, `new $class`,
-// `call_user_func`) are holes; so is a method through a value whose class the
-// syntax does not name. An untyped property (PHP 7) has the class of the
+// `call_user_func`) are unsupported facts, and a method through a value whose
+// class the syntax does not name is a gap. An untyped property (PHP 7) has the class of the
 // constructor parameter assigned to it (`$this->x = $x` with `X $x`), a fact of
 // the syntax; without one, the class its `@var` (or the parameter's `@param`)
 // writes, which PHP does not check: provenance `docblock`.
@@ -126,7 +126,7 @@ interface TypeSource {
   docblock?: { line: number; col: number };
 }
 
-/** Per file: the imports, values read and holes the names of the code add. */
+/** Per file: the imports, the values read and the unsupported facts the names of the code add. */
 class Collector {
   readonly imports = new Map<string, ImportFact>();
   readonly values = new Map<string, ValueRefFact>();
@@ -180,14 +180,14 @@ class Collector {
   }
 
   /** Holes already recorded, by position and reason: typing a variable reads a call once more. */
-  private readonly holes = new Set<string>();
+  private readonly unsupportedSeen = new Set<string>();
 
-  /** Records a hole at `node` (once per position and reason); `symbol` is the declaration whose behaviour it leaves unknown, if any. */
-  hole(node: Node, reason: string, symbol: string | null): void {
+  /** Records an unsupported fact at `node` (once per position and reason); `symbol` is the declaration whose behaviour it leaves unknown, if any. */
+  noteUnsupported(node: Node, reason: string, symbol: string | null): void {
     const key = `${node.startIndex}:${node.endIndex}:${reason}`;
 
-    if (this.holes.has(key)) return;
-    this.holes.add(key);
+    if (this.unsupportedSeen.has(key)) return;
+    this.unsupportedSeen.add(key);
     const fact = unsupportedAt(node, reason);
 
     if (symbol) fact.symbol = symbol;
@@ -195,7 +195,7 @@ class Collector {
   }
 }
 
-/** The FileFacts of a parsed tree: declarations and symbols per namespace region, then imports, holes and values gathered across the file. */
+/** The FileFacts of a parsed tree: declarations and symbols per namespace region, then imports, unsupported facts and values gathered across the file. */
 function extractTree(path: string, root: Node): FileFacts {
   const facts: FileFacts = { path, endLine: 1, endCol: 1, imports: [], decls: [], exports: new Set(), reexportsAll: [], exportRows: [], unsupported: [], valueRefs: [], moduleCalls: [], completeness: "complete", parseError: null, symbols: [] };
   const collector = new Collector();
@@ -489,7 +489,7 @@ function declarationOf(node: Node, names: Names, collector: Collector): DeclFact
   const doc = docOf(node, collector.header);
 
   if (node.type === "interface_declaration") {
-    // An interface is a type: a call through a value typed with it stays a hole, as in TypeScript.
+    // An interface is a type: a call through a value typed with it stays a gap, as in TypeScript.
     // What its methods return is a fact every class implementing it keeps (PHP checks it).
     const methods = interfaceMethods(node, names, collector);
 
@@ -512,7 +512,7 @@ function declarationOf(node: Node, names: Names, collector: Collector): DeclFact
   const fields = new Map<string, FieldType>();
   /** Untyped properties: their declarations and their `@var`, for the constructor to type. */
   const untyped = new Map<string, { node: Node; doc: DocType | null }>();
-  /** Properties the constructor settled: typed, or a hole for conflicting classes. */
+  /** Properties the constructor settled: typed, or an unsupported fact for conflicting classes. */
   const decided = new Set<string>();
   const traits: string[] = [];
   const traitRules: NonNullable<DeclFact["traitRules"]> = [];
@@ -721,7 +721,7 @@ function interfaceMethods(node: Node, names: Names, collector: Collector): Metho
  * comes from a docblock PHP does not check. Only a parameter assigned as it is
  * counts: an expression (`$x ?: new X()`) has no class the syntax names.
  * Assignments of two classes, or a `@var` the constructor contradicts, type
- * nothing: a hole `ambiguous property type` of the class. Returns the
+ * nothing: an unsupported fact `ambiguous property type` of the class. Returns the
  * properties settled either way; the rest may still have a `@var`.
  */
 function constructorFields(method: Node, className: string, names: Names, collector: Collector, fields: Map<string, FieldType>, untyped: ReadonlyMap<string, { node: Node; doc: DocType | null }>, filledBy: Map<string, string | null>): Set<string> {
@@ -780,7 +780,7 @@ function constructorFields(method: Node, className: string, names: Names, collec
     });
   }
 
-  // Decide each assigned property: one class from every assignment, or a hole when they disagree.
+  // Decide each assigned property: one class from every assignment, or an unsupported fact when they disagree.
   for (const [prop, { node, sources }] of assigned) {
     const known = sources.filter((source): source is TypeSource => source !== null);
 
@@ -795,7 +795,7 @@ function constructorFields(method: Node, className: string, names: Names, collec
     // Two classes, or a class and a value of no known class: ambiguous.
     if (distinct.length > 1 || known.length < sources.length) {
       const listed = [...distinct, ...(known.length < sources.length ? ["a value of no known class"] : [])].map((item, i) => (i < distinct.length ? `\`${item}\`` : item));
-      collector.hole(where, `ambiguous property type \`$${prop}\`: assigned ${listed.join(" and ")} in the constructor`, className);
+      collector.noteUnsupported(where, `ambiguous property type \`$${prop}\`: assigned ${listed.join(" and ")} in the constructor`, className);
       continue;
     }
 
@@ -804,7 +804,7 @@ function constructorFields(method: Node, className: string, names: Names, collec
 
     // A `@var` that names another class contradicts the constructor: trust neither.
     if (doc && doc.key !== first.key) {
-      collector.hole(where, `ambiguous property type \`$${prop}\`: \`@var ${doc.written}\`, assigned \`${first.written}\` in the constructor`, className);
+      collector.noteUnsupported(where, `ambiguous property type \`$${prop}\`: \`@var ${doc.written}\`, assigned \`${first.written}\` in the constructor`, className);
       continue;
     }
 
@@ -1153,7 +1153,7 @@ interface Scope {
   bound: ReadonlyMap<string, "parameter" | "local">;
   /** The class of a variable's value, when its bindings name one (`scope.vars` of `fnDecl`); null otherwise. */
   vars: (variable: string) => VarType | null;
-  /** The declaration as a dotted path in the file (`Order.place`), for a hole of its own behaviour. */
+  /** The declaration as a dotted path in the file (`Order.place`), for an unsupported fact of its own behaviour. */
   symbol: string | null;
 }
 
@@ -1959,11 +1959,11 @@ function calleeOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "
       // `isset`/`empty` only when unqualified: `A\isset` would be a real function.
       if (CONSTRUCTS.has(lower) && !written.includes("\\")) return null;
 
-      // A call that dispatches at run time is still a call of the builtin, plus a hole for what it runs.
+      // A call that dispatches at run time is still a call of the builtin, plus an unsupported fact for what it runs.
 
-      if (CALLABLE_CALLS.has(lower)) collector.hole(n, `\`${lastSegment(written)}\` calls a callable chosen at run time`, scope.symbol);
+      if (CALLABLE_CALLS.has(lower)) collector.noteUnsupported(n, `\`${lastSegment(written)}\` calls a callable chosen at run time`, scope.symbol);
 
-      if (lower === "eval") collector.hole(n, "`eval` runs code archdiff cannot read", scope.symbol);
+      if (lower === "eval") collector.noteUnsupported(n, "`eval` runs code archdiff cannot read", scope.symbol);
 
       return { callee: collector.fn(written, fn, scope.names) };
     }
@@ -2103,7 +2103,7 @@ function callableValue(n: Node, scope: Scope, collector: Collector): void {
  * `require`/`include` of a path the code spells out: a string, or `__DIR__`
  * (`dirname(__DIR__)`, `dirname(__FILE__)`) joined with one. The specifier is
  * `include <path>`, relative to the repository root; a path computed at run
- * time is a hole.
+ * time is an unsupported fact.
  */
 function includesIn(root: Node, path: string, collector: Collector): ImportFact[] {
   const out: ImportFact[] = [];
@@ -2114,7 +2114,7 @@ function includesIn(root: Node, path: string, collector: Collector): ImportFact[
       const target = includedPath(n.namedChildren[0] ?? null, path);
       const at = located(n);
 
-      if (target === null) collector.hole(n, "an include of a path computed at run time", null);
+      if (target === null) collector.noteUnsupported(n, "an include of a path computed at run time", null);
       else out.push({ source: `include ${target}`, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, text: firstLine(at.text), bindings: [], reexport: false });
     }
 
