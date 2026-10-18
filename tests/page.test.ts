@@ -219,6 +219,38 @@ test("a picture is fitted clear of the toolbar and the minimap, again when the c
   await assertPictureClear("a stale place");
 });
 
+test("an empty picture and one that cannot be drawn say why on the canvas; a second tap opens deeper or says nothing opens", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/?fresh=empty#view=machines`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "machines"`);
+  // No machine in the sample: the canvas says so in its middle, and the minimap of nothing is gone.
+  await page!.waitForFunction(`!document.querySelector("#empty").hidden`);
+  assert.match((await page!.textContent("#empty")) ?? "", /Nothing to draw here.*no state machine/);
+  assert.equal(await page!.evaluate("document.querySelector('#minimap').hidden"), true);
+  // The timeline outside git cannot be drawn: the canvas is cleared and says why, rather than keeping the last picture.
+  await page!.evaluate(`location.hash = "view=timeline"`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "timeline"`);
+  assert.match((await page!.textContent("#empty")) ?? "", /could not be drawn.*not a git repository/);
+  assert.equal(await page!.evaluate("window.archdiff.canvas().scene().filter((element) => !element.isDeleted).length"), 0);
+  // A picture with shapes takes the note away.
+  await page!.evaluate(`location.hash = "view=${encodeURIComponent("calls:src/routes/checkout.tsx#Checkout")}"`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "calls:src/routes/checkout.tsx#Checkout"`);
+  await page!.waitForTimeout(500);
+  assert.equal(await page!.evaluate("document.querySelector('#empty').hidden"), true);
+  // A second tap on the function the call tree starts from (its own view is this picture) opens its logic.
+  const root = await screenPointOf("src/routes/checkout.tsx#Checkout");
+  await page!.mouse.dblclick(root.x, root.y);
+  await page!.waitForFunction(`window.archdiff.drawn() === "logic:src/routes/checkout.tsx#Checkout"`);
+  // A second tap on a shape that opens nothing (a cell of the metrics) says so instead of doing nothing.
+  await page!.evaluate(`location.hash = "view=metrics"`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "metrics"`);
+  await page!.waitForTimeout(500);
+  const cell = (await page!.evaluate(`[...window.archdiff.nodes().values()].find((node) => node.kind === "cell" && node.opens === undefined)?.id`)) as string;
+  const point = await screenPointOf(cell);
+  await page!.mouse.dblclick(point.x, point.y);
+  await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("nothing opens from this shape")`);
+  assert.ok((await page!.evaluate("location.hash")) === "#view=metrics");
+});
+
 test("the editor opens and closes, and the Chat tab reads the task from the drawing", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.goto(`${base}/#view=module%3Asrc%2Flib%2Forders.ts`);
   await page!.waitForSelector(".excalidraw canvas");

@@ -14,9 +14,9 @@ import type { MenuItem } from "./menu.ts";
 import { siblingViews } from "./navigation.ts";
 import { page } from "./page.ts";
 import { copyText, showCode } from "./panel.ts";
-import { askSelected, labelOf, select, selection, showEdge, toggleSelected } from "./picking.ts";
+import { askSelected, deeperView, labelOf, select, selection, showEdge, toggleSelected } from "./picking.ts";
 import { toggleProjectMap } from "./project-map.ts";
-import { opensView, standsFor, subjectView, tagOf } from "../../src/shape-keys.ts";
+import { standsFor, subjectView, tagOf } from "../../src/shape-keys.ts";
 import { parseView } from "../../src/view-keys.ts";
 
 /** The words of "open" for the view a second tap opens, by its kind. */
@@ -33,7 +33,8 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
   const node = id === null ? undefined : page.nodes().get(id);
 
   if (node) {
-    const own = opensView(node);
+    // What a second tap opens: the shape's own view, or for the function the picture starts from, its logic.
+    const own = deeperView(node.id);
     const subject = subjectView(node);
     const target = standsFor(node);
     const fnLike = node.kind === "fn" || (node.kind === "action" && target.includes("#"));
@@ -44,7 +45,7 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
 
     if (node.kind === "module" || node.kind === "participant" || fnLike) items.push({ label: "Focus: everything joined to it", hint: "callers, callees, imports, across the modules", run: go(`focus:${target}`) });
 
-    if (fnLike) items.push({ label: "Logic: the flowchart and its rules", run: go(`logic:${target}`) });
+    if (fnLike && own !== `logic:${target}`) items.push({ label: "Logic: the flowchart and its rules", run: go(`logic:${target}`) });
 
     // The siblings but the view a second tap opens, and focus and logic, which have their own items above.
     for (const sibling of subject ? siblingViews(subject) : []) {

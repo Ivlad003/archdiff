@@ -5,19 +5,29 @@
 // changed). app.ts sets the title and the reason on every load; a tool
 // gives its notice and clears it, and the reason comes back. A button that
 // reloads the picture keeps its notice for after the load
-// (`noticeAfterLoad`), which would otherwise clear it.
+// (`noticeAfterLoad`), which would otherwise clear it. A picture with
+// nothing to draw, or one that could not be drawn, says why in the
+// middle of the canvas (`showEmpty`): a blank canvas looks broken.
 //
 // Entry points: `showTitle`, `showNoTitle`, `renderCrumbs`, `setReason`,
-// `notice`, `clearNotice`, `noticeAfterLoad`, `showPendingNotice`.
+// `notice`, `clearNotice`, `noticeAfterLoad`, `showPendingNotice`,
+// `showEmpty`.
 
 import type { ChangeSummary } from "./api.ts";
-import { element } from "./dom.ts";
+import { element, h } from "./dom.ts";
 import { currentLink, setLink, type Link } from "./link.ts";
 import { crumbsOf } from "./navigation.ts";
 import { page } from "./page.ts";
 
 const title = element<HTMLSpanElement>("title-text");
 const reason = element<HTMLDivElement>("reason");
+const empty = element<HTMLDivElement>("empty");
+
+/** The note in the middle of an empty canvas: what it is (nothing to draw, or no picture) and why; null takes it away. */
+export function showEmpty(note: { head: string; why: string } | null): void {
+  empty.hidden = note === null;
+  empty.replaceChildren(...(note === null ? [] : [h("p", {}, h("strong", {}, note.head), note.why)]));
+}
 
 /** What a review or a comparison found, for the title: the files changed and the new layer dependencies (against the contract, when there is one). */
 function changeTitle(change: ChangeSummary | null): string {

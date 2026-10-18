@@ -10,16 +10,15 @@
 // Entry point: the module itself, imported by app.ts.
 
 import { canvasMode, saveDrawing, setMode } from "./canvas.ts";
-import { currentLink, reviewing, setLink } from "./link.ts";
+import { currentLink, reviewing } from "./link.ts";
 import { closeMenu, menuOpen } from "./menu.ts";
 import { toggleOptions } from "./options-panel.ts";
 import { page } from "./page.ts";
 import { togglePanel } from "./panel.ts";
-import { lastPicked, select, walk } from "./picking.ts";
+import { lastPicked, openShape, select, walk } from "./picking.ts";
 import { projectMapOpen, toggleProjectMap } from "./project-map.ts";
 import { flipLanes, focusFind, toggleSplit, toggleTool } from "./toolbar.ts";
 import { focusViewSearch } from "./views-list.ts";
-import { opensView } from "../../src/shape-keys.ts";
 
 const ARROWS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"] as const;
 
@@ -43,18 +42,14 @@ function readingKey(event: KeyboardEvent): void {
     // The map's search box takes the focus: the key is not typed into it as a search.
     event.preventDefault();
     toggleProjectMap();
-  }
-  else if (event.key === "0") page.canvas()?.scrollToContent();
+  } else if (event.key === "0") page.canvas()?.scrollToContent();
   else if (event.key === "Backspace") history.back();
   else if (isArrow(event.key) && picked) {
     event.preventDefault();
     walk(event.key);
   } else if (event.key === "Enter" && picked && !(event.target instanceof HTMLButtonElement)) {
-    // Enter: into the picked shape's own view (deeper), as a second tap would.
-    const shape = page.nodes().get(picked);
-    const own = shape ? opensView(shape) : null;
-
-    if (own) setLink({ ...currentLink(), view: own });
+    // Enter: into the picked shape's own view (deeper), as a second tap would; a shape that opens nothing says so.
+    openShape(picked);
   } else if (event.key === "s" && drawable && !document.body.classList.contains("embed")) toggleSplit();
   else if (event.key === "m" && drawable) toggleTool("mix");
   else if (event.key === "d" && drawable) toggleTool("dim");

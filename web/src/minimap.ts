@@ -79,9 +79,10 @@ function drawMinimap(): void {
   }
 }
 
-/** Shows the minimap unless it was turned off (the button, remembered) and keeps it drawn while the viewport moves. */
+/** Shows the minimap unless it was turned off (the button, remembered) or the picture is empty, and keeps it drawn while the viewport moves. */
 export function updateMinimap(): void {
-  minimap.hidden = !wanted || document.body.classList.contains("editing");
+  const empty = !(page.canvas()?.scene() ?? []).some((element) => !element.isDeleted && (element.customData?.["archdiff"] === "node" || element.customData?.["archdiff"] === "lane"));
+  minimap.hidden = !wanted || empty || document.body.classList.contains("editing");
   element<HTMLButtonElement>("tool-minimap").classList.toggle("active", wanted);
 
   if (timer) clearInterval(timer);

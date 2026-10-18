@@ -41,7 +41,7 @@ The system SHALL keep the view (a review and a comparison are views), the pictur
 
 ### Requirement: A tap reads, a second tap goes in
 
-The system SHALL, on a tap on a shape, show its Markdown page (declarations folding open to their calls and code) and its code with the shape's lines highlighted (every line of a function, however long); on a second tap, open the shape's own view: a layer to its modules, a module to its inside, a function to its calls. Breadcrumbs SHALL lead back up, Backspace back.
+The system SHALL, on a tap on a shape, show its Markdown page (declarations folding open to their calls and code) and its code with the shape's lines highlighted (every line of a function, however long); on a second tap, open the shape's own view: a layer to its modules, a module to its inside, a function to its calls (the function a call tree starts from, whose own view is the picture already, to its logic); a second tap or Enter on a shape that opens nothing SHALL say so on the line under the picture. Breadcrumbs SHALL lead back up, Backspace back.
 
 #### Scenario: A long function
 
@@ -59,12 +59,17 @@ The system SHALL, on a tap on a line, light it with its two ends and show its pa
 
 ### Requirement: The canvas shows the picture the link names
 
-The system SHALL draw the picture of the link on one canvas, however fast the link changes: a view opened while the first picture is still mounting the canvas waits for that canvas, and a picture that comes after a newer link is dropped.
+The system SHALL draw the picture of the link on one canvas, however fast the link changes: a view opened while the first picture is still mounting the canvas waits for that canvas, and a picture that comes after a newer link is dropped. A picture with nothing to draw SHALL say why in the middle of the canvas, without the minimap; a picture that cannot be drawn SHALL clear the canvas and say why there, never leave the last picture standing for it.
 
 #### Scenario: Links faster than the pictures
 
 - **WHEN** a reader opens a view while the first picture is still mounting the canvas, and a slow picture is overtaken by a quick one
 - **THEN** the page holds one canvas, and it shows the picture of the last link
+
+#### Scenario: Nothing to draw
+
+- **WHEN** a reader opens the machines of a repository that has none, then the timeline outside git
+- **THEN** the canvas says "Nothing to draw here" with the reason, then "This picture could not be drawn" with git's answer, on an empty canvas
 
 ### Requirement: A picture is fitted where nothing covers it
 

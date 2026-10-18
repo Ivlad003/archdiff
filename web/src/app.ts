@@ -37,7 +37,7 @@ import { loadBranches, loadCommits, showReviewBars } from "./review.ts";
 import { menuItems } from "./shape-menu.ts";
 import "./shortcuts.ts";
 import "./theme.ts";
-import { notice, renderCrumbs, setReason, showNoTitle, showPendingNotice, showTitle } from "./title.ts";
+import { notice, renderCrumbs, setReason, showEmpty, showNoTitle, showPendingNotice, showTitle } from "./title.ts";
 import { renderCanvasTools, setPictureLanes } from "./toolbar.ts";
 import { loadViews, renderViews, viewEntries } from "./views-list.ts";
 import { depthWarning } from "../../src/options.ts";
@@ -104,6 +104,9 @@ async function load(): Promise<void> {
   element<HTMLButtonElement>("edit").disabled = reviewing(state.view);
   element("chat-tab").hidden = reviewing(state.view);
 
+  /** The scene is on the canvas: a failure after it (the flow, the page) leaves the picture be. */
+  let shown = false;
+
   try {
     renderCrumbs(state);
     showReviewBars(state);
@@ -118,7 +121,10 @@ async function load(): Promise<void> {
     await showScene(state.view, result.elements, CANVAS_EVENTS);
 
     if (overtaken()) return;
+    shown = true;
     drawn = state.view;
+    // Nothing on the canvas (no shape, no stroke of a drawing): it says why in the middle, not a blank canvas.
+    showEmpty(result.elements.length === 0 ? { head: "Nothing to draw here", why: result.diagram.reason || "the picture has no shapes" } : null);
     updateMinimap();
     // A value of the link the options table refuses is left out of the picture, and said first.
     const wrong = wrongInLink().map((problem) => `⚠ ignored in the link: ${problem}`);
@@ -133,9 +139,23 @@ async function load(): Promise<void> {
     await loadFlow();
   } catch (error) {
     if (overtaken()) return;
+    const message = error instanceof Error ? error.message : String(error);
     showNoTitle();
-    setMarkdown(markdownPanel, error instanceof Error ? error.message : String(error));
+    setMarkdown(markdownPanel, message);
     showTab("markdown");
+
+    // No picture for this link: the last one would pass for it; the canvas is cleared and says why.
+    if (!shown) {
+      nodes = new Map();
+      edges = [];
+      mocks = [];
+      await showScene(state.view, [], CANVAS_EVENTS);
+
+      if (overtaken()) return;
+      drawn = state.view;
+      showEmpty({ head: "This picture could not be drawn", why: message });
+      updateMinimap();
+    }
   }
 
   if (!overtaken()) showPendingNotice();

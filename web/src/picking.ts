@@ -20,6 +20,7 @@ import { currentLink, refsOf, reviewing, setLink } from "./link.ts";
 import { closeMenu } from "./menu.ts";
 import { page } from "./page.ts";
 import { markdownPanel, setMarkdown, showCode, showPicturePage, showTab } from "./panel.ts";
+import { notice } from "./title.ts";
 import { lineElementId, opensView, standsFor, tagOf } from "../../src/shape-keys.ts";
 
 /** The tools of the canvas that change what a tap does: the toolbar turns them on and off, one at a time. */
@@ -372,10 +373,26 @@ export function tap(id: string | null, lines?: PickedLine[], extend?: boolean): 
   select(node ? [node.id] : []);
 }
 
-/** A double tap on a shape, or its link: the shape's own view, as the export wrote it into the scene; a shape of an older drawing by its link. Reading only. */
-export function openShape(id: string, link: string | null): void {
+/**
+ * The view a second tap on a shape opens: its own (as the export wrote it into the scene), a shape of an older drawing
+ * by its link; the function a call tree starts from, whose own view is the picture already, its logic. Null when the
+ * shape opens nothing, or nothing but the picture shown.
+ */
+export function deeperView(id: string, link: string | null = null): string | null {
   const node = page.nodes().get(id);
   const key = node ? opensView(node) : link?.startsWith(VIEW_LINK) ? decodeURIComponent(link.slice(VIEW_LINK.length)) : null;
+  const now = currentLink().view;
 
-  if (key && page.mode() === "view") setLink({ ...currentLink(), view: key });
+  if (key === now && node?.kind === "fn" && standsFor(node).includes("#")) return `logic:${standsFor(node)}`;
+
+  return key === now ? null : key;
+}
+
+/** A double tap on a shape, or Enter on the picked one: the view it opens; one that opens nothing says so rather than doing nothing. Reading only. */
+export function openShape(id: string, link: string | null = null): void {
+  if (page.mode() !== "view") return;
+  const key = deeperView(id, link);
+
+  if (key) setLink({ ...currentLink(), view: key });
+  else notice(`${labelOf(id)}: nothing opens from this shape — a tap shows it on the right, a right click lists its other pictures`);
 }

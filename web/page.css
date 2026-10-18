@@ -546,8 +546,44 @@ body.hide-right #right {
 }
 
 body.editing #minimap,
-body.editing #reason {
+body.editing #reason,
+body.editing #empty {
   display: none;
+}
+
+/* A picture with nothing to draw says so in the middle of the canvas, with why; taps and drawing go through to the canvas. */
+#empty {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+#empty[hidden] {
+  display: none;
+}
+
+#empty p {
+  max-width: 560px;
+  margin: 0 24px;
+  padding: 14px 18px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+#empty strong {
+  display: block;
+  margin-bottom: 4px;
+  color: inherit;
+  font-size: 15px;
 }
 
 #edit-tools {
