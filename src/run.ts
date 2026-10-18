@@ -23,6 +23,7 @@ import { functionBodies } from "./extract/bodies.ts";
 import { dataFlow, parseSignature, STORAGE_PACKAGES } from "./flow.ts";
 import { nodeId } from "./graph.ts";
 import { createResolver } from "./resolve.ts";
+import { ok, wrong, type Result } from "./result.ts";
 import type { Mock } from "./scene.ts";
 
 export interface RunOptions {
@@ -107,24 +108,27 @@ function argumentsOf(signature: string | null, input: Record<string, unknown>): 
 
 /**
  * Runs `entry` (`<path>#<fn>`) with the mocks. The entry must be an
- * exported top-level function of a TypeScript or JavaScript module; a
- * method, a nested function or another language is refused with a reason.
+ * exported top-level function of a TypeScript or JavaScript module; an
+ * unknown function, a method, a nested function or another language is
+ * refused with a reason before anything runs (a problem of the call: exit
+ * 2, status 400). A run that threw, or a child process that gave no
+ * report, is a run with its error.
  */
-export async function runFlow(analysis: Analysis, entry: string, options: RunOptions = {}): Promise<RunResult> {
+export async function runFlow(analysis: Analysis, entry: string, options: RunOptions = {}): Promise<Result<RunResult>> {
   const { graph, root } = analysis;
   const node = graph.nodes.get(entry);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const predicted = dataFlow(analysis, entry, [], 8).steps.map((step) => step.id);
-  const refuse = (error: string): RunResult => ({ entry, steps: [], storageCalls: [], result: null, error, ms: 0, predicted, missed: predicted, unexpected: [] });
+  const failed = (error: string): RunResult => ({ entry, steps: [], storageCalls: [], result: null, error, ms: 0, predicted, missed: predicted, unexpected: [] });
 
-  if (!node || node.kind !== "fn") return refuse(`no function "${entry}"`);
+  if (!node || node.kind !== "fn") return wrong(`no function "${entry}" (archdiff views lists the entry points)`);
 
-  if (node.parent) return refuse("a method cannot be run on its own; run the function that creates the object");
+  if (node.parent) return wrong("a method cannot be run on its own; run the function that creates the object");
 
-  if (!/\.[cm]?[jt]sx?$/.test(node.module)) return refuse("only a TypeScript or JavaScript function can be run");
+  if (!/\.[cm]?[jt]sx?$/.test(node.module)) return wrong("only a TypeScript or JavaScript function can be run");
   const exportName = graph.resolvedExports.get(node.module)?.get("default") === entry ? "default" : node.name;
 
-  if (!node.exported && exportName !== "default") return refuse(`${node.name} is not exported from ${node.module}`);
+  if (!node.exported && exportName !== "default") return wrong(`${node.name} is not exported from ${node.module}`);
   // The input: given, else the saved mock of the entry; the storages likewise, module mocks mapped to the packages the module imports.
   const savedInput = options.mocks?.find((mock) => mock.kind === "input" && mock.id === entry)?.value;
   const savedObject = savedInput !== undefined ? parseLoosely(savedInput) : {};
@@ -205,42 +209,44 @@ export async function runFlow(analysis: Analysis, entry: string, options: RunOpt
   const started = performance.now();
 
   try {
-    return await new Promise<RunResult>((resolveRun) => {
-      // The permission model: read anywhere, no writes, no child processes; the hooks thread is a worker and is allowed.
-      const child = spawn(process.execPath, ["--permission", "--allow-fs-read=*", "--allow-worker", "--no-warnings", "--import", register, harness], { cwd: root, env: { ...process.env, ARCHDIFF_RUN: planFile }, stdio: ["ignore", "pipe", "pipe"] });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-      child.stderr.on("data", (chunk: Buffer) => (stderr = `${stderr}${chunk.toString()}`.slice(-4000)));
-      const timer = setTimeout(() => child.kill(), timeoutMs + 2000);
-      child.on("error", (error) => {
-        clearTimeout(timer);
-        resolveRun({ ...refuse(error.message), ms: Math.round(performance.now() - started) });
-      });
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        const at = stdout.lastIndexOf("@@archdiff-run@@");
-        const ms = Math.round(performance.now() - started);
+    return ok(
+      await new Promise<RunResult>((resolveRun) => {
+        // The permission model: read anywhere, no writes, no child processes; the hooks thread is a worker and is allowed.
+        const child = spawn(process.execPath, ["--permission", "--allow-fs-read=*", "--allow-worker", "--no-warnings", "--import", register, harness], { cwd: root, env: { ...process.env, ARCHDIFF_RUN: planFile }, stdio: ["ignore", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+        child.stderr.on("data", (chunk: Buffer) => (stderr = `${stderr}${chunk.toString()}`.slice(-4000)));
+        const timer = setTimeout(() => child.kill(), timeoutMs + 2000);
+        child.on("error", (error) => {
+          clearTimeout(timer);
+          resolveRun({ ...failed(error.message), ms: Math.round(performance.now() - started) });
+        });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          const at = stdout.lastIndexOf("@@archdiff-run@@");
+          const ms = Math.round(performance.now() - started);
 
-        if (at === -1) {
+          if (at === -1) {
+            const tail = stderr.trim().split("\n").slice(-12).join("\n");
+
+            resolveRun({ ...failed(`the run gave no report (exit ${code ?? "signal"})${tail ? `: ${tail}` : ""}`), ms, ...(tail ? { stderr: tail } : {}) });
+
+            return;
+          }
+
+          const report = JSON.parse(stdout.slice(at + "@@archdiff-run@@".length).split("\n")[0]!) as { events: { kind: string; id?: string; module?: string; member?: string; args?: unknown[]; t: number }[]; result: unknown; error: string | null; ms: number };
+          const steps = report.events.filter((event) => event.kind === "enter").map((event, i) => ({ id: event.id!, order: i + 1 }));
+          const entered = new Set(steps.map((step) => step.id));
+          const storageCalls = report.events.filter((event) => event.kind === "storage").map((event) => ({ module: event.module!, member: event.member!, args: event.args ?? [] }));
+          const out: RunResult = { entry, steps, storageCalls, result: report.result, error: report.error, ms, predicted, missed: predicted.filter((id) => !entered.has(id)), unexpected: [...entered].filter((id) => !predicted.includes(id)) };
           const tail = stderr.trim().split("\n").slice(-12).join("\n");
 
-          resolveRun({ ...refuse(`the run gave no report (exit ${code ?? "signal"})${tail ? `: ${tail}` : ""}`), ms, ...(tail ? { stderr: tail } : {}) });
-
-          return;
-        }
-
-        const report = JSON.parse(stdout.slice(at + "@@archdiff-run@@".length).split("\n")[0]!) as { events: { kind: string; id?: string; module?: string; member?: string; args?: unknown[]; t: number }[]; result: unknown; error: string | null; ms: number };
-        const steps = report.events.filter((event) => event.kind === "enter").map((event, i) => ({ id: event.id!, order: i + 1 }));
-        const entered = new Set(steps.map((step) => step.id));
-        const storageCalls = report.events.filter((event) => event.kind === "storage").map((event) => ({ module: event.module!, member: event.member!, args: event.args ?? [] }));
-        const out: RunResult = { entry, steps, storageCalls, result: report.result, error: report.error, ms, predicted, missed: predicted.filter((id) => !entered.has(id)), unexpected: [...entered].filter((id) => !predicted.includes(id)) };
-        const tail = stderr.trim().split("\n").slice(-12).join("\n");
-
-        if (tail) out.stderr = tail;
-        resolveRun(out);
-      });
-    });
+          if (tail) out.stderr = tail;
+          resolveRun(out);
+        });
+      }),
+    );
   } finally {
     rmSync(planFile, { force: true });
   }

@@ -403,6 +403,10 @@ test("the Flow tab's run: POST /api/flow/run executes the entry with the saved m
   assert.deepEqual(run.missed, []);
   assert.ok(markdown.startsWith("<!-- archdiff:generated — run "), markdown);
   assert.equal((await fetch(`${base}/api/flow/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers" }) })).status, 400);
+  // An entry that cannot run is refused before anything runs: a method, an unknown function.
+  const refused = await fetch(`${base}/api/flow/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "calls:src/lib/orders.ts#OrderService.place" }) });
+  assert.equal(refused.status, 400);
+  assert.match(((await refused.json()) as { error: string }).error, /^a method cannot be run on its own/);
 });
 
 test("the project map lists every module with its layer and every import; a tag of a view or of a function's logic expands into context", async () => {

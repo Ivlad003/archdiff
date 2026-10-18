@@ -915,12 +915,16 @@ test("run executes an entry for real with the storages mocked, traced function b
   assert.deepEqual(found.steps.map((step) => step.id), ["src/lib/orders.ts#findOrder", "src/db/store.ts#readOrder"]);
   assert.deepEqual(found.storageCalls, [{ module: "node:fs", member: "readFileSync", args: ["/dev/null"] }]);
   assert.equal(found.error, null);
-  // A thrown error is the run's error, exit 1; a method and an unknown function are refused with a reason.
+  // A thrown error is the run's error, exit 1; a method and an unknown function are refused with a reason before anything runs, exit 2.
   const negative = archdiff(["run", "calls:src/lib/orders.ts#placeOrder", fixture, "--input", '{"id":"o2","total":-1}']);
   assert.equal(negative.status, 1);
   assert.ok(negative.stdout.includes("**Error:** Error: negative"), negative.stdout);
-  assert.ok(archdiff(["run", "calls:src/lib/orders.ts#OrderService.place", fixture]).stdout.includes("a method cannot be run on its own"));
-  assert.equal(archdiff(["run", "calls:src/lib/orders.ts#nope", fixture]).status, 1);
+  const method = archdiff(["run", "calls:src/lib/orders.ts#OrderService.place", fixture]);
+  assert.equal(method.status, 2);
+  assert.ok(method.stderr.includes("a method cannot be run on its own"), method.stderr);
+  const unknown = archdiff(["run", "calls:src/lib/orders.ts#nope", fixture]);
+  assert.equal(unknown.status, 2);
+  assert.equal(unknown.stderr, 'archdiff: run: no function "src/lib/orders.ts#nope" (archdiff views lists the entry points)\n');
   assert.equal(archdiff(["run", "layers", fixture]).status, 2);
   assert.ok(!existsSync(join(fixture, ".archdiff")) || !readdirSync(join(fixture, ".archdiff")).some((name) => name.startsWith("run-")), "the plan file is removed after the run");
 });

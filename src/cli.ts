@@ -324,9 +324,12 @@ const COMMANDS: readonly Command[] = [
 
       if (timeout !== undefined) options.timeoutMs = timeout;
       const result = await runFlow(analysis, view.subject, options);
-      const written = writeOut(call.has("json") ? `${JSON.stringify(result, null, 2)}\n` : runMarkdown(result), call.text("out"));
 
-      return written !== 0 ? written : result.error ? 1 : 0;
+      if (!result.ok) return fail(`run: ${result.problem.message}`);
+      const run = result.value;
+      const written = writeOut(call.has("json") ? `${JSON.stringify(run, null, 2)}\n` : runMarkdown(run), call.text("out"));
+
+      return written !== 0 ? written : run.error ? 1 : 0;
     },
   },
   {

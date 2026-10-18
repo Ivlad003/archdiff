@@ -19,7 +19,7 @@ import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView } from "../views.ts";
 import { checkEvents, runChecks } from "../checks.ts";
 import { runFlow, runMarkdown } from "../run.ts";
-import { json, problem, type RouteContext, type RouteRequest } from "./context.ts";
+import { failed, json, problem, type RouteContext, type RouteRequest } from "./context.ts";
 
 /** Where the prompts sent to the agent are kept, beside the drawings. */
 export const TASKS_DIRECTORY = `${CACHE_DIRECTORY}/tasks`;
@@ -174,7 +174,9 @@ export async function postFlowRun(ctx: RouteContext, { body, response }: RouteRe
   if (isJsonObject(parsed) && isJsonObject(parsed["storages"])) options.storages = parsed["storages"];
   const result = await runFlow(analysis, view.subject, options);
 
-  return json(response, { run: result, markdown: runMarkdown(result) });
+  if (!result.ok) return failed(response, result);
+
+  return json(response, { run: result.value, markdown: runMarkdown(result.value) });
 }
 
 export async function postChecks(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
