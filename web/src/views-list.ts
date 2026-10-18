@@ -75,7 +75,9 @@ export async function loadViews(): Promise<void> {
   setAgentName(response.agent);
   element("root").textContent = response.root;
   const s = response.stats;
-  element("stats").textContent = `${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms`;
+  // A server that cannot follow the code says so here: the pictures stay as they were until a reload.
+  const notFollowing = response.watching.problem ? ` · ⚠ not following the code: ${response.watching.problem}` : "";
+  element("stats").textContent = `${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms${notFollowing}`;
   renderViews();
 }
 

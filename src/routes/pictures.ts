@@ -114,7 +114,7 @@ export async function getViews(ctx: RouteContext, { response }: RouteRequest): P
   const { root, agentSpec } = ctx;
   const analysis = await ctx.fresh();
 
-  return json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis), agent: agentSpec?.name ?? null });
+  return json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis), agent: agentSpec?.name ?? null, watching: ctx.watching });
 }
 
 export async function getPlan(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
@@ -193,10 +193,9 @@ export async function getCoverage(ctx: RouteContext, { response }: RouteRequest)
 }
 
 export async function getChanges(ctx: RouteContext, { response, request }: RouteRequest): Promise<void> {
-  const { options } = ctx;
-  // Server-sent events: one per change of a source file, debounced; the page reloads its view.
+  // Server-sent events: one per change of a source file, debounced; the page reloads its view. The first says whether any will come.
   response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-  response.write(`data: ${JSON.stringify({ watching: options.watch })}\n\n`);
+  response.write(`data: ${JSON.stringify({ watching: ctx.watching.on, ...(ctx.watching.problem ? { problem: ctx.watching.problem } : {}) })}\n\n`);
   ctx.changeListeners.add(response);
   request.on("close", () => ctx.changeListeners.delete(response));
 

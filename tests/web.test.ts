@@ -433,7 +433,12 @@ test("the project map lists every module with its layer and every import; a tag 
   assert.ok(node.markdown.startsWith("# order.total < 0"), node.markdown.slice(0, 80));
 });
 
-test("a changed source file of any language the analysis reads reaches the page through /api/changes, and the next picture is drawn anew", async () => {
+test("a changed source file of any language the analysis reads reaches the page through /api/changes, and the next picture is drawn anew", async (t) => {
+  // A machine whose file watchers are used up cannot follow the code: the server says why, and there is nothing more to see.
+  const { watching } = await getJson<{ watching: { on: boolean; problem: string | null } }>("/api/views");
+
+  if (watching.problem) return t.skip(`the server does not follow the code here: ${watching.problem}`);
+  assert.equal(watching.on, true);
   const controller = new AbortController();
   const response = await fetch(`${base}/api/changes`, { signal: controller.signal });
   const reader = response.body!.getReader();

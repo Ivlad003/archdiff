@@ -12,6 +12,7 @@ The options of a picture, checked case by case on the page and fixed.
 - Mermaid: the select lists the state diagram (a link with `mermaid=state` showed it blank) and greys out the types of another kind of view; a gitGraph or a state diagram asked for a picture it does not fit gives the picture's own type with a comment, not an empty block; `--mermaid flowchart` draws any picture as a flowchart (a machine's or a sequence's was ignored).
 - A query's boolean reads `true`/`false` and `yes`/`no` beside `1`/`0`; anything else is refused by the API, and left out by the page with its name.
 - The reasons count one shape, one storage, one state and one transition in the singular, and name a commit by seven characters.
+- `archdiff web` says when it cannot follow the code. Node's recursive watch on Linux gives neither events nor an error once the system's file watchers are used up (ENOSPC), so the page silently stopped reloading; a plain watch of the root probes for it first, and the server's first line, `/api/views` (`watching`) and the stats in the page's header say why.
 
 ## 0.5.0 — 2026-10-18
 

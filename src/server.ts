@@ -131,17 +131,29 @@ function changeChannel(invalidate: () => void): { listeners: Set<ServerResponse>
   };
 }
 
-/** Watches the repository for a changed source file of any language archdiff reads; the cache, the drawings, git and node_modules change for other reasons. */
-function watchSources(root: string, onChange: (path: string) => void): void {
+/**
+ * Watches the repository for a changed source file of any language archdiff reads (the cache, the drawings, git and
+ * node_modules change for other reasons); the problem when it cannot, else null. A plain watch of the root goes
+ * first, as a probe: Node's recursive watch on Linux gives neither events nor an error once the system's file
+ * watchers are used up (ENOSPC), where a plain one throws.
+ */
+function watchSources(root: string, onChange: (path: string) => void): string | null {
   try {
+    watchFs(root).close();
     watchFs(root, { recursive: true }, (_event, name) => {
       const path = typeof name === "string" ? name.split("\\").join("/") : "";
 
       if (path === "" || path.startsWith(".archdiff/") || path.startsWith(".git/") || path.includes("node_modules/") || !isSourceFile(path)) return;
       onChange(path);
     });
+
+    return null;
   } catch (error) {
-    process.stderr.write(`archdiff web: not watching the files (${error instanceof Error ? error.message : String(error)})\n`);
+    const message = error instanceof Error ? error.message : String(error);
+    const problem = message.includes("ENOSPC") ? "the system's file watchers are used up (raise fs.inotify.max_user_watches)" : message;
+    process.stderr.write(`archdiff web: not watching the files: ${problem}\n`);
+
+    return problem;
   }
 }
 
@@ -251,7 +263,8 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   const analyses = analysisPerBurst(root);
   const changes = changeChannel(analyses.invalidate);
 
-  if (options.watch) watchSources(root, changes.notify);
+  // Whether the page follows the code, and why not when it was asked to (`--no-watch` is no problem).
+  const watching = options.watch ? watchSources(root, changes.notify) : null;
   const agentSpec = agentSpecOf((await analyze(root)).config, options.agent);
   // The agent's runner is made once the first run is asked for; every run ends with archdiff running the checks.
   let runner: AgentRunner | null = null;
@@ -273,6 +286,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     },
     activeRunner: () => runner,
     changeListeners: changes.listeners,
+    watching: { on: options.watch && watching === null, problem: watching },
     picture: (query) => pictureOf(query, options.base, analyses.fresh),
   };
 

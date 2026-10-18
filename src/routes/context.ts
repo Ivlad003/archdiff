@@ -33,6 +33,8 @@ export interface RouteContext {
   activeRunner(): AgentRunner | null;
   /** The responses waiting on `/api/changes`. */
   changeListeners: Set<ServerResponse>;
+  /** Whether the server follows the code (`--no-watch` turns it off), and the problem when it could not. */
+  watching: { on: boolean; problem: string | null };
   /** The picture the query names (`requestOf`), drawn on the current analysis; the problem with the request, or git's when it refuses. */
   picture(query: URLSearchParams): Promise<Result<Picture>>;
 }

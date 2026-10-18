@@ -128,7 +128,7 @@ The system SHALL switch the canvas to Excalidraw's full editor on `✎ edit`, sa
 
 ### Requirement: The page follows the code
 
-The system SHALL reload the picture when a source file of any language the analysis reads changes (`--no-watch` turns this off) and after every agent run; a picture asked for after a change SHALL be drawn from the new analysis.
+The system SHALL reload the picture when a source file of any language the analysis reads changes (`--no-watch` turns this off) and after every agent run; a picture asked for after a change SHALL be drawn from the new analysis. When the server cannot follow the files (the system's file watchers used up), it SHALL say so on its first lines, in `/api/views` and in the page's stats, rather than stay silent.
 
 #### Scenario: A file changes
 

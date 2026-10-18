@@ -22,6 +22,8 @@ export interface ViewsResponse {
   root: string;
   /** The agent the server may run, or null. */
   agent: string | null;
+  /** Whether the server follows the code (the page reloads on a change), and the problem when it could not. */
+  watching: { on: boolean; problem: string | null };
   stats: { files: number; modules: number; fns: number; classes: number; deps: number; calls: number; gaps: number; unresolvedImports: number; cacheHits: number; cacheMisses: number; ms: { total: number } };
   layers: string[];
   views: ViewEntry[];
