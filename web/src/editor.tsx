@@ -76,10 +76,18 @@ export const VIEW_LINK = "archdiff://view/";
  * A scene element as Excalidraw's own type. archdiff's `SceneElement` types
  * only what it reads (id, type, box, customData); Excalidraw's type has every
  * field of every element kind, which `restoreElements` fills in. One
- * conversion, here, for every call into the API.
+ * conversion each way, here, for every call into the API.
  */
 function asExcalidraw(elements: readonly SceneElement[]): readonly ExcalidrawElement[] {
   return elements as unknown as readonly ExcalidrawElement[];
+}
+
+/** An element of the scene with the fields of Excalidraw's the page reads and lights: the look, a label's container, a line's points. */
+type CanvasElement = SceneElement & { strokeColor: string; strokeWidth: number; backgroundColor: string; opacity: number; containerId?: string | null; points?: [number, number][] };
+
+/** The scene as the page reads it (without the deleted elements, unless asked): Excalidraw's elements have every field of `CanvasElement`. */
+function elementsOf(api: ExcalidrawImperativeAPI, withDeleted = false): CanvasElement[] {
+  return (withDeleted ? api.getSceneElementsIncludingDeleted() : api.getSceneElements()) as unknown as CanvasElement[];
 }
 
 /** A zoom factor as Excalidraw's branded type (a number in 0.1–30). */
@@ -87,9 +95,35 @@ function asZoom(value: number): NormalizedZoomValue {
   return value as NormalizedZoomValue;
 }
 
+/** How far from a line, in screen pixels, a tap or the pointer still reaches it. */
+const LINE_REACH = 8;
+/** How far the pointer may move, in screen pixels, for a press and a release to be a tap rather than a pan. */
+const TAP_SLOP = 6;
+/** Two taps on one shape within this many milliseconds are a double tap. */
+const DOUBLE_TAP_MS = 500;
+/** The room left around the scene when it is fitted to the canvas, in screen pixels. */
+const FIT_MARGIN = 32;
+/** The opacity of what the dim tool fades, in percent. */
+const DIMMED_OPACITY = 18;
+
+/** How the scene's elements changed: the versions now, and those when the editor opened (a change is measured from them). */
+interface SceneVersions {
+  fingerprint: string;
+  baseline: string | null;
+}
+
+/** What the parts of a mounted canvas share: the container, Excalidraw's API once it is ready, the mode, and the scene's versions. */
+interface Mounted {
+  container: HTMLElement;
+  api: ExcalidrawImperativeAPI | null;
+  mode: "view" | "edit";
+  versions: SceneVersions | null;
+}
+
 interface CanvasProps {
   elements: SceneElement[];
   events: CanvasEvents;
+  mounted: Mounted;
   onApi: (api: ExcalidrawImperativeAPI) => void;
   modeState: [mode: "view" | "edit", subscribe: (listener: (mode: "view" | "edit") => void) => () => void];
 }
@@ -120,12 +154,12 @@ function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: n
 }
 
 /** The generated lines within `tolerance` of the scene point, the nearest first: a bundle where arrows run close together. */
-function arrowsAt(elements: readonly SceneElement[], x: number, y: number, tolerance: number): PickedLine[] {
+function arrowsAt(elements: readonly CanvasElement[], x: number, y: number, tolerance: number): PickedLine[] {
   const near: { line: PickedLine; distance: number }[] = [];
 
   for (const element of elements) {
     if (element.isDeleted || element.customData?.["archdiff"] !== "edge") continue;
-    const points = (element as SceneElement & { points?: [number, number][] }).points ?? [];
+    const points = element.points ?? [];
     let closest = Infinity;
 
     for (let i = 1; i < points.length; i++) {
@@ -143,7 +177,7 @@ function arrowsAt(elements: readonly SceneElement[], x: number, y: number, toler
   return near.sort((a, b) => a.distance - b.distance).map((entry) => entry.line);
 }
 
-function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
+function CanvasView({ elements, events, mounted, onApi, modeState }: CanvasProps) {
   const [mode, setMode] = useState(modeState[0]);
   useEffect(() => modeState[1](setMode), [modeState]);
   return (
@@ -156,12 +190,11 @@ function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
       onChange={(changed, appState) => {
         // Excalidraw reports a change on mount and on every mode switch too: only a scene whose elements' versions moved counts.
         const fingerprint = changed.map((element) => `${element.id}:${element.version}:${element.isDeleted ? 1 : 0}`).join("|");
-        const window_ = window as unknown as { archdiffScene?: { fingerprint: string; baseline: string | null } };
-        const known = window_.archdiffScene ?? { fingerprint, baseline: null };
-        window_.archdiffScene = { fingerprint, baseline: known.baseline };
+        const baseline = mounted.versions?.baseline ?? null;
+        mounted.versions = { fingerprint, baseline };
 
         if (mode === "edit") {
-          if (known.baseline !== null && fingerprint !== known.baseline) events.changed();
+          if (baseline !== null && fingerprint !== baseline) events.changed();
           // The generated shapes among the selected elements, in the scene's order: one picks, several select.
           const chosen = new Set(Object.keys(appState.selectedElementIds));
           const selected = changed.filter((element) => chosen.has(element.id) && !element.isDeleted && (element.customData as { archdiff?: string } | undefined)?.archdiff === "node").map((element) => element.id);
@@ -176,279 +209,296 @@ function CanvasView({ elements, events, onApi, modeState }: CanvasProps) {
   );
 }
 
+/** A client point as a scene point, through the app state's scroll and zoom; null before the canvas is drawn. */
+function scenePoint(mounted: Mounted, event: MouseEvent): { x: number; y: number } | null {
+  const canvas = mounted.container.querySelector<HTMLCanvasElement>(".excalidraw__canvas.interactive");
+
+  if (!mounted.api || !canvas) return null;
+  const box = canvas.getBoundingClientRect();
+  const state = mounted.api.getAppState();
+
+  return { x: (event.clientX - box.left) / state.zoom.value - state.scrollX, y: (event.clientY - box.top) / state.zoom.value - state.scrollY };
+}
+
+/** Screen pixels as scene units at the current zoom. */
+function sceneUnits(api: ExcalidrawImperativeAPI, pixels: number): number {
+  return pixels / api.getAppState().zoom.value;
+}
+
+/**
+ * Taps and right clicks in view mode, from the container's own pointer events (Excalidraw reports none of its own
+ * there): a tap picks the shape under it, or the lines within reach; a second tap on a shape opens its view; a right
+ * click asks for the page's menu.
+ */
+function listenForTaps(mounted: Mounted, events: CanvasEvents): void {
+  const { container } = mounted;
+  let down: { x: number; y: number } | null = null;
+  let lastTap: { id: string; at: number } | null = null;
+
+  // Only the main button taps: a right click is the menu (below), and on Linux its press comes before its contextmenu.
+  container.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (mounted.mode === "view" && event.button === 0) down = scenePoint(mounted, event);
+    },
+    true,
+  );
+  container.addEventListener(
+    "pointerup",
+    (event) => {
+      const { api } = mounted;
+
+      if (mounted.mode !== "view" || !down || !api || event.button !== 0) return;
+      const at = scenePoint(mounted, event);
+      const from = down;
+      down = null;
+
+      // A drag is a pan, not a tap.
+      if (!at || Math.hypot(at.x - from.x, at.y - from.y) > sceneUnits(api, TAP_SLOP)) return;
+      const scene = elementsOf(api);
+      const hit = shapeAt(scene, at.x, at.y);
+      const now = Date.now();
+      const extend = event.shiftKey || event.ctrlKey || event.metaKey;
+
+      // No shape under the tap: the lines within a few screen pixels, when any; Shift follows the chain from the nearest.
+      if (!hit) {
+        const lines = arrowsAt(scene, at.x, at.y, sceneUnits(api, LINE_REACH));
+        lastTap = null;
+
+        if (lines.length > 0) {
+          events.pick(lines[0]!.id, lines, extend);
+
+          return;
+        }
+      }
+
+      if (hit && !extend && lastTap && lastTap.id === hit.id && now - lastTap.at < DOUBLE_TAP_MS) {
+        lastTap = null;
+        events.open(hit.id, typeof hit.customData?.["view"] === "string" && hit.customData["view"] !== "" ? hit.customData["view"] : null);
+
+        return;
+      }
+
+      lastTap = hit ? { id: hit.id, at: now } : null;
+      events.pick(hit?.id ?? null, undefined, extend);
+    },
+    true,
+  );
+
+  // A right click in view mode is the page's menu, not Excalidraw's: the shape or the lines under the pointer.
+  container.addEventListener(
+    "contextmenu",
+    (event) => {
+      const { api } = mounted;
+
+      if (mounted.mode !== "view" || !api || !events.menu) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const at = scenePoint(mounted, event);
+
+      if (!at) return;
+      const scene = elementsOf(api);
+      const hit = shapeAt(scene, at.x, at.y);
+      const lines = hit ? [] : arrowsAt(scene, at.x, at.y, sceneUnits(api, LINE_REACH));
+      events.menu(hit?.id ?? null, { x: event.clientX, y: event.clientY }, lines);
+    },
+    true,
+  );
+}
+
+/** Hover: the line under the pointer, lit lightly; checked at most once a frame, and never over a shape. */
+function listenForHover(mounted: Mounted, hover: (id: string | null) => void): void {
+  const { container } = mounted;
+  let hovered: string | null = null;
+  let pending: PointerEvent | null = null;
+
+  container.addEventListener("pointermove", (event) => {
+    if (mounted.mode !== "view" || !mounted.api || pending) {
+      pending = pending ?? (mounted.mode === "view" ? event : null);
+
+      return;
+    }
+
+    pending = event;
+    requestAnimationFrame(() => {
+      const last = pending;
+      pending = null;
+      const { api } = mounted;
+
+      if (!last || !api || mounted.mode !== "view") return;
+      const at = scenePoint(mounted, last);
+      const scene = elementsOf(api);
+      const line = at && !shapeAt(scene, at.x, at.y) ? (arrowsAt(scene, at.x, at.y, sceneUnits(api, LINE_REACH))[0] ?? null) : null;
+      const id = line?.id ?? null;
+
+      if (id === hovered) return;
+      hovered = id;
+      container.style.cursor = id ? "pointer" : "";
+      hover(id);
+    });
+  });
+  container.addEventListener("pointerleave", () => {
+    if (!hovered) return;
+    hovered = null;
+    container.style.cursor = "";
+    hover(null);
+  });
+}
+
+/**
+ * Fits the whole scene into the container: Excalidraw's own scrollToContent zooms out far too much for a small
+ * scene, so the zoom is computed here from the scene's bounds (never above 1, so a tiny diagram stays readable).
+ */
+function fitScene(mounted: Mounted): void {
+  const { api, container } = mounted;
+
+  if (!api) return;
+  const all = elementsOf(api);
+
+  if (all.length === 0) return;
+  const minX = Math.min(...all.map((element) => element.x));
+  const minY = Math.min(...all.map((element) => element.y));
+  const maxX = Math.max(...all.map((element) => element.x + element.width));
+  const maxY = Math.max(...all.map((element) => element.y + element.height));
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+
+  if (width === 0 || height === 0) return;
+  const zoom = Math.max(0.1, Math.min(1, (width - 2 * FIT_MARGIN) / (maxX - minX), (height - 2 * FIT_MARGIN) / (maxY - minY)));
+  const scrollX = width / zoom / 2 - (minX + (maxX - minX) / 2);
+  const scrollY = height / zoom / 2 - (minY + (maxY - minY) / 2);
+  api.updateScene({ appState: { scrollX, scrollY, zoom: { value: asZoom(zoom) } } });
+}
+
+/**
+ * The lights over the scene, each keeping the original look of what it changed to put it back: the tap's light (a
+ * run of shapes and lines), the dimming of all but some, and the hover's light under the tap's.
+ */
+function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; dim: CanvasHandle["dim"]; hover: CanvasHandle["hover"]; forget(): void } {
+  const lit = new Map<string, { strokeColor: string; strokeWidth: number; backgroundColor: string }>();
+  const dimmed = new Map<string, number>();
+  const hoverLit = new Map<string, { strokeColor: string; strokeWidth: number }>();
+
+  /** Maps every element (the deleted too), and writes the scene back only when one changed. */
+  const update = (change: (element: CanvasElement, byId: ReadonlyMap<string, CanvasElement>) => CanvasElement | null): void => {
+    const { api } = mounted;
+
+    if (!api) return;
+    const elements = elementsOf(api, true);
+    const byId = new Map(elements.map((element) => [element.id, element]));
+    let changed = false;
+    const next = elements.map((element) => {
+      const updated = change(element, byId);
+
+      if (updated === null) return element;
+      changed = true;
+
+      return updated;
+    });
+
+    if (changed) api.updateScene({ elements: asExcalidraw(next) });
+  };
+
+  const highlight = (ids: readonly string[], colour = "#ff6f00"): void => {
+    const wanted = new Set(ids);
+    update((element) => {
+      const original = lit.get(element.id);
+      const role = element.customData?.["archdiff"];
+
+      if (wanted.has(element.id) && (role === "node" || role === "edge")) {
+        if (!original) lit.set(element.id, { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth, backgroundColor: element.backgroundColor });
+
+        // A line keeps its fill (none) and gets the colour and a thick stroke; a shape also gets a warm fill.
+        return role === "edge" ? { ...element, strokeColor: colour, strokeWidth: 4 } : { ...element, strokeColor: colour, strokeWidth: 4, backgroundColor: "#ffe0b2" };
+      }
+
+      if (!original) return null;
+      lit.delete(element.id);
+
+      return { ...element, ...original };
+    });
+  };
+
+  const dim = (keep: readonly string[] | null): void => {
+    const kept = keep === null ? null : new Set(keep);
+    update((element, byId) => {
+      const role = element.customData?.["archdiff"];
+      // A label follows its shape or line; a lane is never dimmed.
+      const owner = role === "label" && element.containerId ? byId.get(element.containerId) : role === "label" ? byId.get(element.id.replace(/:text$/, "")) : element;
+      const wanted = kept !== null && owner !== undefined && (role === "node" || role === "edge" || role === "label") && !kept.has(owner.id);
+      const original = dimmed.get(element.id);
+
+      if (wanted && original === undefined) {
+        dimmed.set(element.id, element.opacity);
+
+        return { ...element, opacity: DIMMED_OPACITY };
+      }
+
+      if (wanted || original === undefined) return null;
+      dimmed.delete(element.id);
+
+      return { ...element, opacity: original };
+    });
+  };
+
+  // The hover light sits under the tap light: a line the tap lit keeps its look; one line at a time.
+  const hover = (id: string | null): void => {
+    update((element) => {
+      const original = hoverLit.get(element.id);
+
+      if (element.id === id && !lit.has(element.id) && !original) {
+        hoverLit.set(element.id, { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth });
+
+        return { ...element, strokeColor: "#ffa726", strokeWidth: 3 };
+      }
+
+      if (!original || element.id === id) return null;
+      hoverLit.delete(element.id);
+
+      return { ...element, ...original };
+    });
+  };
+
+  return { highlight, dim, hover, forget: () => lit.clear() };
+}
+
 export function mountCanvas(container: HTMLElement, elements: SceneElement[], events: CanvasEvents): Promise<CanvasHandle> {
   return new Promise((resolve) => {
     let root: Root | null = createRoot(container);
-    let api: ExcalidrawImperativeAPI | null = null;
-    let mode: "view" | "edit" = "view";
+    const mounted: Mounted = { container, api: null, mode: "view", versions: null };
     const listeners = new Set<(mode: "view" | "edit") => void>();
     const modeState: CanvasProps["modeState"] = [
-      mode,
+      mounted.mode,
       (listener) => {
         listeners.add(listener);
 
         return () => listeners.delete(listener);
       },
     ];
-
-    // Taps in view mode, from the container's own pointer events (Excalidraw reports none of its own there):
-    // client coordinates become scene coordinates through the app state's scroll and zoom.
-    let down: { x: number; y: number } | null = null;
-    let lastTap: { id: string; at: number } | null = null;
-
-    const scenePoint = (event: PointerEvent): { x: number; y: number } | null => {
-      if (!api) return null;
-      const canvas = container.querySelector<HTMLCanvasElement>(".excalidraw__canvas.interactive");
-
-      if (!canvas) return null;
-      const box = canvas.getBoundingClientRect();
-      const state = api.getAppState();
-
-      return { x: (event.clientX - box.left) / state.zoom.value - state.scrollX, y: (event.clientY - box.top) / state.zoom.value - state.scrollY };
-    };
-
-    // Only the main button taps: a right click is the menu (below), and on Linux its press comes before its contextmenu.
-    container.addEventListener(
-      "pointerdown",
-      (event) => {
-        if (mode === "view" && event.button === 0) down = scenePoint(event);
-      },
-      true,
-    );
-    container.addEventListener(
-      "pointerup",
-      (event) => {
-        if (mode !== "view" || !down || !api || event.button !== 0) return;
-        const at = scenePoint(event);
-        const from = down;
-        down = null;
-
-        if (!at) return;
-
-        // A drag is a pan, not a tap.
-        if (Math.hypot(at.x - from.x, at.y - from.y) > 6 / api.getAppState().zoom.value) return;
-        const scene = api.getSceneElements() as unknown as SceneElement[];
-        const hit = shapeAt(scene, at.x, at.y);
-        const now = Date.now();
-
-        const extend = event.shiftKey || event.ctrlKey || event.metaKey;
-
-        // No shape under the tap: the lines within a few screen pixels, when any; Shift follows the chain from the nearest.
-        if (!hit) {
-          const lines = arrowsAt(scene, at.x, at.y, 8 / api.getAppState().zoom.value);
-          lastTap = null;
-
-          if (lines.length > 0) {
-            events.pick(lines[0]!.id, lines, extend);
-
-            return;
-          }
-        }
-
-        if (hit && !extend && lastTap && lastTap.id === hit.id && now - lastTap.at < 500) {
-          lastTap = null;
-          events.open(hit.id, typeof hit.customData?.["view"] === "string" && hit.customData["view"] !== "" ? hit.customData["view"] : null);
-
-          return;
-        }
-
-        lastTap = hit ? { id: hit.id, at: now } : null;
-        events.pick(hit?.id ?? null, undefined, extend);
-      },
-      true,
-    );
-
-    // A right click in view mode is the page's menu, not Excalidraw's: the shape or the lines under the pointer.
-    container.addEventListener(
-      "contextmenu",
-      (event) => {
-        if (mode !== "view" || !api || !events.menu) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const at = scenePoint(event as unknown as PointerEvent);
-
-        if (!at) return;
-        const scene = api.getSceneElements() as unknown as SceneElement[];
-        const hit = shapeAt(scene, at.x, at.y);
-        const lines = hit ? [] : arrowsAt(scene, at.x, at.y, 8 / api.getAppState().zoom.value);
-        events.menu(hit?.id ?? null, { x: event.clientX, y: event.clientY }, lines);
-      },
-      true,
-    );
-
-    // Fits the whole scene into the container: Excalidraw's own scrollToContent zooms out far too much for a small
-    // scene, so the zoom is computed here from the scene's bounds (never above 1, so a tiny diagram stays readable).
-    const fit = (): void => {
-      if (!api) return;
-      const all = (api.getSceneElements() as unknown as SceneElement[]).filter((element) => !element.isDeleted);
-
-      if (all.length === 0) return;
-      const minX = Math.min(...all.map((element) => element.x));
-      const minY = Math.min(...all.map((element) => element.y));
-      const maxX = Math.max(...all.map((element) => element.x + element.width));
-      const maxY = Math.max(...all.map((element) => element.y + element.height));
-      const width = container.clientWidth;
-      const height = container.clientHeight;
-
-      if (width === 0 || height === 0) return;
-      const margin = 32;
-      const zoom = Math.max(0.1, Math.min(1, (width - 2 * margin) / (maxX - minX), (height - 2 * margin) / (maxY - minY)));
-      const scrollX = width / zoom / 2 - (minX + (maxX - minX) / 2);
-      const scrollY = height / zoom / 2 - (minY + (maxY - minY) / 2);
-      api.updateScene({ appState: { scrollX, scrollY, zoom: { value: asZoom(zoom) } } });
-    };
-
-    // Hover: the line under the pointer, lit lightly; checked at most once a frame, and never over a lit shape or line.
-    let hovered: string | null = null;
-    let pending: PointerEvent | null = null;
-    container.addEventListener("pointermove", (event) => {
-      if (mode !== "view" || !api || pending) {
-        pending = pending ?? (mode === "view" ? event : null);
-
-        return;
-      }
-
-      pending = event;
-      requestAnimationFrame(() => {
-        const last = pending;
-        pending = null;
-
-        if (!last || !api || mode !== "view") return;
-        const at = scenePoint(last);
-        const scene = api.getSceneElements() as unknown as SceneElement[];
-        const line = at && !shapeAt(scene, at.x, at.y) ? (arrowsAt(scene, at.x, at.y, 8 / api.getAppState().zoom.value)[0] ?? null) : null;
-        const id = line?.id ?? null;
-
-        if (id === hovered) return;
-        hovered = id;
-        container.style.cursor = id ? "pointer" : "";
-        hover(id);
-      });
-    });
-    container.addEventListener("pointerleave", () => {
-      if (hovered) {
-        hovered = null;
-        container.style.cursor = "";
-        hover(null);
-      }
-    });
-
-    // Highlight: the original look of every lit shape, to put back when the light goes.
-    const lit = new Map<string, { strokeColor: string; strokeWidth: number; backgroundColor: string }>();
-
-    const highlight = (ids: readonly string[], colour = "#ff6f00"): void => {
-      if (!api) return;
-      const wanted = new Set(ids);
-      const elements = api.getSceneElementsIncludingDeleted() as unknown as (SceneElement & { strokeColor: string; strokeWidth: number; backgroundColor: string })[];
-      let changed = false;
-      const next = elements.map((element) => {
-        const original = lit.get(element.id);
-
-        if (wanted.has(element.id) && (element.customData?.["archdiff"] === "node" || element.customData?.["archdiff"] === "edge")) {
-          if (!original) lit.set(element.id, { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth, backgroundColor: element.backgroundColor });
-          changed = true;
-
-          // A line keeps its fill (none) and gets the colour and a thick stroke; a shape also gets a warm fill.
-          return element.customData?.["archdiff"] === "edge" ? { ...element, strokeColor: colour, strokeWidth: 4 } : { ...element, strokeColor: colour, strokeWidth: 4, backgroundColor: "#ffe0b2" };
-        }
-
-        if (original) {
-          lit.delete(element.id);
-          changed = true;
-
-          return { ...element, ...original };
-        }
-
-        return element;
-      });
-
-      if (changed) api.updateScene({ elements: asExcalidraw(next) });
-    };
-
-    // Dimming: the opacity of everything outside the focus, put back when the focus clears.
-    const dimmed = new Map<string, number>();
-
-    const dim = (keep: readonly string[] | null): void => {
-      if (!api) return;
-      const kept = keep === null ? null : new Set(keep);
-      const elements = api.getSceneElementsIncludingDeleted() as unknown as (SceneElement & { opacity: number; containerId?: string | null })[];
-      const byId = new Map(elements.map((element) => [element.id, element]));
-      let changed = false;
-      const next = elements.map((element) => {
-        const role = element.customData?.["archdiff"];
-        // A label follows its shape or line; a lane is never dimmed.
-        const owner = role === "label" && element.containerId ? byId.get(element.containerId) : role === "label" ? byId.get(element.id.replace(/:text$/, "")) : element;
-        const wanted = kept !== null && owner !== undefined && (role === "node" || role === "edge" || role === "label") && !kept.has(owner.id);
-        const original = dimmed.get(element.id);
-
-        if (wanted && original === undefined) {
-          dimmed.set(element.id, element.opacity);
-          changed = true;
-
-          return { ...element, opacity: 18 };
-        }
-
-        if (!wanted && original !== undefined) {
-          dimmed.delete(element.id);
-          changed = true;
-
-          return { ...element, opacity: original };
-        }
-
-        return element;
-      });
-
-      if (changed) api.updateScene({ elements: asExcalidraw(next) });
-    };
-
-    // The hover light sits under the tap light: a line the tap lit keeps its look; one line at a time.
-    const hoverLit = new Map<string, { strokeColor: string; strokeWidth: number }>();
-
-    const hover = (id: string | null): void => {
-      if (!api) return;
-      const elements = api.getSceneElementsIncludingDeleted() as unknown as (SceneElement & { strokeColor: string; strokeWidth: number })[];
-      let changed = false;
-      const next = elements.map((element) => {
-        const original = hoverLit.get(element.id);
-
-        if (element.id === id && !lit.has(element.id) && !original) {
-          hoverLit.set(element.id, { strokeColor: element.strokeColor, strokeWidth: element.strokeWidth });
-          changed = true;
-
-          return { ...element, strokeColor: "#ffa726", strokeWidth: 3 };
-        }
-
-        if (original && element.id !== id) {
-          hoverLit.delete(element.id);
-          changed = true;
-
-          return { ...element, ...original };
-        }
-
-        return element;
-      });
-
-      if (changed) api.updateScene({ elements: asExcalidraw(next) });
-    };
+    const lights = makeLights(mounted);
+    const fit = (): void => fitScene(mounted);
+    listenForTaps(mounted, events);
+    listenForHover(mounted, lights.hover);
 
     const handle: CanvasHandle = {
-      scene: () => (api ? (api.getSceneElementsIncludingDeleted() as unknown as SceneElement[]) : elements),
+      scene: () => (mounted.api ? elementsOf(mounted.api, true) : elements),
       replace: (next) => {
         // A saved element may lack fields Excalidraw needs (a scene saved through the API, an older version): restore fills them.
-        lit.clear();
-        api?.updateScene({ elements: restoreElements(asExcalidraw(next), null) });
+        lights.forget();
+        mounted.api?.updateScene({ elements: restoreElements(asExcalidraw(next), null) });
         requestAnimationFrame(fit);
       },
       setMode: (next) => {
-        mode = next;
-        // Entering the editor: the scene as it is now is the baseline a change is measured from.
-        const window_ = window as unknown as { archdiffScene?: { fingerprint: string; baseline: string | null } };
+        mounted.mode = next;
 
-        if (window_.archdiffScene) window_.archdiffScene.baseline = next === "edit" ? window_.archdiffScene.fingerprint : null;
+        // Entering the editor: the scene as it is now is the baseline a change is measured from.
+        if (mounted.versions) mounted.versions.baseline = next === "edit" ? mounted.versions.fingerprint : null;
 
         for (const listener of listeners) listener(next);
       },
       screenshot: async (kind) => {
+        const { api } = mounted;
+
         if (!api) throw new Error("the canvas is not ready");
         const all = api.getSceneElements();
         const selected = Object.keys(api.getAppState().selectedElementIds);
@@ -465,29 +515,29 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         return exportToBlob({ elements: chosen, appState, files, mimeType: "image/png", quality: 1, exportPadding: 24 });
       },
       scrollToContent: fit,
-      highlight,
-      hover,
-      dim,
+      highlight: lights.highlight,
+      hover: lights.hover,
+      dim: lights.dim,
       centreOn: (id) => {
-        if (!api) return;
-        const target = (api.getSceneElements() as unknown as SceneElement[]).find((element) => element.id === id);
+        const { api } = mounted;
+        const target = api ? elementsOf(api).find((element) => element.id === id) : undefined;
 
-        if (!target) return;
+        if (!api || !target) return;
         const zoom = api.getAppState().zoom.value;
         api.updateScene({ appState: { scrollX: container.clientWidth / zoom / 2 - (target.x + target.width / 2), scrollY: container.clientHeight / zoom / 2 - (target.y + target.height / 2) } });
       },
       size: () => ({ width: container.clientWidth, height: container.clientHeight }),
       viewport: () => {
-        if (!api) return null;
-        const state = api.getAppState();
+        if (!mounted.api) return null;
+        const state = mounted.api.getAppState();
 
         return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom.value };
       },
-      setViewport: (viewport) => api?.updateScene({ appState: { scrollX: viewport.scrollX, scrollY: viewport.scrollY, zoom: { value: asZoom(viewport.zoom) } } }),
+      setViewport: (viewport) => mounted.api?.updateScene({ appState: { scrollX: viewport.scrollX, scrollY: viewport.scrollY, zoom: { value: asZoom(viewport.zoom) } } }),
       unmount: () => {
         root?.unmount();
         root = null;
-        api = null;
+        mounted.api = null;
       },
     };
 
@@ -495,9 +545,10 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
       <CanvasView
         elements={elements}
         events={events}
+        mounted={mounted}
         modeState={modeState}
         onApi={(ready) => {
-          api = ready;
+          mounted.api = ready;
           // The container may still be laid out when Excalidraw mounts: fit once the frames are drawn.
           requestAnimationFrame(() => requestAnimationFrame(fit));
           setTimeout(fit, 300);

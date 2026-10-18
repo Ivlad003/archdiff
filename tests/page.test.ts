@@ -197,7 +197,7 @@ async function screenPointOf(view: string, elementId: string, extra = ""): Promi
   return { x: box.left + (target.x + target.width / 2 + scrollX) * zoom, y: box.top + (target.y + target.height / 2 + scrollY) * zoom };
 }
 
-test("find (/), the views filter (v), lanes, split, the chain between two shapes and the minimap", { skip: !CHROME && "no Chrome installed" }, async () => {
+test("find (/), the views filter (v), dim (d), lanes, split, the chain between two shapes and the minimap", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.evaluate("localStorage.clear()");
   await page!.goto(`${base}/?fresh=7#view=layer%3Alib`);
   await page!.waitForSelector(".excalidraw canvas");
@@ -222,6 +222,14 @@ test("find (/), the views filter (v), lanes, split, the chain between two shapes
   assert.equal(await page!.evaluate("document.activeElement?.id"), "search");
   await page!.keyboard.press("Escape");
   assert.notEqual(await page!.evaluate("document.activeElement?.id"), "search");
+  // The dim tool (d): a tap on orders.ts fades all but it and its neighbours; d again turns it off and clears the dimming.
+  await page!.keyboard.press("d");
+  await page!.waitForFunction(`document.querySelector("#tool-dim").classList.contains("active")`);
+  await page!.mouse.click(orders.x, orders.y);
+  await page!.waitForFunction(`window.archdiff.canvas().scene().some((element) => element.opacity === 18)`, undefined, { timeout: 8000 });
+  assert.equal(await page!.evaluate(`window.archdiff.canvas().scene().find((element) => element.id === "src/lib/orders.ts").opacity`), 100);
+  await page!.keyboard.press("d");
+  await page!.waitForFunction(`!window.archdiff.canvas().scene().some((element) => element.opacity === 18)`);
   // Find: typing counts the matches, Enter centres the first and opens it (the viewport moves: taps by position come before this).
   await page!.fill("#find", "store");
   await page!.waitForFunction(`(document.querySelector("#reason")?.textContent ?? "").includes("1 shape matches")`);
