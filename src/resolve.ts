@@ -24,7 +24,8 @@ import { RustResolver } from "./rust-imports.ts";
 
 /** What an import specifier names. */
 export type Resolution =
-  | { kind: "file"; path: string }
+  /** `whole`: the import binds the module itself (Python's `from . import core`, Rust's `use crate::util`): a namespace of its names. */
+  | { kind: "file"; path: string; whole?: true }
   | { kind: "package"; name: string }
   /** The language's own library: Node's (`runtime` absent), Python's standard library, Rust's `std`, PHP's functions. */
   | { kind: "builtin"; name: string; runtime?: "python" | "rust" | "php" }
@@ -257,7 +258,8 @@ export function tsconfigResolver(root: string, _files: Iterable<string>): (from:
 function fromLanguage(resolution: LanguageResolution, specifier: string, runtime: "python" | "rust" | "php"): Resolution {
   switch (resolution.kind) {
     case "internal":
-      return { kind: "file", path: resolution.file };
+      // `from . import core`, `use crate::util::{self}`: the import binds the module itself, a namespace of its names.
+      return resolution.whole ? { kind: "file", path: resolution.file, whole: true } : { kind: "file", path: resolution.file };
     case "external":
       return { kind: "package", name: resolution.pkg };
     case "builtin":

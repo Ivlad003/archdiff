@@ -46,6 +46,12 @@ export interface FileFacts {
   exports: Set<string>;
   /** `export * from "./x"` — the file re-exports everything from these sources. */
   reexportsAll: string[];
+  /**
+   * Constants of the file's top level that hold an instance: made with `new` (`export const store = new Store()`, the
+   * class as written) or the result of a call (`export const db = createDb()`, read as `CallFact.on` is). A member
+   * called through the name — here or where it is imported — is the member of that class.
+   */
+  instances?: ({ name: string; class: string } | { name: string; of: ValueOfFact })[];
   /** Public names with their kinds. Empty only when the file exports nothing. */
   exportRows: ExportRow[];
   /**
@@ -395,7 +401,7 @@ export interface DeclFact {
   params?: ParamFact[];
   /** PHP functions and methods: the literal a body of one `return <literal>;` gives (`getSubscribedEvents`, `getFacadeAccessor`). */
   returns?: LiteralFact;
-  /** PHP functions and methods: the class of the result as the declaration writes it (`: Order`, `: static`, `@return Item[]`). */
+  /** Functions and methods: the class of the result as the declaration writes it (PHP `: Order`, `: static`, `@return Item[]`; TypeScript `: Order`, `: Promise<Order>`; Python `-> Order`). */
   result?: ResultTypeFact;
   /** PHP interfaces: their methods' result types (an interface's methods are no nodes). */
   methods?: MethodSigFact[];
@@ -421,17 +427,20 @@ export interface TypeFieldFact {
 }
 
 /**
- * PHP: the class a function returns, or of the elements of the array it returns, as its
+ * The class a function returns, or of the elements of the array it returns, as its
  * declaration writes it. A declared return type is a fact PHP checks; `@return` is a docblock
  * (`docblock`, the tag's position) and is read only where the declared type names no class.
+ * TypeScript without a return annotation: the class of the `new X()` every `return` gives.
  */
 export interface ResultTypeFact {
-  /** The qualified class, without the leading `\`; absent for `self` and `static`. */
+  /** PHP: the qualified class, without the leading `\`; TypeScript, Python: the name as written. Absent for `self` and `static`. */
   class?: string;
   /** `self`: the declaring class; `static` (and `$this`): the class of the value the method is called on. */
   self?: "self" | "static";
   /** The result is an array of `class` values (`Foo[]`, `array<Foo>`, `iterable<Foo>`, `list<Foo>`). */
   element?: true;
+  /** TypeScript: a Promise of a `class` value (`: Promise<Foo>`, an `async` function's `new Foo()`): the value once awaited. */
+  promise?: true;
   docblock?: { line: number; col: number };
 }
 
@@ -452,12 +461,14 @@ export interface FieldFact {
 
 
 /**
- * PHP: a value whose class the graph reads from another declaration — the result of a call
- * (its declared result type) or, with `element`, an element of the array it returns.
+ * A value whose class the graph reads from another declaration — the result of a call
+ * (its declared result type), with `element` an element of the array it returns (PHP), with
+ * `awaited` what the Promise it returns gives (TypeScript `await`).
  */
 export interface ValueOfFact {
   call: ResultCallFact;
   element?: true;
+  awaited?: true;
 }
 
 /** The call whose result a `ValueOfFact` is, written as `CallFact` writes a call. */
@@ -562,6 +573,12 @@ export interface CallFact {
   /** The callee is a hook with a default: `const generate = request.generate ?? generateMap; generate()`. */
   hook?: HookFact;
   /**
+   * The callee is a local that a `require` or an `import()` in the function binds: the export `name` of the module
+   * `source` names (`const { f } = await import("./x"); f()` is `f`; `const x = require("./x"); x.f()` is `f`;
+   * `x()` is the module itself, `*`).
+   */
+  imported?: { source: string; name: string };
+  /**
    * Function values the call passes: `analyze({ generate: worker.generate })`, `later(save)`,
    * and callable references — PHP `[$this, 'm']`, `'Cls::m'`, `\Closure::fromCallable(…)`,
    * `$this->m(...)`; TS `this.m.bind(this)`; Python `functools.partial(self.m)`; Rust `Self::m`.
@@ -597,10 +614,11 @@ export interface CallFact {
    */
   literal?: string | null;
   /**
-   * PHP: the receiver is a value whose class the code does not write here — the result of
-   * another call (`$this->repo()->save()`, `$x = $this->repo->get(); $x->save()`), or an element
-   * of the array it returns (`foreach ($order->getItems() as $item)`). The graph reads the class
-   * from the declared result type of that call's target.
+   * The receiver is a value whose class the code does not write here — the result of another
+   * call (PHP `$this->repo()->save()`, `$x = $this->repo->get(); $x->save()`; TypeScript
+   * `const s = makeStore(); s.save()`, `const s = await load()`), or an element of the array it
+   * returns (PHP `foreach ($order->getItems() as $item)`). The graph reads the class from the
+   * declared result type of that call's target.
    */
   on?: ValueOfFact;
   /** With `on`: the member called (an opaque `callee` does not end in it). */

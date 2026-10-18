@@ -70,6 +70,8 @@ function extractTree(path: string, root: Node): FileFacts {
   const names = new Set(items.filter((node) => node.type !== "mod_item" || node.childForFieldName("body") !== null).map((node) => node.childForFieldName("name")?.text).filter((name) => name !== undefined));
 
   for (const binding of facts.imports.flatMap((imp) => imp.bindings)) names.add(binding.local);
+  // The fields' types of the file's structs, for `self.repo.save()` in their impls.
+  const fields = structFields(items);
 
   const detached = (body: Node | null, owner: string | null, imports = true): void => {
     // Code archdiff indexes under no fn: what it calls escapes, as module-level code does.
@@ -136,7 +138,7 @@ function extractTree(path: string, root: Node): FileFacts {
           const member = item.childForFieldName("name")?.text;
 
           if (item.type !== "function_item" || !member) continue;
-          const decl = fnDecl(item, member, exported(item), type, names, facts);
+          const decl = fnDecl(item, member, exported(item), type, names, facts, fields.get(type));
 
           if (implicit) decl.implicit = true;
           list.push({ item, decl });
@@ -372,8 +374,8 @@ function takesSelf(params: Node | null): boolean {
   return (params?.namedChildren ?? []).some((c) => c.type === "self_parameter" || (c.type === "parameter" && c.childForFieldName("pattern")?.type === "self"));
 }
 
-/** The declaration of a fn or method: signature, calls, doc, and whether it is an associated (static) fn. */
-function fnDecl(node: Node, name: string, exported: boolean, owner: string | null, names: ReadonlySet<string>, facts: FileFacts): DeclFact {
+/** The declaration of a fn or method: signature, calls, doc, and whether it is an associated (static) fn. `fields`: the types of the owner's fields. */
+function fnDecl(node: Node, name: string, exported: boolean, owner: string | null, names: ReadonlySet<string>, facts: FileFacts, fields?: ReadonlyMap<string, string>): DeclFact {
   const at = located(node);
   const params = node.childForFieldName("parameters");
   const returns = node.childForFieldName("return_type");
@@ -381,7 +383,10 @@ function fnDecl(node: Node, name: string, exported: boolean, owner: string | nul
   const signature = params ? `${params.text.replace(/\s+/g, " ")}${returns ? ` → ${returns.text.replace(/\s+/g, " ")}` : ""}` : null;
   const self = takesSelf(params);
   const body = node.childForFieldName("body");
-  const calls = body ? bodyCalls(body, { owner, self, bound: boundNames(node), names, imports: true }, facts) : [];
+  const scope: CallScope = { owner, self, bound: boundNames(node), types: paramTypes(node), names, imports: true };
+
+  if (fields) scope.fields = fields;
+  const calls = body ? bodyCalls(body, scope, facts) : [];
   const doc = itemDoc(node);
   const decl: DeclFact = { kind: "fn", name, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, signature, exported, calls, types: [], members: [], ...fingerprintFacts(node) };
 
@@ -391,6 +396,65 @@ function fnDecl(node: Node, name: string, exported: boolean, owner: string | nul
   if (owner !== null && !self) decl.static = true;
 
   return decl;
+}
+
+/** Wrappers whose value a method call goes through to: `Box<Order>`, `Arc<Order>`, `&Rc<RefCell<Order>>` reach `Order`. */
+const SMART_POINTERS = new Set(["Box", "Rc", "Arc", "RefCell", "Mutex", "RwLock", "Cell"]);
+
+/**
+ * The one type a written type names, for a method called on its value: `Order`, `&Order`, `&mut Order`,
+ * `Box<Order>`, `crate::m::Order` (its last segment). Null for a trait object, a generic or a tuple.
+ */
+function namedType(type: Node | null): string | null {
+  if (!type) return null;
+
+  if (type.type === "reference_type") return namedType(type.childForFieldName("type"));
+
+  if (type.type === "type_identifier") return type.text;
+
+  if (type.type === "scoped_type_identifier") return type.childForFieldName("name")?.text ?? null;
+
+  if (type.type === "generic_type" && SMART_POINTERS.has(type.childForFieldName("type")?.text ?? "")) return namedType(type.childForFieldName("type_arguments")?.namedChildren[0] ?? null);
+
+  return null;
+}
+
+/** The types of a fn's parameters that name one type (`o: &Order`), by parameter name. */
+function paramTypes(fn: Node): Map<string, string> {
+  const out = new Map<string, string>();
+
+  for (const p of fn.childForFieldName("parameters")?.namedChildren ?? []) {
+    const pattern = p.type === "parameter" ? p.childForFieldName("pattern") : null;
+    const type = p.type === "parameter" ? namedType(p.childForFieldName("type")) : null;
+
+    if (pattern?.type === "identifier" && type) out.set(pattern.text, type);
+  }
+
+  return out;
+}
+
+/** The named fields of each struct of the file whose type names one type (`repo: Repo`, `cache: Arc<Cache>`), by struct and field. */
+function structFields(items: readonly Node[]): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+
+  for (const item of items) {
+    const name = item.type === "struct_item" ? item.childForFieldName("name")?.text : undefined;
+    const list = item.childForFieldName("body");
+
+    if (!name || list?.type !== "field_declaration_list") continue;
+    const fields = new Map<string, string>();
+
+    for (const field of list.namedChildren) {
+      const type = field.type === "field_declaration" ? namedType(field.childForFieldName("type")) : null;
+      const fieldName = field.childForFieldName("name")?.text;
+
+      if (type && fieldName) fields.set(fieldName, type);
+    }
+
+    out.set(name, fields);
+  }
+
+  return out;
 }
 
 /**
@@ -460,6 +524,10 @@ interface CallScope {
   owner: string | null;
   self: boolean;
   bound: ReadonlyMap<string, "parameter" | "local">;
+  /** The type a parameter is declared with (`o: &Order` → `Order`): a method call through it is looked up there. */
+  types?: ReadonlyMap<string, string>;
+  /** The types of the impl's own fields (`repo: Repo`): `self.repo.save()` is looked up on `Repo`. */
+  fields?: ReadonlyMap<string, string>;
   names: ReadonlySet<string>;
   /** False in an inline `mod x { … }`: its paths start at that module, so they are not imports of the file. */
   imports: boolean;
@@ -551,7 +619,7 @@ function passesOf(call: Node, scope: CallScope, facts: FileFacts): PassFact[] {
 }
 
 /** What a callee expression names: the dotted callee, and `bound` when it goes through a local or parameter. */
-type Callee = Pick<CallFact, "callee" | "bound">;
+type Callee = Pick<CallFact, "callee" | "bound" | "receiver">;
 
 /**
  * `f()` → `f`; `a::b::f()` → `a.b.f`; `Self::new()` → `<Type>.new`;
@@ -598,7 +666,18 @@ function callOf(fn: Node | null, scope: CallScope, facts: FileFacts): Callee | n
 
       if (value.type === "self" && self && owner !== null) return { callee: `this.${field}` };
 
-      if (value.type === "identifier") return { callee: `${value.text}.${field}`, bound: bound.get(value.text) ?? "local" };
+      // `self.repo.save()`: a field whose type the struct declares.
+      const own = value.type === "field_expression" && value.childForFieldName("value")?.type === "self" && self ? value.childForFieldName("field")?.text : undefined;
+      const fieldType = own ? scope.fields?.get(own) : undefined;
+
+      if (own && fieldType) return { callee: `self.${own}.${field}`, receiver: fieldType };
+
+      if (value.type === "identifier") {
+        // A parameter of a known type (`o: &Order`): the graph looks the method up on `Order`.
+        const type = scope.types?.get(value.text);
+
+        return type ? { callee: `${value.text}.${field}`, bound: bound.get(value.text) ?? "local", receiver: type } : { callee: `${value.text}.${field}`, bound: bound.get(value.text) ?? "local" };
+      }
 
       return throughValue(fn);
     }
@@ -710,7 +789,7 @@ function valueRefs(items: Node[], names: ReadonlySet<string>, facts: FileFacts):
   const walk = (node: Node, scope: CallScope): void => {
     if (node.type === "use_declaration" || node.type === "attribute_item" || node.type === "macro_definition" || node.type === "lifetime" || node.type === "label" || testOnly(node)) return;
 
-    if (node.type === "function_item" || node.type === "closure_expression") scope = { ...scope, bound: new Map([...scope.bound, ...boundNames(node)]) };
+    if (node.type === "function_item" || node.type === "closure_expression") scope = { ...scope, bound: new Map([...scope.bound, ...boundNames(node)]), types: new Map([...(scope.types ?? []), ...paramTypes(node)]) };
 
     if (node.type === "mod_item") scope = { ...scope, imports: false };
 

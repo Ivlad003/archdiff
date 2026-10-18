@@ -43,7 +43,7 @@ export interface CoverageReport {
 const REASON_TEXT: Record<Gap["reason"], string> = {
   dynamic: "a callee archdiff cannot name (a computed or passed value): a blind spot",
   "unknown-member": "a known class or module without that member: a blind spot",
-  interface: "a call through an interface or type no class of the repository implements (injected from outside): a blind spot",
+  interface: "a call through an interface or type no class of the repository implements (an object literal's function, a value injected from outside): a blind spot",
   "member-of-value": "a method of a local value whose type is not tracked (list.map, req.on): mostly built-ins",
   global: "a bare name the file neither declares nor imports (setTimeout, JSON.parse): a global",
   local: "a function of the caller's own body (a nested function, a local arrow): its calls are the caller's already",

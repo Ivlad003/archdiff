@@ -10,7 +10,7 @@
 // handed to a call as a value.
 
 import { builtinModules } from "node:module";
-import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, TypeFieldFact, TypeRefFact, ValueRefFact } from "./facts.ts";
+import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, ResultCallFact, ResultTypeFact, TypeFieldFact, TypeRefFact, ValueOfFact, ValueRefFact } from "./facts.ts";
 import { addMember } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
 import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Query, type Tree } from "./treesitter.ts";
@@ -474,7 +474,7 @@ function visitDeclaration(x: Extraction, node: Node, exported: boolean): void {
       const name = node.childForFieldName("name")?.text;
 
       if (!name) return;
-      facts.decls.push(decl("fn", name, node, signature(node), exported, calls(node), collectTypeRefs(node), []));
+      facts.decls.push(fnDecl(name, node, node, exported, calls(node), collectTypeRefs(node)));
       break;
     }
 
@@ -503,6 +503,10 @@ function visitDeclaration(x: Extraction, node: Node, exported: boolean): void {
       const shape = typeShape(node);
 
       if (shape !== undefined) fact.shape = shape;
+      // `interface Store extends Repo`: a class implementing Store implements Repo too (a call through Repo reaches it).
+      const extended = node.type === "interface_declaration" ? heritageNames(node.namedChildren.find((c) => c.type === "extends_type_clause")) : [];
+
+      if (extended.length > 0) fact.implements = extended;
       facts.decls.push(fact);
       break;
     }
@@ -573,9 +577,16 @@ function variableDeclaration(x: Extraction, node: Node, exported: boolean): void
     const fnNode = wrapped ?? (fnValue && FUNCTION_VALUES.has(fnValue.type) ? fnValue : null);
 
     if (fnNode) {
-      facts.decls.push(decl("fn", name, d, signature(fnNode), exported, calls(fnNode), collectTypeRefs(fnNode), []));
+      facts.decls.push(fnDecl(name, d, fnNode, exported, calls(fnNode), collectTypeRefs(fnNode)));
     } else if (fnValue && fnValue.type === "class") {
       facts.decls.push(classDecl(name, fnValue, d, exported, calls, facts));
+    } else if (fnValue && node.children.some((c) => c.type === "const")) {
+      // `const store = new Store()`, `const db = createDb()`: a singleton, whose methods are called through its name.
+      const made = fnValue.type === "new_expression" ? fnValue.childForFieldName("constructor") : null;
+      const of = made ? null : resultValue(fnValue, d, null, 0);
+
+      if (made && (made.type === "identifier" || made.type === "member_expression")) facts.instances = [...(facts.instances ?? []), { name, class: made.text }];
+      else if (of) facts.instances = [...(facts.instances ?? []), { name, of }];
     }
 
     // Every exported declarator is an export row, whatever its value; the kind tells the graph what it stands for.
@@ -703,7 +714,7 @@ function localExport(x: Extraction, node: Node, localExports: Set<string>): void
         facts.exportRows.push({ name: "default", kind: "value", local: value.text, form: "default" });
         localExports.add(value.text);
       } else if (FUNCTION_VALUES.has(value.type)) {
-        facts.decls.push(decl("fn", "default", value, signature(value), true, callsOf(x)(value), collectTypeRefs(value), []));
+        facts.decls.push(fnDecl("default", value, value, true, callsOf(x)(value), collectTypeRefs(value)));
         facts.exportRows.push({ name: "default", kind: "fn", local: "default", form: "default" });
       } else if (value.type === "class") {
         const name = value.childForFieldName("name")?.text ?? "default";
@@ -829,6 +840,149 @@ function decl(kind: DeclFact["kind"], name: string, node: Node, signature: strin
   return fact;
 }
 
+/** A function's declaration fact: its signature and, when it names one, the class its result has. */
+function fnDecl(name: string, at: Node, fn: Node, exported: boolean, calls: CallFact[], types: TypeRefFact[]): DeclFact {
+  const fact = decl("fn", name, at, signature(fn), exported, calls, types, []);
+  const result = resultOf(fn);
+
+  if (result) fact.result = result;
+
+  return fact;
+}
+
+/**
+ * The class a function's result has, for a member called on it to be found: the class its return annotation names
+ * (`: Store`; `: Promise<Store>`, a Store once awaited), else — without an annotation — the `new X()` an arrow's body
+ * or every `return` of its body gives (an `async` function's: a Promise of it). Null for anything else.
+ */
+function resultOf(fn: Node): ResultTypeFact | null {
+  const annotation = fn.childForFieldName("return_type");
+
+  if (annotation) {
+    const type = annotation.type === "type_annotation" ? annotation.namedChildren[0] : null;
+
+    if (type?.type === "type_identifier") return { class: type.text };
+    const args = type?.type === "generic_type" && type.childForFieldName("name")?.text === "Promise" ? type.childForFieldName("type_arguments")?.namedChildren : undefined;
+
+    return args?.length === 1 && args[0]!.type === "type_identifier" ? { class: args[0]!.text, promise: true } : null;
+  }
+
+  const body = fn.childForFieldName("body");
+  const made = !body ? null : body.type === "statement_block" ? returnedClass(body) : newClass(unwrapValue(body));
+
+  if (!made) return null;
+
+  return fn.children.some((c) => c.type === "async") ? { class: made, promise: true } : { class: made };
+}
+
+/** The class every `return` of a body gives with `new X()`, the functions nested in it aside; null when one returns anything else, or none returns. */
+function returnedClass(body: Node): string | null {
+  let made: string | null | undefined;
+
+  walkNamed(body, (node) => {
+    // A nested function's `return` is its own.
+    if (node.id !== body.id && (FUNCTION_NODES.has(node.type) || node.type === "class_declaration" || node.type === "class")) return false;
+
+    if (node.type !== "return_statement") return;
+    const value = node.namedChildren[0];
+    const cls = value ? newClass(unwrapValue(value)) : null;
+
+    made = made === undefined || made === cls ? cls : null;
+  });
+
+  return made ?? null;
+}
+
+/**
+ * The call a value is the result of — `makeStore()`, `repo.load()`, `await load()` — for the graph to read the class
+ * its target returns; null for any other value. `depth` bounds a chain of locals each made from the one before.
+ */
+function resultValue(written: Node, stop: Node, cls: ClassScope | null, depth: number): ValueOfFact | null {
+  let value = unwrapValue(written);
+  const awaited = value.type === "await_expression";
+
+  if (awaited) {
+    const operand = value.namedChildren[0];
+
+    if (!operand) return null;
+    value = unwrapValue(operand);
+  }
+
+  const fn = value.type === "call_expression" ? value.childForFieldName("function") : null;
+  const inner = fn ? calleeFact(unwrapValue(fn), stop, cls, depth + 1) : null;
+
+  if (!inner || inner.opaque) return null;
+  const call: ResultCallFact = { callee: inner.callee, member: inner.member ?? inner.callee.slice(inner.callee.lastIndexOf(".") + 1) };
+
+  if (inner.bound) call.bound = inner.bound;
+
+  if (inner.receiver) call.receiver = inner.receiver;
+
+  if (inner.on) call.on = inner.on;
+
+  return awaited ? { call, awaited: true } : { call };
+}
+
+/** The call a `const` local without a type annotation holds the result of (`const s = makeStore()`); null for any other binding. */
+function localResult(from: Node, name: string, stop: Node, cls: ClassScope | null, depth: number): ValueOfFact | null {
+  const binding = declarationOf(from, name, stop);
+
+  if (depth > MAX_RESULT_CHAIN || binding?.kind !== "local" || binding.node.childForFieldName("name")?.type !== "identifier" || binding.node.childForFieldName("type")) return null;
+  // A `let` may hold another value by the time of the call.
+  const written = binding.node.parent?.children[0]?.type === "const" ? binding.node.childForFieldName("value") : null;
+
+  return written ? resultValue(written, stop, cls, depth) : null;
+}
+
+/** How many locals made one from the next (`const a = f(); const b = a.g(); b.h()`) a receiver is followed through. */
+const MAX_RESULT_CHAIN = 4;
+
+/**
+ * The export a local names when a `require` or an awaited `import()` in the function binds it: `const { getSetting }
+ * = await import("./features.js")` is `getSetting`, `const { a: b } = require("./x")` names `a` as `b`, `const mod =
+ * require("./x")` is the module itself (`*`). Null for any other local.
+ */
+function localImport(from: Node, name: string, stop: Node): { source: string; name: string } | null {
+  const binding = declarationOf(from, name, stop);
+  const written = binding?.kind === "local" ? binding.node.childForFieldName("value") : null;
+  const source = written ? loadedModule(written) : null;
+  const pattern = binding?.kind === "local" ? binding.node.childForFieldName("name") : null;
+
+  if (!source || !pattern) return null;
+
+  if (pattern.type === "identifier") return { source, name: "*" };
+
+  // `{ f }`, `{ f = fallback }`, `{ f: g }`: the property the local is bound from.
+  for (const property of pattern.type === "object_pattern" ? pattern.namedChildren : []) {
+    if (property.type === "shorthand_property_identifier_pattern" && property.text === name) return { source, name };
+
+    if (property.type === "object_assignment_pattern" && property.childForFieldName("left")?.text === name) return { source, name };
+    const key = property.type === "pair_pattern" && property.childForFieldName("value")?.text === name ? property.childForFieldName("key") : null;
+
+    if (key?.type === "property_identifier") return { source, name: key.text };
+  }
+
+  return null;
+}
+
+/** The module a value loads: `require("./x")` with Node's `require`, `await import("./x")`; null for anything else. */
+function loadedModule(written: Node): string | null {
+  let call = unwrapValue(written);
+  const awaited = call.type === "await_expression";
+
+  if (awaited && call.namedChildren[0]) call = unwrapValue(call.namedChildren[0]);
+  const fn = call.type === "call_expression" ? call.childForFieldName("function") : null;
+  const arg = call.type === "call_expression" ? call.childForFieldName("arguments")?.namedChildren[0] : undefined;
+  const source = arg ? stringValue(arg) : null;
+
+  if (!fn || !source) return null;
+
+  // An `import()` not awaited is a Promise of the module, not the module.
+  if (fn.type === "import") return awaited ? source : null;
+
+  return fn.type === "identifier" && fn.text === "require" && requireKind(fn) !== "shadowed" ? source : null;
+}
+
 /** The call, marked as made through a parameter or local binding when it is one. */
 function boundCall(call: CallFact, bound: "parameter" | "local" | null): CallFact {
   return bound ? { ...call, bound } : call;
@@ -867,11 +1021,15 @@ function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact 
     case "identifier": {
       // Node's `require(...)` is an import, read by the require query; a shadowed `require` is an ordinary call.
       if (n.text === "require" && parentOf(node)?.type === "call_expression" && requireKind(n) !== "shadowed") return null;
-      // A callee named by a parameter or local is bound; through a local, it may be a hook with a default.
+      // A callee named by a parameter or local is bound; through a local, it may be a hook with a default, or a
+      // module's export the function loads (`const { f } = await import("./x")`).
       const fact = boundCall(callFact(n.text, n), bindingOf(n, n.text, body));
       const hook = fact.bound ? localHook(n, n.text, body) : null;
+      const imported = fact.bound === "local" && !hook ? localImport(n, n.text, body) : null;
 
       if (hook) fact.hook = hook;
+
+      if (imported) fact.imported = imported;
 
       return fact;
     }
@@ -1205,7 +1363,7 @@ function classDecl(name: string, cls: Node, at: Node, exported: boolean, declCal
 
     if (!isField) {
       // A method: a fn member, exported unless private; only a method with a body has calls.
-      const member = flag(decl("fn", mname, m, signature(m), !isPrivate, m.type === "method_definition" ? declCalls(m, scope) : [], collectTypeRefs(m, typeParams), []));
+      const member = flag(fnDecl(mname, m, m, !isPrivate, m.type === "method_definition" ? declCalls(m, scope) : [], collectTypeRefs(m, typeParams)));
 
       const accessor = m.children.find((c) => c.type === "get" || c.type === "set")?.type;
 
@@ -1223,7 +1381,7 @@ function classDecl(name: string, cls: Node, at: Node, exported: boolean, declCal
     const value = written ? unwrapValue(written) : null;
 
     if (value && FUNCTION_VALUES.has(value.type)) {
-      members.push(flag(decl("fn", mname, m, signature(value), !isPrivate, declCalls(value, scope), collectTypeRefs(m, typeParams), [])));
+      members.push(flag(fnDecl(mname, m, value, !isPrivate, declCalls(value, scope), collectTypeRefs(m, typeParams))));
       continue;
     }
 
@@ -1263,6 +1421,10 @@ function classDecl(name: string, cls: Node, at: Node, exported: boolean, declCal
   const base = heritageNode ? baseClass(heritageNode) : null;
 
   if (base) out.base = base;
+  // `implements Repo, Store<T>`: the interfaces by the names written, so a call through one reaches this class.
+  const implemented = heritageNames(heritageNode?.namedChildren.find((c) => c.type === "implements_clause"));
+
+  if (implemented.length > 0) out.implements = implemented;
   // `@Controller('x') export class X` puts the decorator on the `export` statement.
   const wrapper = parentOf(cls);
   const classDecorators = [...(wrapper?.type === "export_statement" ? decoratorsOf(wrapper) : []), ...decoratorsOf(cls)];
@@ -1426,6 +1588,11 @@ function templateValue(n: Node): string | null {
   if (n.type !== "template_string" || n.namedChildren.some((c) => c.type === "template_substitution")) return null;
 
   return n.text.slice(1, -1);
+}
+
+/** The type names of an `implements` or an interface's `extends` clause, their type arguments left off (`Store<T>` → `Store`). */
+function heritageNames(clause: Node | undefined): string[] {
+  return (clause?.namedChildren ?? []).map((type) => collapse(type.text).replace(/<[\s\S]*$/, "").trim()).filter((name) => name !== "");
 }
 
 /** The `extends` expression: `(extends_clause value: …)` in TypeScript, the bare expression in JavaScript. */
@@ -1740,9 +1907,17 @@ function collectUnsupported(root: Node, facts: FileFacts): void {
  * `this.m`, or `this.field.m` when the field's class is known. Null for any
  * other shape.
  */
-function calleeFact(n: Node, stop: Node, cls: ClassScope | null): CallFact | null {
-  // A plain name: bound when a parameter or local of an enclosing scope declares it.
-  if (n.type === "identifier" || n.type === "shorthand_property_identifier") return boundCall(callFact(n.text, n), bindingOf(n, n.text, stop));
+function calleeFact(n: Node, stop: Node, cls: ClassScope | null, depth = 0): CallFact | null {
+  // A plain name: bound when a parameter or local of an enclosing scope declares it; a local may be a module's export
+  // the function loads (`const { f } = await import("./x")`).
+  if (n.type === "identifier" || n.type === "shorthand_property_identifier") {
+    const fact = boundCall(callFact(n.text, n), bindingOf(n, n.text, stop));
+    const imported = fact.bound === "local" ? localImport(n, n.text, stop) : null;
+
+    if (imported) fact.imported = imported;
+
+    return fact;
+  }
 
   if (n.type !== "member_expression") return null;
   const obj = n.childForFieldName("object");
@@ -1762,12 +1937,23 @@ function calleeFact(n: Node, stop: Node, cls: ClassScope | null): CallFact | nul
     return fact;
   }
 
-  // `a.b`: bound when `a` is local; then a local `const a = new A()` may name the receiver's class.
+  // `a.b`: bound when `a` is local; then a local `const a = new A()` may name the receiver's class, and a local
+  // `const a = makeA()` the call whose result it is.
   if (obj.type === "identifier") {
     const fact = boundCall(callFact(`${obj.text}.${prop.text}`, n), bindingOf(n, obj.text, stop));
     const receiver = fact.bound ? localClass(n, obj.text, stop) : null;
+    // `const x = require("./x"); x.f()`: the export `f` of the module the function loads.
+    const loaded = fact.bound === "local" ? localImport(n, obj.text, stop) : null;
+    const on = fact.bound === "local" && !receiver && !loaded ? localResult(n, obj.text, stop, cls, depth) : null;
+
+    if (loaded?.name === "*") fact.imported = { source: loaded.source, name: prop.text };
 
     if (receiver) fact.receiver = receiver;
+
+    if (on) {
+      fact.on = on;
+      fact.member = prop.text;
+    }
 
     return fact;
   }
@@ -2578,7 +2764,7 @@ function commonJsExports(stmt: Node, facts: FileFacts, declCalls: (n: Node) => C
     if (existing) return existing.kind;
 
     if (!FUNCTION_VALUES.has(fn.type) && fn.type !== "method_definition") return null;
-    facts.decls.push(decl("fn", name, at, signature(fn), true, declCalls(fn), collectTypeRefs(fn), []));
+    facts.decls.push(fnDecl(name, at, fn, true, declCalls(fn), collectTypeRefs(fn)));
 
     return "fn";
   };

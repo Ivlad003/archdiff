@@ -269,8 +269,9 @@ function classDecl(def: Node, name: string, symbol: string, topLevel: boolean, f
     if (method?.type === "function_definition" && member && decorators(item).some((d) => d.name === "staticmethod" || d.name === "classmethod")) statics.add(member);
   }
 
-  // Second pass: nested classes and methods become members.
+  // Second pass: nested classes and methods become members; `self.repo.save()` in them knows the attributes' classes.
   const members: DeclFact[] = [];
+  const attributes = attributeClasses(items);
 
   for (const { item, def: inner } of items) {
     const member = inner?.childForFieldName("name")?.text;
@@ -289,7 +290,7 @@ function classDecl(def: Node, name: string, symbol: string, topLevel: boolean, f
     if (inner.type !== "function_definition") continue;
     const names = decorators(item).map((d) => d.name);
     const isStatic = names.includes("staticmethod");
-    const decl = fnDecl(inner, member, { name, statics: topLevel ? statics : new Set(), receiver: !isStatic });
+    const decl = fnDecl(inner, member, { name, statics: topLevel ? statics : new Set(), receiver: !isStatic, attributes });
     noteParamCalls(inner, path, facts);
     decl.exported = exported;
 
@@ -317,11 +318,64 @@ function classDecl(def: Node, name: string, symbol: string, topLevel: boolean, f
   return decl;
 }
 
-/** The class a method belongs to: its name, its static and class methods (for a top-level class), and whether the first parameter is the receiver. */
+/** The class a method belongs to: its name, its static and class methods (for a top-level class), whether the first parameter is the receiver, and its attributes' classes. */
 interface Owner {
   name: string;
   statics: ReadonlySet<string>;
   receiver: boolean;
+  attributes: ReadonlyMap<string, string>;
+}
+
+/**
+ * The class of each attribute of a class's instances, where the class says it: an annotation in its body (`repo:
+ * Repo`, a dataclass field), or assignments `self.x = …` in its methods that all name one class — `Repo(…)`, an
+ * annotation (`self.x: Repo = …`), a parameter or local of the method typed `Repo` (`def __init__(self, repo: Repo):
+ * self.repo = repo`). An attribute also assigned anything else, or another class, is left out.
+ */
+function attributeClasses(items: readonly { item: Node; def: Node | null }[]): Map<string, string> {
+  const evidence = new Map<string, string | null>();
+  const bind = (name: string, cls: string | null): void => {
+    evidence.set(name, evidence.has(name) && evidence.get(name) !== cls ? null : cls);
+  };
+
+  for (const { item, def } of items) {
+    // `repo: Repo`, `repo: Repo = field(…)`, `repo = Repo()` in the class body.
+    const assignment = def?.type === "expression_statement" ? def.namedChildren[0] : null;
+    const target = assignment?.type === "assignment" ? assignment.childForFieldName("left") : null;
+
+    if (assignment && target?.type === "identifier") bind(target.text, annotatedClass(assignment.childForFieldName("type")) ?? constructedClass(assignment.childForFieldName("right")));
+
+    // A method's receiver is its first parameter; a static method has none.
+    if (def?.type !== "function_definition" || decorators(item).some((d) => d.name === "staticmethod")) continue;
+    const first = def.childForFieldName("parameters")?.namedChildren[0];
+    const receiver = first?.type === "identifier" ? first.text : first?.type === "typed_parameter" ? first.namedChildren.find((c) => c.type === "identifier")?.text : undefined;
+    const body = def.childForFieldName("body");
+
+    if (!receiver || !body) continue;
+    const typed = typedValues(def);
+    // Every `self.x = …` of the method, nested blocks and closures included; a tuple target or `+=` says no class.
+    const walk = (node: Node): void => {
+      if (node.type === "assignment" || node.type === "augmented_assignment") {
+        const left = node.childForFieldName("left");
+        const right = node.childForFieldName("right");
+        const attribute = (at: Node): string | null => (at.type === "attribute" && at.childForFieldName("object")?.text === receiver ? (at.childForFieldName("attribute")?.text ?? null) : null);
+        const own = left ? attribute(left) : null;
+
+        if (own && node.type === "assignment") bind(own, annotatedClass(node.childForFieldName("type")) ?? constructedClass(right) ?? (right?.type === "identifier" ? (typed.get(right.text) ?? null) : null));
+        else if (own) bind(own, null);
+        else for (const each of left?.namedChildren ?? []) if (attribute(each)) bind(attribute(each)!, null);
+      }
+
+      for (const child of node.namedChildren) walk(child);
+    };
+    walk(body);
+  }
+
+  const out = new Map<string, string>();
+
+  for (const [name, cls] of evidence) if (cls) out.set(name, cls);
+
+  return out;
 }
 
 /** The declaration of a def: signature, calls (with receiver and owner for a method) and docstring. */
@@ -340,6 +394,10 @@ function fnDecl(node: Node, name: string, owner: Owner | null): DeclFact {
   const doc = docstring(body);
 
   const decl: DeclFact = { kind: "fn", name, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, signature, exported: false, calls, types: [], members: [], ...fingerprintFacts(node) };
+  // `-> Repo`: a call's result is a Repo, for a member called on it.
+  const result = annotatedClass(returns);
+
+  if (result) decl.result = { class: result };
 
   if (doc !== undefined) decl.doc = doc;
   const branches = body ? countBranches(body, PY_CONTROL) : 0;
@@ -486,9 +544,10 @@ function typedValues(fn: Node): Map<string, string> {
   };
 
   // Only a plain identifier or an annotated parameter carries a class; names
-  // inside tuple patterns are bound with none.
+  // inside tuple patterns are bound with none. `self.repo = …` and `d[k] = …`
+  // bind no name of the function.
   const targets = (target: Node | null, cls: string | null): void => {
-    if (!target) return;
+    if (!target || target.type === "attribute" || target.type === "subscript") return;
 
     if (target.type === "identifier") bind(target.text, cls);
     else if (target.type === "typed_parameter") targets(target.namedChildren[0] ?? null, annotatedClass(target.childForFieldName("type")));
@@ -684,6 +743,11 @@ function callOf(fn: Node | null, scope: CallScope): Pick<CallFact, "callee" | "b
   const head = at.text;
 
   if (head === scope.receiver) {
+    // `self.repo.save()`: a member of the attribute's class, when the class says it (`attributeClasses`).
+    const attribute = parts.length === 2 ? scope.owner?.attributes.get(parts[0]!) : undefined;
+
+    if (attribute) return { callee: [head, ...parts].join("."), receiver: attribute };
+
     // `self.queue.put()` goes through an attribute whose type archdiff does not know.
     if (parts.length !== 1) return { callee: [head, ...parts].join("."), bound: "local" };
 

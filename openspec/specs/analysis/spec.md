@@ -36,12 +36,22 @@ The system SHALL resolve relative and aliased imports to files (TypeScript `path
 
 ### Requirement: Calls resolve through declarations, exports and types
 
-The system SHALL resolve a call to the function it names through the file's local declarations, its import bindings (including re-exports, `export *`, CommonJS `module.exports`), receiver types, interface implementers and class ancestors. A call it cannot name SHALL be a gap with one of the reasons `dynamic`, `global`, `member-of-value`, `unknown-member`, `interface`, `external`, `local`, `parse-error`. A callee bound between the call and the module — a parameter, a local, a nested function, a caught error — SHALL never be read as the module's declaration of the same name: through a parameter it is `dynamic` (a blind spot: what the caller passes), a function of the caller's own body is `local` (its calls are the caller's already). `super.m()` (PHP `parent::m()`, Python `super().m()`) SHALL resolve to the member of the class the enclosing class extends.
+The system SHALL resolve a call to the function it names through the file's local declarations, its import bindings (including re-exports, `export *`, `export * as ns`, CommonJS `module.exports`, a module bound whole, a glob import, a `require` or an awaited `import()` in the function), receiver types, interface implementers (through the interfaces that extend one too), class ancestors and PHP traits. A receiver's type SHALL be the one the code writes: a parameter, a local or a field typed with a class or made with `new`, a constant of the module made with `new` or by a call, a Python attribute the class's methods fill with one class, a Rust struct's field, or the result type the target of the call a value comes from declares (a Promise of a class is that class once awaited). A function passed as a value inside a function SHALL be a `ref` line of that function. A call it cannot name SHALL be a gap with one of the reasons `dynamic`, `global`, `member-of-value`, `unknown-member`, `interface`, `external`, `local`, `parse-error`. A callee bound between the call and the module — a parameter, a local, a nested function, a caught error — SHALL never be read as the module's declaration of the same name: through a parameter it is `dynamic` (a blind spot: what the caller passes), a function of the caller's own body is `local` (its calls are the caller's already). `super.m()` (PHP `parent::m()`, Python `super().m()`) SHALL resolve to the member of the class the enclosing class extends.
 
 #### Scenario: A call through an interface
 
 - **WHEN** `repo.save()` is called where `repo` is typed as an interface with one implementer
 - **THEN** the call resolves to the implementer's `save`
+
+#### Scenario: A method of a factory's result
+
+- **WHEN** `const s = await load()` where `load(): Promise<Store>`, then `s.save()`
+- **THEN** the call resolves to `Store.save`; without the `await` it is a gap with the reason `member-of-value`
+
+#### Scenario: An interface an object literal implements
+
+- **WHEN** `r.map()` is called where `r` is the result of `repo(): Repo`, `Repo` an interface no class implements
+- **THEN** the call is a gap with the reason `interface`, a blind spot
 
 #### Scenario: A dynamic call
 

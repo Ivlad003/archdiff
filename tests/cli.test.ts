@@ -639,6 +639,70 @@ test("facts never guessed: a parameter or a local spelled like a function, super
     assert.ok(!archdiff(["views", dir]).stdout.includes("uncalled method of a handler"));
   }));
 
+test("calls reach what the code names: an interface's implementers, a namespace by its name, a module bound whole, a glob import, a private method, a module a function loads", () =>
+  withTempDir("archdiff-reach-", (dir) => {
+    const write = (path: string, text: string): void => {
+      mkdirSync(join(dir, path, ".."), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    };
+    write("src/r.ts", "export interface Repo { save(): void }\nexport interface Store extends Repo { load(): void }\nexport class DbRepo implements Repo { save(): void {} }\nexport class FileStore implements Store { save(): void {} load(): void {} }\nexport function use(r: Repo): void { r.save(); }\n");
+    write("src/ns.ts", "export function nsf(): number { return 1; }\n");
+    write("src/index.ts", 'export * as nsx from "./ns";\n');
+    write("src/use.ts", 'import { nsx } from "./index";\nexport function use(): number { return nsx.nsf(); }\n');
+    write("src/priv.ts", "export class C { #priv(): number { return 1; } run(): number { return this.#priv(); } }\n");
+    write("pkg/__init__.py", "");
+    write("pkg/core.py", "def helper():\n    return 1\n");
+    write("pkg/app.py", "from . import core\nfrom .core import *\n\ndef run():\n    return core.helper()\n\ndef run2():\n    return helper()\n");
+    write("rs/Cargo.toml", '[package]\nname = "rs"\nversion = "0.1.0"\n');
+    write("rs/src/lib.rs", "mod util;\nuse crate::util::{self};\nuse crate::util::*;\npub fn run() -> i32 { util::helper() }\npub fn run2() -> i32 { helper() }\n");
+    write("rs/src/util.rs", "pub fn helper() -> i32 { 1 }\n");
+    write("src/features.ts", "export function getSetting(k: string): string { return k; }\n");
+    write("src/panel.ts", 'export async function onLogin(): Promise<string> {\n  const { getSetting } = await import("./features");\n  return getSetting("pm");\n}\nexport function cjs(): string {\n  const features = require("./features");\n  return features.getSetting("x");\n}\n');
+    const calls = (view: string): string[] => archdiff(["diagram", view, dir, "--format", "mermaid"]).stdout.split("\n").filter((line) => line.includes("==>")).map((line) => line.trim()).sort();
+    // Through an interface: every class implementing it, through an interface that extends it too.
+    assert.deepEqual(calls("calls:src/r.ts#use"), ["src_r_ts_use ==> src_r_ts_DbRepo_save", "src_r_ts_use ==> src_r_ts_FileStore_save"]);
+    assert.deepEqual(calls("calls:src/use.ts#use"), ["src_use_ts_use ==> src_ns_ts_nsf"]);
+    assert.deepEqual(calls("calls:src/priv.ts#C.run"), ["src_priv_ts_C_run ==> src_priv_ts_C_priv"]);
+    assert.deepEqual(calls("calls:pkg/app.py#run"), ["pkg_app_py_run ==> pkg_core_py_helper"]);
+    assert.deepEqual(calls("calls:pkg/app.py#run2"), ["pkg_app_py_run2 ==> pkg_core_py_helper"]);
+    assert.deepEqual(calls("calls:rs/src/lib.rs#run"), ["rs_src_lib_rs_run ==> rs_src_util_rs_helper"]);
+    assert.deepEqual(calls("calls:rs/src/lib.rs#run2"), ["rs_src_lib_rs_run2 ==> rs_src_util_rs_helper"]);
+    // A `require` or an awaited `import()` in a function binds the module's exports there.
+    assert.deepEqual(calls("calls:src/panel.ts#onLogin"), ["src_panel_ts_onLogin ==> src_features_ts_getSetting"]);
+    assert.deepEqual(calls("calls:src/panel.ts#cjs"), ["src_panel_ts_cjs ==> src_features_ts_getSetting"]);
+  }));
+
+test("a method called on a value reaches its class wherever the code names the class: a singleton, a factory's result, a field, a parameter, a trait", () =>
+  withTempDir("archdiff-receivers-", (dir) => {
+    const write = (path: string, text: string): void => {
+      mkdirSync(join(dir, path, ".."), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    };
+    write("src/store.ts", "export class Store { save(): number { return 1; } }\nexport const store = new Store();\nexport const made = createStore();\nfunction createStore() { return new Store(); }\nexport async function load(): Promise<Store> { return new Store(); }\n");
+    write("src/use.ts", 'import { store, made, load, Store } from "./store";\nexport function single(): number { return store.save() + made.save(); }\nexport async function awaited(): Promise<number> {\n  const s = await load();\n  return s.save();\n}\nexport function pending(): void {\n  const p = load();\n  void p.then();\n}\nexport function inParens(): number { return (new Store()).save(); }\n');
+    write("app/svc.py", "class Repo:\n    def save(self):\n        return 1\n\ndef make_repo() -> Repo:\n    return Repo()\n\nclass Service:\n    def __init__(self, repo: Repo):\n        self.repo = repo\n        self.spare = Repo()\n\n    def run(self):\n        self.repo.save()\n        return self.spare.save()\n\ndef made():\n    r = make_repo()\n    return r.save()\n");
+    write("src/B.php", "<?php\nnamespace App;\n\ntrait Logs {\n    public function log(): int { return 1; }\n}\n\nclass Svc {\n    public function go(): int { return 2; }\n}\n\nclass S {\n    public static function make(): Svc { return new Svc(); }\n}\n\nclass B {\n    use Logs;\n    public function go(): int { return $this->log(); }\n}\n\nfunction run(): int {\n    $s = S::make();\n    return (new B())->go() + $s->go();\n}\n");
+    write("rs/Cargo.toml", '[package]\nname = "rs"\nversion = "0.1.0"\n');
+    write("rs/src/lib.rs", "pub struct Repo {}\nimpl Repo { pub fn save(&self) -> i32 { 1 } }\npub struct Svc { repo: Box<Repo> }\nimpl Svc { pub fn run(&self) -> i32 { self.repo.save() } }\npub fn direct(r: &Repo) -> i32 { r.save() }\n");
+    // The calls of the entry itself, one level deep.
+    const calls = (view: string): string[] => archdiff(["diagram", view, dir, "--format", "mermaid", "--depth", "1"]).stdout.split("\n").filter((line) => line.includes("==>")).map((line) => line.trim()).sort();
+    // A constant made with `new` or by a factory, used here or where it is imported.
+    assert.deepEqual(calls("calls:src/use.ts#single"), ["src_use_ts_single ==> src_store_ts_Store_save"]);
+    // A Promise of a Store is a Store once awaited, and only then.
+    assert.deepEqual(calls("calls:src/use.ts#awaited"), ["src_use_ts_awaited ==> src_store_ts_Store_save", "src_use_ts_awaited ==> src_store_ts_load"]);
+    assert.deepEqual(calls("calls:src/use.ts#pending"), ["src_use_ts_pending ==> src_store_ts_load"]);
+    assert.ok(calls("calls:src/use.ts#inParens").includes("src_use_ts_inParens ==> src_store_ts_Store_save"));
+    // Python: an attribute the constructor fills from a typed parameter or with `Repo()`; a function annotated `-> Repo`.
+    assert.deepEqual(calls("calls:app/svc.py#Service.run"), ["app_svc_py_Service_run ==> app_svc_py_Repo_save"]);
+    assert.ok(calls("calls:app/svc.py#made").includes("app_svc_py_made ==> app_svc_py_Repo_save"));
+    // PHP: a trait's method is the class's own; `(new B())->go()`; the declared result type of `S::make()`.
+    assert.deepEqual(calls("calls:src/B.php#B.go"), ["src_B_php_B_go ==> src_B_php_Logs_log"]);
+    assert.deepEqual(calls("calls:src/B.php#run"), ["src_B_php_run ==> src_B_php_B", "src_B_php_run ==> src_B_php_B_go", "src_B_php_run ==> src_B_php_S_make", "src_B_php_run ==> src_B_php_Svc_go"]);
+    // Rust: a field the struct types (through a Box), a parameter typed with a reference.
+    assert.deepEqual(calls("calls:rs/src/lib.rs#Svc.run"), ["rs_src_lib_rs_Svc_run ==> rs_src_lib_rs_Repo_save"]);
+    assert.deepEqual(calls("calls:rs/src/lib.rs#direct"), ["rs_src_lib_rs_direct ==> rs_src_lib_rs_Repo_save"]);
+  }));
+
 test("imports resolve as the tools resolve them: baseUrl, a jsconfig, the longest paths pattern, a missing alias, a monorepo's own packages, a Python project in a directory", () =>
   withTempDir("archdiff-resolve-", (dir) => {
     const write = (path: string, text: string): void => {
