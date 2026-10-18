@@ -420,8 +420,8 @@ test("the Flow tab's run: POST /api/flow/run executes the entry with the saved m
 });
 
 test("the project map lists every module with its layer and every import; a tag of a view or of a function's logic expands into context", async () => {
-  const map = await getJson<{ layers: string[]; nodes: { id: string; layer: string; lines: number }[]; edges: { from: string; to: string; count: number }[]; level: string }>("/api/graph");
-  assert.equal(map.level, "module");
+  const map = await getJson<{ layers: string[]; nodes: { id: string; layer: string; lines: number }[]; edges: { from: string; to: string; count: number }[]; directoryDepth: number | null }>("/api/graph");
+  assert.equal(map.directoryDepth, null);
   assert.deepEqual(map.layers, ["cartridge", "db", "lib", "routes"]);
   assert.ok(map.nodes.some((node) => node.id === "src/lib/orders.ts" && node.layer === "lib" && node.lines > 0), JSON.stringify(map.nodes));
   assert.ok(map.edges.some((edge) => edge.from === "src/lib/orders.ts" && edge.to === "src/db/store.ts" && edge.count === 1), JSON.stringify(map.edges));

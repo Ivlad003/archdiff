@@ -46,7 +46,12 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
 
     if (fnLike) items.push({ label: "Logic: the flowchart and its rules", run: go(`logic:${target}`) });
 
-    for (const sibling of subject ? siblingViews(subject) : []) if (sibling.key !== own && !sibling.key.startsWith("focus:") && !sibling.key.startsWith("logic:")) items.push({ label: sibling.label, run: go(sibling.key) });
+    // The siblings but the view a second tap opens, and focus and logic, which have their own items above.
+    for (const sibling of subject ? siblingViews(subject) : []) {
+      const kind = parseView(sibling.key)?.kind;
+
+      if (sibling.key !== own && kind !== "focus" && kind !== "logic") items.push({ label: sibling.label, run: go(sibling.key) });
+    }
     items.push("—", { label: selection().includes(node.id) ? "Take out of the selection" : "Add to the selection", hint: "Shift+tap", run: () => toggleSelected(node.id) });
     items.push({ label: "Ask the agent about it", hint: tag?.tag ?? "no tag for this kind of shape", disabled: tag === null, run: () => askSelected([node.id]) });
     items.push({ label: "Dim all but its neighbours", run: () => page.canvas()?.dim(neighbourhoodOf(page.edges(), node.id)) });

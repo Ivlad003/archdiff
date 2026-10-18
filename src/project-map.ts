@@ -75,5 +75,5 @@ export function projectMap(graph: Graph): ProjectMap {
     } else counts.set(key, dep.typeOnly ? { from, to, count: 1, typeOnly: true } : { from, to, count: 1 });
   }
 
-  return { layers: [...graph.layers], nodes: [...byGroup.values()], edges: [...counts.values()], level: depth === 0 ? "module" : `dir:${depth}` };
+  return { layers: [...graph.layers], nodes: [...byGroup.values()], edges: [...counts.values()], directoryDepth: depth === 0 ? null : depth };
 }

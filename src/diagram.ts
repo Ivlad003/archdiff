@@ -201,8 +201,8 @@ export interface ProjectMap {
   layers: string[];
   nodes: MapDot[];
   edges: MapLine[];
-  /** `module`, or `dir:<depth>` when the modules were folded to directories of that depth. */
-  level: string;
+  /** Null: a dot per module; a number: the modules folded to the directories of their first that many path segments (a big repository). */
+  directoryDepth: number | null;
 }
 
 export interface MapDot {

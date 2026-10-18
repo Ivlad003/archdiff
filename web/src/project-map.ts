@@ -182,9 +182,9 @@ function currentModules(): Set<string> {
     else if (node.kind === "module") files.add(node.id);
   }
 
-  if (!data || data.level === "module") return files;
+  if (!data || data.directoryDepth === null) return files;
   // A folded map: the directory a file falls in at the map's depth.
-  const depth = Number(data.level.slice(4));
+  const depth = data.directoryDepth;
 
   return new Set([...files].map((file) => `dir:${file.split("/").slice(0, depth).join("/")}`));
 }
@@ -337,7 +337,7 @@ function renderLayers(): void {
   }
 
   const counted = data.nodes.length;
-  element<HTMLSpanElement>("map-note").textContent = `${counted} ${data.level === "module" ? "modules" : "directories"}, ${data.edges.length} imports${data.level === "module" ? "" : " (folded: the repository is big)"}`;
+  element<HTMLSpanElement>("map-note").textContent = `${counted} ${data.directoryDepth === null ? "modules" : "directories"}, ${data.edges.length} imports${data.directoryDepth === null ? "" : " (folded: the repository is big)"}`;
 }
 
 async function loadMap(): Promise<void> {
