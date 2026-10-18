@@ -55,7 +55,7 @@ The system SHALL list the branches with the default base, and compare any number
 
 ### Requirement: History shows the drift
 
-The system SHALL list, commit by commit between a base and a head, the modules, functions, imports, layer couplings and packages each commit added or removed, and draw it as the `timeline` view.
+The system SHALL list, commit by commit between a base and a head, the modules, functions (added, removed and changed, each counted), imports, layer couplings and packages (`+redis`, `−node:fs`) each commit added or removed, and draw it as the `timeline` view.
 
 #### Scenario: A coupling appears
 

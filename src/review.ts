@@ -12,7 +12,7 @@
 
 import { analyze, type Analysis } from "./analyze.ts";
 import { loadConfig } from "./config.ts";
-import { graphDiff, markContract, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
+import { graphDiff, historyRow, markContract, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
 import { changedFiles, commitOf, commitsBetween, defaultBase, forkPoint, mergeBase, treeAt as filesAt } from "./git.ts";
 import { INTENT_FILE, judgesLayers } from "./intent.ts";
 import type { Graph } from "./graph.ts";
@@ -115,8 +115,7 @@ export async function history(root: string, base: string, head: string): Promise
 
   for (const commit of commits) {
     const current = (await analyze(root, { overrides: treeAt(root, commit.sha), config })).graph;
-    const diff = graphDiff(previous, current, commit.sha, []);
-    rows.push({ commit, modulesAdded: diff.modulesAdded.length, modulesRemoved: diff.modulesRemoved.length, fnsChanged: diff.nodesAdded.length + diff.nodesRemoved.length + diff.nodesChanged.length, depsAdded: diff.depsAdded.length, depsRemoved: diff.depsRemoved.length, layerEdgesAdded: diff.layerEdgesAdded, layerEdgesRemoved: diff.layerEdgesRemoved, externalsAdded: diff.externalsAdded });
+    rows.push(historyRow(commit, graphDiff(previous, current, commit.sha, [])));
     previous = current;
   }
 

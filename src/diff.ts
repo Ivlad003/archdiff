@@ -229,12 +229,21 @@ export interface HistoryRow {
   commit: Commit;
   modulesAdded: number;
   modulesRemoved: number;
+  /** Declarations the commit added, removed and changed (its signature or its body). */
+  fnsAdded: number;
+  fnsRemoved: number;
   fnsChanged: number;
   depsAdded: number;
   depsRemoved: number;
   layerEdgesAdded: { from: string; to: string }[];
   layerEdgesRemoved: { from: string; to: string }[];
   externalsAdded: string[];
+  externalsRemoved: string[];
+}
+
+/** The row of one commit: what its diff added, removed and changed, counted. */
+export function historyRow(commit: Commit, diff: GraphDiff): HistoryRow {
+  return { commit, modulesAdded: diff.modulesAdded.length, modulesRemoved: diff.modulesRemoved.length, fnsAdded: diff.nodesAdded.length, fnsRemoved: diff.nodesRemoved.length, fnsChanged: diff.nodesChanged.length, depsAdded: diff.depsAdded.length, depsRemoved: diff.depsRemoved.length, layerEdgesAdded: diff.layerEdgesAdded, layerEdgesRemoved: diff.layerEdgesRemoved, externalsAdded: diff.externalsAdded, externalsRemoved: diff.externalsRemoved };
 }
 
 /** The history as a Markdown table: one row per commit, the layer couplings it added or removed named. */
@@ -251,7 +260,9 @@ export function historyMarkdown(rows: HistoryRow[], base: string, head: string):
 
   for (const row of rows) {
     const couplings = [...row.layerEdgesAdded.map((edge) => `+${edge.from}→${edge.to}`), ...row.layerEdgesRemoved.map((edge) => `−${edge.from}→${edge.to}`)].join(" ") || "";
-    lines.push(`| \`${row.commit.short}\` ${row.commit.subject.replace(/\|/g, "\\|")} | ${row.commit.date} | ${row.commit.author} | +${row.modulesAdded} −${row.modulesRemoved} | ~${row.fnsChanged} | +${row.depsAdded} −${row.depsRemoved} | ${couplings} | ${row.externalsAdded.map((id) => id.replace(/^pkg:/, "")).join(", ")} |`);
+    // A package by its name, a built-in by its language (`node:fs`); a sign says which way it went.
+    const packages = [...row.externalsAdded.map((id) => `+${id.replace(/^pkg:/, "")}`), ...row.externalsRemoved.map((id) => `−${id.replace(/^pkg:/, "")}`)].join(", ");
+    lines.push(`| \`${row.commit.short}\` ${row.commit.subject.replace(/\|/g, "\\|")} | ${row.commit.date} | ${row.commit.author} | +${row.modulesAdded} −${row.modulesRemoved} | +${row.fnsAdded} −${row.fnsRemoved} ~${row.fnsChanged} | +${row.depsAdded} −${row.depsRemoved} | ${couplings} | ${packages} |`);
   }
 
   return `${lines.join("\n")}\n`;

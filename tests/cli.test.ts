@@ -526,18 +526,24 @@ test("history lists the drift commit by commit, and review --head compares two r
     git("commit", "-q", "-m", "add extra");
     writeFileSync(join(dir, "src/routes/checkout.tsx"), 'import { OrderService } from "@/lib/orders";\nimport { readOrder } from "@/db/store";\n\nexport async function action(request: { total: number }) {\n  readOrder("x");\n  return new OrderService("web").place(request.total);\n}\n');
     git("commit", "-q", "-am", "route reads the store");
+    writeFileSync(join(dir, "src/db/store.ts"), 'import type { Order } from "../lib/orders.ts";\n\nconst rows = new Map<string, Order>();\n\nexport function saveOrder(order: Order): void {\n  rows.set(order.id, order);\n}\n\nexport function readOrder(id: string): Order | null {\n  return rows.get(id) ?? null;\n}\n');
+    git("commit", "-q", "-am", "the store reads no file");
+    git("checkout", "-q", "main");
     const { status, stdout } = archdiff(["history", dir, "--base", "main", "--head", "feature"]);
     assert.equal(status, 0, stdout);
     const rows = stdout.split("\n").filter((line) => line.startsWith("| `"));
-    assert.equal(rows.length, 2);
-    assert.ok(rows[0]!.includes("add extra | ") && rows[0]!.includes("| +1 −0 |"), rows[0]);
+    assert.equal(rows.length, 3);
+    // Functions added, removed and changed apart; a package that goes, as much as one that comes.
+    assert.ok(rows[0]!.includes("add extra | ") && rows[0]!.includes("| +1 −0 | +1 −0 ~0 |"), rows[0]);
     assert.ok(rows[1]!.includes("route reads the store") && rows[1]!.includes("+routes→db"), rows[1]);
+    assert.ok(rows[2]!.includes("the store reads no file") && rows[2]!.includes("| −node:fs |"), rows[2]);
+    git("checkout", "-q", "feature");
     // Two refs: the first commit alone adds a module and no coupling.
-    const first = archdiff(["review", dir, "--base", "main", "--head", "feature~1"]);
+    const first = archdiff(["review", dir, "--base", "main", "--head", "feature~2"]);
     assert.equal(first.status, 0, first.stdout);
     assert.ok(first.stdout.includes("## Modules added\n\n- src/lib/extra.ts"), first.stdout);
     assert.ok(!first.stdout.includes("routes → db"));
-    const second = archdiff(["review", dir, "--base", "feature~1", "--head", "feature"]);
+    const second = archdiff(["review", dir, "--base", "feature~2", "--head", "feature~1"]);
     assert.equal(second.status, 1);
     assert.ok(second.stdout.includes("- **routes → db**"));
   }));

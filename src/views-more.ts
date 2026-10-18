@@ -692,7 +692,7 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
 /** The drift of the architecture as a bar per commit: height by the imports and functions that moved, red when a coupling between layers appeared, green when one went. */
 export function timelineDiagram(rows: readonly HistoryRow[], base: string, head: string): PictureContent {
   if (rows.length === 0) return unplaced(`Timeline ${base}..${head}`, [], [], [], { placed: true, reason: "no commits in the range" });
-  const magnitude = (row: HistoryRow): number => row.depsAdded + row.depsRemoved + row.fnsChanged + row.modulesAdded + row.modulesRemoved + 10 * (row.layerEdgesAdded.length + row.layerEdgesRemoved.length);
+  const magnitude = (row: HistoryRow): number => row.depsAdded + row.depsRemoved + row.fnsAdded + row.fnsRemoved + row.fnsChanged + row.modulesAdded + row.modulesRemoved + 10 * (row.layerEdgesAdded.length + row.layerEdgesRemoved.length);
   const max = Math.max(1, ...rows.map(magnitude));
   const column = 110;
   const chart = 240;
@@ -702,7 +702,7 @@ export function timelineDiagram(rows: readonly HistoryRow[], base: string, head:
     const height = Math.max(8, Math.round((chart * magnitude(row)) / max));
     const x = 20 + i * column;
     const couplings = [...row.layerEdgesAdded.map((edge) => `+${edge.from}→${edge.to}`), ...row.layerEdgesRemoved.map((edge) => `−${edge.from}→${edge.to}`)];
-    const bar: Shape = { id: `bar:${row.commit.sha}`, kind: "cell", label: `+${row.depsAdded} −${row.depsRemoved} imp\n~${row.fnsChanged} fn${couplings.length > 0 ? `\n${couplings.join(" ")}` : ""}`, x, y: 20 + chart - height, w: column - 20, h: height, heat: magnitude(row) / max, count: magnitude(row) };
+    const bar: Shape = { id: `bar:${row.commit.sha}`, kind: "cell", label: `+${row.depsAdded} −${row.depsRemoved} imp\n+${row.fnsAdded} −${row.fnsRemoved} ~${row.fnsChanged} fn${couplings.length > 0 ? `\n${couplings.join(" ")}` : ""}`, x, y: 20 + chart - height, w: column - 20, h: height, heat: magnitude(row) / max, count: magnitude(row) };
 
     if (row.layerEdgesAdded.length > 0) bar.diff = "removed";
     else if (row.layerEdgesRemoved.length > 0) bar.diff = "added";
