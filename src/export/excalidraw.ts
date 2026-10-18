@@ -51,8 +51,8 @@ const LABEL_INSET = 8;
 /** The label of a lane, and of a sequence's fragment: top left in the frame, at its offset, in a box of its size. */
 const LANE_LABEL = { dx: 8, dy: 4, w: 120, h: 20, fontSize: 14 } as const;
 const FRAGMENT_LABEL = { dx: 8, dy: 2, w: 200, h: 18, fontSize: 12 } as const;
-/** The label of a line: a box of this size, centred on the line (a message's sits above it, a self-call's beside its loop). */
-const LINE_LABEL = { w: 120, h: 16, fontSize: 12, above: 18, middleUp: 10, selfDx: 80, selfDy: 4 } as const;
+/** The label of a line: at most this wide, on the line (labelSpot); a message's sits above its line, a self-call's beside its loop. */
+const LINE_LABEL = { w: 120, h: 16, fontSize: 12, above: 18, selfDx: 80, selfDy: 4 } as const;
 /** The label of a step of a function's logic: up to four lines of 32 characters (24 for an exit), its start kept. */
 const LOGIC_LABEL = { lines: 4, width: 32, endWidth: 24 } as const;
 /** The counts of a shape's neighbours beyond the picture: small, grey, under its corners — before it on the left, after it on the right. */
@@ -64,6 +64,54 @@ interface Box {
   y: number;
   w: number;
   h: number;
+}
+
+/** The width a line of text takes at `fontSize`, roughly: the hand-drawn face averages six tenths of the size a character. */
+function textWidth(text: string, fontSize: number): number {
+  return Math.max(...text.split("\n").map((line) => line.length)) * fontSize * 0.6;
+}
+
+/** Whether two boxes overlap. */
+function overlaps(a: Box, b: Box): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/**
+ * Where a line's label sits: on the line itself — the midpoint of its start and its end, which the label kept before,
+ * lies off an elbowed route, often on a shape or on another line's label. Spots along each segment are tried, the
+ * longest segment first — its middle, then a third, two thirds, a fifth and four fifths along — above a horizontal
+ * segment and then below it, beside a vertical one on the right and then on the left (lines running together share
+ * a segment, and their labels take turns along it); the first spot clear of every shape and of the labels placed
+ * before wins. Where no spot is clear (a label wider than the gap its line crosses), the one that covers the least:
+ * another label counts double, as two labels on each other read as neither.
+ */
+function labelSpot(route: readonly Point[], size: { w: number; h: number }, shapes: readonly Box[], placed: readonly Box[]): Box {
+  const segments = route.slice(1).map((end, i) => ({ start: route[i]!, end, length: Math.hypot(end.x - route[i]!.x, end.y - route[i]!.y) })).sort((a, b) => b.length - a.length);
+  const spots: Box[] = [];
+
+  for (const { start, end } of segments) {
+    const vertical = Math.abs(end.x - start.x) < Math.abs(end.y - start.y);
+
+    for (const t of [0.5, 1 / 3, 2 / 3, 0.2, 0.8]) {
+      const x = start.x + (end.x - start.x) * t;
+      const y = start.y + (end.y - start.y) * t;
+
+      if (vertical) spots.push({ x: x + 4, y: y - size.h / 2, w: size.w, h: size.h }, { x: x - 4 - size.w, y: y - size.h / 2, w: size.w, h: size.h });
+      else spots.push({ x: x - size.w / 2, y: y - size.h - 2, w: size.w, h: size.h }, { x: x - size.w / 2, y: y + 2, w: size.w, h: size.h });
+    }
+  }
+
+  const clear = spots.find((spot) => !shapes.some((shape) => overlaps(spot, shape)) && !placed.some((other) => overlaps(spot, other)));
+
+  if (clear || spots.length === 0) return clear ?? { x: route[0]!.x, y: route[0]!.y, w: size.w, h: size.h };
+  const covered = (spot: Box): number => shapes.reduce((sum, shape) => sum + overlapArea(spot, shape), 0) + 2 * placed.reduce((sum, other) => sum + overlapArea(spot, other), 0);
+
+  return spots.reduce((best, spot) => (covered(spot) < covered(best) ? spot : best));
+}
+
+/** How much of two boxes overlaps, in square units. */
+function overlapArea(a: Box, b: Box): number {
+  return Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
 }
 
 /** The height of `lines` lines of text at `fontSize`. */
@@ -496,6 +544,9 @@ export function toExcalidraw(diagram: Diagram): string {
 
   const boxes = new Map(diagram.nodes.map((node) => [node.id, node]));
   const routes = routeEdges(diagram);
+  // The shapes a label keeps off (an invisible anchor and a fragment's frame are not in the way), and the labels placed so far.
+  const obstacles: Box[] = diagram.nodes.filter((node) => node.kind !== "anchor" && node.kind !== "fragment");
+  const labels: Box[] = [];
 
   for (const edge of diagram.edges) {
     const source = boxes.get(edge.from);
@@ -526,12 +577,16 @@ export function toExcalidraw(diagram: Diagram): string {
       customData: { archdiff: "edge", kind: edge.kind, from: edge.from, to: edge.to },
     });
 
-    // A message's label sits just above its line (beside the loop of a self-call); another edge's label at the middle of the line.
-    if (edge.label) {
-      const self = edge.kind === "message" && edge.from === edge.to;
+    // A message's label sits just above its line (beside the loop of a self-call); another line's on the line, clear of the shapes and the other labels.
+    if (edge.label && edge.kind === "message") {
+      const self = edge.from === edge.to;
       const labelX = self ? start.x + LINE_LABEL.selfDx : (start.x + finish.x) / 2 - LINE_LABEL.w / 2;
-      const labelY = edge.kind === "message" ? (self ? start.y + LINE_LABEL.selfDy : Math.min(start.y, finish.y) - LINE_LABEL.above) : (start.y + finish.y) / 2 - LINE_LABEL.middleUp;
+      const labelY = self ? start.y + LINE_LABEL.selfDy : Math.min(start.y, finish.y) - LINE_LABEL.above;
       elements.push({ ...text(`${id}:text`, id, { x: labelX, y: labelY, w: LINE_LABEL.w, h: LINE_LABEL.h }, edge.label, LINE_LABEL.fontSize), ...(self ? { textAlign: "left" } : {}), customData: { archdiff: "label" } });
+    } else if (edge.label) {
+      const spot = labelSpot(route, { w: Math.min(LINE_LABEL.w, textWidth(edge.label, LINE_LABEL.fontSize) + 4), h: LINE_LABEL.h }, obstacles, labels);
+      labels.push(spot);
+      elements.push({ ...text(`${id}:text`, id, spot, edge.label, LINE_LABEL.fontSize), customData: { archdiff: "label" } });
     }
   }
 

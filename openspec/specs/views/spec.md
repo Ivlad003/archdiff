@@ -104,7 +104,7 @@ The system SHALL apply, with `--overlay tests,storages,heat` in any mix, these m
 
 ### Requirement: The layout is deterministic and lines never cross a shape
 
-The system SHALL rank shapes by their longest path, order each rank by the barycentre of its neighbours, place them in lanes, and route every line orthogonally: out of the right of its source, along a channel in the gap before the target's column, into the target's left; a line over several columns takes a corridor between rows when a shape is in its way; a backward line goes through the gaps beside the columns. The same diagram SHALL give the same places and routes.
+The system SHALL rank shapes by their longest path, order each rank by the barycentre of its neighbours, place them in lanes, and route every line orthogonally: out of the right of its source, along a channel in the gap before the target's column, into the target's left; a line over several columns takes a corridor between rows when a shape is in its way; a backward line goes through the gaps beside the columns. The same diagram SHALL give the same places and routes. A line's label SHALL sit on its line — on the segment with room for it, the longest first — off the other labels, and off the shapes wherever the line leaves room (a label wider than the gap it crosses covers the least it can).
 
 #### Scenario: No line through a shape
 

@@ -98,6 +98,57 @@ test("no route of any view of the sample fixture runs through a shape", async ()
   }
 });
 
+test("a line's label sits on its line, off the other labels, and off the shapes wherever its line leaves room", async () => {
+  const { DEFAULT_PICTURE_OPTIONS } = await import("../src/options.ts");
+  const { toExcalidraw } = await import("../src/export/excalidraw.ts");
+  const { readLogic } = await import("../src/extract/logic.ts");
+  const machines = join(import.meta.dirname, "fixtures/machines");
+  type Element = { id: string; type: string; x: number; y: number; width: number; height: number; text?: string; fontSize?: number; points?: [number, number][]; customData?: { archdiff?: string } };
+  let checked = 0;
+  let onShapes = 0;
+
+  for (const dir of [machines, fixture]) {
+    const analysis = await analyze(dir, { cache: false });
+
+    for (const key of viewList(analysis).map((view) => view.key).filter((key) => key.startsWith("logic:"))) {
+      // The function's body, read as the edge reads it for the page (picture.ts), then the view drawn and placed.
+      const fn = analysis.graph.nodes.get(key.slice("logic:".length))!;
+      const logic = await readLogic(fn.module, readFileSync(join(dir, fn.module), "utf8"), fn.parent ? `${fn.parent}.${fn.name}` : fn.name, fn.line);
+      const diagram = layout(viewOf(analysis, parseView(key)!, DEFAULT_PICTURE_OPTIONS, { logic }));
+      const elements = (JSON.parse(toExcalidraw(diagram)) as { elements: Element[] }).elements;
+      const shapes = elements.filter((element) => element.customData?.archdiff === "node");
+      // A label's box as wide as its text, the way it reads (the box itself may be wider).
+      const labels = elements.filter((element) => element.type === "text" && element.id.startsWith("edge:")).map((element) => {
+        const width = Math.min(element.width, Math.max(...element.text!.split("\n").map((line) => line.length)) * element.fontSize! * 0.6);
+
+        return { ...element, x: element.x + (element.width - width) / 2, width };
+      });
+      const overlaps = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): boolean => a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
+
+      for (const label of labels) {
+        // A label wider than the gap its line crosses between two shapes cannot keep off both: counted, and kept few.
+        if (shapes.some((shape) => overlaps(label, shape))) onShapes++;
+        assert.ok(!labels.some((other) => other !== label && overlaps(label, other)), `${key}: "${label.text}" on another label`);
+        // On its line: the label's centre within a label's height of one of the line's segments.
+        const line = elements.find((element) => element.id === label.id.replace(/:text$/, ""))!;
+        const points = line.points!.map(([px, py]) => ({ x: line.x + px, y: line.y + py }));
+        const centre = { x: label.x + label.width / 2, y: label.y + label.height / 2 };
+        const near = points.slice(1).some((end, i) => {
+          const start = points[i]!;
+          const t = Math.max(0, Math.min(1, ((centre.x - start.x) * (end.x - start.x) + (centre.y - start.y) * (end.y - start.y)) / Math.max(1e-9, (end.x - start.x) ** 2 + (end.y - start.y) ** 2)));
+
+          return Math.hypot(centre.x - (start.x + t * (end.x - start.x)), centre.y - (start.y + t * (end.y - start.y))) <= label.height + label.width / 2;
+        });
+        assert.ok(near, `${key}: "${label.text}" away from its line`);
+        checked++;
+      }
+    }
+  }
+
+  assert.ok(checked >= 10, `${checked} labels checked`);
+  assert.ok(onShapes <= checked / 10, `${onShapes} of ${checked} labels on a shape`);
+});
+
 /** How many times the routes of two different lines cross (segment pairs that intersect). */
 function crossingsOf(diagram: Diagram): number {
   const orient = (p: { x: number; y: number }, q: { x: number; y: number }, r: { x: number; y: number }): number => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
