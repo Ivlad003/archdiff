@@ -421,7 +421,7 @@ function flowchartMermaid(diagram: Diagram): string {
     const to = ids.get(edge.to);
 
     if (!from || !to || edge.kind === "lifeline") continue;
-    const arrow = edge.kind === "ref" || edge.typeOnly || edge.diff === "removed" ? "-.->" : edge.kind === "call" || edge.kind === "message" ? "==>" : "-->";
+    const arrow = edge.kind === "ref" || edge.typeOnly || edge.loads || edge.diff === "removed" ? "-.->" : edge.kind === "call" || edge.kind === "message" ? "==>" : "-->";
     const text = edge.label ? `|${label(edge.label)}|` : "";
     lines.push(`  ${from} ${arrow}${text} ${to}`);
 

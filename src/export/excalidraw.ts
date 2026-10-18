@@ -577,7 +577,7 @@ export function toExcalidraw(diagram: Diagram): string {
     elements.push({
       ...base(id, "arrow", { x: start.x, y: start.y, w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }),
       strokeColor: lineStroke(edge),
-      strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" || edge.typeOnly ? "dashed" : "solid",
+      strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" || edge.typeOnly || edge.loads ? "dashed" : "solid",
       strokeWidth: edge.diff ? 2 : 1,
       points: route.map((point) => [point.x - start.x, point.y - start.y]),
       // No binding: Excalidraw would pull every end to the centre of a side and the ports would collapse into one point.

@@ -1408,6 +1408,20 @@ test("new scaffolds a project with its intent and first commit; import, intent a
     assert.ok(seeded.modules.some((module) => module.id === "src/services/health.ts"));
   }));
 
+test("a file named by a URL — a worker, a child process, a registered hook — is a dashed `loads` line, not an import", () =>
+  withTempDir("archdiff-loads-", (dir) => {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/main.ts"), 'import { spawn } from "node:child_process";\nimport { fileURLToPath } from "node:url";\nimport { helper } from "./helper.ts";\n\nexport function start(): void {\n  helper();\n  new Worker(new URL("./worker.ts", import.meta.url));\n  spawn(process.execPath, [fileURLToPath(new URL("./child.ts", import.meta.url))]);\n}\n');
+    writeFileSync(join(dir, "src/helper.ts"), "export function helper(): void {}\n");
+    writeFileSync(join(dir, "src/worker.ts"), "export function work(): void {}\n");
+    writeFileSync(join(dir, "src/child.ts"), "export function child(): void {}\n");
+    const json = JSON.parse(archdiff(["diagram", "module:src/main.ts", dir, "--format", "json"]).stdout) as { edges: { from: string; to: string; label?: string; loads?: true }[] };
+    const lines = json.edges.map((edge) => `${edge.to}${edge.loads ? " loads" : ""}${edge.label ? ` [${edge.label}]` : ""}`).sort();
+    assert.deepEqual(lines, ["src/child.ts loads [loads]", "src/helper.ts", "src/worker.ts loads [loads]"]);
+    const mermaid = archdiff(["diagram", "module:src/main.ts", dir, "--format", "mermaid"]).stdout;
+    assert.ok(mermaid.includes('src_main_ts -.->|"loads"| src_worker_ts') && mermaid.includes("src_main_ts --> src_helper_ts"), mermaid);
+  }));
+
 test("an import type expression does not make a file a syntax error; a dynamic import call is still a call", () =>
   withTempDir("archdiff-import-type-", (dir) => {
     mkdirSync(join(dir, "src"), { recursive: true });

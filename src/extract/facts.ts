@@ -296,6 +296,11 @@ export interface ImportFact {
    */
   optional?: true;
   /**
+   * The module is named by a URL (`new URL("./w.ts", import.meta.url)`, `import.meta.resolve("./w.ts")`): a file
+   * the module loads or runs — a worker, a child process, a hook it registers — rather than imports.
+   */
+  url?: true;
+  /**
    * The name is written only in a docblock the language does not check (PHP `@var Foo` above a
    * property, `@param Foo $x`), never in the code: the edge's provenance is `docblock`.
    */

@@ -307,14 +307,14 @@ export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file:
       if (imports.length > 0) {
         lines.push("## Imports", "");
 
-        for (const dep of imports) lines.push(`- ${dep.to}${dep.typeOnly ? " (types only)" : ""}${dep.reexport ? " (re-exported)" : ""} — line ${dep.line}`);
+        for (const dep of imports) lines.push(`- ${dep.to}${dep.typeOnly ? " (types only)" : ""}${dep.url ? " (loaded by URL)" : ""}${dep.reexport ? " (re-exported)" : ""} — line ${dep.line}`);
         lines.push("");
       }
 
       if (importers.length > 0) {
         lines.push("## Imported by", "");
 
-        for (const dep of importers) lines.push(`- ${dep.from}${dep.typeOnly ? " (types only)" : ""} — line ${dep.line}`);
+        for (const dep of importers) lines.push(`- ${dep.from}${dep.typeOnly ? " (types only)" : ""}${dep.url ? " (loaded by URL)" : ""} — line ${dep.line}`);
         lines.push("");
       }
     }
@@ -369,7 +369,7 @@ export function edgeMarkdown(edge: Line, diagram: Diagram, analysis: Analysis): 
 
   if (!from || !to) return `# ${edge.from} → ${edge.to}\n\nThe line's ends are not in this view.\n`;
   const lines = [`# ${nameOf(from)} → ${nameOf(to)}`, ""];
-  const what = edge.kind === "dependency" ? "imports" : edge.kind === "call" ? "calls" : edge.kind === "ref" ? "passes as a value (may call)" : edge.kind === "message" ? `message${edge.label ? ` ${edge.label}` : ""}` : "lifeline";
+  const what = edge.kind === "dependency" ? (edge.loads ? "loads by URL (a worker, a child process, a hook)" : "imports") : edge.kind === "call" ? "calls" : edge.kind === "ref" ? "passes as a value (may call)" : edge.kind === "message" ? `message${edge.label ? ` ${edge.label}` : ""}` : "lifeline";
   lines.push(`${nameOf(from)} ${what} ${nameOf(to)}${edge.count !== undefined && edge.count > 1 ? ` — ${edge.count} lines behind this one` : ""}${edge.diff ? ` (${edge.diff})` : ""}.`, "");
   const whereFrom = position(from);
   const whereTo = position(to);
@@ -384,7 +384,7 @@ export function edgeMarkdown(edge: Line, diagram: Diagram, analysis: Analysis): 
   if (imports.length > 0 && (edge.kind === "dependency" || from.kind !== "fn")) {
     lines.push(`## Imports (${imports.length})`, "");
 
-    for (const dep of imports.slice(0, 60)) lines.push(`- \`${dep.from}:${dep.line}\` → ${dep.to}${dep.typeOnly ? " (types only)" : ""}${dep.reexport ? " (re-export)" : ""}`);
+    for (const dep of imports.slice(0, 60)) lines.push(`- \`${dep.from}:${dep.line}\` → ${dep.to}${dep.typeOnly ? " (types only)" : ""}${dep.url ? " (loaded by URL)" : ""}${dep.reexport ? " (re-export)" : ""}`);
 
     if (imports.length > 60) lines.push(`- … ${imports.length - 60} more`);
     lines.push("");

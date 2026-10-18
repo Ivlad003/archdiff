@@ -70,6 +70,8 @@ export interface Dependency {
   /** Only types cross: no runtime dependency. */
   typeOnly: boolean;
   reexport: boolean;
+  /** The module names the file by a URL (`new URL("./w.ts", import.meta.url)`): a worker, a child process, a hook it loads or runs, not an import. */
+  url?: true;
   line: number;
 }
 
@@ -400,7 +402,10 @@ function bindImports(b: Building): void {
       const typeOnly = fact.typeOnly === true || (fact.inlineTypeOnly === true && !b.keepsTypeImports(file.path));
 
       if (target.kind === "file") {
-        b.deps.push({ from: file.path, to: target.path, typeOnly, reexport: fact.reexport, line: fact.line });
+        const dep: Dependency = { from: file.path, to: target.path, typeOnly, reexport: fact.reexport, line: fact.line };
+
+        if (fact.url) dep.url = true;
+        b.deps.push(dep);
       } else if (target.kind === "package" || target.kind === "builtin") {
         // A package by its name; a language's own library by the language: `node:fs`, `py:os`, `rust:std`, `php:strlen`.
         const id = `${target.kind === "package" ? "pkg" : target.runtime === undefined ? "node" : target.runtime === "python" ? "py" : target.runtime}:${target.name}`;

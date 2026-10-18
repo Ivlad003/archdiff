@@ -102,6 +102,8 @@ export interface Line {
   diff?: DiffMark;
   /** Only types cross the line (`import type`): drawn dashed, counted only when asked (`--types`). */
   typeOnly?: true;
+  /** Every import the line stands for names its file by a URL — a worker, a child process, a hook — rather than importing it: drawn dashed, labelled `loads`. */
+  loads?: true;
 }
 
 /** A lane: one layer, a band across the diagram. */

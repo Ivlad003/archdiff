@@ -7,6 +7,10 @@ The coding agent is picked on the page.
 - The Chat tab offers the agents installed on this computer — Claude Code, Cursor, Codex (`codex exec --json`, in its workspace-write sandbox, a follow-up by `codex exec resume`) and OpenCode (`opencode run --format json --auto`) — and the one `archdiff.json` names; the ones not installed are greyed out, "none" only writes the tasks. The page remembers the pick, every run names its agent and a follow-up goes on with the one that holds the session. `archdiff web` needs no `--agent` any more: `--agent claude|cursor|codex|opencode` (or `"agent"` in archdiff.json) is the one picked first, else the first installed. `GET /api/agents` lists them. Codex's and OpenCode's events read like Claude's: the session, the messages, the files a tool wrote (lit on the canvas), the last message as the answer. A custom `"agent"` command says the `protocol` it prints (`stream-json`, `codex`, `opencode`).
 - A page of another site could send a POST to the server (a form, a fetch in no-cors mode) — to start an agent with its own prompt, to write a drawing — though it could not read the answer: a POST whose Origin is not the server's own is refused (403).
 
+What the pictures draw as an import.
+
+- A file a module names by a URL — `new Worker(new URL("./worker.ts", import.meta.url))`, a child process started on `fileURLToPath(new URL(…))`, a hook `module.register` loads — was drawn as an import of it, so a test script that starts the relay read as the host depending on the relay. The line is dashed and labelled `loads`, the module's page says *loaded by URL*, and the layers still count it.
+
 A peek at a shape's lines.
 
 - Hold Alt and press a shape (or a line) on the canvas: its lines alone stay, lit, with the shapes at their ends; every other line goes and the other shapes fade. Let go of the button or of Alt and everything is back. The press picks nothing and pans nothing.

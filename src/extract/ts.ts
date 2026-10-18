@@ -1829,7 +1829,7 @@ function importStatement(node: Node): ImportFact[] {
 /** Literal `import("…")` / `require("…")` anywhere in the file. A non-literal specifier is coverage, not an edge. */
 function collectDynamicImports(root: Node, facts: FileFacts): void {
   // Record one dynamic import, unless the same source on the same line is already an import (a top-level `require`).
-  const add = (node: Node, spec: string, optional: boolean, typeOnly = false): void => {
+  const add = (node: Node, spec: string, optional: boolean, typeOnly = false, url = false): void => {
     const line = node.startPosition.row + 1;
     const same = facts.imports.find((i) => i.source === spec && i.line === line);
 
@@ -1845,6 +1845,9 @@ function collectDynamicImports(root: Node, facts: FileFacts): void {
     if (optional) fact.optional = true;
 
     if (typeOnly) fact.typeOnly = true;
+
+    // Named by a URL: a file loaded or run, not imported.
+    if (url) fact.url = true;
     facts.imports.push(fact);
   };
 
@@ -1856,7 +1859,7 @@ function collectDynamicImports(root: Node, facts: FileFacts): void {
 
       if (specs === null) facts.unsupported.push(unsupportedAt(node, "computed specifier", "whole"));
 
-      for (const spec of specs ?? []) add(node, spec.spec, spec.optional);
+      for (const spec of specs ?? []) add(node, spec.spec, spec.optional, false, true);
     }
 
     // SFCC `module.superModule`: the same file in the next cartridge of the cartridge path, an import the resolver places.
@@ -1877,7 +1880,7 @@ function collectDynamicImports(root: Node, facts: FileFacts): void {
         if (arg?.type === "string") {
           const spec = stringValue(arg);
 
-          if (spec) add(node, spec, false, isImport && inTypePosition(node));
+          if (spec) add(node, spec, false, isImport && inTypePosition(node), isResolve);
         } else if (arg) {
           facts.unsupported.push(unsupportedAt(node, "computed specifier", "whole"));
         }
