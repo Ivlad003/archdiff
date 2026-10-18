@@ -16,7 +16,7 @@ import { updateMinimap, toggleMinimap } from "./minimap.ts";
 import { siblingViews } from "./navigation.ts";
 import { applyOptions } from "./options-panel.ts";
 import { page } from "./page.ts";
-import { select, tools } from "./picking.ts";
+import { select, selection, tools } from "./picking.ts";
 import { projectMapOpen, toggleProjectMap } from "./project-map.ts";
 import { defaultDepth, parseView, usesDepth } from "../../src/view-keys.ts";
 
@@ -181,7 +181,8 @@ export function focusFind(): void {
 
 findInput.addEventListener("input", () => {
   const hits = findShapes(page.nodes(), findInput.value);
-  page.canvas()?.highlight(hits.slice(0, 20).map((node) => node.id));
+  // An empty field gives the selection its light back.
+  page.canvas()?.highlight(findInput.value.trim() === "" ? selection() : hits.slice(0, 20).map((node) => node.id));
 
   if (findInput.value.trim() === "") clearNotice();
   else notice(`${hits.length} ${hits.length === 1 ? "shape matches" : "shapes match"}`);
@@ -205,7 +206,8 @@ findInput.addEventListener("keydown", (event) => {
     }
   } else if (event.key === "Escape") {
     findInput.value = "";
-    page.canvas()?.highlight([]);
+    // The find's light goes; the selection's stays lit, as it stays selected.
+    page.canvas()?.highlight(selection());
     clearNotice();
     findInput.blur();
   }

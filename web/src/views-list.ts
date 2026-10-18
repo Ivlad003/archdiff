@@ -84,10 +84,12 @@ export async function loadViews(): Promise<void> {
   views = response.views;
   setAgentName(response.agent);
   element("root").textContent = response.root;
+  element("root").title = response.root;
   const s = response.stats;
   // A server that cannot follow the code says so here: the pictures stay as they were until a reload.
   const notFollowing = response.watching.problem ? ` · ⚠ not following the code: ${response.watching.problem}` : "";
   element("stats").textContent = `${head ? `at ${head} · ` : ""}${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms${notFollowing}`;
+  element("stats").title = element("stats").textContent;
   renderViews();
 }
 

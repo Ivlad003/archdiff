@@ -51,7 +51,11 @@ export function labelOf(id: string): string {
 // ── A shape's page ───────────────────────────────────────────────────────────
 
 /** The page of a shape (as the server writes it for the picture shown), its neighbours and its code; null: the picture's page. */
+/** The shape pages asked for: a page that comes after a newer pick is dropped, so the panel is the last shape's. */
+let pageLoads = 0;
+
 async function showNode(id: string | null): Promise<void> {
+  const mine = ++pageLoads;
   const state = currentLink();
   const node = id === null ? null : page.nodes().get(id);
 
@@ -70,6 +74,8 @@ async function showNode(id: string | null): Promise<void> {
     markdown = error instanceof Error ? error.message : String(error);
   }
 
+  if (mine !== pageLoads) return;
+
   // A review: the commits that touched the shape's file (a module's page says what the change did to it, another
   // shape its mark). A comparison's module page says what each head did; the history here is the checkout's, not theirs.
   const file = node.ref?.file;
@@ -81,6 +87,8 @@ async function showNode(id: string | null): Promise<void> {
     } catch {
       // Outside git: the shape's page alone.
     }
+
+    if (mine !== pageLoads) return;
   }
 
   setMarkdown(markdownPanel, markdown);
@@ -219,6 +227,8 @@ export function select(ids: string[], centre = false): void {
 /** A new picture, or a new pick: nothing selected yet, and no neighbours of a shape shown (the page is the caller's to show). */
 export function resetSelection(): void {
   selected = [];
+  // The arrow keys walk from a shape of this picture, never from one the last picture had.
+  picked = null;
   renderSelection();
   renderNeighbours(null);
 }

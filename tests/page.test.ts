@@ -432,6 +432,74 @@ test("the branch bar compares two heads: the title, the table from where each le
     },
   ));
 
+test("the review's commit bar steps through its range and keeps it; a link without a base is reviewed from the default", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-commits-",
+    (dir) => {
+      const git = (...args: string[]): void => {
+        const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      git("init", "-q", "-b", "main");
+      git("add", ".");
+      git("commit", "-q", "-m", "base");
+      git("checkout", "-q", "-b", "feature");
+
+      for (const n of [1, 2, 3]) {
+        writeFileSync(join(dir, `src/lib/step${n}.ts`), `export function step${n}(): number {\n  return ${n};\n}\n`);
+        git("add", ".");
+        git("commit", "-q", "-m", `step ${n}`);
+      }
+    },
+    async (origin) => {
+      await page!.goto(`${origin}/#view=review`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "review" && document.querySelectorAll("#commit-list option").length === 4`, undefined, { timeout: 20_000 });
+      const listed = (): Promise<string[]> => page!.evaluate(`[...document.querySelectorAll("#commit-list option")].map((option) => option.textContent.replace(/^\\S+ \\S+ /, ""))`) as Promise<string[]>;
+      assert.equal((await listed()).length, 4);
+      // Each › moves to the next commit of the range; the list keeps the whole range.
+      for (const n of [1, 2, 3]) {
+        const before = (await page!.evaluate("location.hash")) as string;
+        await page!.click("#commit-next");
+        await page!.waitForFunction(`location.hash !== ${JSON.stringify(before)} && window.archdiff.drawn() === "review"`, undefined, { timeout: 20_000 });
+        await page!.waitForFunction(`document.querySelector("#commit-list").selectedOptions[0]?.textContent.endsWith("step ${n}")`, undefined, { timeout: 10_000 });
+        assert.equal((await listed()).length, 4, `after › ${n}`);
+        assert.match((await page!.textContent("#title-text")) ?? "", /— 1 source file changed$/);
+      }
+
+      // ‹ goes back one, still one commit's change.
+      await page!.click("#commit-prev");
+      await page!.waitForFunction(`document.querySelector("#commit-list").selectedOptions[0]?.textContent.endsWith("step 2")`, undefined, { timeout: 10_000 });
+      await page!.waitForFunction(`/— 1 source file changed$/.test(document.querySelector("#title-text")?.textContent ?? "")`, undefined, { timeout: 20_000 });
+      // A link without a base: the base field follows it, empty, whatever it held for the last commit.
+      await page!.evaluate(`location.hash = "view=review"`);
+      await page!.waitForFunction(`!location.hash.includes("base=") && document.querySelector("#base").value === ""`, undefined, { timeout: 10_000 });
+      await page!.waitForFunction(`/— 3 source files changed$/.test(document.querySelector("#title-text")?.textContent ?? "")`, undefined, { timeout: 20_000 });
+    },
+  ));
+
+test("a repository the server cannot read says why on the page; the Flow tab is the picture's own", { skip: !CHROME && "no Chrome installed" }, async () => {
+  // The config broken while the server runs (it refuses to start with one).
+  await withOwnServer(
+    "archdiff-page-broken-",
+    () => {},
+    async (origin, dir) => {
+      writeFileSync(join(dir, "archdiff.json"), '{ "layers": { "lib": 5 } }');
+      await page!.goto(`${origin}/`);
+      await page!.waitForFunction(`!document.querySelector("#empty").hidden`, undefined, { timeout: 20_000 });
+      assert.ok(((await page!.textContent("#empty")) ?? "").includes('archdiff.json: "layers.lib" must be a list of strings'));
+    },
+  );
+  // A calls view has its Flow tab; a module's picture has none, and its panel goes with it.
+  await page!.goto(`${base}/#view=${encodeURIComponent("calls:src/routes/checkout.tsx#action")}`);
+  await page!.waitForFunction(`window.archdiff.drawn()?.startsWith("calls:") && !document.querySelector("#flow-tab").hidden`, undefined, { timeout: 20_000 });
+  await page!.click("#flow-tab");
+  await page!.waitForFunction(`document.querySelector("#flow").classList.contains("active") && document.querySelectorAll("#flow-steps .step").length > 0`, undefined, { timeout: 10_000 });
+  await page!.evaluate(`location.hash = "view=${encodeURIComponent("module:src/lib/log.ts")}"`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/log.ts"`, undefined, { timeout: 20_000 });
+  assert.ok(await page!.evaluate(`document.querySelector("#flow-tab").hidden && !document.querySelector("#flow").classList.contains("active") && document.querySelector("#markdown").classList.contains("active")`));
+  assert.equal(await page!.evaluate(`document.querySelectorAll("#flow-steps .step").length`), 0);
+});
+
 test("a double tap goes in though the page is still busy with its first tap", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.goto(`${base}/?fresh=busy#view=layer%3Alib`);
   await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`);
@@ -656,12 +724,15 @@ test("find (/), the views filter (v), dim (d), lanes, split, the chain between t
   assert.equal(await page!.evaluate("document.activeElement?.id"), "search");
   await page!.keyboard.press("Escape");
   assert.notEqual(await page!.evaluate("document.activeElement?.id"), "search");
-  // The dim tool (d): a tap on orders.ts fades all but it and its neighbours; d again turns it off and clears the dimming.
+  // The dim tool (d): a tap on log.ts fades all but it and its neighbour orders.ts — never a lane's title; d again turns it off and clears the dimming.
   await page!.keyboard.press("d");
   await page!.waitForFunction(`document.querySelector("#tool-dim").classList.contains("active")`);
-  await page!.mouse.click(orders.x, orders.y);
-  await page!.waitForFunction(`window.archdiff.canvas().scene().some((element) => element.opacity === 18)`, undefined, { timeout: 8000 });
-  assert.equal(await page!.evaluate(`window.archdiff.canvas().scene().find((element) => element.id === "src/lib/orders.ts").opacity`), 100);
+  // Past the double tap's half second: log.ts was tapped (with Shift) just before.
+  await page!.waitForTimeout(700);
+  await page!.mouse.click(log.x, log.y);
+  const opacity = (id: string): Promise<number> => page!.evaluate(`window.archdiff.canvas().scene().find((element) => element.id === ${JSON.stringify(id)}).opacity`) as Promise<number>;
+  await page!.waitForFunction(`window.archdiff.canvas().scene().find((element) => element.id === "src/db/store.ts")?.opacity === 18`, undefined, { timeout: 8000 });
+  assert.deepEqual([await opacity("src/lib/log.ts"), await opacity("src/lib/orders.ts"), await opacity("lane:db:text")], [100, 100, 100]);
   await page!.keyboard.press("d");
   await page!.waitForFunction(`!window.archdiff.canvas().scene().some((element) => element.opacity === 18)`);
   // Find: typing counts the matches, Enter centres the first and opens it (the viewport moves: taps by position come before this).

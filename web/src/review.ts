@@ -21,9 +21,8 @@ let commits: Commit[] = [];
 
 /** The base and head fields as the link has them; the commits bar for a review, the branches bar for a review or a comparison. */
 export function showReviewBars(state: Link): void {
-  const base = new URLSearchParams(location.hash.slice(1)).get("base");
-
-  if (base !== null) baseInput.value = base;
+  // The base is the link's: a link without one is reviewed from the default base, whatever the field held before.
+  baseInput.value = new URLSearchParams(location.hash.slice(1)).get("base") ?? "";
   headInput.value = state.head ?? "";
   element("commits").hidden = state.view !== "review";
   element("branches").hidden = !reviewing(state.view);
@@ -36,9 +35,25 @@ baseInput.addEventListener("change", () => {
   if (reviewing(currentLink().view)) setLink(currentLink());
 });
 
+/** The range the commit bar lists (its base and head), kept while a commit of it is picked: stepping stays in the range. */
+let range: { base: string | null; head: string | null } | null = null;
+
 export async function loadCommits(state: Link): Promise<void> {
+  // A commit of the listed range picked (its own change, base the commit before it): the bar keeps the range and moves the pick.
+  const at = commits.findIndex((commit) => commit.sha === state.head || commit.short === state.head);
+  const picked = commits[at];
+  const before = at > 0 ? commits[at - 1]!.sha : (range?.base ?? "");
+
+  if (range && picked && baseInput.value.trim() === before) {
+    commitList.value = picked.sha;
+    element("commit-note").textContent = "this commit against the one before it";
+
+    return;
+  }
+
   try {
-    const result = await api.commits(baseInput.value.trim() || null, state.head);
+    range = { base: baseInput.value.trim() || null, head: state.head };
+    const result = await api.commits(range.base, range.head);
     commits = result.commits;
     commitList.replaceChildren();
     const whole = document.createElement("option");
@@ -66,8 +81,9 @@ function reviewCommit(index: number): void {
   const commit = commits[index];
 
   if (!commit) return;
+  // The first commit of the range against the range's own base, each later one against the one before it.
   const previous = commits[index - 1];
-  baseInput.value = previous ? previous.sha : "";
+  baseInput.value = previous ? previous.sha : (range?.base ?? "");
   setLink({ ...currentLink(), view: "review", head: commit.sha, heads: [] });
 }
 
@@ -75,8 +91,11 @@ commitList.addEventListener("change", () => {
   const index = commits.findIndex((commit) => commit.sha === commitList.value);
 
   if (index === -1) {
-    baseInput.value = "";
-    setLink({ ...currentLink(), view: "review", head: null, heads: [] });
+    // The whole range again: its own base and head, and the bar reads it afresh.
+    const whole = range;
+    range = null;
+    baseInput.value = whole?.base ?? "";
+    setLink({ ...currentLink(), view: "review", head: whole?.head ?? null, heads: [] });
   } else reviewCommit(index);
 });
 element<HTMLButtonElement>("commit-prev").addEventListener("click", () => {

@@ -164,11 +164,18 @@ export function showPicturePage(): void {
 // ── Code and coverage ────────────────────────────────────────────────────────
 
 /** The code of a shape: the file with the shape's lines marked and scrolled into view. */
+/** The files the Code tab has asked for: only the newest one is drawn. */
+let codeLoads = 0;
+
 export async function showCode(node: Shape): Promise<void> {
   const file = node.ref?.file;
+  // A file asked for after this one draws instead: the code of the shape picked last, however slow the first was.
+  const mine = ++codeLoads;
 
   if (!file) {
+    // Nothing to copy either: the last file's text would pass for this shape's.
     codePanel.textContent = "";
+    delete codePanel.dataset["text"];
 
     return;
   }
@@ -178,10 +185,14 @@ export async function showCode(node: Shape): Promise<void> {
   try {
     text = await api.file(file, codeHead(currentLink()));
   } catch (error) {
+    if (mine !== codeLoads) return;
     codePanel.textContent = error instanceof Error ? error.message : String(error);
+    delete codePanel.dataset["text"];
 
     return;
   }
+
+  if (mine !== codeLoads) return;
 
   const from = node.ref?.line ?? 1;
   const to = node.ref?.endLine ?? from;

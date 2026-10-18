@@ -151,6 +151,8 @@ interface Mounted {
   api: ExcalidrawImperativeAPI | null;
   mode: "view" | "edit";
   versions: SceneVersions | null;
+  /** The generated shapes selected in the editor when it last said so: a drag changes the scene, not the selection. */
+  selectedKey?: string;
   cover: () => CanvasCover;
   placed: { by: "fit"; at: Viewport } | { by: "given" } | null;
   /** Told after every fit whether the whole scene is on the canvas (a picture too big even at the smallest zoom is not). */
@@ -219,11 +221,25 @@ function arrowsAt(elements: readonly CanvasElement[], x: number, y: number, tole
   return near.sort((a, b) => a.distance - b.distance).map((entry) => entry.line);
 }
 
+/** Whether the page is dark (theme.ts's class on the root element). */
+function pageIsDark(): boolean {
+  return document.documentElement.classList.contains("dark");
+}
+
 function CanvasView({ elements, events, mounted, onApi, modeState }: CanvasProps) {
   const [mode, setMode] = useState(modeState[0]);
   useEffect(() => modeState[1](setMode), [modeState]);
+  // The canvas follows the page's theme: Excalidraw's dark theme, as the ◐ button or the system sets it.
+  const [dark, setDark] = useState(pageIsDark);
+  useEffect(() => {
+    const watcher = new MutationObserver(() => setDark(pageIsDark()));
+    watcher.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
+    return () => watcher.disconnect();
+  }, []);
   return (
     <Excalidraw
+      theme={dark ? "dark" : "light"}
       initialData={{ elements: restoreElements(asExcalidraw(elements), null), appState: { viewBackgroundColor: "#ffffff" }, scrollToContent: true }}
       excalidrawAPI={(ready) => {
         onApi(ready);
@@ -240,9 +256,15 @@ function CanvasView({ elements, events, mounted, onApi, modeState }: CanvasProps
           // The generated shapes among the selected elements, in the scene's order: one picks, several select.
           const chosen = new Set(Object.keys(appState.selectedElementIds));
           const selected = changed.filter((element) => chosen.has(element.id) && !element.isDeleted && (element.customData as { archdiff?: string } | undefined)?.archdiff === "node").map((element) => element.id);
-          events.pick(selected.length === 1 ? (selected[0] ?? null) : null);
+          // Only a new selection is a pick: every step of a drag changes the scene, and each pick asks the server for a page.
+          const key = selected.join("\u0000");
 
-          if (selected.length !== 1) events.selection?.(selected);
+          if (key !== mounted.selectedKey) {
+            mounted.selectedKey = key;
+            events.pick(selected.length === 1 ? (selected[0] ?? null) : null);
+
+            if (selected.length !== 1) events.selection?.(selected);
+          }
         }
       }}
       UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: true, toggleTheme: false, clearCanvas: false, changeViewBackgroundColor: false } }}
@@ -497,8 +519,8 @@ function makeLights(mounted: Mounted): { highlight: CanvasHandle["highlight"]; d
     const role = element.customData?.["archdiff"];
     const next = { ...look };
 
-    // The dim fades a shape, a line and the label or the counts of one it does not keep; a lane never.
-    if (kept !== null && owner !== undefined && (role === "node" || role === "edge" || role === "label" || role === "beyond") && !kept.has(owner.id)) next.opacity = DIMMED_OPACITY;
+    // The dim fades a shape, a line and the label or the counts of one it does not keep; a lane never, nor its title.
+    if (kept !== null && owner !== undefined && owner.customData?.["archdiff"] !== "lane" && (role === "node" || role === "edge" || role === "label" || role === "beyond") && !kept.has(owner.id)) next.opacity = DIMMED_OPACITY;
 
     // The tap's light: a line gets the colour and a thick stroke, a shape a warm fill too; the hover's sits under it.
     if (lit.ids.has(element.id) && (role === "node" || role === "edge")) {
@@ -646,7 +668,7 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
           return new Blob([new XMLSerializer().serializeToString(svg)], { type: "image/svg+xml" });
         }
 
-        return exportToBlob({ elements: chosen, appState, files, mimeType: "image/png", quality: 1, exportPadding: 24 });
+        return exportToBlob({ elements: chosen, appState, files, mimeType: "image/png", exportPadding: 24 });
       },
       scrollToContent: fit,
       moved,

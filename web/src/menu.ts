@@ -28,6 +28,8 @@ function ensure(): HTMLUListElement {
   });
   window.addEventListener("blur", closeMenu);
   document.addEventListener("scroll", closeMenu, true);
+  // The wheel moves the canvas under the menu (no scroll event): the menu would point at another place.
+  document.addEventListener("wheel", closeMenu, { capture: true, passive: true });
 
   return menu;
 }

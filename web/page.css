@@ -83,6 +83,24 @@ body {
   flex: 1;
 }
 
+/* A long repository path or stats line gives way (ellipsis, the whole in its tooltip); the controls never do. */
+#top #root,
+#top #stats {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#top > :not(#root):not(#stats):not(.spacer) {
+  flex-shrink: 0;
+}
+
+/* Hidden is hidden, whatever display a rule gives the element (a strip of chips is a flex box). */
+[hidden] {
+  display: none !important;
+}
+
 #top input[type="number"] {
   width: 52px;
 }
@@ -269,14 +287,18 @@ body.hide-right #right {
   overflow: hidden;
 }
 
+/* The title takes its room first; the hint has what is left (none, on a narrow canvas). */
 #title-text {
+  flex: 0 1 auto;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 #hint {
-  margin-left: auto;
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: right;
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -311,6 +333,23 @@ body.hide-right #right {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A narrow canvas (under 730 pixels: a laptop with both panels open) gets Excalidraw's phone layout, its toolbar
+   along the bottom: the reason sits above it, the whole width. */
+#canvas-wrap:has(.excalidraw--mobile) #reason {
+  left: 12px;
+  right: 12px;
+  bottom: 56px;
+}
+
+/* The minimap above that toolbar too, and the reason beside it. */
+#canvas-wrap:has(.excalidraw--mobile) #minimap {
+  bottom: 56px;
+}
+
+#canvas-wrap:has(.excalidraw--mobile):has(#minimap:not([hidden])) #reason {
+  right: 246px;
 }
 
 #legend {

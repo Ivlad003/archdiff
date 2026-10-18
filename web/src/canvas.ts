@@ -93,7 +93,8 @@ document.addEventListener("visibilitychange", () => {
 function coveredEdges(): CanvasCover {
   const box = element("canvas").getBoundingClientRect();
   const tools = element("canvas-tools").getBoundingClientRect();
-  const rows = [element("reason"), ...element("canvas").querySelectorAll(".layer-ui__wrapper__footer")].map((row) => row.getBoundingClientRect()).filter((row) => row.height > 0);
+  // Excalidraw's footer of zoom and help, or in its phone layout (a narrow canvas) the toolbar along the bottom.
+  const rows = [element("reason"), ...element("canvas").querySelectorAll(".layer-ui__wrapper__footer, .excalidraw--mobile .App-toolbar")].map((row) => row.getBoundingClientRect()).filter((row) => row.height > 0);
   const minimap = element<HTMLCanvasElement>("minimap");
   const corner = minimap.hidden ? null : minimap.getBoundingClientRect();
 

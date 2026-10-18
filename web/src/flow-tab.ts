@@ -44,14 +44,30 @@ let lastFlow: import("./api.ts").FlowResponse["flow"] | null = null;
 let mockInput: HTMLTextAreaElement | null = null;
 let mockStorages: { id: string; field: HTMLTextAreaElement }[] = [];
 
+/** The flows asked for: one that comes after a newer picture's is dropped, so the tab is the picture's own. */
+let flowLoads = 0;
+
 export async function loadFlow(): Promise<void> {
+  const mine = ++flowLoads;
   const state = currentLink();
+  // Another picture: no steps, mocks or run of the last one stay.
   flowMocks.replaceChildren();
   flowSteps.replaceChildren();
+  element("flow-run-result").replaceChildren();
+  lastFlow = null;
+  flowMarkdown = "";
   element("flow-tab").hidden = entryOf(state.view) === null;
 
-  if (element("flow-tab").hidden) return;
+  if (element("flow-tab").hidden) {
+    // Its panel goes with its tab: the picture's page shows instead.
+    if (element("flow").classList.contains("active")) page.showTab("markdown");
+
+    return;
+  }
+
   const { flow, markdown } = await api.flow(state.view, state.depth);
+
+  if (mine !== flowLoads) return;
   lastFlow = flow;
   flowMarkdown = markdown;
   const entryId = entryOf(state.view)!;
@@ -141,9 +157,13 @@ async function playFlow(): Promise<void> {
   const button = element<HTMLButtonElement>("flow-play");
   button.disabled = true;
   page.showTab("flow");
+  // The steps are of this picture: another one opened stops the play, and its lights are left alone.
+  const playing = state.view;
+  const here = (): boolean => currentLink().view === playing;
 
   try {
     for (const step of lastFlow.steps) {
+      if (!here()) break;
       page.canvas()?.highlight([step.id]);
 
       for (const row of flowSteps.querySelectorAll<HTMLElement>(".step")) row.classList.toggle("playing", row.dataset["id"] === step.id);
@@ -151,7 +171,7 @@ async function playFlow(): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 700));
     }
   } finally {
-    page.canvas()?.highlight([]);
+    if (here()) page.canvas()?.highlight([]);
 
     for (const row of flowSteps.querySelectorAll<HTMLElement>(".step")) row.classList.remove("playing");
     button.disabled = false;

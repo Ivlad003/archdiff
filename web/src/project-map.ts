@@ -432,7 +432,11 @@ export function toggleProjectMap(force?: boolean): void {
     schedule();
   }
 
-  element<HTMLInputElement>("map-search").focus();
+  // A fresh search each time the map opens: the last one's would fade every dot that does not match it.
+  const field = element<HTMLInputElement>("map-search");
+  field.value = "";
+  search = "";
+  field.focus();
 }
 
 export function projectMapOpen(): boolean {

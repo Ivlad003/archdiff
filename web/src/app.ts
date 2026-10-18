@@ -65,10 +65,17 @@ bindPage({
   renderMarkdown,
   showCode,
   load: () => load(),
-  loadViews,
+  // After an agent run the code changed: the views, the stats and the coverage.
+  loadViews: reloadCode,
 });
 
 /** What the canvas does on a tap, a double tap, its own selection (a box in the editor) and a right click. */
+/** The code changed (a file saved, an agent run): the views, the stats and the coverage read it again. */
+async function reloadCode(): Promise<void> {
+  await loadViews();
+  void loadCoverage();
+}
+
 const CANVAS_EVENTS = {
   pick: tap,
   open: openShape,
@@ -188,7 +195,7 @@ api.changes((path) => {
   }
 
   notice(`${path} changed — reloaded`);
-  void loadViews().then(() => load());
+  void reloadCode().then(() => load());
 });
 
 window.addEventListener("hashchange", () => {
@@ -206,7 +213,18 @@ element<HTMLButtonElement>("back").addEventListener("click", () => history.back(
 (window as unknown as { archdiff: unknown }).archdiff = { canvas: canvasHandle, state: currentLink, nodes: () => nodes, drawn: () => drawn, selected: selection, mapDots, mapSettled, menuOpen };
 
 void (async () => {
-  await loadViews();
+  // A repository the server cannot read (a broken archdiff.json) is said in the middle of the page, not a blank one.
+  try {
+    await loadViews();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showNoTitle();
+    setMarkdown(markdownPanel, message);
+    showEmpty({ head: "The repository could not be read", why: message });
+
+    return;
+  }
+
   await load();
   await loadCoverage();
   await loadTasks();
