@@ -301,7 +301,7 @@ export function usageView(analysis: Analysis, id: string): PictureContent {
     const users = used.get(node.id)!;
     const drawn = node.kind === "type" ? { ...fnNode(graph, node.id), label: `type ${node.name}` } : fnNode(graph, node.id);
 
-    return users.size === 0 ? { ...drawn, label: `${drawn.label}\n(unused outside)`, diff: "changed" as const, group: id } : { ...drawn, group: id };
+    return users.size === 0 ? { ...drawn, label: `${drawn.label}\n(unused outside)`, diff: "warning" as const, group: id } : { ...drawn, group: id };
   });
   const edges: Line[] = [];
   const usedImporters = new Set<string>();
@@ -418,7 +418,7 @@ export function testsView(graph: Graph): PictureContent {
     const by = covered.get(id)?.size ?? 0;
     const node = { ...moduleNode(graph, id), label: `${id}\n${by === 0 ? "no tests" : `${by} test file${by === 1 ? "" : "s"}`}`, count: by };
 
-    return by === 0 ? { ...node, diff: "changed" } : node;
+    return by === 0 ? { ...node, diff: "warning" } : node;
   });
   const untested = nodes.filter((node) => node.count === 0).length;
 

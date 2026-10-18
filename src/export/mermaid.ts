@@ -9,7 +9,7 @@
 // Entry points: `toMermaid`, `mermaidStyleFor`, `mermaidMismatch`,
 // `MERMAID_STYLES`.
 
-import type { Diagram, Shape } from "../diagram.ts";
+import type { Diagram, Line, Shape } from "../diagram.ts";
 
 /** A Mermaid-safe node ID: letters, digits and underscores, unique per diagram. */
 function mermaidIds(nodes: readonly Shape[]): Map<string, string> {
@@ -28,8 +28,9 @@ function mermaidIds(nodes: readonly Shape[]): Map<string, string> {
   return ids;
 }
 
+/** A label as Mermaid quotes it; an empty one is a space, since Mermaid refuses `[""]` (an empty cell, a machine's start). */
 function label(text: string): string {
-  return `"${text.replace(/"/g, "#quot;").replace(/\n/g, "<br/>")}"`;
+  return text === "" ? '" "' : `"${text.replace(/"/g, "#quot;").replace(/\n/g, "<br/>")}"`;
 }
 
 function shape(node: Shape, id: string): string {
@@ -208,7 +209,8 @@ function c4Mermaid(diagram: Diagram): string {
 
 /** The metrics as a quadrant chart: instability across, abstractness up; the main sequence runs from top left to bottom right. */
 function metricsQuadrant(diagram: Diagram): string {
-  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "quadrantChart", `  title ${diagram.title.replace(/\n/g, " ")}`, "  x-axis stable (depended upon) --> unstable (depends on others)", "  y-axis concrete --> abstract", "  quadrant-1 zone of uselessness", "  quadrant-2 main sequence", "  quadrant-3 zone of pain", "  quadrant-4 main sequence"];
+  // An axis's words are quoted: Mermaid reads a bare parenthesis as syntax.
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "quadrantChart", `  title ${diagram.title.replace(/\n/g, " ")}`, '  x-axis "stable (depended upon)" --> "unstable (depends on others)"', "  y-axis concrete --> abstract", "  quadrant-1 zone of uselessness", "  quadrant-2 main sequence", "  quadrant-3 zone of pain", "  quadrant-4 main sequence"];
 
   for (const row of diagram.metrics!.modules.slice(0, 60)) lines.push(`  "${row.id.replace(/"/g, "'")}": [${(0.03 + 0.94 * row.instability).toFixed(2)}, ${(0.03 + 0.94 * row.abstractness).toFixed(2)}]`);
 
@@ -242,8 +244,47 @@ function pieMermaid(diagram: Diagram): string {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * The branches as a gitGraph: the base's commits in order, each branch opened where its first commit leaves from —
+ * a commit of the base, of the branch it was started on, or the base's earlier commits — its commits after it.
+ */
+function branchesGitgraph(diagram: Diagram): string {
+  const base = diagram.groups[0]?.id ?? "main";
+  // `mainBranchName`: the base is the graph's first branch, whatever its name.
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), `%%{init: { "gitGraph": { "mainBranchName": "${base}" } } }%%`, "gitGraph"];
+  const inLane = (lane: string): Shape[] => diagram.nodes.filter((node) => node.group === lane).sort((a, b) => a.x - b.x);
+  // The lane each branch leaves from, by the shape its first line comes out of.
+  const leaves = new Map<string, string[]>();
+
+  for (const lane of diagram.groups.slice(1)) {
+    const first = inLane(lane.id)[0];
+    const from = first ? diagram.edges.find((edge) => edge.to === first.id)?.from : undefined;
+
+    if (from) leaves.set(from, [...(leaves.get(from) ?? []), lane.id]);
+  }
+
+  const commit = (node: Shape): string => (node.kind === "more" ? `  commit id: "${node.label.replace(/"/g, "'")} (${node.group})" type: HIGHLIGHT` : `  commit id: "${node.label.split("\n").slice(0, 2).join(" ").replace(/"/g, "'")}"`);
+  // A lane's commits, and after each one the branches that leave from it, each checked out and closed again.
+  const walk = (lane: string): void => {
+    for (const node of inLane(lane)) {
+      lines.push(commit(node));
+
+      for (const branch of leaves.get(node.id) ?? []) {
+        lines.push(`  branch ${JSON.stringify(branch)}`, `  checkout ${JSON.stringify(branch)}`);
+        walk(branch);
+        lines.push(`  checkout ${JSON.stringify(lane)}`);
+      }
+    }
+  };
+
+  walk(base);
+
+  return `${lines.join("\n")}\n`;
+}
+
 /** The timeline as a gitGraph: one commit per bar, tagged with the couplings it added or removed. */
 function gitgraphMermaid(diagram: Diagram): string {
+  if (diagram.view === "branches") return branchesGitgraph(diagram);
   const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "gitGraph"];
 
   for (const node of diagram.nodes.filter((candidate) => candidate.id.startsWith("commit:"))) {
@@ -258,15 +299,18 @@ function gitgraphMermaid(diagram: Diagram): string {
 
 /** The shapes as a mindmap under their lanes: a directory or layer tree at a glance. */
 function mindmapMermaid(diagram: Diagram): string {
-  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "mindmap", `  root((${diagram.title.split("\n")[0]!.replace(/[()]/g, "")}))`];
+  // Every node by an ID with its text quoted: a bare `[slug]` or `{ type }` in a path or a statement is a mindmap shape.
+  let next = 0;
+  const node = (text: string): string => `n${next++}["${text === "" ? " " : text.replace(/"/g, "'")}"]`;
+  const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "mindmap", `  root(("${diagram.title.split("\n")[0]!.replace(/"/g, "'")}"))`];
   const byGroup = new Map<string | undefined, Shape[]>();
 
-  for (const node of diagram.nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);
+  for (const shape of diagram.nodes) byGroup.set(shape.group, [...(byGroup.get(shape.group) ?? []), shape]);
 
   for (const [group, members] of byGroup) {
-    if (group !== undefined) lines.push(`    ${group.replace(/[()]/g, "")}`);
+    if (group !== undefined) lines.push(`    ${node(group)}`);
 
-    for (const node of members) lines.push(`${group !== undefined ? "      " : "    "}${node.label.split("\n")[0]!.replace(/[()]/g, "")}`);
+    for (const member of members) lines.push(`${group !== undefined ? "      " : "    "}${node(member.label.split("\n")[0]!)}`);
   }
 
   return `${lines.join("\n")}\n`;
@@ -276,7 +320,7 @@ function mindmapMermaid(diagram: Diagram): string {
 export function mermaidStyleFor(diagram: Diagram, style: MermaidStyle): Exclude<MermaidStyle, "auto"> {
   if (style !== "auto") return style;
 
-  if (diagram.view === "timeline") return "gitgraph";
+  if (diagram.view === "timeline" || diagram.view === "branches") return "gitgraph";
 
   if (diagram.metrics) return "quadrant";
 
@@ -289,7 +333,7 @@ export function mermaidStyleFor(diagram: Diagram, style: MermaidStyle): Exclude<
 export function mermaidMismatch(diagram: Diagram, style: MermaidStyle): string | null {
   const only = MERMAID_ONLY_FOR[style];
 
-  return only && parseView(diagram.view)?.kind !== only.kind ? `${style} draws ${only.what}` : null;
+  return only && !only.kinds.includes(parseView(diagram.view)?.kind ?? "") ? `${style} draws ${only.what}` : null;
 }
 
 /** The text with a Mermaid comment after its first line (the generated mark). */
@@ -328,6 +372,15 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
 }
 
 /** The picture as a flowchart: lanes as subgraphs, shapes by kind, the lines by kind, the marks as classes. */
+/** How a marked line is drawn: the colours of the marked shapes' classes. */
+const LINK_STYLES: Record<NonNullable<Line["diff"]>, string> = {
+  added: "stroke:#2e7d32,stroke-width:3px",
+  removed: "stroke:#c62828,stroke-width:3px",
+  changed: "stroke:#ef6c00,stroke-width:3px",
+  warning: "stroke:#ef6c00,stroke-width:3px",
+  planned: "stroke:#1565c0,stroke-width:3px",
+};
+
 function flowchartMermaid(diagram: Diagram): string {
   // The feet of a sequence's lifelines and its frames are no shapes of a flowchart; its participants and messages are.
   const nodes = diagram.nodes.filter((node) => node.kind !== "anchor" && node.kind !== "fragment");
@@ -353,15 +406,24 @@ function flowchartMermaid(diagram: Diagram): string {
 
   for (const node of nodes) if (node.group === undefined || !diagram.groups.some((group) => group.id === node.group)) lines.push(`  ${shape(node, ids.get(node.id)!)}`);
 
+  // The marked lines by their place among the links written: `linkStyle` colours a link by its index.
+  const markedLinks = new Map<NonNullable<Line["diff"]>, number[]>();
+  let link = 0;
+
   for (const edge of diagram.edges) {
     const from = ids.get(edge.from);
     const to = ids.get(edge.to);
 
     if (!from || !to || edge.kind === "lifeline") continue;
-    const arrow = edge.kind === "ref" || edge.typeOnly ? "-.->" : edge.kind === "call" || edge.kind === "message" ? "==>" : "-->";
+    const arrow = edge.kind === "ref" || edge.typeOnly || edge.diff === "removed" ? "-.->" : edge.kind === "call" || edge.kind === "message" ? "==>" : "-->";
     const text = edge.label ? `|${label(edge.label)}|` : "";
     lines.push(`  ${from} ${arrow}${text} ${to}`);
+
+    if (edge.diff) markedLinks.set(edge.diff, [...(markedLinks.get(edge.diff) ?? []), link]);
+    link++;
   }
+
+  for (const [mark, links] of markedLinks) lines.push(`  linkStyle ${links.join(",")} ${LINK_STYLES[mark]}`);
 
   const marked = nodes.filter((node) => node.diff);
 

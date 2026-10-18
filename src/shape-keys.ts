@@ -106,7 +106,14 @@ export function tagOf(shape: Shape): { tag: string; label: string } | null {
   }
 }
 
-/** The element ID of a line on the canvas: a message by its index too, since one pair of shapes may exchange several. */
-export function lineElementId(line: Line, index: number): string {
-  return `edge:${line.from}->${line.to}${line.kind === "message" ? `:${index}` : ""}`;
+/**
+ * The element ID of the line at `index` of a picture's lines: by its two ends, and by its index too when one pair
+ * of shapes has several — a sequence's messages always, two cases of a switch that end in one place, two
+ * transitions between two states — so every ID of a scene is its own.
+ */
+export function lineElementId(lines: readonly Line[], index: number): string {
+  const line = lines[index]!;
+  const again = line.kind === "message" || lines.slice(0, index).some((other) => other.from === line.from && other.to === line.to);
+
+  return `edge:${line.from}->${line.to}${again ? `:${index}` : ""}`;
 }

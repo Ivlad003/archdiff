@@ -61,7 +61,7 @@ export function neighbourhoodOf(edges: readonly Line[], id: string): string[] {
   const keep = new Set([id]);
   edges.forEach((edge, index) => {
     if (edge.from === id || edge.to === id) {
-      keep.add(lineElementId(edge, index));
+      keep.add(lineElementId(edges, index));
       keep.add(edge.from);
       keep.add(edge.to);
     }
@@ -85,7 +85,7 @@ export function chainFrom(edges: readonly Line[], line: PickedLine, cap = 300): 
     for (const id of frontier) {
       edges.forEach((edge, index) => {
         if (edge.from !== id || edge.kind === "lifeline" || lineIds.length >= cap) return;
-        lineIds.push(lineElementId(edge, index));
+        lineIds.push(lineElementId(edges, index));
         hops.push({ edge, depth });
 
         if (!seen.has(edge.to)) {

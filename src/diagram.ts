@@ -70,6 +70,8 @@ export interface Shape {
   beyond?: { before: BeyondSide; after: BeyondSide };
   /** How many things the shape stands for when it summarises (a layer: its modules). */
   count?: number;
+  /** A folded shape (`more`): the IDs of the shapes of the picture it stands for, which the Markdown lists. */
+  members?: string[];
   x: number;
   y: number;
   w: number;

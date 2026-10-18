@@ -273,7 +273,7 @@ function showChain(from: string, to: string): void {
   const ids = new Set([from, to]);
 
   for (const step of chain) {
-    ids.add(lineElementId(step.edge, step.index));
+    ids.add(lineElementId(page.edges(), step.index));
     ids.add(step.edge.from);
     ids.add(step.edge.to);
   }

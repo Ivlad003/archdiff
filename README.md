@@ -125,7 +125,7 @@ A call is followed when its callee is a declaration of the same file, an import 
 
 ## Which Mermaid type where
 
-Every view exports as a Mermaid flowchart; some views read better as another Mermaid type, chosen with `--mermaid` (or the export menu on the page). `--mermaid flowchart` draws any picture as a flowchart (a sequence as its modules and numbered messages); a type that does not fit the view — a gitGraph off the timeline, a state diagram of no machine — is not drawn empty: the picture keeps its own type, with a comment saying why.
+Every view exports as a Mermaid flowchart; some views read better as another Mermaid type, chosen with `--mermaid` (or the export menu on the page). `--mermaid flowchart` draws any picture as a flowchart (a sequence as its modules and numbered messages); a type that does not fit the view — a gitGraph off the timeline and the branches, a state diagram of no machine, a quadrant off the hotspots and the metrics — is not drawn empty: the picture keeps its own type, with a comment saying why. A marked line (added, removed, changed) keeps its colour in a flowchart (`linkStyle`), and a folded shape's Markdown lists every shape it stands for.
 
 | View | Mermaid type | Why |
 | --- | --- | --- |
@@ -135,6 +135,7 @@ Every view exports as a Mermaid flowchart; some views read better as another Mer
 | `hotspots` | `quadrantChart` (`--mermaid quadrant`) | size against calls in, the big and central modules top right |
 | `layers`, any lanes | `pie` (`--mermaid pie`) | the share of modules per layer |
 | `timeline` | `gitGraph` (automatic) | commits in order, tagged where a coupling appeared |
+| `branches` | `gitGraph` (automatic) | each branch opened where it left the base or the branch it was started on |
 | `dir:`, `layer:` | `mindmap` (`--mermaid mindmap`) | a tree of what lives where |
 | `matrix`, `metrics` | a Markdown table (`metrics` also a `quadrantChart`) | a matrix is a table; I against A is a quadrant |
 | `machine:` | `stateDiagram-v2` (automatic) | states and transitions in their own notation |

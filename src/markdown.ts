@@ -125,7 +125,8 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
 
     for (const node of nodes) {
       const where = position(node);
-      const mark = node.diff && node.diff !== "warning" ? ` (${node.diff})` : "";
+      // A change's mark; a cell's colour (a bar of the timeline, a cell of the matrix) is no change of it.
+      const mark = node.diff && node.diff !== "warning" && node.kind !== "cell" ? ` (${node.diff})` : "";
       const detail = node.kind === "hole" ? ` — not followed: ${node.reason ?? ""}` : node.signature ? ` \`${node.signature}\`` : node.count !== undefined && node.kind === "layer" ? ` — ${node.count} modules` : "";
       // The further lines of a label are what the overlays found (no tests, ⛁ a store, N calls in); a class lists its members elsewhere.
       const [first, ...rest] = node.label.split("\n");
@@ -133,6 +134,9 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
       // Where the code leads on past the picture's depth, as the canvas counts it under the shape.
       const beyond = node.beyond ? ` — beyond the picture: ${[node.beyond.before.count > 0 ? `◂ ${node.beyond.before.count} before` : "", node.beyond.after.count > 0 ? `${node.beyond.after.count} after ▸` : ""].filter(Boolean).join(", ")}` : "";
       lines.push(`- **${first}**${mark}${found}${detail}${where ? ` — ${where}` : ""}${beyond}`);
+
+      // A folded shape: what it stands for, every one, since the picture shows them as one.
+      for (const member of node.members ?? []) lines.push(`  - ${member}`);
     }
 
     lines.push("");

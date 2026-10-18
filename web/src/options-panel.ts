@@ -61,8 +61,9 @@ export function showOptions(state: Link): void {
   // A type that draws another kind of view (a state diagram of no machine, a gitGraph of no timeline) is greyed out.
   for (const option of mermaidSelect.options) {
     const only = isMermaidStyle(option.value) ? MERMAID_ONLY_FOR[option.value] : undefined;
-    option.disabled = only !== undefined && only.kind !== kind && option.value !== state.mermaid;
-    option.title = only !== undefined && only.kind !== kind ? `draws ${only.what} only` : "";
+    const other = only !== undefined && !only.kinds.includes(kind ?? "");
+    option.disabled = other && option.value !== state.mermaid;
+    option.title = other ? `draws ${only.what} only` : "";
   }
 
   mermaidSelect.value = state.mermaid;

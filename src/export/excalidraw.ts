@@ -555,7 +555,7 @@ export function toExcalidraw(diagram: Diagram): string {
     const target = boxes.get(edge.to);
 
     if (!source || !target) continue;
-    const id = lineElementId(edge, diagram.edges.indexOf(edge));
+    const id = lineElementId(diagram.edges, diagram.edges.indexOf(edge));
     const route = edge.route ?? routes.get(edge) ?? [centre.get(edge.from)!, centre.get(edge.to)!];
     const start = route[0]!;
     const finish = route[route.length - 1]!;

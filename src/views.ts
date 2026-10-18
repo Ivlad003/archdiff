@@ -337,7 +337,7 @@ function coverageView(graph: Graph): PictureContent {
   for (const call of graph.calls) callsOf.set(moduleOf(call.from), (callsOf.get(moduleOf(call.from)) ?? 0) + 1);
   const nodes = [...gapsOf]
     .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
-    .map(([id, gaps]): Shape => ({ ...moduleNode(graph, id), label: `${id}\n${gaps} gaps / ${callsOf.get(id) ?? 0} calls`, count: gaps, diff: "changed" }));
+    .map(([id, gaps]): Shape => ({ ...moduleNode(graph, id), label: `${id}\n${gaps} gaps / ${callsOf.get(id) ?? 0} calls`, count: gaps, diff: "warning" }));
 
   return unplaced("What the diagrams cannot show", nodes, [], lanesOf(graph, nodes), nodes.length === 0 ? { reason: "every import and call was followed" } : {});
 }

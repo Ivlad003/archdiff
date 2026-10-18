@@ -137,9 +137,10 @@ export function fold(diagram: Diagram, limit: number): Diagram {
 
   if (folded.length > 12) {
     const rest = folded.slice(11);
-    const other: Shape & { members: string[] } = { id: "more", kind: "more", label: "other", count: rest.reduce((sum, shape) => sum + (shape.count ?? 0), 0), x: 0, y: 0, w: 0, h: 0, members: rest.flatMap((shape) => shape.members) };
+    // Its own ID: a group "more" of other shapes may be among those kept.
+    const other: Shape & { members: string[] } = { id: "more:(other)", kind: "more", label: "other", count: rest.reduce((sum, shape) => sum + (shape.count ?? 0), 0), x: 0, y: 0, w: 0, h: 0, members: rest.flatMap((shape) => shape.members) };
 
-    for (const member of other.members) groupOfId.set(member, "more");
+    for (const member of other.members) groupOfId.set(member, "more:(other)");
     folded = [...folded.slice(0, 11), other];
   }
 
@@ -161,7 +162,7 @@ export function fold(diagram: Diagram, limit: number): Diagram {
   }
 
   const edges = [...merged.values()].map((edge) => (edge.count === 1 && !diagram.edges.includes(edge) ? { from: edge.from, to: edge.to, kind: edge.kind } : edge));
-  const nodes = [...kept, ...folded.map(({ members: _members, ...shape }) => shape)];
+  const nodes = [...kept, ...folded];
   const lanes = diagram.groups.filter((group) => nodes.some((node) => node.group === group.id));
   const note = `${dropped.length} of ${diagram.nodes.length} shapes folded by directory; tap a folded shape to open it, the Markdown lists them all`;
 

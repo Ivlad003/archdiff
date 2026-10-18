@@ -85,10 +85,12 @@ export function toArchimate(diagram: Diagram): string {
   for (const [index, edge] of diagram.edges.entries()) {
     // Lifelines are drawing, not architecture; a sequence's messages are numbered so two calls between the same pair stay apart.
     if (!known.has(edge.from) || !known.has(edge.to) || edge.kind === "lifeline") continue;
-    const id = xmlId("rel", `${edge.from}->${edge.to}:${edge.kind}${edge.kind === "message" ? `:${index}` : ""}`);
+    // Several lines between one pair (a sequence's messages, two transitions of a machine) stay apart by their index.
+    const again = edge.kind === "message" || diagram.edges.slice(0, index).some((other) => other.from === edge.from && other.to === edge.to && other.kind === edge.kind);
+    const id = xmlId("rel", `${edge.from}->${edge.to}:${edge.kind}${again ? `:${index}` : ""}`);
     relationships.push(`    <relationship identifier="${id}" source="${xmlId("id", edge.from)}" target="${xmlId("id", edge.to)}" xsi:type="${relationType(edge)}">${edge.label ? `<name xml:lang="en">${escapeXml(edge.label)}</name>` : ""}</relationship>`);
     const colour = edge.diff === "added" ? '<style><lineColor r="46" g="125" b="50"/></style>' : edge.diff === "removed" ? '<style><lineColor r="198" g="40" b="40"/></style>' : edge.diff === "planned" ? '<style><lineColor r="21" g="101" b="192"/></style>' : edge.diff === "warning" || edge.diff === "changed" ? '<style><lineColor r="239" g="108" b="0"/></style>' : "";
-    viewEdges.push(`      <connection identifier="${xmlId("conn", `${edge.from}->${edge.to}:${edge.kind}${edge.kind === "message" ? `:${index}` : ""}`)}" relationshipRef="${id}" xsi:type="Relationship" source="${xmlId("node", edge.from)}" target="${xmlId("node", edge.to)}">${colour}</connection>`);
+    viewEdges.push(`      <connection identifier="${xmlId("conn", `${edge.from}->${edge.to}:${edge.kind}${again ? `:${index}` : ""}`)}" relationshipRef="${id}" xsi:type="Relationship" source="${xmlId("node", edge.from)}" target="${xmlId("node", edge.to)}">${colour}</connection>`);
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>

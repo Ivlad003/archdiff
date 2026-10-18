@@ -110,6 +110,9 @@ test("a big view folds its tail into shapes by directory and says so", () => {
   );
   assert.ok(diagram.edges.some((edge) => edge.from.startsWith("more:") || edge.to.startsWith("more:")));
   assert.ok(diagram.reason?.includes("folded"));
+  // The Markdown lists what each folded shape stands for, as the reason says.
+  const markdown = archdiff(["diagram", "layer:lib", fixture, "--limit", "2"]).stdout;
+  assert.ok(markdown.includes("- **… 1 in src/db/**\n  - src/db/store.ts\n"), markdown);
 });
 
 test("the whole map keeps every module up to 200 where the other views fold above 40", () =>
@@ -182,6 +185,8 @@ test("every export is well formed: the XML parses, every Excalidraw ID is unique
     ["sequence:src/checkout.ts#checkout", machines],
     ["logic:src/order.ts#pay", machines],
     ["machine:src/order.ts#status", machines],
+    // Two transitions between one pair of states, a line each.
+    ["machine:src/light.ts#light", machines],
     ["classes", fixture],
     ["matrix", fixture],
     ["metrics", fixture],
@@ -193,6 +198,8 @@ test("every export is well formed: the XML parses, every Excalidraw ID is unique
       const { status, stdout } = archdiff(["diagram", view, dir, "--format", format]);
       assert.equal(status, 0, `${view} ${format}`);
       assert.equal(xmlProblem(stdout), null, `${view} as ${format}`);
+      const identifiers = [...stdout.matchAll(/identifier="([^"]+)"/g)].map((match) => match[1]);
+      assert.equal(new Set(identifiers).size, identifiers.length, `${view} as ${format}: an identifier twice`);
     }
 
     const scene = JSON.parse(archdiff(["diagram", view, dir, "--format", "excalidraw"]).stdout) as { elements: { id: string; type: string; containerId?: string | null; boundElements: { id: string }[] | null }[] };
@@ -206,6 +213,14 @@ test("every export is well formed: the XML parses, every Excalidraw ID is unique
       for (const bound of element.boundElements ?? []) assert.ok(known.has(bound.id), `${view}: ${element.id} names a missing bound element ${bound.id}`);
     }
   }
+
+  // Mermaid 11 refuses an empty label (`[""]`), a bare parenthesis on an axis, a bracket in a mindmap's text.
+  const matrix = archdiff(["diagram", "matrix", fixture, "--format", "mermaid"]).stdout;
+  assert.ok(!matrix.includes('[""]') && matrix.includes('[" "]'), matrix);
+  assert.ok(archdiff(["diagram", "metrics", fixture, "--format", "mermaid"]).stdout.includes('  x-axis "stable (depended upon)" --> "unstable (depends on others)"'));
+  assert.match(archdiff(["diagram", "modules", fixture, "--format", "mermaid", "--mermaid", "mindmap"]).stdout, /\n {6}n\d+\["src\/lib\/orders\.ts"\]\n/);
+  // A quadrant draws the hotspots or the metrics, nothing else.
+  assert.ok(archdiff(["diagram", "matrix", fixture, "--format", "mermaid", "--mermaid", "quadrant"]).stdout.includes("%% --mermaid quadrant: quadrant draws the hotspots or the metrics, so the picture is written as its own type"));
 
   // The checker itself refuses what it should.
   assert.equal(xmlProblem('<a x="1"><b/></a>'), null);
@@ -313,6 +328,8 @@ export default function Checkout() {
     assert.ok(stdout.includes("## Functions added\n\n- fn `loader`"), stdout);
     assert.ok(stdout.includes("- src/routes/checkout.tsx → src/db/store.ts"), stdout);
     assert.ok(stdout.includes("class src_routes_checkout_tsx changed"), stdout);
+    // The import added is coloured as its module is: a line keeps its mark in Mermaid too.
+    assert.match(stdout, /src_routes_checkout_tsx --> src_db_store_ts\n(.*\n)*  linkStyle \d+(,\d+)* stroke:#2e7d32,stroke-width:3px\n/);
     const json = JSON.parse(archdiff(["review", dir, "--base", "HEAD", "--format", "json"]).stdout) as { callsAdded: { from: string; to: string }[] };
     assert.ok(json.callsAdded.some((edge) => edge.from === "src/routes/checkout.tsx#action" && edge.to === "src/db/store.ts#readOrder"));
     // No change: exit 0 and an empty picture.
@@ -814,7 +831,7 @@ test("cycles, events, tests, packages and timeline on a repository that has them
     assert.ok(events.includes("event_order_placed -.->|\"on\"| packages_app_src_b_ts_onPlaced"), events);
     const tests = JSON.parse(archdiff(["diagram", "tests", dir, "--format", "json"]).stdout) as { nodes: { id: string; count?: number; diff?: string }[] };
     assert.equal(tests.nodes.find((node) => node.id === "packages/app/src/a.ts")?.count, 1);
-    assert.equal(tests.nodes.find((node) => node.id === "packages/app/src/b.ts")?.diff, "changed");
+    assert.equal(tests.nodes.find((node) => node.id === "packages/app/src/b.ts")?.diff, "warning");
     assert.ok(!tests.nodes.some((node) => node.id.includes("test/")));
     const packages = archdiff(["diagram", "packages", dir, "--format", "mermaid"]).stdout;
     // app declares lib and its test imports one file of it.
@@ -863,7 +880,7 @@ test("a deep depth is drawn with a warning, not refused; a Mermaid type asked fo
   const machines = join(root, "tests/fixtures/machines");
   // A gitGraph of no timeline, a state diagram of no machine: the picture's own type, and why.
   const gitgraph = mermaid("module:src/lib/orders.ts", fixture, "gitgraph");
-  assert.ok(gitgraph.includes("%% --mermaid gitgraph: gitgraph draws the commits of the timeline, so the picture is written as its own type\n") && gitgraph.includes("\nflowchart LR\n"), gitgraph);
+  assert.ok(gitgraph.includes("%% --mermaid gitgraph: gitgraph draws the commits of the timeline or of the branches, so the picture is written as its own type\n") && gitgraph.includes("\nflowchart LR\n"), gitgraph);
   const state = mermaid("module:src/lib/orders.ts", fixture, "state");
   assert.ok(state.includes("%% --mermaid state: state draws a machine, so the picture is written as its own type") && state.includes("\nflowchart LR\n"), state);
   assert.ok(mermaid("machine:src/order.ts#status", machines, "state").includes("\nstateDiagram-v2\n"));
@@ -980,6 +997,11 @@ test("the branches picture lays each branch from the commit it left, and a commi
     assert.ok(picture.edges.some((edge) => edge.from === `commit:${a}` && edge.to === `commit:${stacked}`));
     assert.equal(picture.nodes.filter((node) => node.group === "stacked").length, 1);
     assert.ok(picture.reason?.includes("level with main or merged: level"), picture.reason);
+    // As Mermaid, a gitGraph: each branch opened where it left, the stacked one from feature-a.
+    const graph = archdiff(["diagram", "branches", dir, "--format", "mermaid"]).stdout;
+    assert.ok(graph.includes('%%{init: { "gitGraph": { "mainBranchName": "main" } } }%%\ngitGraph\n'), graph);
+    assert.ok(graph.includes(`  branch "feature-a"\n  checkout "feature-a"\n  commit id: "${a.slice(0, 7)} · `), graph);
+    assert.ok(/checkout "feature-a"\n {2}commit id: "[^"]+"\n {2}branch "stacked"/.test(graph), graph);
     // A commit's picture: what it did against the commit before it, headed and stamped by the commit.
     const commit = archdiff(["diagram", `commit:${a.slice(0, 7)}`, dir]);
     assert.equal(commit.status, 0, commit.stderr);
