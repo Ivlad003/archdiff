@@ -23,7 +23,7 @@
 // Entry points: `extractPhp`, `NAME_ARG_MEMBERS`.
 
 import { asciiLowerCase } from "../languages.ts";
-import type { ArgFact, AttributeFact, CallFact, ChainLinkFact, DeclFact, ExportRow, FieldFact, FileFacts, ImportFact, LiteralFact, MethodSigFact, ParamFact, PassFact, PropertyFact, ResultCallFact, ResultTypeFact, TypeRefFact, UnsupportedFact, ValueOfFact, ValueRefFact } from "./facts.ts";
+import { boundForm, passable, type ArgFact, type AttributeFact, type CallFact, type ChainLinkFact, type DeclFact, type ExportRow, type FieldFact, type FileFacts, type ImportFact, type LiteralFact, type MethodSigFact, type ParamFact, type PassFact, type PropertyFact, type ResultTypeFact, type TypeRefFact, type UnsupportedFact, type ValueOfFact, type ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, located, startCol, unsupportedAt, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
 
@@ -1074,40 +1074,31 @@ function valueType(expr: Node, scope: Scope, collector: Collector): VarType | nu
 
   // A call: its result class is not known here, only which call it is; the graph looks up the declared result type.
   if (CALL_NODES.has(n.type) && n.type !== "object_creation_expression" && !firstClassCallable(n)) {
-    const call = resultCall(n, scope, collector);
+    const of = resultCall(n, scope, collector);
 
-    return call ? { of: { call } } : null;
+    return of ? { of } : null;
   }
 
   return null;
 }
 
-/** A call as the receiver of another: its callee as `calleeOf` reads it, and the member it calls; null when the graph could not look it up. */
-function resultCall(n: Node, scope: Scope, collector: Collector): ResultCallFact | null {
+/** A call as the value another reads — its callee as `calleeOf` reads it, with the literal arguments and the docblock of its receiver's class; null when the graph could not look it up. */
+function resultCall(n: Node, scope: Scope, collector: Collector): ValueOfFact | null {
   const fact = calleeOf(n, scope, collector);
 
-  // An opaque callee is only usable when it is itself a call on a known result (`on`).
-  if (!fact || (fact.opaque && !fact.on)) return null;
+  // An expression archdiff does not name gives a value of unknown class.
+  if (!fact || fact.form.kind === "opaque") return null;
   const nameNode = n.type === "function_call_expression" ? n.childForFieldName("function") : n.childForFieldName("name");
 
   if (nameNode?.type !== "name" && nameNode?.type !== "qualified_name") return null;
-  const member = n.type === "function_call_expression" ? fact.callee : nameNode.text;
   const args = argsOf(n, scope.names, scope.ctx ? qualify(scope.names.ns, scope.ctx.name) : null);
 
   // Arguments are kept only when one of them is an informative literal, as on a call fact.
-  const call: ResultCallFact = args.some((a) => informative(a.value)) ? { args, callee: fact.callee, member } : { callee: fact.callee, member };
+  const value: ValueOfFact = args.some((a) => informative(a.value)) ? { call: fact.form, args } : { call: fact.form };
 
-  if (fact.bound) call.bound = fact.bound;
+  if (fact.docblock) value.docblock = fact.docblock;
 
-  if (fact.receiver) call.receiver = fact.receiver;
-
-  if (fact.docblock) call.docblock = fact.docblock;
-
-  if (fact.on) call.on = fact.on;
-
-  if (fact.opaque) call.opaque = true;
-
-  return call;
+  return value;
 }
 
 /**
@@ -1692,11 +1683,7 @@ function passesOf(call: Node, scope: Scope, collector: Collector): PassFact[] {
 
       if (!found) return;
       const at = located(found.node);
-      const pass: Omit<PassFact, "text" | "line" | "col" | "endLine" | "endCol"> = { arg: index, path: "", callee: found.callee };
-
-      if (found.bound) pass.bound = found.bound;
-
-      if (found.receiver) pass.receiver = found.receiver;
+      const pass: Omit<PassFact, "text" | "line" | "col" | "endLine" | "endCol"> = { arg: index, path: "", callee: found.callee, form: found.form };
 
       if (found.docblock) pass.docblock = found.docblock;
       // Object.assign appends the text and position after the optional keys, in the key order of a pass fact.
@@ -1707,14 +1694,20 @@ function passesOf(call: Node, scope: Scope, collector: Collector): PassFact[] {
 }
 
 /** A callable an expression names, with the node that spells it. */
-interface CallableRef extends Pick<CallFact, "callee" | "bound" | "receiver" | "docblock"> {
+interface CallableRef extends Pick<CallFact, "callee" | "form" | "docblock"> {
   node: Node;
+}
+
+/** The method `name` of a holder written as `this` (the enclosing class) or a class name, as a callable reference names it; null without a holder. */
+function methodRef(holder: string | null, name: string, node: Node): CallableRef | null {
+  if (holder === null) return null;
+
+  return { callee: `${holder}.${name}`, form: holder === "this" ? { kind: "own", member: name } : { kind: "member", head: holder, member: name }, node };
 }
 
 /** The callable an expression names, with the node that spells it; null when it names none archdiff can follow. */
 function callableOf(value: Node, scope: Scope, collector: Collector, plainStrings: boolean): CallableRef | null {
   const node = unparenthesized(value);
-  const method = (holder: string | null, name: string): string | null => (holder ? `${holder}.${name}` : null);
 
   // `[target, 'method']`: exactly two elements, the second a string that is a valid PHP identifier.
   if (node.type === "array_creation_expression") {
@@ -1729,12 +1722,12 @@ function callableOf(value: Node, scope: Scope, collector: Collector, plainString
     if (target.type === "variable_name") {
       const variable = target.text.replace(/^\$/, "");
 
-      if (variable === "this") return scope.ctx ? { callee: `this.${name}`, node } : null;
+      if (variable === "this") return scope.ctx ? methodRef("this", name, node) : null;
       const type = scope.vars(variable);
 
       // `[$obj, 'm']` is followed only when `$obj` has one known class (not a call result, not an array).
       if (!type || !("cls" in type) || type.element) return null;
-      const ref: CallableRef = { callee: `${variable}.${name}`, bound: scope.bound.get(variable) ?? "local", receiver: type.cls, node };
+      const ref: CallableRef = { callee: `${variable}.${name}`, form: { kind: "typed", type: type.cls, member: name }, node };
 
       if (type.docblock) ref.docblock = type.docblock;
 
@@ -1748,7 +1741,7 @@ function callableOf(value: Node, scope: Scope, collector: Collector, plainString
 
       if (!prop || !field || field.element) return null;
 
-      const ref: CallableRef = { callee: `this.${prop.text}.${name}`, receiver: field.cls, node };
+      const ref: CallableRef = { callee: `this.${prop.text}.${name}`, form: { kind: "typed", type: field.cls, member: name }, node };
 
       if (field.docblock) ref.docblock = field.docblock;
 
@@ -1759,15 +1752,14 @@ function callableOf(value: Node, scope: Scope, collector: Collector, plainString
       const [scopeNode, constant] = target.namedChildren;
 
       if (asciiLowerCase(constant?.text ?? "") !== "class" || !scopeNode) return null;
-      const callee = method(classHolder(scopeNode, name, scope, collector), name);
 
-      return callee ? { callee, node } : null;
+      return methodRef(classHolder(scopeNode, name, scope, collector), name, node);
     }
 
     // A class name in a string is fully qualified, whatever `use` and namespace surround it.
     const written = stringValue(target);
 
-    if (written && /^\\?[A-Za-z_\x80-￿][A-Za-z0-9_\\\x80-￿]*$/.test(written) && !SPECIAL_CLASSES.has(asciiLowerCase(written))) return { callee: `${collector.klass(qualifiedString(written), target, scope.names)}.${name}`, node };
+    if (written && /^\\?[A-Za-z_\x80-￿][A-Za-z0-9_\\\x80-￿]*$/.test(written) && !SPECIAL_CLASSES.has(asciiLowerCase(written))) return methodRef(collector.klass(qualifiedString(written), target, scope.names), name, node);
 
     return null;
   }
@@ -1782,11 +1774,15 @@ function callableOf(value: Node, scope: Scope, collector: Collector, plainString
     if (scoped) {
       if (SPECIAL_CLASSES.has(asciiLowerCase(scoped[1]!))) return null;
 
-      return { callee: `${collector.klass(qualifiedString(scoped[1]!), node, scope.names)}.${scoped[2]}`, node };
+      return methodRef(collector.klass(qualifiedString(scoped[1]!), node, scope.names), scoped[2]!, node);
     }
 
     // `'helper'` or `'App\helper'`: a function name, where the callee reads strings as callables.
-    if (plainStrings && /^\\?[A-Za-z_\x80-￿][A-Za-z0-9_\\\x80-￿]*$/.test(text)) return { callee: collector.fn(qualifiedString(text), node, scope.names), node };
+    if (plainStrings && /^\\?[A-Za-z_\x80-￿][A-Za-z0-9_\\\x80-￿]*$/.test(text)) {
+      const name = collector.fn(qualifiedString(text), node, scope.names);
+
+      return { callee: name, form: { kind: "name", name }, node };
+    }
 
     return null;
   }
@@ -1802,14 +1798,10 @@ function callableOf(value: Node, scope: Scope, collector: Collector, plainString
   if (CALL_NODES.has(node.type) && firstClassCallable(node)) {
     const fact = calleeOf(node, scope, collector);
 
-    // A variable of unknown class (`$x->m(...)`) names no method archdiff can follow.
-    if (!fact || fact.opaque || (fact.bound && !fact.receiver)) return null;
+    // A variable of unknown class (`$x->m(...)`), or the result of a call, names no method archdiff follows as a value.
+    if (!fact || !passable(fact.form)) return null;
 
-    const ref: CallableRef = { callee: fact.callee, node };
-
-    if (fact.bound) ref.bound = fact.bound;
-
-    if (fact.receiver) ref.receiver = fact.receiver;
+    const ref: CallableRef = { callee: fact.callee, form: fact.form, node };
 
     if (fact.docblock) ref.docblock = fact.docblock;
 
@@ -1910,7 +1902,7 @@ function firstClassCallable(n: Node): boolean {
  * an opaque expression. Null for a first-class callable (`f(...)`), which is a
  * value.
  */
-function callOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "callee" | "bound" | "receiver" | "opaque" | "docblock" | "param" | "on" | "member"> | null {
+function callOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "callee" | "form" | "docblock" | "param"> | null {
   // `f(...)` calls nothing: record the name as read, and no call.
   if (n.type !== "object_creation_expression" && firstClassCallable(n)) {
     callableValue(n, scope, collector);
@@ -1922,9 +1914,13 @@ function callOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "ca
 }
 
 /** The callee of a call node as `callOf` reads it, whether or not the arguments are `(...)`. */
-function calleeOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "callee" | "bound" | "receiver" | "opaque" | "docblock" | "param" | "on" | "member"> | null {
+function calleeOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "callee" | "form" | "docblock" | "param"> | null {
   // A call archdiff cannot name: its text, whitespace collapsed and cut to `MAX_CALLEE`.
-  const opaque = (): Pick<CallFact, "callee" | "opaque"> => ({ callee: n.text.replace(/\s+/g, " ").slice(0, MAX_CALLEE), opaque: true });
+  const opaque = (): Pick<CallFact, "callee" | "form"> => ({ callee: n.text.replace(/\s+/g, " ").slice(0, MAX_CALLEE), form: { kind: "opaque" } });
+  /** A callee that is a name of the file's scope: a function, a class. */
+  const named = (name: string): Pick<CallFact, "callee" | "form"> => ({ callee: name, form: { kind: "name", name } });
+  /** `X.m`: a member of a name of the file's scope (a class, the enclosing class by its name). */
+  const memberOf = (head: string, member: string): Pick<CallFact, "callee" | "form"> => ({ callee: `${head}.${member}`, form: { kind: "member", head, member } });
 
   // `new X`, `new self`, `new parent`, `new $class`; an anonymous class constructs nothing named.
   if (n.type === "object_creation_expression") {
@@ -1936,11 +1932,12 @@ function calleeOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "
     if (written) {
       const lower = asciiLowerCase(written);
 
-      if (lower === "self" || lower === "static") return scope.ctx ? { callee: scope.ctx.name } : opaque();
+      if (lower === "self" || lower === "static") return scope.ctx ? named(scope.ctx.name) : opaque();
 
-      if (lower === "parent") return scope.ctx ? { callee: "super" } : opaque();
+      // `new parent()`: the base class's constructor, which no node of the graph stands for.
+      if (lower === "parent") return scope.ctx ? named("super") : opaque();
 
-      return { callee: collector.klass(written, target, scope.names) };
+      return named(collector.klass(written, target, scope.names));
     }
 
     if (target.type === "variable_name") return variableCall(target.text.replace(/^\$/, ""), scope);
@@ -1965,7 +1962,7 @@ function calleeOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "
 
       if (lower === "eval") collector.noteUnsupported(n, "`eval` runs code archdiff cannot read", scope.symbol);
 
-      return { callee: collector.fn(written, fn, scope.names) };
+      return named(collector.fn(written, fn, scope.names));
     }
 
     if (fn?.type === "variable_name") return variableCall(fn.text.replace(/^\$/, ""), scope);
@@ -1988,15 +1985,15 @@ function calleeOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "
 
       if (!scope.ctx) return opaque();
 
-      if (relative === "parent") return { callee: `super.${member}` };
+      if (relative === "parent") return { callee: `super.${member}`, form: { kind: "super", member } };
 
       // `self::m()` of an instance method is a call on `$this`; of a static one, a call on the class.
-      return scope.ctx.statics.has(asciiLowerCase(member)) ? { callee: `${scope.ctx.name}.${member}` } : { callee: `this.${member}` };
+      return scope.ctx.statics.has(asciiLowerCase(member)) ? memberOf(scope.ctx.name, member) : { callee: `this.${member}`, form: { kind: "own", member } };
     }
 
     const written = classNameOf(scopeNode);
 
-    if (written) return { callee: `${collector.klass(written, scopeNode!, scope.names)}.${member}` };
+    if (written) return memberOf(collector.klass(written, scopeNode!, scope.names), member);
 
     if (scopeNode?.type === "variable_name") return variableCall(`${scopeNode.text.replace(/^\$/, "")}.${member}`, scope);
 
@@ -2010,16 +2007,16 @@ function calleeOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "
     const variable = object.text.replace(/^\$/, "");
 
     // `$this` outside a class (a closure bound later) is a value of unknown class.
-    if (variable === "this") return scope.ctx ? { callee: `this.${member}` } : { callee: `this.${member}`, bound: "local" };
+    if (variable === "this") return { callee: `this.${member}`, form: scope.ctx ? { kind: "own", member } : { kind: "value" } };
     const fact = variableCall(`${variable}.${member}`, scope);
     const type = scope.vars(variable);
 
     // `$x = $this->repo->get(); $x->save()`: the class of the result `get` declares, which the graph reads.
-    if (type && "of" in type) return { ...fact, on: type.of, member };
+    if (type && "of" in type) return { callee: fact.callee, form: { kind: "result", of: type.of, member } };
 
     // No class, or an array of one (no methods to call): a call through a value.
     if (!type || type.element) return fact;
-    const typed: Pick<CallFact, "callee" | "bound" | "receiver" | "docblock"> = { ...fact, receiver: type.cls };
+    const typed: Pick<CallFact, "callee" | "form" | "docblock"> = { callee: fact.callee, form: { kind: "typed", type: type.cls, member } };
 
     if (type.docblock) typed.docblock = type.docblock;
 
@@ -2034,7 +2031,7 @@ function calleeOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "
       const field = scope.ctx?.fields.get(prop.text);
       const param = scope.ctx?.params.get(prop.text);
       // A property of unknown class: a call through a value, as `self.queue.put()` in Python.
-      const call: Pick<CallFact, "callee" | "bound" | "receiver" | "docblock" | "param"> = !field || field.element ? { callee: `this.${prop.text}.${member}`, bound: "local" } : { callee: `this.${prop.text}.${member}`, receiver: field.cls };
+      const call: Pick<CallFact, "callee" | "form" | "docblock" | "param"> = { callee: `this.${prop.text}.${member}`, form: !field || field.element ? { kind: "value" } : { kind: "typed", type: field.cls, member } };
 
       if (field && !field.element && field.docblock) call.docblock = field.docblock;
 
@@ -2053,15 +2050,15 @@ function calleeOf(n: Node, scope: Scope, collector: Collector): Pick<CallFact, "
     const callee = `${object.text.replace(/\s+/g, " ")}.${member}`;
 
     // A long constructor expression falls through to opaque rather than being cut.
-    if (callee.length <= MAX_CALLEE) return { callee, receiver: collector.klass(created, creation, scope.names) };
+    if (callee.length <= MAX_CALLEE) return { callee, form: { kind: "typed", type: collector.klass(created, creation, scope.names), member } };
   }
 
-  // `$this->repo()->save()`, `->total()->tax()`: an expression archdiff does not name, whose class is
-  // the declared result type of the call it is — the graph reads it (`on`).
+  // `$this->repo()->save()`, `->total()->tax()`: a call written as the receiver, whose class is the declared result
+  // type of the call it is — the graph reads it; the text is the whole expression archdiff does not name.
   if (creation && CALL_NODES.has(creation.type) && creation.type !== "object_creation_expression" && !firstClassCallable(creation)) {
     const inner = resultCall(creation, scope, collector);
 
-    if (inner) return { ...opaque(), on: { call: inner }, member };
+    if (inner) return { callee: opaque().callee, form: { kind: "result", of: inner, member, inline: true } };
   }
 
   return opaque();
@@ -2076,12 +2073,12 @@ function unparenthesized(node: Node): Node {
   return inner;
 }
 
-/** A call through a variable: `$f()`, `$x->m()`, `$class::m()`. */
-function variableCall(callee: string, scope: Scope): Pick<CallFact, "callee" | "bound"> {
+/** A call through a variable: `$f()` is the binding's, `$x->m()` and `$class::m()` members of a value of unknown class. */
+function variableCall(callee: string, scope: Scope): Pick<CallFact, "callee" | "form"> {
   const head = callee.split(".")[0]!;
 
   // A variable the function never binds (a closure's `use`, a global read implicitly) counts as local.
-  return { callee, bound: scope.bound.get(head) ?? "local" };
+  return { callee, form: boundForm(callee, scope.bound.get(head) ?? "local") };
 }
 
 /** `f(...)`, `$this->m(...)`, `X::m(...)`: the function or method read as a value. */

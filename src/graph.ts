@@ -3,26 +3,30 @@
 // edge. A call it cannot follow (a dynamic callee, a method on a value of
 // unknown class) is a gap, counted and listed, never a guessed edge.
 //
-// Call resolution, in order: a member of what another call returns
-// (`const s = makeStore(); s.m()`) → the member `m` of the class the
-// call's target declares as its result; `new X().m` → a member of `X`; a
-// call whose receiver type the extractor saw (`const s = new X(); s.m()`,
-// a parameter or field typed `X`) → the member `m` of `X` (a class,
-// interface or type the file declares or imports, bases and traits
-// followed; through an interface, every class implementing it); a name a
+// A call is resolved by the form of its callee as the frontend read it
+// (`Callee`, facts.ts), one way per form: a name → a declaration of the
+// same file, else an import binding → the export of the file it names
+// (re-exports and globs followed); `X.m` → a static or instance member of
+// a class `X`, an export `m` of a namespace `X`, or a member of the class
+// of a constant `X` made with `new` or by a call; `this.m` → a member of
+// the enclosing class, `super.m` of the one it extends; a member of a
+// value whose class the syntax names (`const s = new X(); s.m()`, a
+// parameter or field typed `X`, `new X().m()`) → the member of `X` (a
+// class, interface or type the file declares or imports, bases and traits
+// followed; through an interface, every class implementing it); a member
+// of what another call returns (`const s = makeStore(); s.m()`) → the
+// member of the class the call's target declares as its result; a name a
 // `require` or an `import()` of the function binds → that module's
-// export; `name` → a declaration of the same file, else an import binding
-// → the export of the file it names (re-exports and globs followed);
-// `this.m` → a member of the enclosing class; `X.m` → a static or
-// instance member of a class `X`, an export `m` of a namespace `X`, or a
-// member of the class of a constant `X` made with `new` or by a call.
+// export. A callee bound in the body, a member of an untracked value, the
+// language's own functions and an expression archdiff cannot name are
+// gaps by their form.
 //
 // Pipeline: FileFacts[] + Config + resolver → Graph. Entry points:
 // `buildGraph`, `nodeId`, `moduleOf`, and the types.
 
 import type { Config } from "./config.ts";
 import { layerOf } from "./config.ts";
-import type { CallFact, DeclFact, FileFacts, GuardFact, ResultCallFact, ValueOfFact } from "./extract/facts.ts";
+import { dottedForm, type Callee, type CallFact, type DeclFact, type FileFacts, type GuardFact, type ValueOfFact } from "./extract/facts.ts";
 import type { Resolution } from "./resolve.ts";
 
 /** A file of the repository. */
@@ -472,54 +476,44 @@ class CallResolver {
     return found ? { id: found } : { gap: "unknown-member" };
   }
 
-  /** Where a call lands, by the form of its callee: a member of another call's result, `new X().m`, a member of a typed receiver, a plain name, `this.m`, `ns.f` or `x.m`. */
-  resolve(module: string, enclosingClass: string | null, call: CallFact): CallTarget {
-    // `const s = makeStore(); s.save()`, PHP's `$this->repo()->save()`: a member of the class the other call's target
-    // declares as its result.
-    if (call.on) {
-      const made = this.resultType(module, enclosingClass, call.on);
+  /** Where a call lands, one way per form of its callee (`Callee`): a node, several, or a gap with its reason. */
+  resolve(module: string, enclosingClass: string | null, form: Callee): CallTarget {
+    switch (form.kind) {
+      case "name":
+        return this.nameTarget(module, form.name);
+      case "member":
+        return this.memberTarget(module, form.head, form.member);
+      case "own":
+        return this.ownMemberTarget(enclosingClass, form.member);
+      case "super":
+        return this.superMemberTarget(enclosingClass, form.member);
+      // The member is looked up on the class, interface or type the syntax names for the receiver.
+      case "typed":
+        return this.receiverTarget(module, form.type, form.member);
+      // `const s = makeStore(); s.save()`, PHP's `$this->repo()->save()`: a member of the class the other call's target
+      // declares as its result.
+      case "result": {
+        const made = this.resultType(module, enclosingClass, form.of);
 
-      return "id" in made ? this.typedMemberTarget(made.id, call.member ?? call.callee.slice(call.callee.lastIndexOf(".") + 1)) : made;
+        return "id" in made ? this.typedMemberTarget(made.id, form.member) : made;
+      }
+      // `const { f } = await import("./x"); f()`, `const x = require("./x"); x.f()`: the export of the module the function loads.
+      case "loaded":
+        return this.loadedTarget(module, form);
+      // A name bound between the call and the module — a parameter, a local, a nested function, a caught error — is not
+      // the module's declaration of that name, though it is spelled so: never an edge to it. A parameter holds what the
+      // caller passes (a blind spot); a local function's own calls are the enclosing function's already.
+      case "bound":
+        return { gap: form.binding === "parameter" ? "dynamic" : "local" };
+      // `expect(x).toBe`, `list.map`, `this.state.records.at`: a method of a value whose type is not tracked.
+      case "value":
+        return { gap: "member-of-value" };
+      // The `resolve` and `reject` a `new Promise` executor receives: the language's own functions.
+      case "language":
+        return { gap: "external" };
+      case "opaque":
+        return { gap: "dynamic" };
     }
-
-    if (call.opaque) return { gap: "dynamic" };
-    const callee = call.callee;
-
-    // The extractor names the receiver's type when it can see it: `new X(…).m()` (and `(new X())->m()`), a local made
-    // with `new X()`, a parameter or a field typed `X`. The member is then looked up on that class, interface or type.
-    if (call.receiver) return this.receiverTarget(module, call.receiver, callee.slice(callee.lastIndexOf(".") + 1));
-
-    if (callee.startsWith("new ")) return this.constructedTarget(module, callee.slice(4));
-
-    // `const { f } = await import("./x"); f()`, `const x = require("./x"); x.f()`: the export of the module the function loads.
-    if (call.imported) return this.loadedTarget(module, call.imported);
-
-    // The `resolve` and `reject` a `new Promise` executor receives: the language's own functions.
-    if (call.language) return { gap: "external" };
-
-    // Python's `super().m()`: the member of the class the enclosing one extends.
-    const parentCall = /^super\(\)\.([\w$]+)$/.exec(callee);
-
-    if (parentCall) return this.superMemberTarget(enclosingClass, parentCall[1]!);
-
-    // `expect(x).toBe`, `vi.mocked(f).mockReturnValue`: a method of a call's result, whose type is not tracked.
-    if (callee.includes("(")) return { gap: "member-of-value" };
-    const parts = callee.split(".");
-
-    // A name bound between the call and the module — a parameter, a local, a nested function, a caught error — is not
-    // the module's declaration of that name, though it is spelled so: never an edge to it. A parameter holds what the
-    // caller passes (a blind spot); a local function's own calls are the enclosing function's already.
-    if (call.bound) return parts.length > 1 ? { gap: "member-of-value" } : call.bound === "parameter" ? { gap: "dynamic" } : { gap: "local" };
-
-    if (parts.length === 1) return this.nameTarget(module, callee);
-
-    // `s.app.idle`, `this.state.records.at`, `[a].map`: a property of a property, or of a literal — a value whose type is not tracked.
-    if (parts.length > 2 || parts[0]!.startsWith("[") || parts[0]!.startsWith("{")) return { gap: "member-of-value" };
-    const [head, member] = parts as [string, string];
-
-    if (head === "super") return this.superMemberTarget(enclosingClass, member);
-
-    return head === "this" ? this.ownMemberTarget(enclosingClass, member) : this.memberTarget(module, head, member);
   }
 
   /** The export `name` (`*`: the module itself, its default) of the module a function loads with `require` or `import()`. */
@@ -554,18 +548,6 @@ class CallResolver {
     return this.externalAncestor(parent.id) ? { gap: "external" } : { gap: "unknown-member" };
   }
 
-  /** `new X()` lands on X; `new X(…).m` on the member of X. */
-  private constructedTarget(module: string, constructed: string): CallTarget {
-    const head = constructed.split(/[.(]/)[0]!;
-    const member = constructed.includes(".") ? constructed.slice(constructed.lastIndexOf(".") + 1) : null;
-    const target = this.nameTarget(module, head);
-
-    if (!("id" in target) || member === null) return target;
-    const found = this.memberOf(target.id, member);
-
-    return found ? { id: found } : { gap: "unknown-member" };
-  }
-
   /**
    * A member of a receiver whose type the extractor saw: found on the type, else dispatched to every class of the
    * repository implementing or extending it (an interface, an abstract class), else a package's or a blind spot.
@@ -578,7 +560,7 @@ class CallResolver {
 
     // Python's `repo = make_repo()` names a function: the value is what it returns.
     if (this.b.nodes.get(owner.id)?.kind === "fn") {
-      const made = this.declaredResult(owner.id, { call: { callee: receiver, member: receiver } }, module);
+      const made = this.declaredResult(owner.id, { call: { kind: "name", name: receiver } }, module);
 
       return made === null ? { gap: "member-of-value" } : this.typedMemberTarget(made, member);
     }
@@ -611,19 +593,11 @@ class CallResolver {
    */
   private resultType(module: string, enclosingClass: string | null, value: ValueOfFact): { id: string } | { gap: Gap["reason"] } {
     const { call } = value;
-    const inner: CallFact = { callee: call.callee, line: 0, col: 0, endLine: 0, endCol: 0 };
-
-    if (call.bound) inner.bound = call.bound;
-
-    if (call.receiver) inner.receiver = call.receiver;
-
-    if (call.on) Object.assign(inner, { on: call.on, member: call.member });
-
-    if (call.opaque) inner.opaque = true;
     // The call itself is resolved as any call is; nesting is bounded by the expression it is written in.
-    const target = this.resolve(module, enclosingClass, inner);
+    const target = this.resolve(module, enclosingClass, call);
 
-    if ("gap" in target) return target.gap === "external" ? target : { gap: call.opaque ? "dynamic" : "member-of-value" };
+    // A link of a chain written inline (PHP `$a()->b()->c()`) that is not followed hides the rest of the chain.
+    if ("gap" in target) return target.gap === "external" ? target : { gap: call.kind === "result" && call.inline ? "dynamic" : "member-of-value" };
     const targets = "id" in target ? [target.id] : target.ids;
     // A call dispatched to several implementers: their results must agree on one class.
     const made = new Set(targets.map((id) => this.declaredResult(id, value, module)));
@@ -655,9 +629,8 @@ class CallResolver {
   }
 
   /** The class a static call names (`Order.query` of `Order::query()`); null for a call through a value, `this` or a plain function. */
-  private staticClass(module: string, call: ResultCallFact): string | null {
-    const head = !call.bound && !call.receiver && !call.opaque && call.callee.includes(".") ? call.callee.slice(0, call.callee.indexOf(".")) : null;
-    const target = head && head !== "this" ? this.nameTarget(module, head) : null;
+  private staticClass(module: string, call: Callee): string | null {
+    const target = call.kind === "member" ? this.nameTarget(module, call.head) : null;
 
     return target && "id" in target && this.b.nodes.get(target.id)?.kind === "class" ? target.id : null;
   }
@@ -701,10 +674,9 @@ class CallResolver {
     return classes;
   }
 
-  /** `this.m()` (`this.#m()`, a private name: the member `m`): the member of the enclosing class, up its `extends` chain. */
-  private ownMemberTarget(enclosingClass: string | null, written: string): CallTarget {
+  /** `this.m()`: the member of the enclosing class, up its `extends` chain. */
+  private ownMemberTarget(enclosingClass: string | null, member: string): CallTarget {
     if (!enclosingClass) return { gap: "dynamic" };
-    const member = written.replace(/^#/, "");
     const found = this.memberOf(enclosingClass, member);
 
     if (found) return { id: found };
@@ -823,9 +795,9 @@ class CallResolver {
     return this.files.get(node.module)?.decls.find((decl) => decl.name === node.name && (kind === undefined || decl.kind === kind));
   }
 
-  /** A function read as a value is looked up like the head of a call, with no member; a dispatched call stands for its first target. */
+  /** A function read as a value (`save`, `mod.save`) is looked up as a callee written so; a dispatched call stands for its first target. */
   valueTarget(module: string, name: string): { id: string } | { gap: Gap["reason"] } {
-    const target = this.resolve(module, null, { callee: name, line: 0, col: 0, endLine: 0, endCol: 0 });
+    const target = this.resolve(module, null, dottedForm(name));
 
     return "id" in target ? target : "ids" in target ? { id: target.ids[0]! } : target;
   }
@@ -835,7 +807,7 @@ class CallResolver {
 function resolveCalls(b: Building, resolver: CallResolver): void {
   for (const file of b.facts) {
     const record = (from: string, call: CallFact): void => {
-      const target = resolver.resolve(file.path, from.includes("#") ? classOf(b, from) : null, call);
+      const target = resolver.resolve(file.path, from.includes("#") ? classOf(b, from) : null, call.form);
       const edge = (to: string): CallEdge => (call.guards ? { from, to, kind: "call", line: call.line, guards: call.guards } : { from, to, kind: "call", line: call.line });
 
       if ("id" in target) b.calls.push(edge(target.id));
@@ -845,8 +817,7 @@ function resolveCalls(b: Building, resolver: CallResolver): void {
       // A function the call is handed (`list.forEach(save)`, `setTimeout(this.tick)`, `{ onDone: finish }`): whoever
       // holds it may call it — a `ref` of the function passing it, as a function read at the top level is the module's.
       for (const pass of call.passes ?? []) {
-        if (pass.bound && !pass.receiver) continue;
-        const passed = resolver.resolve(file.path, from.includes("#") ? classOf(b, from) : null, { callee: pass.callee, line: pass.line, col: pass.col, endLine: pass.endLine, endCol: pass.endCol, ...(pass.receiver ? { receiver: pass.receiver } : {}) });
+        const passed = resolver.resolve(file.path, from.includes("#") ? classOf(b, from) : null, pass.form);
 
         if ("id" in passed && b.nodes.get(passed.id)?.kind === "fn" && passed.id !== from) b.calls.push({ from, to: passed.id, kind: "ref", line: pass.line });
       }

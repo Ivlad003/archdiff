@@ -48,7 +48,7 @@ export default function main(): void {
   assert.equal(place.signature, "(id: string, total = 1) → Order");
   assert.equal(place.doc?.trim(), "Places an order.");
   assert.equal(place.exported, true);
-  assert.deepEqual(place.calls.map((call) => [call.callee, call.receiver ?? null]), [["Store", null], ["store.save", "Store"], ["log.info", null]]);
+  assert.deepEqual(place.calls.map((call) => [call.callee, call.form.kind === "typed" ? call.form.type : null]), [["Store", null], ["store.save", "Store"], ["log.info", null]]);
   const store = facts.decls.find((decl) => decl.name === "Store")!;
   assert.equal(store.kind, "class");
   assert.deepEqual(store.members.map((member) => member.name), ["save"]);
@@ -214,6 +214,6 @@ final class Orders
   assert.equal(orders.kind, "class");
   assert.deepEqual(orders.members.map((member) => member.name), ["__construct", "place"]);
   const placePhp = orders.members.find((member) => member.name === "place")!;
-  assert.deepEqual(placePhp.calls.map((call) => [call.callee, call.receiver ?? null]), [["Order", null], ["this.store.save", "OrderStore"]]);
+  assert.deepEqual(placePhp.calls.map((call) => [call.callee, call.form.kind === "typed" ? call.form.type : null]), [["Order", null], ["this.store.save", "OrderStore"]]);
   assert.deepEqual(php.symbols?.map((symbol) => symbol.qualified), ["App\\Domain\\Orders"]);
 });

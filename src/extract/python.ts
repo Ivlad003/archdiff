@@ -13,7 +13,7 @@
 // unsupported (a construct read but not followed, with its reason), gap (a
 // call the graph cannot follow), value ref (a fn read as a value).
 
-import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, Kwarg, LiteralValue, PassFact, StatementFact, ValueRefFact } from "./facts.ts";
+import { boundForm, dottedForm, passable, type CallFact, type DeclFact, type ExportRow, type FileFacts, type ImportFact, type Kwarg, type LiteralValue, type PassFact, type StatementFact, type ValueRefFact } from "./facts.ts";
 import { addMember } from "./facts.ts";
 import { isLicense, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, located, unsupportedAt, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
@@ -681,15 +681,9 @@ function passesOf(call: Node, scope: CallScope): PassFact[] {
       const fact = callOf(node, scope);
 
       // A value archdiff cannot name, or a local of unknown class, resolves to nothing.
-      if (fact.callee === "?" || (fact.bound && !fact.receiver)) return;
+      if (fact.callee === "?" || !passable(fact.form)) return;
       const at = located(node);
-      const pass: Omit<PassFact, "text" | "line" | "col" | "endLine" | "endCol"> = { arg: index, path: "", callee: fact.callee };
-
-      if (fact.bound) pass.bound = fact.bound;
-
-      if (fact.receiver) pass.receiver = fact.receiver;
-      // Object.assign appends the text and position after the optional keys, in the key order of a pass fact.
-      out.push(Object.assign(pass, { text: at.text.replace(/\s+/g, " "), line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol }));
+      out.push({ arg: index, path: "", callee: fact.callee, form: fact.form, text: at.text.replace(/\s+/g, " "), line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol });
     });
 
   return out;
@@ -712,13 +706,13 @@ function callableOf(value: Node): Node | null {
 
 /**
  * `f()` → `f`; `a.b.f()` → `a.b.f`; `self.m()` → `this.m` (`Order.m` for a
- * static method); `x.m()` through a value → `x.m`, bound, with the receiver's
- * class when `typedValues` names it. Any other callee
- * (`super().m()`, `f().m()`, `x[0]()`) is a call through a value archdiff
- * cannot name, written as in the source.
+ * static method); `x.m()` through a value → `x.m`, a member of the
+ * receiver's class when `typedValues` names it, of an untracked value
+ * otherwise. Any other callee (`super().m()`, `f().m()`, `x[0]()`) is a
+ * call through a value archdiff cannot name, written as in the source.
  */
-function callOf(fn: Node | null, scope: CallScope): Pick<CallFact, "callee" | "bound" | "receiver"> {
-  if (!fn) return { callee: "?", bound: "local" };
+function callOf(fn: Node | null, scope: CallScope): Pick<CallFact, "callee" | "form"> {
+  if (!fn) return { callee: "?", form: { kind: "bound", binding: "local" } };
 
   // `(f)()` is `f()`.
   if (fn.type === "parenthesized_expression" && fn.namedChildren.length === 1) return callOf(fn.namedChildren[0]!, scope);
@@ -726,7 +720,7 @@ function callOf(fn: Node | null, scope: CallScope): Pick<CallFact, "callee" | "b
   if (fn.type === "identifier") {
     const bound = scope.bound.get(fn.text);
 
-    return bound ? { callee: fn.text, bound } : { callee: fn.text };
+    return { callee: fn.text, form: bound ? { kind: "bound", binding: bound } : { kind: "name", name: fn.text } };
   }
 
   // Unwind an attribute chain `a.b.c` into its head identifier and parts.
@@ -738,34 +732,35 @@ function callOf(fn: Node | null, scope: CallScope): Pick<CallFact, "callee" | "b
     at = at.childForFieldName("object");
   }
 
-  // Not a name or a chain rooted at a name: a call through a value.
-  if (fn.type !== "attribute" || at?.type !== "identifier") return { callee: fn.text.replace(/\s+/g, " "), bound: "local" };
+  // Not a name or a chain rooted at a name: a call through a value (`super().m()` the base's member).
+  if (fn.type !== "attribute" || at?.type !== "identifier") {
+    const callee = fn.text.replace(/\s+/g, " ");
+
+    return { callee, form: boundForm(callee, "local") };
+  }
+
   const head = at.text;
 
   if (head === scope.receiver) {
     // `self.repo.save()`: a member of the attribute's class, when the class says it (`attributeClasses`).
     const attribute = parts.length === 2 ? scope.owner?.attributes.get(parts[0]!) : undefined;
 
-    if (attribute) return { callee: [head, ...parts].join("."), receiver: attribute };
+    if (attribute) return { callee: [head, ...parts].join("."), form: { kind: "typed", type: attribute, member: parts[1]! } };
 
     // `self.queue.put()` goes through an attribute whose type archdiff does not know.
-    if (parts.length !== 1) return { callee: [head, ...parts].join("."), bound: "local" };
+    if (parts.length !== 1) return { callee: [head, ...parts].join("."), form: { kind: "value" } };
 
-    return scope.owner?.statics.has(parts[0]!) ? { callee: `${scope.owner.name}.${parts[0]}` } : { callee: `this.${parts[0]}` };
+    return scope.owner?.statics.has(parts[0]!) ? { callee: `${scope.owner.name}.${parts[0]}`, form: { kind: "member", head: scope.owner.name, member: parts[0]! } } : { callee: `this.${parts[0]}`, form: { kind: "own", member: parts[0]! } };
   }
 
   const callee = [head, ...parts].join(".");
-  const bound = scope.bound.get(head);
-  // `repo.save()` with `repo: Repo` or `repo = Repo()`: the graph looks `save` up in `Repo`.
+  // `repo.save()` with `repo: Repo` or `repo = Repo()`: the graph looks `save` up in `Repo`; through any other
+  // parameter or local, a member of a value of unknown class.
   const receiver = parts.length === 1 ? scope.classes.get(head) : undefined;
 
-  const call: Pick<CallFact, "callee" | "bound" | "receiver"> = { callee };
+  if (receiver) return { callee, form: { kind: "typed", type: receiver, member: parts[0]! } };
 
-  if (bound) call.bound = bound;
-
-  if (receiver) call.receiver = receiver;
-
-  return call;
+  return { callee, form: scope.bound.has(head) ? { kind: "value" } : dottedForm(callee) };
 }
 
 /**

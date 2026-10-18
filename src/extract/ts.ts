@@ -10,7 +10,7 @@
 // handed to a call as a value.
 
 import { builtinModules } from "node:module";
-import type { CallFact, DeclFact, CodeDecorator, DecoratorArg, EntryFact, WebCallFact, WebFacts, FileFacts, HookFact, ImportBinding, ImportFact, PassFact, ResultCallFact, ResultTypeFact, TypeFieldFact, TypeRefFact, ValueOfFact, ValueRefFact } from "./facts.ts";
+import { dottedForm, passable, type Callee, type CallFact, type DeclFact, type CodeDecorator, type DecoratorArg, type EntryFact, type WebCallFact, type WebFacts, type FileFacts, type HookFact, type ImportBinding, type ImportFact, type PassFact, type ResultTypeFact, type TypeFieldFact, type TypeRefFact, type ValueOfFact, type ValueRefFact } from "./facts.ts";
 import { addMember } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
 import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Query, type Tree } from "./treesitter.ts";
@@ -414,7 +414,7 @@ function declarationCalls(x: Extraction, body: Node, cls: ClassScope | null = nu
     const call = parentOf(c.node);
     // `setGlobalPrefix("api")` and `emit("order.created")`: keep the first argument, which framework adapters read.
     const member = fact.callee.slice(fact.callee.lastIndexOf(".") + 1);
-    const first = call?.type === "call_expression" && !fact.opaque && (LITERAL_CALLS.has(member) || NAME_ARG_CALLS.has(member)) ? call.childForFieldName("arguments")?.namedChildren.find((a) => a.type !== "comment") : undefined;
+    const first = call?.type === "call_expression" && fact.form.kind !== "opaque" && (LITERAL_CALLS.has(member) || NAME_ARG_CALLS.has(member)) ? call.childForFieldName("arguments")?.namedChildren.find((a) => a.type !== "comment") : undefined;
 
     if (first) {
       const value = stringValue(unwrapValue(first)) ?? templateValue(unwrapValue(first));
@@ -914,14 +914,10 @@ function resultValue(written: Node, stop: Node, cls: ClassScope | null, depth: n
   const fn = value.type === "call_expression" ? value.childForFieldName("function") : null;
   const inner = fn ? calleeFact(unwrapValue(fn), stop, cls, depth + 1) : null;
 
-  if (!inner || inner.opaque) return null;
-  const call: ResultCallFact = { callee: inner.callee, member: inner.member ?? inner.callee.slice(inner.callee.lastIndexOf(".") + 1) };
-
-  if (inner.bound) call.bound = inner.bound;
-
-  if (inner.receiver) call.receiver = inner.receiver;
-
-  if (inner.on) call.on = inner.on;
+  if (!inner) return null;
+  // A call of a module's export the function loads (`const { make } = await import("./x"); const s = make()`) is read
+  // as a call through the local that binds it, as the result call said before the forms were explicit.
+  const call: Callee = inner.form.kind !== "loaded" ? inner.form : inner.callee.includes(".") ? { kind: "value" } : { kind: "bound", binding: "local" };
 
   return awaited ? { call, awaited: true } : { call };
 }
@@ -1004,23 +1000,23 @@ function loadedModule(written: Node): string | null {
   return fn.type === "identifier" && fn.text === "require" && requireKind(fn) !== "shadowed" ? source : null;
 }
 
-/** The call, marked as made through a parameter or local binding when it is one. */
-function boundCall(call: CallFact, bound: "parameter" | "local" | null): CallFact {
-  return bound ? { ...call, bound } : call;
-}
-
-/** A call fact named `callee` at `node`'s span. */
-function callFact(callee: string, node: Node): CallFact {
+/** A call fact named `callee` at `node`'s span, read as `form`. */
+function callFact(callee: string, form: Callee, node: Node): CallFact {
   const at = located(node);
 
-  return { callee, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol };
+  return { callee, form, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol };
+}
+
+/** A plain name: the module's, or a parameter's or local's when one binds it between the call and `stop`. */
+function nameForm(name: string, binding: "parameter" | "local" | null): Callee {
+  return binding ? { kind: "bound", binding } : { kind: "name", name };
 }
 
 /** A call through an expression archdiff does not name: an opaque call with the source text, a gap in the graph. */
 function opaqueCall(node: Node): CallFact {
   const text = collapse(node.text);
 
-  return { ...callFact(text.length <= MAX_CALLEE ? text : `${text.slice(0, MAX_CALLEE - 1)}…`, node), opaque: true };
+  return callFact(text.length <= MAX_CALLEE ? text : `${text.slice(0, MAX_CALLEE - 1)}…`, { kind: "opaque" }, node);
 }
 
 /**
@@ -1045,15 +1041,13 @@ function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact 
       // A callee named by a parameter or local is bound; through a local, it may be a hook with a default, or a
       // module's export the function loads (`const { f } = await import("./x")`); through a parameter, the `resolve`
       // of a `new Promise` executor.
-      const fact = boundCall(callFact(n.text, n), bindingOf(n, n.text, body));
-      const hook = fact.bound ? localHook(n, n.text, body) : null;
-      const imported = fact.bound === "local" && !hook ? localImport(n, n.text, body) : null;
+      const binding = bindingOf(n, n.text, body);
+      const hook = binding ? localHook(n, n.text, body) : null;
+      const loaded = binding === "local" && !hook ? localImport(n, n.text, body) : null;
+      const form: Callee = loaded ? { kind: "loaded", source: loaded.source, name: loaded.name } : binding === "parameter" && promiseExecutorParameter(n, n.text, body) ? { kind: "language" } : nameForm(n.text, binding);
+      const fact = callFact(n.text, form, n);
 
       if (hook) fact.hook = hook;
-
-      if (imported) fact.imported = imported;
-
-      if (fact.bound === "parameter" && promiseExecutorParameter(n, n.text, body)) fact.language = true;
 
       return fact;
     }
@@ -1064,15 +1058,17 @@ function calleeOfCall(node: Node, body: Node, cls: ClassScope | null): CallFact 
       const fact = calleeFact(n, body, cls);
 
       if (fact) return fact;
-      // `a.b.c()`, `f().m()`, `super.m()`: the text keeps the head, which the graph resolves or leaves a gap; a chain too
-      // long to keep is cut short in its object, still a member of a value.
+      // `a.b.c()`, `f().m()`, `super.m()`: the head read from the text (a chain too long to keep is cut short in its
+      // object, still a member of a value).
       const text = n.text.replace(/\s+/g, "");
+      const callee = text.length < MAX_CALLEE ? text : shortMember(n);
 
-      return callFact(text.length < MAX_CALLEE ? text : shortMember(n), n);
+      return callFact(callee, dottedForm(callee), n);
     }
 
+    // `super()`: the base class's constructor, which no node of the graph stands for.
     case "super":
-      return callFact("super", n);
+      return callFact("super", { kind: "name", name: "super" }, n);
     // `import()`, `obj[k]()` and `new class {}` are recorded elsewhere or as `unsupported`.
     case "import":
     case "subscript_expression":
@@ -1109,7 +1105,7 @@ function componentOfTag(name: Node, body: Node, cls: ClassScope | null): CallFac
   // A member tag with no binding to resolve: its text, or an opaque call when it is too long.
   const text = collapse(name.text);
 
-  return text.length < MAX_CALLEE ? callFact(text, name) : opaqueCall(name);
+  return text.length < MAX_CALLEE ? callFact(text, dottedForm(text), name) : opaqueCall(name);
 }
 
 /** The factory names. Which module bound the callee decides, not the spelling at the call. */
@@ -1939,12 +1935,10 @@ function calleeFact(n: Node, stop: Node, cls: ClassScope | null, depth = 0): Cal
   // A plain name: bound when a parameter or local of an enclosing scope declares it; a local may be a module's export
   // the function loads (`const { f } = await import("./x")`).
   if (n.type === "identifier" || n.type === "shorthand_property_identifier") {
-    const fact = boundCall(callFact(n.text, n), bindingOf(n, n.text, stop));
-    const imported = fact.bound === "local" ? localImport(n, n.text, stop) : null;
+    const binding = bindingOf(n, n.text, stop);
+    const loaded = binding === "local" ? localImport(n, n.text, stop) : null;
 
-    if (imported) fact.imported = imported;
-
-    return fact;
+    return callFact(n.text, loaded ? { kind: "loaded", source: loaded.source, name: loaded.name } : nameForm(n.text, binding), n);
   }
 
   if (n.type !== "member_expression") return null;
@@ -1955,9 +1949,9 @@ function calleeFact(n: Node, stop: Node, cls: ClassScope | null, depth = 0): Cal
 
   // `this.m`: a member of the class, possibly a hook its constructor set.
   if (obj.type === "this") {
-    // `this` of an object-literal method or a nested `function` is not the class.
-    if (!classThis(n)) return { ...callFact(`this.${prop.text}`, n), bound: "local" };
-    const fact = callFact(`this.${prop.text}`, n);
+    // `this` of an object-literal method or a nested `function` is not the class: a value of unknown class.
+    if (!classThis(n)) return callFact(`this.${prop.text}`, { kind: "value" }, n);
+    const fact = callFact(`this.${prop.text}`, { kind: "own", member: memberName(prop) }, n);
     const hook = cls?.hooks.get(memberName(prop));
 
     if (hook) fact.hook = hook;
@@ -1965,25 +1959,17 @@ function calleeFact(n: Node, stop: Node, cls: ClassScope | null, depth = 0): Cal
     return fact;
   }
 
-  // `a.b`: bound when `a` is local; then a local `const a = new A()` may name the receiver's class, and a local
-  // `const a = makeA()` the call whose result it is.
+  // `a.b`: a member of a name of the module, unless `a` is bound here: then a local `const a = new A()` or a parameter
+  // `a: A` names the receiver's class, a local `const a = require("./x")` the module whose export `b` is, a local
+  // `const a = makeA()` the call whose result it is; else `a` is a value of unknown class.
   if (obj.type === "identifier") {
-    const fact = boundCall(callFact(`${obj.text}.${prop.text}`, n), bindingOf(n, obj.text, stop));
-    const receiver = fact.bound ? localClass(n, obj.text, stop) : null;
-    // `const x = require("./x"); x.f()`: the export `f` of the module the function loads.
-    const loaded = fact.bound === "local" ? localImport(n, obj.text, stop) : null;
-    const on = fact.bound === "local" && !receiver && !loaded ? localResult(n, obj.text, stop, cls, depth) : null;
+    const binding = bindingOf(n, obj.text, stop);
+    const receiver = binding ? localClass(n, obj.text, stop) : null;
+    const loaded = binding === "local" ? localImport(n, obj.text, stop) : null;
+    const on = binding === "local" && !receiver && !loaded ? localResult(n, obj.text, stop, cls, depth) : null;
+    const form: Callee = !binding ? { kind: "member", head: obj.text, member: prop.text } : receiver ? { kind: "typed", type: receiver, member: prop.text } : loaded?.name === "*" ? { kind: "loaded", source: loaded.source, name: prop.text } : on ? { kind: "result", of: on, member: prop.text } : { kind: "value" };
 
-    if (loaded?.name === "*") fact.imported = { source: loaded.source, name: prop.text };
-
-    if (receiver) fact.receiver = receiver;
-
-    if (on) {
-      fact.on = on;
-      fact.member = prop.text;
-    }
-
-    return fact;
+    return callFact(`${obj.text}.${prop.text}`, form, n);
   }
 
   // `this.decoder.feed()`: the receiver is a field whose class the class body names.
@@ -1992,9 +1978,7 @@ function calleeFact(n: Node, stop: Node, cls: ClassScope | null, depth = 0): Cal
 
   if (field && type && classThis(n)) {
     const param = cls?.params.get(memberName(field));
-
-    const fact = callFact(`this.${field.text}.${prop.text}`, n);
-    fact.receiver = type;
+    const fact = callFact(`this.${field.text}.${prop.text}`, { kind: "typed", type, member: prop.text }, n);
 
     if (param !== undefined) fact.param = param;
 
@@ -2004,12 +1988,12 @@ function calleeFact(n: Node, stop: Node, cls: ClassScope | null, depth = 0): Cal
   // `this.repo.save()` with `constructor(@Inject(T) private repo)` and no class archdiff can name: a framework's config may set it.
   const param = field && classThis(n) ? cls?.params.get(memberName(field)) : undefined;
 
-  if (field && param !== undefined) return { ...callFact(`this.${field.text}.${prop.text}`, n), param };
+  if (field && param !== undefined) return { ...callFact(`this.${field.text}.${prop.text}`, { kind: "value" }, n), param };
   // `new Foo().run()`: an instance of the class `new` names, unless `Foo` is rebound here.
   const created = newClass(unwrapValue(obj));
   const text = collapse(n.text);
 
-  if (created && bindingOf(obj, created, stop) === null) return { ...callFact(text.length < MAX_CALLEE ? text : shortMember(n), n), receiver: created };
+  if (created && bindingOf(obj, created, stop) === null) return callFact(text.length < MAX_CALLEE ? text : shortMember(n), { kind: "typed", type: created, member: prop.text }, n);
 
   return null;
 }
@@ -2043,16 +2027,10 @@ function passesOf(call: Node, stop: Node, cls: ClassScope | null): PassFact[] {
     const add = (node: Node, path: string, written: Node = node): void => {
       const fact = calleeFact(node, stop, cls);
 
-      // A local value of unknown class names nothing the graph can resolve.
-      if (!fact || (fact.bound && !fact.receiver)) return;
+      // A value of unknown class, a loaded module's export or a call's result names nothing the graph follows as a value.
+      if (!fact || !passable(fact.form)) return;
       const at = located(written);
-      const pass: Omit<PassFact, "text" | "line" | "col" | "endLine" | "endCol"> = { arg: index, path, callee: fact.callee };
-
-      if (fact.bound) pass.bound = fact.bound;
-
-      if (fact.receiver) pass.receiver = fact.receiver;
-      // Object.assign appends the text and position after the optional keys, in the key order of a pass fact.
-      out.push(Object.assign(pass, { text: collapse(at.text).slice(0, MAX_CALLEE), line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol }));
+      out.push({ arg: index, path, callee: fact.callee, form: fact.form, text: collapse(at.text).slice(0, MAX_CALLEE), line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol });
     };
 
     // The argument itself is a function value: `run(save)`, `run(this.m)`.

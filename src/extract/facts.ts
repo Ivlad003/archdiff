@@ -462,29 +462,101 @@ export interface FieldFact {
 
 
 /**
+ * The callee of a call as the frontend read it: what the graph resolves,
+ * one form per call and no order between the forms. The text as written
+ * stays beside it (`CallFact.callee`) for the reports. A form the graph
+ * cannot follow is a gap with the reason the form implies; a form it can
+ * follow may still end in a gap of its own (`global`, `unknown-member`,
+ * `interface`, `unresolved`, `external`).
+ */
+export type Callee =
+  /** `f()`, `new X()`, PHP `A\f()`, Rust `crate::a::f()`: a name of the module's scope — a declaration, or an import binding followed to its export. */
+  | { kind: "name"; name: string }
+  /** `ns.f()`, `Cls.m()`, `store.save()` of a constant made with `new` or by a call: a member of a name of the module's scope. */
+  | { kind: "member"; head: string; member: string }
+  /** `this.m()`, Python `self.m()`, PHP `$this->m()` and `self::m()`: a member of the enclosing class (`#` of a private name stripped). */
+  | { kind: "own"; member: string }
+  /** `super.m()`, PHP `parent::m()`, Python `super().m()`: a member of the class the enclosing one extends. */
+  | { kind: "super"; member: string }
+  /** `this.repo.save()` with `repo: Repo`, `new Foo(1).run()`, PHP `(new B())->go()`, Rust `o.total()` with `o: &Order`: a member of a value whose class the syntax names. */
+  | { kind: "typed"; type: string; member: string }
+  /**
+   * `const s = makeStore(); s.save()`, PHP `$this->repo()->save()`: a member of what another call returns, read from the
+   * declared result type of that call's target. `inline` (PHP): the receiver is a call written in the same expression,
+   * a link of a chain — one link archdiff cannot follow hides the rest (`dynamic`), where a variable's result it
+   * cannot follow is a value of untracked type.
+   */
+  | { kind: "result"; of: ValueOfFact; member: string; inline?: true }
+  /** `const { f } = await import("./x"); f()`, `const x = require("./x"); x.f()`: the export `name` of the module `source` names (`*`: the module itself). */
+  | { kind: "loaded"; source: string; name: string }
+  /** `x()` through a parameter or a local of the body: a parameter holds what the caller passes (a blind spot), a local function's calls are the caller's already. */
+  | { kind: "bound"; binding: "parameter" | "local" }
+  /** `list.map()`, `f().m()`, `a.b.c()`, `[a].map()`, `x.m()` through a value whose class the code does not name: a member of a value archdiff does not track. */
+  | { kind: "value" }
+  /** The `resolve` and `reject` a `new Promise` executor receives: the language's own functions. */
+  | { kind: "language" }
+  /** `f()()`, `(a || b)()`, PHP `$obj->$m()`: an expression archdiff does not name — never an edge, always a gap. */
+  | { kind: "opaque" };
+
+/**
+ * The form of a callee a frontend writes as a dotted name composed of the
+ * parts it read — `f`, `ns.f`, `Cls.m`, `this.m`, `super.m`, `crate::a.f` —
+ * or of a name read as a value: one part is a name of the module's scope,
+ * `this.m` the enclosing class's member, `super.m` (Python's `super().m`)
+ * the base's; two parts a member of a name; more parts, a literal head or a
+ * call in it a member of a value.
+ */
+export function dottedForm(callee: string): Callee {
+  const base = /^super\(\)\.([\w$]+)$/.exec(callee);
+
+  if (base) return { kind: "super", member: base[1]! };
+
+  if (callee.includes("(")) return { kind: "value" };
+  const parts = callee.split(".");
+
+  if (parts.length === 1) return { kind: "name", name: callee };
+
+  if (parts.length > 2 || parts[0]!.startsWith("[") || parts[0]!.startsWith("{")) return { kind: "value" };
+  const [head, member] = parts as [string, string];
+
+  return head === "this" ? { kind: "own", member } : head === "super" ? { kind: "super", member } : { kind: "member", head, member };
+}
+
+/**
+ * The form of a callee whose head a parameter or a local of the body binds, written as a dotted name: the name alone
+ * is the binding's (Python's `super().m` the base's member); with a member or a call in it, a member of a value.
+ */
+export function boundForm(callee: string, binding: "parameter" | "local"): Callee {
+  const base = /^super\(\)\.([\w$]+)$/.exec(callee);
+
+  if (base) return { kind: "super", member: base[1]! };
+
+  return callee.includes("(") || callee.includes(".") ? { kind: "value" } : { kind: "bound", binding };
+}
+
+/**
+ * Whether a function value passed as an argument can be followed to a declaration: a name, a member of a name, of
+ * the class, of its base, or of a value whose class the syntax names. A value of a binding, a loaded module's export
+ * or a call's result is not (it would be read as a call only): no `ref` edge.
+ */
+export function passable(form: Callee): boolean {
+  return form.kind === "name" || form.kind === "member" || form.kind === "own" || form.kind === "super" || form.kind === "typed";
+}
+
+/**
  * A value whose class the graph reads from another declaration — the result of a call
  * (its declared result type), with `element` an element of the array it returns (PHP), with
  * `awaited` what the Promise it returns gives (TypeScript `await`).
  */
 export interface ValueOfFact {
-  call: ResultCallFact;
+  /** The call, as its callee was read. */
+  call: Callee;
+  /** PHP: the arguments as literals, as `CallFact.args`: a framework's service locator reads the class the first one names (`get(X::class)`). */
+  args?: ArgFact[];
+  /** PHP: the receiver's class of the call is written only in a docblock, at this position. */
+  docblock?: { line: number; col: number };
   element?: true;
   awaited?: true;
-}
-
-/** The call whose result a `ValueOfFact` is, written as `CallFact` writes a call. */
-export interface ResultCallFact {
-  callee: string;
-  /** The member called: what the graph looks up in the receiver's class. */
-  member: string;
-  bound?: "parameter" | "local";
-  receiver?: string;
-  docblock?: { line: number; col: number };
-  /** The receiver is itself the result of a call. */
-  on?: ValueOfFact;
-  opaque?: true;
-  /** The arguments as literals, as `CallFact.args`: a framework's service locator reads the class the first one names (`get(X::class)`). */
-  args?: ArgFact[];
 }
 
 /**
@@ -538,31 +610,18 @@ export interface ChainLinkFact {
   args: ArgFact[];
 }
 
-/** One call written in the code, with its callee as written and its range. */
+/** One call written in the code, with its callee as written and as read, and its range. */
 export interface CallFact {
   /**
-   * `f()` → `f`; `a.b()` → `a.b`; `this.m()` → `this.m`; `new X()` → `X`;
-   * `new ns.X()` → `ns.X`; `super()` → `super`. For an `opaque` call, the
-   * callee's source text (at most 80 characters).
+   * The callee as written, for the reports: `f()` → `f`; `a.b()` → `a.b`;
+   * `this.m()` → `this.m`; `new X()` → `X`; `new ns.X()` → `ns.X`;
+   * `super()` → `super`; an expression archdiff does not name, its source
+   * text (at most 80 characters); a member of a chain too long to keep
+   * whole, its object cut short (`fetch(…….then`).
    */
   callee: string;
-  /**
-   * The callee is an expression archdiff does not name (`f()()`, `(a || b)()`,
-   * `new (load())()`): never an edge, always a `dynamic` gap. Every call in the
-   * code is an edge or a gap. A member of a chain too long to keep whole is cut
-   * short instead (`fetch(…….then`): a member of a value, no blind spot.
-   */
-  opaque?: true;
-  /** The callee is a function the language itself passes in: the `resolve` and `reject` of a `new Promise` executor. */
-  language?: true;
-  /** The head of the callee is bound in a scope between the call and the module; for `this.m`, `this` is not the class. */
-  bound?: "parameter" | "local";
-  /**
-   * Class of the receiver when the syntax names it: `this.decoder.feed()` with a
-   * field `decoder: InputDecoder` or `= new InputDecoder()`, `worker.generate()`
-   * with `const worker = new SnapshotWorker()` or a parameter `worker: SnapshotWorker`.
-   */
-  receiver?: string;
+  /** The callee as read: what the graph resolves. */
+  form: Callee;
   /**
    * The receiver is a property the constructor fills from its parameter `param` (PHP
    * `$this->x = $x`, a promoted `private X $x`): a framework's config may set that argument.
@@ -576,12 +635,6 @@ export interface CallFact {
   docblock?: { line: number; col: number };
   /** The callee is a hook with a default: `const generate = request.generate ?? generateMap; generate()`. */
   hook?: HookFact;
-  /**
-   * The callee is a local that a `require` or an `import()` in the function binds: the export `name` of the module
-   * `source` names (`const { f } = await import("./x"); f()` is `f`; `const x = require("./x"); x.f()` is `f`;
-   * `x()` is the module itself, `*`).
-   */
-  imported?: { source: string; name: string };
   /**
    * Function values the call passes: `analyze({ generate: worker.generate })`, `later(save)`,
    * and callable references — PHP `[$this, 'm']`, `'Cls::m'`, `\Closure::fromCallable(…)`,
@@ -617,16 +670,6 @@ export interface CallFact {
    * (the global route prefix).
    */
   literal?: string | null;
-  /**
-   * The receiver is a value whose class the code does not write here — the result of another
-   * call (PHP `$this->repo()->save()`, `$x = $this->repo->get(); $x->save()`; TypeScript
-   * `const s = makeStore(); s.save()`, `const s = await load()`), or an element of the array it
-   * returns (PHP `foreach ($order->getItems() as $item)`). The graph reads the class from the
-   * declared result type of that call's target.
-   */
-  on?: ValueOfFact;
-  /** With `on`: the member called (an opaque `callee` does not end in it). */
-  member?: string;
   /** The branches, loops and handlers the call sits in, outermost first (control.ts): a sequence draws calls under one guard as a fragment. */
   guards?: GuardFact[];
   line: number;
@@ -704,16 +747,16 @@ export interface HookFact {
 /**
  * A function value in the arguments of a call: argument index, property path
  * ("" for the argument itself). `callee` names it as a call would (`this.m`,
- * `Cls.m`, `save`); `text` is the argument as written (`[$this, 'm']`), at the
- * position. One passed as the argument itself is a `callable-arg` edge of the
- * enclosing fn when it resolves.
+ * `Cls.m`, `save`) and `form` is how it was read (`passable` forms only);
+ * `text` is the argument as written (`[$this, 'm']`), at the position. One
+ * passed as the argument itself is a `callable-arg` edge of the enclosing fn
+ * when it resolves.
  */
 export interface PassFact {
   arg: number;
   path: string;
   callee: string;
-  bound?: "parameter" | "local";
-  receiver?: string;
+  form: Callee;
   /** The receiver's class is written only in a docblock (PHP `[$this->store, 'm']` with `@var Store`), at this position. */
   docblock?: { line: number; col: number };
   text: string;

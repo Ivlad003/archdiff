@@ -123,7 +123,7 @@ export function storageOf(analysis: Analysis, module: string): string | null {
     const calls = [...file.moduleCalls, ...file.decls.flatMap((decl) => [...decl.calls, ...decl.members.flatMap((member) => member.calls)])];
 
     for (const call of calls) {
-      if (call.opaque) continue;
+      if (call.form.kind === "opaque") continue;
       const name = calleeName(call.callee);
 
       for (const [pattern, label] of STORAGE_CALLS) if (pattern.test(name)) return label;

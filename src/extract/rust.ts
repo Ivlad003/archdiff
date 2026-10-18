@@ -12,7 +12,7 @@
 // call the graph cannot follow), value ref (a fn read as a value, so
 // something else may call it), pass (a fn path given as an argument).
 
-import type { CallFact, DeclFact, ExportRow, FileFacts, ImportFact, PassFact, ValueRefFact } from "./facts.ts";
+import { boundForm, dottedForm, passable, type CallFact, type DeclFact, type ExportRow, type FileFacts, type ImportFact, type PassFact, type ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, located, unsupportedAt, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
 
@@ -610,16 +610,16 @@ function passesOf(call: Node, scope: CallScope, facts: FileFacts): PassFact[] {
       const fact = callOf(arg, scope, facts);
 
       // A local of unknown kind, a variant or a value archdiff cannot name resolves to nothing.
-      if (!fact || fact.bound) return;
+      if (!fact || !passable(fact.form)) return;
       const at = located(arg);
-      out.push({ arg: index, path: "", callee: fact.callee, text: compact(at.text), line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol });
+      out.push({ arg: index, path: "", callee: fact.callee, form: fact.form, text: compact(at.text), line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol });
     });
 
   return out;
 }
 
-/** What a callee expression names: the dotted callee, and `bound` when it goes through a local or parameter. */
-type Callee = Pick<CallFact, "callee" | "bound" | "receiver">;
+/** What a callee expression names: the dotted callee as written, and its form. */
+type Callee = Pick<CallFact, "callee" | "form">;
 
 /**
  * `f()` → `f`; `a::b::f()` → `a.b.f`; `Self::new()` → `<Type>.new`;
@@ -654,7 +654,7 @@ function callOf(fn: Node | null, scope: CallScope, facts: FileFacts): Callee | n
       if (/^[A-Z]/.test(fn.text)) return null;
       const kind = bound.get(fn.text);
 
-      return kind ? { callee: fn.text, bound: kind } : { callee: fn.text };
+      return { callee: fn.text, form: kind ? { kind: "bound", binding: kind } : { kind: "name", name: fn.text } };
     }
 
     // `self.m()` is a method of the impl; `x.m()` goes through the value `x`.
@@ -664,19 +664,19 @@ function callOf(fn: Node | null, scope: CallScope, facts: FileFacts): Callee | n
 
       if (!value || !field) return throughValue(fn);
 
-      if (value.type === "self" && self && owner !== null) return { callee: `this.${field}` };
+      if (value.type === "self" && self && owner !== null) return { callee: `this.${field}`, form: { kind: "own", member: field } };
 
       // `self.repo.save()`: a field whose type the struct declares.
       const own = value.type === "field_expression" && value.childForFieldName("value")?.type === "self" && self ? value.childForFieldName("field")?.text : undefined;
       const fieldType = own ? scope.fields?.get(own) : undefined;
 
-      if (own && fieldType) return { callee: `self.${own}.${field}`, receiver: fieldType };
+      if (own && fieldType) return { callee: `self.${own}.${field}`, form: { kind: "typed", type: fieldType, member: field } };
 
       if (value.type === "identifier") {
-        // A parameter of a known type (`o: &Order`): the graph looks the method up on `Order`.
+        // A parameter of a known type (`o: &Order`): the graph looks the method up on `Order`; any other value is untracked.
         const type = scope.types?.get(value.text);
 
-        return type ? { callee: `${value.text}.${field}`, bound: bound.get(value.text) ?? "local", receiver: type } : { callee: `${value.text}.${field}`, bound: bound.get(value.text) ?? "local" };
+        return { callee: `${value.text}.${field}`, form: type ? { kind: "typed", type, member: field } : { kind: "value" } };
       }
 
       return throughValue(fn);
@@ -698,18 +698,18 @@ function pathCall(fn: Node, scope: CallScope, facts: FileFacts): Callee | null {
     // `<T as Trait>::f()`: a trait method on a type archdiff does not resolve.
     const name = fn.childForFieldName("name")?.text;
 
-    return name ? { callee: `${compact(fn.childForFieldName("path")?.text ?? "?")}.${name}`, bound: "local" } : throughValue(fn);
+    return name ? { callee: `${compact(fn.childForFieldName("path")?.text ?? "?")}.${name}`, form: { kind: "value" } } : throughValue(fn);
   }
 
   // A CamelCase last segment is a constructor, not a call.
   if (/^[A-Z]/.test(segments.at(-1)!)) return null;
 
   // `u64::from` and friends: the language's own, kept as written.
-  if (PRIMITIVES.has(segments[0]!)) return { callee: segments.join(".") };
+  if (PRIMITIVES.has(segments[0]!)) return dotted(segments);
 
-  if (segments[0] === "Self" && owner !== null) return { callee: [owner, ...segments.slice(1)].join(".") };
+  if (segments[0] === "Self" && owner !== null) return dotted([owner, ...segments.slice(1)]);
 
-  if (segments[0] === "self" && segments.length === 2) return { callee: segments[1]! };
+  if (segments[0] === "self" && segments.length === 2) return dotted([segments[1]!]);
   // `order::Order::new()` or `sync::mpsc::channel()` through a `use` binding: the path of that `use`, then the rest.
   const via = segments.length > 2 ? facts.imports.find((imp) => imp.bindings.some((b) => b.kind === "named" && b.local === segments![0] && b.imported === imp.source.split("::").at(-1))) : undefined;
 
@@ -717,7 +717,7 @@ function pathCall(fn: Node, scope: CallScope, facts: FileFacts): Callee | null {
   const head = segments[0]!;
 
   // Inside an inline module paths are relative to it: not an import, a call of a local name.
-  if (!scope.imports) return { callee: segments.join("::"), bound: "local" };
+  if (!scope.imports) return { callee: segments.join("::"), form: boundForm(segments.join("::"), "local") };
 
   if (head === "crate" || head === "super" || head === "self" || via || (/^[a-z_]/.test(head) && !bound.has(head) && !names.has(head))) {
     // The path is its own import: the call site names the module, or a type in it (`a::Message::raw` → `Message.raw`).
@@ -732,16 +732,25 @@ function pathCall(fn: Node, scope: CallScope, facts: FileFacts): Callee | null {
       facts.imports.push({ source, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, text: at.text, bindings: [{ kind: "named", local: source, imported: path.at(-1)! }], reexport: false });
     }
 
-    return { callee: [source, ...segments.slice(path.length)].join(".") };
+    return dotted([source, ...segments.slice(path.length)]);
   }
 
   // A path starting at an item or binding of this file.
-  return { callee: segments.join(".") };
+  return dotted(segments);
+}
+
+/** The callee of a path written as its parts joined with dots: a name, a member of one, or a member of a value when there are more. */
+function dotted(parts: readonly string[]): Callee {
+  const callee = parts.join(".");
+
+  return { callee, form: dottedForm(callee) };
 }
 
 /** A call archdiff cannot name, as written: a call through a value, a gap in the graph, never an edge. */
 function throughValue(fn: Node): Callee {
-  return { callee: compact(fn.text), bound: "local" };
+  const callee = compact(fn.text);
+
+  return { callee, form: boundForm(callee, "local") };
 }
 
 /** Source text on one line, without spaces around `.` and `:`. */
@@ -799,7 +808,8 @@ function valueRefs(items: Node[], names: ReadonlySet<string>, facts: FileFacts):
       if (!calledPath(node)) {
         const callee = pathCall(node, scope, facts);
 
-        if (callee && !callee.bound) {
+        // A path bound in the fn, or a trait method on a type (`<T as Trait>::f`), names no item.
+        if (callee && callee.form.kind !== "bound" && pathSegments(node) !== null) {
           note(callee.callee, node, false);
 
           // `Order::total` as a value may be a method taking `self`.
