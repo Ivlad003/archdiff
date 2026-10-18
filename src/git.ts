@@ -13,6 +13,8 @@
 // `revisionStamp`, `commitFirst`.
 
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isSourceFile } from "./languages.ts";
 function git(root: string, args: string[]): { ok: true; out: string } | { ok: false; error: string } {
   const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
@@ -155,8 +157,12 @@ export function changedFiles(root: string, base: string, head: string | null = n
   return { base: baseSide, head: headSide };
 }
 
-/** The whole tree of a ref as overrides against the working tree: files that differ get the ref's content, files the ref lacks null, files only the ref has their content. */
-export function treeAt(root: string, ref: string): Map<string, string | null> {
+/**
+ * The whole tree of a ref as overrides against the working tree: the source files that differ get the ref's content,
+ * files the ref lacks null, files only the ref has their content; and so do the files of `also` (the contract), when
+ * they differ.
+ */
+export function treeAt(root: string, ref: string, also: readonly string[] = []): Map<string, string | null> {
   assertRef(ref);
   const diff = git(root, ["diff", "--name-status", "-z", "-M", ref, "--"]);
 
@@ -169,7 +175,16 @@ export function treeAt(root: string, ref: string): Map<string, string | null> {
     const paths = status.startsWith("R") || status.startsWith("C") ? [parts[i + 1]!, parts[i + 2]!] : [parts[i + 1]!];
     i += 1 + paths.length;
 
-    for (const path of paths) if (path && isSourceFile(path)) overrides.set(path, contentAt(root, ref, path));
+    for (const path of paths) if (path && (isSourceFile(path) || also.includes(path))) overrides.set(path, contentAt(root, ref, path));
+  }
+
+  // A file of `also` git does not compare (one the working tree has untracked, or the ref has and the tree not): as the ref has it.
+  for (const path of also) {
+    if (overrides.has(path)) continue;
+    const here = existsSync(join(root, path)) ? readFileSync(join(root, path), "utf8") : null;
+    const there = contentAt(root, ref, path);
+
+    if (here !== there) overrides.set(path, there);
   }
 
   const untracked = git(root, ["ls-files", "-z", "--others", "--exclude-standard"]);

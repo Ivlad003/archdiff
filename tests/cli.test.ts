@@ -844,6 +844,38 @@ test("a comparison says what each head did: apart where they differ, every funct
     assert.ok(archdiff(["compare", dir, "--heads", "loud"]).stdout.includes("# 1 head against main"));
   }));
 
+test("a head of a review or a comparison is held to its own ARCHITECTURE.md, not the checkout's", () =>
+  withTempDir("archdiff-own-contract-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    const git = gitIn(dir);
+    const contract = (arrows: string): string => `# Architecture\n\n\`\`\`mermaid\nflowchart LR\n  subgraph routes\n    r[src/routes/checkout.tsx]\n  end\n  subgraph lib\n    o[src/lib/orders.ts]\n  end\n  subgraph db\n    s[src/db/store.ts]\n  end\n${arrows}\`\`\`\n`;
+    const report = 'import { action } from "../routes/checkout.tsx";\n\nexport function report(): unknown {\n  return action({ total: 1 });\n}\n';
+    git("init", "-q", "-b", "main");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    // allowed: its contract lets the store read a route, and a report does; against: the same report, no contract.
+    git("checkout", "-q", "-b", "allowed");
+    writeFileSync(join(dir, "ARCHITECTURE.md"), contract("  r --> o\n  o --> s\n  s --> r\n"));
+    writeFileSync(join(dir, "src/db/report.ts"), report);
+    git("add", ".");
+    git("commit", "-q", "-m", "allowed");
+    git("checkout", "-q", "main");
+    git("checkout", "-q", "-b", "against");
+    writeFileSync(join(dir, "src/db/report.ts"), report);
+    git("add", ".");
+    git("commit", "-q", "-m", "against");
+    git("checkout", "-q", "main");
+    // The checkout holds a contract of its own, not committed, that allows no db → routes.
+    writeFileSync(join(dir, "ARCHITECTURE.md"), contract("  r --> o\n  o --> s\n"));
+    const alone = archdiff(["compare", dir, "--heads", "allowed"]);
+    assert.equal(alone.status, 0, alone.stdout);
+    assert.ok(alone.stdout.includes("- **db → routes** — allowed by ARCHITECTURE.md"), alone.stdout);
+    assert.equal(archdiff(["compare", dir, "--heads", "allowed,against"]).status, 1);
+    const review = archdiff(["review", dir, "--head", "allowed"]);
+    assert.equal(review.status, 0, review.stdout);
+    assert.ok(review.stdout.includes("- **db → routes** — allowed by ARCHITECTURE.md"), review.stdout);
+  }));
+
 test("agent events name the files a tool touches, for the page to light their shapes", async () => {
   const { parseAgentLine } = await import("../src/agent.ts");
   const event = parseAgentLine(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/repo/src/lib/orders.ts", old_string: "a", new_string: "b" } }] } }));

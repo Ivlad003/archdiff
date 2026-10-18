@@ -73,7 +73,7 @@ The system SHALL offer `action.yml` that runs the review of a pull request again
 
 ### Requirement: A review knows the contract
 
-The system SHALL, when the head has `ARCHITECTURE.md`, mark a new dependency between layers as against the contract only when the contract's arrows do not allow it, report an allowed one as news, and exit 1 only for the ones against; without a contract every new layer dependency SHALL be a finding, as before. `compare` SHALL do the same per head.
+The system SHALL, when the head has `ARCHITECTURE.md` (a ref's own, as that revision has it, not the checkout's), mark a new dependency between layers as against the contract only when the contract's arrows do not allow it, report an allowed one as news, and exit 1 only for the ones against; without a contract every new layer dependency SHALL be a finding, as before. `compare` SHALL do the same per head.
 
 #### Scenario: Allowed and forbidden
 

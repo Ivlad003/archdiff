@@ -13,8 +13,14 @@
 import { analyze, type Analysis } from "./analyze.ts";
 import { loadConfig } from "./config.ts";
 import { graphDiff, markContract, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
-import { changedFiles, commitOf, commitsBetween, defaultBase, forkPoint, mergeBase, treeAt } from "./git.ts";
+import { changedFiles, commitOf, commitsBetween, defaultBase, forkPoint, mergeBase, treeAt as filesAt } from "./git.ts";
+import { INTENT_FILE } from "./intent.ts";
 import type { Graph } from "./graph.ts";
+
+/** A revision as overrides of the working tree: its source files, and its contract, which its analysis is held to. */
+function treeAt(root: string, ref: string): Map<string, string | null> {
+  return filesAt(root, ref, [INTENT_FILE]);
+}
 
 export interface ReviewResult {
   /** The head has a contract (ARCHITECTURE.md): a new layer dependency is a finding only when it goes against it. */

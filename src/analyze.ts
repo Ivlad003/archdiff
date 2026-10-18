@@ -3,7 +3,8 @@
 // only I/O of the pipeline besides the server: reading sources and the
 // cache. `overrides` lets a caller analyse another revision without a
 // checkout: the content of changed files at that revision, null for files
-// it does not have (`review`, diff.ts).
+// it does not have (`review`, diff.ts), the revision's ARCHITECTURE.md
+// among them.
 //
 // Pipeline: root → Config + files → FileFacts (cache | extractTs) → Graph.
 // Entry points: `analyze`, `Analysis`, `AnalysisStats`.
@@ -13,7 +14,7 @@ import { join } from "node:path";
 import { contentHash, FactCache } from "./cache.ts";
 import { loadConfig, type Config } from "./config.ts";
 import type { FileFacts } from "./extract/facts.ts";
-import { readIntent, withIntentLayers, type Intent } from "./intent.ts";
+import { INTENT_FILE, parseIntent, readIntent, withIntentLayers, type Intent } from "./intent.ts";
 import { extractAll } from "./extract/pool.ts";
 import { listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
 import { frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
@@ -65,12 +66,14 @@ export interface AnalyzeOptions {
 /** Analyses the repository at `root`. */
 export async function analyze(root: string, options: AnalyzeOptions = {}): Promise<Analysis> {
   const started = performance.now();
-  // ARCHITECTURE.md is read first: without layers of its own, archdiff.json takes the contract's.
-  const intent = readIntent(root);
+  const overrides = options.overrides ?? new Map<string, string | null>();
+  // ARCHITECTURE.md is read first — the revision's, when the overrides carry it: a review's or a comparison's head is
+  // held to its own contract. Without layers of its own, archdiff.json takes the contract's.
+  const contract = overrides.get(INTENT_FILE);
+  const intent = !overrides.has(INTENT_FILE) ? readIntent(root) : contract ? parseIntent(contract) : null;
   const config = withIntentLayers(options.config ?? loadConfig(root), intent);
   const listed0 = listSourceFiles(root, config.exclude);
-  const overrides = options.overrides ?? new Map<string, string | null>();
-  const files = [...new Set([...listed0.files, ...[...overrides.keys()].filter((path) => overrides.get(path) !== null)])].filter((path) => overrides.get(path) !== null).sort();
+  const files = [...new Set([...listed0.files, ...[...overrides.keys()].filter((path) => path !== INTENT_FILE && overrides.get(path) !== null)])].filter((path) => overrides.get(path) !== null).sort();
   const listed = performance.now();
   const cache = options.cache === false ? null : new FactCache(root);
   const facts = new Map<string, FileFacts>();
