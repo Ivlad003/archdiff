@@ -75,7 +75,10 @@ export function checkEvents(results: readonly CheckResult[]): Omit<AgentEvent, "
   return results.map((result) => ({ kind: "check", text: result.ok ? `✔ ${result.command}${result.command === "archdiff check" ? `: ${result.output}` : ""}` : `✘ ${result.command}${result.code !== undefined ? ` (exit ${result.code ?? "signal"})` : ""}\n${result.output}` }));
 }
 
-/** The Claude Code tools the checks need: a Bash pattern per command, and archdiff's own CLI, so the agent can verify its work. */
+/**
+ * The Claude Code tools the checks need: a Bash pattern per command, archdiff's own CLI, so the agent can verify its
+ * work, and the OpenSpec CLI, which the spec task has it run (`openspec init`, `openspec validate --specs`).
+ */
 export function allowedToolsFor(checks: readonly string[]): string[] {
-  return [...new Set([...checks.map((command) => `Bash(${command}:*)`), "Bash(npx @ivlad003/archdiff:*)", "Bash(npx -y @ivlad003/archdiff:*)", "Bash(archdiff:*)"])];
+  return [...new Set([...checks.map((command) => `Bash(${command}:*)`), "Bash(npx @ivlad003/archdiff:*)", "Bash(npx -y @ivlad003/archdiff:*)", "Bash(archdiff:*)", "Bash(npx @fission-ai/openspec:*)", "Bash(npx -y @fission-ai/openspec:*)"])];
 }

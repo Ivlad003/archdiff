@@ -81,7 +81,7 @@ The system SHALL generate the mock input and storages of a call flow from the ty
 
 ### Requirement: The checks run after the agent
 
-The system SHALL, when an agent's run ends, run the contract check and the commands `archdiff.json` names in `checks`, each in a shell in the repository with a time limit, and append their results to the run's events before the exit (✔ with the command, or ✘ with the exit code and the tail of the output); `POST /api/checks` and the Chat tab's *run checks* SHALL run them on request. Claude Code SHALL be allowed exactly those commands and archdiff itself (`--allowedTools Bash(<command>:*)`).
+The system SHALL, when an agent's run ends, run the contract check and the commands `archdiff.json` names in `checks`, each in a shell in the repository with a time limit, and append their results to the run's events before the exit (✔ with the command, or ✘ with the exit code and the tail of the output); `POST /api/checks` and the Chat tab's *run checks* SHALL run them on request. Claude Code SHALL be allowed exactly those commands, archdiff itself and the OpenSpec CLI (`--allowedTools Bash(<command>:*)`).
 
 #### Scenario: One check passes, one fails
 
