@@ -3,7 +3,7 @@
 // bound text element, lines as arrows bound to their shapes. IDs and seeds
 // derive from the archdiff IDs, so the same diagram gives the same file.
 
-import type { Diagram, DiagramEdge, DiagramNode } from "../diagram.ts";
+import type { Diagram, Line, Shape } from "../diagram.ts";
 import { heatColour } from "./colour.ts";
 import { routeFree } from "./route-free.ts";
 
@@ -94,7 +94,7 @@ function text(id: string, container: string | null, x: number, y: number, width:
   return { ...base(id, "text", x, y, width, Math.max(height, lines * fontSize * 1.25)), text: content, originalText: content, fontSize, fontFamily: 1, textAlign: "center", verticalAlign: "middle", containerId: container, lineHeight: 1.25, autoResize: true };
 }
 
-function shapeOf(node: DiagramNode): { type: string; fill: string; stroke: string; style: ExcalidrawElement["strokeStyle"]; width: number } {
+function shapeOf(node: Shape): { type: string; fill: string; stroke: string; style: ExcalidrawElement["strokeStyle"]; width: number } {
   const stroke = node.diff ? DIFF_STROKE[node.diff] : node.kind === "fn" ? "#1565c0" : node.kind === "hole" ? "#ef6c00" : node.kind === "event" ? "#f9a825" : node.kind === "package" ? "#3949ab" : node.kind === "class" ? "#4e342e" : node.kind === "state" ? "#2e7d32" : node.kind === "fragment" ? "#9e9e9e" : node.kind === "decision" ? "#6a1b9a" : node.kind === "action" ? "#424242" : node.kind === "end" ? "#616161" : node.kind === "external" || node.kind === "more" || node.kind === "cell" ? "#757575" : "#1e1e1e";
   const plain = node.kind === "layer" || node.kind === "participant" || node.kind === "more" || node.kind === "cell" ? "#f5f5f5" : node.kind === "fn" ? "#e3f2fd" : node.kind === "hole" ? "#fff3e0" : node.kind === "start" ? "#c8e6c9" : node.kind === "event" ? "#fff8e1" : node.kind === "package" ? "#e8eaf6" : node.kind === "class" ? "#fff8e1" : node.kind === "state" ? "#e8f5e9" : node.kind === "fragment" ? "transparent" : node.kind === "decision" ? "#f3e5f5" : node.kind === "end" ? "#eeeeee" : "#ffffff";
   // Heat darkens the fill; a diff mark is the stroke, so both show at once.
@@ -104,7 +104,7 @@ function shapeOf(node: DiagramNode): { type: string; fill: string; stroke: strin
 }
 
 /** The view a shape opens on the page (`customData.view`, read by the page on a second tap); not an Excalidraw link, whose icon would clutter every shape. */
-function viewLink(node: DiagramNode): string | null {
+function viewLink(node: Shape): string | null {
   const id = node.ref?.id ?? node.id;
 
   if (node.kind === "more") return node.ref?.id ? `archdiff://view/${encodeURIComponent(node.ref.id)}` : null;
@@ -137,7 +137,7 @@ export interface Point {
 }
 
 /** The columns of a placed diagram: shapes whose x-ranges overlap share a column; a column starts where a shape begins past every shape before it. */
-function columnsOf(nodes: readonly DiagramNode[]): { column: Map<string, number>; left: number[]; right: number[] } {
+function columnsOf(nodes: readonly Shape[]): { column: Map<string, number>; left: number[]; right: number[] } {
   const column = new Map<string, number>();
   const left: number[] = [];
   const right: number[] = [];
@@ -169,35 +169,35 @@ function columnsOf(nodes: readonly DiagramNode[]): { column: Map<string, number>
  * apart. Exports and the canvas share these routes; the sizes come from
  * `layout`.
  */
-export function routeEdges(diagram: Diagram): Map<DiagramEdge, Point[]> {
+export function routeEdges(diagram: Diagram): Map<Line, Point[]> {
   // Shapes the user moved out of the layout's columns: the grid router around every shape (route-free.ts).
   if (diagram.freeform) return routeFree(diagram);
   const boxes = new Map(diagram.nodes.map((node) => [node.id, node]));
-  const routes = new Map<DiagramEdge, Point[]>();
+  const routes = new Map<Line, Point[]>();
   const lowest = Math.max(0, ...diagram.nodes.map((node) => node.y + node.h));
-  const centreY = (node: DiagramNode): number => node.y + node.h / 2;
+  const centreY = (node: Shape): number => node.y + node.h / 2;
   const usable = diagram.edges.filter((edge) => boxes.has(edge.from) && boxes.has(edge.to) && edge.from !== edge.to && !edge.route);
   const columns = columnsOf(diagram.nodes);
 
   // Ports: the edges leaving a shape spread down its right side in the order of their targets, the edges entering a
   // shape spread down its left side in the order of their sources, so no two lines share an end point.
-  const outgoing = new Map<string, DiagramEdge[]>();
-  const incoming = new Map<string, DiagramEdge[]>();
+  const outgoing = new Map<string, Line[]>();
+  const incoming = new Map<string, Line[]>();
 
   for (const edge of usable) {
     outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge]);
     incoming.set(edge.to, [...(incoming.get(edge.to) ?? []), edge]);
   }
 
-  const portY = (node: DiagramNode, index: number, count: number): number => {
+  const portY = (node: Shape, index: number, count: number): number => {
     if (count <= 1) return centreY(node);
     const span = node.h * 0.7;
 
     return node.y + node.h * 0.15 + (span * index) / (count - 1);
   };
 
-  const outPort = new Map<DiagramEdge, number>();
-  const inPort = new Map<DiagramEdge, number>();
+  const outPort = new Map<Line, number>();
+  const inPort = new Map<Line, number>();
 
   for (const [id, edges] of outgoing) {
     const sorted = [...edges].sort((a, b) => centreY(boxes.get(a.to)!) - centreY(boxes.get(b.to)!));
@@ -210,7 +210,7 @@ export function routeEdges(diagram: Diagram): Map<DiagramEdge, Point[]> {
   }
 
   // A shape (other than the edge's own two) standing on the horizontal run at `y` between `x1` and `x2`.
-  const blocked = (edge: DiagramEdge, y: number, x1: number, x2: number): boolean =>
+  const blocked = (edge: Line, y: number, x1: number, x2: number): boolean =>
     diagram.nodes.some((node) => node.id !== edge.from && node.id !== edge.to && node.x < x2 && node.x + node.w > x1 && node.y - 6 < y && node.y + node.h + 6 > y);
 
   // The free horizontal corridors between the rows of the columns `first`..`last`: the midpoints of the gaps between
@@ -245,8 +245,8 @@ export function routeEdges(diagram: Diagram): Map<DiagramEdge, Point[]> {
   // gap take distinct x positions spread over the middle of the gap, ordered by where they start, so their runs do
   // not overlap. A detour (the exit of an edge that must take a corridor) runs down the left tenth of the gap after
   // the source's column, and the edges of one corridor sit a few pixels apart.
-  const byGap = new Map<number, DiagramEdge[]>();
-  const backward: DiagramEdge[] = [];
+  const byGap = new Map<number, Line[]>();
+  const backward: Line[] = [];
 
   for (const edge of usable) {
     const from = columns.column.get(edge.from)!;

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { analyze } from "../src/analyze.ts";
-import type { Diagram, DiagramNode } from "../src/diagram.ts";
+import type { Diagram, Shape } from "../src/diagram.ts";
 import { layout } from "../src/diagram.ts";
 import { routeEdges } from "../src/export/excalidraw.ts";
 import { parseView, viewList, viewOf } from "../src/views.ts";
@@ -47,7 +47,7 @@ function crossings(diagram: Diagram): string[] {
 
 /** A grid of modules: `grid[row][column]` names a shape or is null; `edges` are pairs of names. */
 function grid(rows: (string | null)[][], edges: [string, string][]): Diagram {
-  const nodes: DiagramNode[] = [];
+  const nodes: Shape[] = [];
 
   rows.forEach((row, r) => row.forEach((name, c) => {
     if (name) nodes.push({ id: name, kind: "module", label: name, x: 40 + c * 260, y: 40 + r * 90, w: 180, h: 50, group: "lane" });
@@ -133,7 +133,7 @@ test("crossings of the fixture's views stay at or under their baseline (ordering
 
 test("a module most of a picture imports becomes a badge on its importers, not a tangle of lines", () => {
   const modules = ["a", "b", "c", "d", "e", "f", "g", "h", "log"];
-  const nodes: DiagramNode[] = modules.map((id) => ({ id, kind: "module", label: id, x: 0, y: 0, w: 0, h: 0 }));
+  const nodes: Shape[] = modules.map((id) => ({ id, kind: "module", label: id, x: 0, y: 0, w: 0, h: 0 }));
   const edges = modules.filter((id) => id !== "log" && id !== "h").map((id) => ({ from: id, to: "log", kind: "dependency" as const }));
   edges.push({ from: "a", to: "b", kind: "dependency" });
   const diagram: Diagram = { view: "layer:x", title: "x", nodes, edges, groups: [] };
@@ -149,7 +149,7 @@ test("a module most of a picture imports becomes a badge on its importers, not a
 });
 
 test("only the changed shapes and their neighbours stay; hidden lanes take their shapes and lines with them", () => {
-  const nodes: DiagramNode[] = ["a", "b", "c", "d"].map((id) => ({ id, kind: "module", label: id, group: id === "d" ? "other" : "main", x: 0, y: 0, w: 0, h: 0 }));
+  const nodes: Shape[] = ["a", "b", "c", "d"].map((id) => ({ id, kind: "module", label: id, group: id === "d" ? "other" : "main", x: 0, y: 0, w: 0, h: 0 }));
   nodes[1]!.diff = "changed";
   const diagram: Diagram = { view: "layer:x", title: "x", nodes, edges: [{ from: "a", to: "b", kind: "dependency" }, { from: "c", to: "d", kind: "dependency" }], groups: [{ id: "main", label: "main", kind: "lane", x: 0, y: 0, w: 0, h: 0 }, { id: "other", label: "other", kind: "lane", x: 0, y: 0, w: 0, h: 0 }] };
   const only = onlyChanged(diagram);
@@ -218,7 +218,7 @@ test("shapes placed anywhere by hand: the grid router runs no line through a sha
   for (let seed = 1; seed <= 150; seed++) {
     const random = mulberry32(seed);
     const count = 6 + Math.floor(random() * 16);
-    const nodes: DiagramNode[] = [];
+    const nodes: Shape[] = [];
 
     // Shapes on a jittered grid, so none overlaps another; some cells left empty.
     for (let i = 0; i < count; i++) {

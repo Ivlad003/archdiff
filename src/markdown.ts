@@ -8,12 +8,12 @@
 // Entry points: `diagramMarkdown`, `nodeMarkdown`.
 
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, DiagramEdge, DiagramNode } from "./diagram.ts";
+import type { Diagram, Line, Shape } from "./diagram.ts";
 import { farFromMainSequence, type Metrics } from "./diagram.ts";
 import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
 import { moduleOf } from "./graph.ts";
 
-function position(node: DiagramNode): string {
+function position(node: Shape): string {
   if (!node.ref?.file) return "";
 
   return node.ref.line !== undefined ? `${node.ref.file}:${node.ref.line}` : node.ref.file;
@@ -106,7 +106,7 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
 
     return `${lines.join("\n").trimEnd()}\n`;
   }
-  const byGroup = new Map<string, DiagramNode[]>();
+  const byGroup = new Map<string, Shape[]>();
 
   for (const node of diagram.nodes) byGroup.set(node.group ?? "", [...(byGroup.get(node.group ?? "") ?? []), node]);
 
@@ -182,7 +182,7 @@ function callLines(id: string, analysis: Analysis): string[] {
  * `readSource` (a file's text, or null), a module's declarations fold
  * open to their calls and their code.
  */
-export function nodeMarkdown(node: DiagramNode, analysis: Analysis, readSource: (file: string) => string | null = () => null): string {
+export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file: string) => string | null = () => null): string {
   const { graph } = analysis;
   const lines = [`# ${node.label.replace(/\n.*/s, "")}`, ""];
   const where = position(node);
@@ -290,14 +290,14 @@ export function nodeMarkdown(node: DiagramNode, analysis: Analysis, readSource: 
 }
 
 /** The modules a shape stands for: a module itself, a layer's modules, a folded directory's, a function's own module; none for an external. */
-function modulesBehind(node: DiagramNode, analysis: Analysis): string[] {
+function modulesBehind(node: Shape, analysis: Analysis): string[] {
   const { graph } = analysis;
   const id = node.ref?.id ?? node.id;
 
   if (node.kind === "layer") return [...graph.modules.values()].filter((module) => module.layer === node.id).map((module) => module.id);
 
   if (node.kind === "more" || node.kind === "package") {
-    const members = (node as DiagramNode & { members?: string[] }).members;
+    const members = (node as Shape & { members?: string[] }).members;
 
     if (members && members.length > 0) return members.map(moduleOf);
     const directory = id.startsWith("dir:") ? `${id.slice(4)}/` : null;
@@ -311,7 +311,7 @@ function modulesBehind(node: DiagramNode, analysis: Analysis): string[] {
 }
 
 /** The label of a shape for prose: its first line. */
-function nameOf(node: DiagramNode): string {
+function nameOf(node: Shape): string {
   return node.label.split("\n")[0]!;
 }
 
@@ -320,7 +320,7 @@ function nameOf(node: DiagramNode): string {
  * call behind it with its `file:line`, so a tap on an arrow says where it
  * leads and why it is there.
  */
-export function edgeMarkdown(edge: DiagramEdge, diagram: Diagram, analysis: Analysis): string {
+export function edgeMarkdown(edge: Line, diagram: Diagram, analysis: Analysis): string {
   const { graph } = analysis;
   const from = diagram.nodes.find((node) => node.id === edge.from);
   const to = diagram.nodes.find((node) => node.id === edge.to);

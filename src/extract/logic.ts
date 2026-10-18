@@ -10,14 +10,14 @@
 // paths from the start to every exit as the rules of the function.
 //
 // TypeScript, JavaScript and Python, over the control grammars of
-// control.ts. Entry points: `readLogic`, `LogicFact`, `LogicNode`,
+// control.ts. Entry points: `readLogic`, `LogicFact`, `LogicStep`,
 // `LogicEdge`.
 
 import { headerOf, PY_CONTROL, short, TS_CONTROL, type ControlGrammar } from "./control.ts";
 import { grammarFor, withTree, type Grammar, type Node } from "./treesitter.ts";
 
 /** One box of the flowchart. */
-export interface LogicNode {
+export interface LogicStep {
   id: string;
   /**
    * `start` and `end` frame the body; `decision` is a branch (an `if`, a
@@ -41,7 +41,7 @@ export interface LogicEdge {
 }
 
 export interface LogicFact {
-  nodes: LogicNode[];
+  nodes: LogicStep[];
   edges: LogicEdge[];
   /** The body had more statements than a readable picture holds: the rest were left out. */
   truncated?: true;
@@ -145,7 +145,7 @@ function statementText(node: Node): string {
 
 /** Builds the flowchart of one body. */
 class Builder {
-  readonly nodes: LogicNode[] = [];
+  readonly nodes: LogicStep[] = [];
   readonly edges: LogicEdge[] = [];
   truncated = false;
   private readonly frames: Frame[] = [];
@@ -155,8 +155,8 @@ class Builder {
     this.grammar = grammar;
   }
 
-  add(kind: LogicNode["kind"], text: string, node: Node, calls: string[] = []): LogicNode {
-    const made: LogicNode = { id: `n${this.nodes.length}`, kind, text, line: node.startPosition.row + 1, endLine: node.endPosition.row + 1 };
+  add(kind: LogicStep["kind"], text: string, node: Node, calls: string[] = []): LogicStep {
+    const made: LogicStep = { id: `n${this.nodes.length}`, kind, text, line: node.startPosition.row + 1, endLine: node.endPosition.row + 1 };
 
     if (calls.length > 0) made.calls = calls;
     this.nodes.push(made);

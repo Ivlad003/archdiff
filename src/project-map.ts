@@ -7,10 +7,10 @@
 //
 // A pure function of the graph. Entry points: `projectMap`, `ProjectMap`.
 
-import type { ProjectMap, ProjectMapEdge, ProjectMapNode } from "./diagram.ts";
+import type { ProjectMap, MapLine, MapDot } from "./diagram.ts";
 import type { Graph } from "./graph.ts";
 
-export type { ProjectMap, ProjectMapEdge, ProjectMapNode } from "./diagram.ts";
+export type { ProjectMap, MapLine, MapDot } from "./diagram.ts";
 
 /** More modules than this, and the map folds to directories. */
 const FOLD_ABOVE = 400;
@@ -38,7 +38,7 @@ export function projectMap(graph: Graph): ProjectMap {
   }
 
   const groupOf = (id: string): string => (depth === 0 ? id : `dir:${directoryAt(id, depth)}`);
-  const byGroup = new Map<string, ProjectMapNode>();
+  const byGroup = new Map<string, MapDot>();
 
   for (const module of modules) {
     const id = groupOf(module.id);
@@ -51,13 +51,13 @@ export function projectMap(graph: Graph): ProjectMap {
       continue;
     }
 
-    const node: ProjectMapNode = { id, label: depth === 0 ? module.id : directoryAt(module.id, depth), layer: module.layer, lines: module.lines, fns: fnsOf.get(module.id) ?? 0 };
+    const node: MapDot = { id, label: depth === 0 ? module.id : directoryAt(module.id, depth), layer: module.layer, lines: module.lines, fns: fnsOf.get(module.id) ?? 0 };
 
     if (depth > 0) node.modules = 1;
     byGroup.set(id, node);
   }
 
-  const counts = new Map<string, ProjectMapEdge>();
+  const counts = new Map<string, MapLine>();
 
   for (const dep of graph.deps) {
     if (!graph.modules.has(dep.to)) continue;

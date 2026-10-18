@@ -15,11 +15,11 @@
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
 
 import type { Analysis } from "./analyze.ts";
-import { SIZE, type Diagram, type DiagramEdge, type DiagramNode } from "./diagram.ts";
+import { SIZE, type Diagram, type Line, type Shape } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
-import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
+import { moduleOf, type Graph, type Declaration } from "./graph.ts";
 import { classesView, contractView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
@@ -77,7 +77,7 @@ const HANDLER_MODULE = /(controller|handler|command|job|listener|subscriber|midd
 
 /** A function execution starts from, with how it is known. */
 export interface EntryPoint {
-  node: GraphNode;
+  node: Declaration;
   /** `route cart.tsx: loader`, `hook …`, `bin`, `main`, `entries` (archdiff.json), `uncalled export`. */
   label: string;
 }
@@ -95,7 +95,7 @@ export function entryPoints(analysis: Analysis): EntryPoint[] {
   const entries = new Map<string, EntryPoint>();
 
   // The node an export name of a module stands for, re-exports followed.
-  const exportedNode = (module: string, exportName: string): GraphNode | null => {
+  const exportedNode = (module: string, exportName: string): Declaration | null => {
     const id = graph.resolvedExports.get(module)?.get(exportName);
     const node = id ? graph.nodes.get(id) : undefined;
 
@@ -197,8 +197,8 @@ function layersView(graph: Graph): Diagram {
     counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
   }
 
-  const nodes = graph.layers.map((layer): DiagramNode => ({ id: layer, kind: "layer", label: layer, count: modulesOf.get(layer) ?? 0, x: 0, y: 0, w: 0, h: 0 }));
-  const edges = [...counts].map(([key, count]): DiagramEdge => {
+  const nodes = graph.layers.map((layer): Shape => ({ id: layer, kind: "layer", label: layer, count: modulesOf.get(layer) ?? 0, x: 0, y: 0, w: 0, h: 0 }));
+  const edges = [...counts].map(([key, count]): Line => {
     const [from, to] = key.split("\u0000") as [string, string];
 
     return { from, to, kind: "dependency", count, label: String(count) };
@@ -262,7 +262,7 @@ function callsView(graph: Graph, id: string, depth: number): Diagram {
 
   if (!start) return unplaced(`calls:${id}`, id, [], [], [], { reason: `no function "${id}"`, missing: true });
   const members = new Set([id]);
-  const edges: DiagramEdge[] = [];
+  const edges: Line[] = [];
   const seenEdges = new Set<string>();
   let frontier = new Set([id]);
   const callsFrom = new Map<string, typeof graph.calls>();
@@ -271,7 +271,7 @@ function callsView(graph: Graph, id: string, depth: number): Diagram {
   const gapsFrom = new Map<string, typeof graph.gaps>();
 
   for (const gap of graph.gaps) gapsFrom.set(gap.from, [...(gapsFrom.get(gap.from) ?? []), gap]);
-  const holes: DiagramNode[] = [];
+  const holes: Shape[] = [];
 
   for (let step = 0; step < depth && frontier.size > 0; step++) {
     const next = new Set<string>();
@@ -323,7 +323,7 @@ function coverageView(graph: Graph): Diagram {
   for (const call of graph.calls) callsOf.set(moduleOf(call.from), (callsOf.get(moduleOf(call.from)) ?? 0) + 1);
   const nodes = [...gapsOf]
     .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
-    .map(([id, gaps]): DiagramNode => ({ ...moduleNode(graph, id), label: `${id}\n${gaps} gaps / ${callsOf.get(id) ?? 0} calls`, count: gaps, diff: "changed" }));
+    .map(([id, gaps]): Shape => ({ ...moduleNode(graph, id), label: `${id}\n${gaps} gaps / ${callsOf.get(id) ?? 0} calls`, count: gaps, diff: "changed" }));
 
   return unplaced("coverage", "What the diagrams cannot show", nodes, [], lanesOf(graph, nodes), nodes.length === 0 ? { reason: "every import and call was followed" } : {});
 }
@@ -351,7 +351,7 @@ function insideView(graph: Graph, id: string, depth: number): Diagram {
   }
 
   const seen = new Set<string>();
-  const edges: DiagramEdge[] = [];
+  const edges: Line[] = [];
 
   for (const call of graph.calls) {
     if (!members.has(call.from) || !members.has(call.to) || call.from === call.to) continue;
@@ -389,10 +389,10 @@ function focusView(graph: Graph, id: string, depth: number): Diagram {
   if ((!fn || fn.kind === "type") && !module) return unplaced(key, id, [], [], [], { reason: `no function or module "${id}"`, missing: true });
   const own = module ? [...graph.nodes.values()].filter((node) => node.module === id && node.kind !== "type").map((node) => node.id) : [id];
   const members = new Set(own);
-  const edges: DiagramEdge[] = [];
+  const edges: Line[] = [];
   const seen = new Set<string>();
 
-  const take = (from: string, to: string, kind: DiagramEdge["kind"]): void => {
+  const take = (from: string, to: string, kind: Line["kind"]): void => {
     const edgeKey = `${from}\u0000${to}\u0000${kind}`;
 
     if (seen.has(edgeKey) || from === to) return;
@@ -432,7 +432,7 @@ function focusView(graph: Graph, id: string, depth: number): Diagram {
   }
 
   for (const call of graph.calls) if (members.has(call.from) && members.has(call.to)) take(call.from, call.to, call.kind);
-  const nodes: DiagramNode[] = [...members].filter((member) => graph.nodes.has(member)).map((member) => ({ ...fnNode(graph, member), group: moduleOf(member) }));
+  const nodes: Shape[] = [...members].filter((member) => graph.nodes.has(member)).map((member) => ({ ...fnNode(graph, member), group: moduleOf(member) }));
 
   // A module: the modules joined by an import with no call drawn between them, as module shapes beside the subject's own.
   if (module) {
@@ -570,8 +570,8 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): D
   }
   const column = new Map(participants.map((module, i) => [module, 20 + i * SEQ_COLUMN]));
   const bottom = 80 + (messages.length + 1) * SEQ_ROW;
-  const nodes: DiagramNode[] = [];
-  const edges: DiagramEdge[] = [];
+  const nodes: Shape[] = [];
+  const edges: Line[] = [];
 
   for (const module of participants) {
     const x = column.get(module)!;

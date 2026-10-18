@@ -11,7 +11,7 @@
 // Entry point: `intentView`.
 
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "./diagram.ts";
+import type { Diagram, Line, Lane, Shape } from "./diagram.ts";
 import { INTENT_FILE, type Intent } from "./intent.ts";
 
 /**
@@ -28,8 +28,8 @@ export function intentView(analysis: Analysis, intent: Intent | null): Diagram {
   const layerNames = [...intent.layers.map((layer) => layer.name)];
 
   for (const module of intent.modules) if (module.layer && !layerNames.includes(module.layer)) layerNames.push(module.layer);
-  const nodes: DiagramNode[] = [];
-  const edges: DiagramEdge[] = [];
+  const nodes: Shape[] = [];
+  const edges: Line[] = [];
   const shown = new Set<string>();
   let planned = 0;
   let beyond = 0;
@@ -37,7 +37,7 @@ export function intentView(analysis: Analysis, intent: Intent | null): Diagram {
   for (const module of intent.modules) {
     const built = graph.modules.has(module.id);
     // The path is the label; the description goes to the panel (`doc`), where it has room.
-    const node: DiagramNode = { id: module.id, kind: "module", label: module.id, ref: { id: module.id, file: module.id, line: 1 }, x: 0, y: 0, w: 0, h: 0 };
+    const node: Shape = { id: module.id, kind: "module", label: module.id, ref: { id: module.id, file: module.id, line: 1 }, x: 0, y: 0, w: 0, h: 0 };
 
     if (module.layer) node.group = module.layer;
 
@@ -53,7 +53,7 @@ export function intentView(analysis: Analysis, intent: Intent | null): Diagram {
     for (const fn of module.fns) {
       const id = `${module.id}#${fn.name}`;
       const real = graph.nodes.get(id);
-      const fnNode: DiagramNode = { id, kind: "fn", label: fn.name, ref: real ? { id, file: real.module, line: real.line, endLine: real.endLine } : { id, file: module.id }, x: 0, y: 0, w: 0, h: 0 };
+      const fnNode: Shape = { id, kind: "fn", label: fn.name, ref: real ? { id, file: real.module, line: real.line, endLine: real.endLine } : { id, file: module.id }, x: 0, y: 0, w: 0, h: 0 };
 
       if (module.layer) fnNode.group = module.layer;
 
@@ -80,7 +80,7 @@ export function intentView(analysis: Analysis, intent: Intent | null): Diagram {
 
   const seen = new Set<string>();
 
-  const push = (edge: DiagramEdge): void => {
+  const push = (edge: Line): void => {
     const key = `${edge.from}\u0000${edge.to}`;
 
     if (seen.has(key) || edge.from === edge.to) return;
@@ -93,7 +93,7 @@ export function intentView(analysis: Analysis, intent: Intent | null): Diagram {
   for (const edge of intent.edges) {
     if (!shown.has(edge.from) || !shown.has(edge.to)) continue;
     const kind = edge.from.includes("#") || edge.to.includes("#") ? "call" : "dependency";
-    const line: DiagramEdge = { from: edge.from, to: edge.to, kind };
+    const line: Line = { from: edge.from, to: edge.to, kind };
 
     if (edge.label) line.label = edge.label;
 
@@ -110,7 +110,7 @@ export function intentView(analysis: Analysis, intent: Intent | null): Diagram {
     extra++;
   }
 
-  const groups: DiagramGroup[] = layerNames.map((name) => ({ id: name, label: intent.layers.find((layer) => layer.name === name)?.description ? `${name} — ${intent.layers.find((layer) => layer.name === name)!.description}` : name, kind: "lane", x: 0, y: 0, w: 0, h: 0 }));
+  const groups: Lane[] = layerNames.map((name) => ({ id: name, label: intent.layers.find((layer) => layer.name === name)?.description ? `${name} — ${intent.layers.find((layer) => layer.name === name)!.description}` : name, kind: "lane", x: 0, y: 0, w: 0, h: 0 }));
   const parts = [planned > 0 ? `${planned} planned, not built yet (dashed)` : "everything planned is built", beyond > 0 ? `${beyond} modules beyond the intent (orange)` : "", extra > 0 ? `${extra} imports beyond the intent (orange)` : ""].filter(Boolean);
 
   return { view: "intent", title: `Intent: ${INTENT_FILE} against the code`, nodes, edges, groups, reason: parts.join("; "), question: "what was intended, what is built, and where the code went beyond the intent" };

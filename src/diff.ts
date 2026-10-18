@@ -13,15 +13,15 @@
 import { analyze, type Analysis } from "./analyze.ts";
 import { changedFiles, commitsBetween, defaultBase, mergeBase, treeAt, type Commit } from "./git.ts";
 import { loadConfig } from "./config.ts";
-import type { Diagram, DiagramEdge, DiagramNode, DiffMark } from "./diagram.ts";
+import type { Diagram, Line, Shape, DiffMark } from "./diagram.ts";
 import { layout } from "./diagram.ts";
 import { toMermaid } from "./export/mermaid.ts";
-import { moduleOf, type Graph, type GraphNode } from "./graph.ts";
+import { moduleOf, type Graph, type Declaration } from "./graph.ts";
 import { allowedLayerPairs, type Intent } from "./intent.ts";
 
 export interface NodeChange {
   id: string;
-  kind: GraphNode["kind"];
+  kind: Declaration["kind"];
   module: string;
   line: number;
   /** `changed`: what differs. */
@@ -73,7 +73,7 @@ function edgeOf(key: string): EdgeChange {
   return { from, to };
 }
 
-function nodeChange(node: GraphNode): NodeChange {
+function nodeChange(node: Declaration): NodeChange {
   return { id: node.id, kind: node.kind, module: node.module, line: node.line };
 }
 
@@ -155,14 +155,14 @@ export function graphDiff(base: Graph, head: Graph, baseRef: string, changed: re
  * where that import changed, and the imports themselves marked.
  */
 export function diffDiagram(diff: GraphDiff, base: Graph, head: Graph): Diagram {
-  const marks = new Map<string, DiagramNode["diff"]>();
+  const marks = new Map<string, Shape["diff"]>();
 
   for (const id of diff.modulesAdded) marks.set(id, "added");
 
   for (const id of diff.modulesRemoved) marks.set(id, "removed");
 
   for (const change of [...diff.nodesChanged, ...diff.nodesAdded, ...diff.nodesRemoved]) if (!marks.has(change.module)) marks.set(change.module, "changed");
-  const edges: DiagramEdge[] = [];
+  const edges: Line[] = [];
   const touched = new Set(marks.keys());
 
   for (const dep of diff.depsAdded) {
@@ -186,20 +186,20 @@ export function diffDiagram(diff: GraphDiff, base: Graph, head: Graph): Diagram 
     edges.push({ from: dep.from, to: dep.to, kind: "dependency" });
   }
 
-  const nodes: DiagramNode[] = [];
+  const nodes: Shape[] = [];
 
   for (const id of [...touched].sort()) {
     const module = head.modules.get(id) ?? base.modules.get(id);
     const external = head.externals.get(id) ?? base.externals.get(id);
 
     if (module) {
-      const node: DiagramNode = { id, kind: "module", label: id, ref: { id, file: id, line: 1 }, group: module.layer, x: 0, y: 0, w: 0, h: 0 };
+      const node: Shape = { id, kind: "module", label: id, ref: { id, file: id, line: 1 }, group: module.layer, x: 0, y: 0, w: 0, h: 0 };
       const mark = marks.get(id);
 
       if (mark) node.diff = mark;
       nodes.push(node);
     } else if (external) {
-      const node: DiagramNode = { id, kind: "external", label: external.kind === "builtin" ? `node:${external.name}` : external.name, x: 0, y: 0, w: 0, h: 0 };
+      const node: Shape = { id, kind: "external", label: external.kind === "builtin" ? `node:${external.name}` : external.name, x: 0, y: 0, w: 0, h: 0 };
 
       if (diff.externalsAdded.includes(id)) node.diff = "added";
       else if (diff.externalsRemoved.includes(id)) node.diff = "removed";
@@ -419,7 +419,7 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
   }
 
   const glyph: Record<DiffMark, string> = { added: "+", removed: "−", changed: "~", warning: "!", planned: "○" };
-  const nodes: DiagramNode[] = [];
+  const nodes: Shape[] = [];
   const everyHead = heads.length;
 
   for (const [id, own] of [...marks].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
@@ -430,14 +430,14 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
     const kinds = new Set(own.values());
     // The shape's own colour: what every head agrees on; a mixed picture is "changed".
     const colour: DiffMark = kinds.size === 1 ? [...kinds][0]! : "changed";
-    const node: DiagramNode = { id, kind: "module", label: `${id}\n${parts.join("  ")}`, ref: { id, file: id, line: 1 }, group: module.layer, diff: colour, count: own.size, x: 0, y: 0, w: 0, h: 0 };
+    const node: Shape = { id, kind: "module", label: `${id}\n${parts.join("  ")}`, ref: { id, file: id, line: 1 }, group: module.layer, diff: colour, count: own.size, x: 0, y: 0, w: 0, h: 0 };
 
     if (own.size === everyHead && everyHead > 1) node.label = `${id}\n${glyph[colour]} every head`;
     nodes.push(node);
   }
 
-  const edges: DiagramEdge[] = [];
-  const seen = new Map<string, DiagramEdge>();
+  const edges: Line[] = [];
+  const seen = new Map<string, Line>();
 
   for (const { head, diff } of heads) {
     for (const [list, what] of [
@@ -451,7 +451,7 @@ export function compareDiagram(base: string, heads: readonly Compared[], baseGra
 
         if (known) known.label = `${known.label}, ${name}`;
         else {
-          const drawn: DiagramEdge = { from: edge.from, to: edge.to, kind: "dependency", diff: what, label: name };
+          const drawn: Line = { from: edge.from, to: edge.to, kind: "dependency", diff: what, label: name };
           seen.set(key, drawn);
           edges.push(drawn);
         }

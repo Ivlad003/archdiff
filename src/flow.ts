@@ -12,7 +12,7 @@
 
 import type { Analysis } from "./analyze.ts";
 import { matchesGlob } from "./glob.ts";
-import { moduleOf, type GraphNode } from "./graph.ts";
+import { moduleOf, type Declaration } from "./graph.ts";
 import type { Mock } from "./scene.ts";
 
 export interface FlowParam {
@@ -223,7 +223,7 @@ export function dataFlow(analysis: Analysis, entry: string, mocks: readonly Mock
 
   for (const [key, value] of inputFields) known.set(key, { value, from: "input" });
 
-  const visit = (node: GraphNode, level: number, caller: string | null): void => {
+  const visit = (node: Declaration, level: number, caller: string | null): void => {
     if (seen.has(node.id) || level > depth) return;
     seen.add(node.id);
     const module = moduleOf(node.id);

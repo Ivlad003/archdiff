@@ -15,7 +15,7 @@
 // `metricsOf`, `metricsView`, `overlayInstability`.
 
 import type { Analysis } from "./analyze.ts";
-import { farFromMainSequence, SIZE, type Diagram, type DiagramNode, type LayerMetrics, type Metrics, type ModuleMetrics } from "./diagram.ts";
+import { farFromMainSequence, SIZE, type Diagram, type Shape, type LayerMetrics, type Metrics, type ModuleMetrics } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { unplaced } from "./nodes.ts";
 
@@ -219,7 +219,7 @@ export function metricsView(analysis: Analysis, scope: string | null, limit: num
   const shown = rows.slice(0, limit);
   const cell = SIZE.cell;
   const head = 240;
-  const nodes: DiagramNode[] = [];
+  const nodes: Shape[] = [];
 
   COLUMNS.forEach((column, i) => nodes.push({ id: `col:${column.key}`, kind: "cell", label: column.label, x: head + i * cell.w, y: 0, w: cell.w, h: cell.h }));
   shown.forEach((row, r) => {
@@ -228,7 +228,7 @@ export function metricsView(analysis: Analysis, scope: string | null, limit: num
 
     COLUMNS.forEach((column, i) => {
       const value = row[column.key] as number;
-      const node: DiagramNode = { id: `cell:${row.id}:${column.key}`, kind: "cell", label: Number.isInteger(value) ? String(value) : value.toFixed(2), x: head + i * cell.w, y, w: cell.w, h: cell.h, count: value };
+      const node: Shape = { id: `cell:${row.id}:${column.key}`, kind: "cell", label: Number.isInteger(value) ? String(value) : value.toFixed(2), x: head + i * cell.w, y, w: cell.w, h: cell.h, count: value };
 
       // The distance and a low cohesion are what to look at: shaded, and marked when far.
       if (column.key === "distance") {
@@ -261,7 +261,7 @@ export function overlayInstability(diagram: Diagram, analysis: Analysis): Diagra
     const row = module ? byModule.get(module) : undefined;
 
     if (!row) return node;
-    const shaded: DiagramNode = { ...node, heat: row.instability, label: `${node.label}\nI ${row.instability.toFixed(2)} · Ca ${row.ca}` };
+    const shaded: Shape = { ...node, heat: row.instability, label: `${node.label}\nI ${row.instability.toFixed(2)} · Ca ${row.ca}` };
 
     if (row.instability >= 0.7 && row.ca >= 3 && !node.diff) {
       shaded.diff = "warning";

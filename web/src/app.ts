@@ -8,7 +8,7 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { api, type DiagramEdge, type DiagramNode, type ViewEntry } from "./api.ts";
+import { api, type Line, type Shape, type ViewEntry } from "./api.ts";
 import { mountCanvas, VIEW_LINK, type CanvasHandle, type PickedLine } from "./editor.tsx";
 import { element, h, remember } from "./dom.ts";
 import { agentNameOf, askAbout, loadTasks, runButton, setAgentName, transcript } from "./chat.ts";
@@ -26,9 +26,9 @@ import { MERMAID_STYLES, OVERLAYS, pictureQueryText, type MermaidStyle, type Ove
 
 let views: ViewEntry[] = [];
 let diagramMarkdown = "";
-let nodes = new Map<string, DiagramNode>();
+let nodes = new Map<string, Shape>();
 /** The lines of the current view, in the diagram's order (the order the canvas names them by). */
-let edges: DiagramEdge[] = [];
+let edges: Line[] = [];
 let canvas: CanvasHandle | null = null;
 let mode: "view" | "edit" = "view";
 let dirty = false;
@@ -249,7 +249,7 @@ function setMarkdown(target: HTMLElement, markdown: string): void {
 }
 
 /** The code of a shape: the file with the shape's lines marked and scrolled into view. */
-async function showCode(node: DiagramNode): Promise<void> {
+async function showCode(node: Shape): Promise<void> {
   const file = node.ref?.file;
 
   if (!file) {
@@ -338,7 +338,7 @@ async function showNode(id: string | null): Promise<void> {
  * calls it (←) — as chips. A click picks the neighbour here (sideways, the same picture); Shift+click opens the
  * neighbour's own view (sideways, the same kind of picture for another subject). The ← → keys do the same walk.
  */
-function renderNeighbours(node: DiagramNode | null): void {
+function renderNeighbours(node: Shape | null): void {
   const strip = element<HTMLDivElement>("neighbours");
   strip.replaceChildren();
   strip.className = "line-strip neighbours";
@@ -448,7 +448,7 @@ function showSelection(): void {
 
 /** The question box of the Chat tab with the shapes attached: the selection, else the picked shape, else the picture alone. */
 function askSelected(ids: string[] = selected.length > 0 ? selected : lastPicked ? [lastPicked] : []): void {
-  askAbout(ids.map((id) => nodes.get(id)).filter((node): node is DiagramNode => node !== undefined).map(tagOf).filter((tag): tag is { tag: string; label: string } => tag !== null));
+  askAbout(ids.map((id) => nodes.get(id)).filter((node): node is Shape => node !== undefined).map(tagOf).filter((tag): tag is { tag: string; label: string } => tag !== null));
 }
 
 // ── The context menu ─────────────────────────────────────────────────────────

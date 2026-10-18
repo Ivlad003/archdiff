@@ -7,13 +7,13 @@
 // rather than reaching into app.ts, the way the server's routes take
 // theirs. Nothing here runs at import: `page` is used inside handlers.
 
-import type { DiagramEdge, DiagramNode, ViewEntry } from "./api.ts";
+import type { Line, Shape, ViewEntry } from "./api.ts";
 import type { CanvasHandle } from "./editor.tsx";
 
 export interface PageContext {
   canvas(): CanvasHandle | null;
-  nodes(): Map<string, DiagramNode>;
-  edges(): DiagramEdge[];
+  nodes(): Map<string, Shape>;
+  edges(): Line[];
   views(): ViewEntry[];
   mode(): "view" | "edit";
   mocks(): unknown[];
@@ -23,7 +23,7 @@ export interface PageContext {
   headInput: HTMLInputElement;
   showTab(name: string): void;
   renderMarkdown(target: HTMLElement, markdown: string): void;
-  showCode(node: DiagramNode): Promise<void>;
+  showCode(node: Shape): Promise<void>;
   load(): Promise<void>;
   loadViews(): Promise<void>;
 }

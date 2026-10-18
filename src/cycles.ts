@@ -10,7 +10,7 @@
 // Pure functions of the graph, on scc.ts. Entry points: `cyclesView`,
 // `feedbackArcSet`.
 
-import type { Diagram, DiagramEdge, DiagramNode } from "./diagram.ts";
+import type { Diagram, Line, Shape } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode, lane, moduleNode, unplaced } from "./nodes.ts";
 import { stronglyConnected } from "./scc.ts";
@@ -213,8 +213,8 @@ export function cyclesView(graph: Graph, only: string | null, options: CycleOpti
   const within = every.length - components.length;
   const chosen = only === null ? components : components.filter((component) => component.includes(only));
   const title = only === null ? (fns ? `Call cycles (${chosen.length})` : `Import cycles (${chosen.length})`) : `Cycle of ${only}`;
-  const nodes: DiagramNode[] = [];
-  const edges: DiagramEdge[] = [];
+  const nodes: Shape[] = [];
+  const edges: Line[] = [];
   const lanes: string[] = [];
   const notes: string[] = [];
 
@@ -246,7 +246,7 @@ export function cyclesView(graph: Graph, only: string | null, options: CycleOpti
 
       for (const edge of layerEdges) {
         if (!inCircle.has(edge.from) || !inCircle.has(edge.to)) continue;
-        const line: DiagramEdge = { from: edge.from, to: edge.to, kind: "dependency", count: edge.weight, label: `${edge.weight}` };
+        const line: Line = { from: edge.from, to: edge.to, kind: "dependency", count: edge.weight, label: `${edge.weight}` };
 
         if (cuts.has(key(edge))) {
           line.diff = "removed";
@@ -271,7 +271,7 @@ export function cyclesView(graph: Graph, only: string | null, options: CycleOpti
     const cutKeys = new Set(cuts.map(key));
 
     for (const edge of inside) {
-      const line: DiagramEdge = { from: edge.from, to: edge.to, kind: fns ? "call" : "dependency", count: edge.weight };
+      const line: Line = { from: edge.from, to: edge.to, kind: fns ? "call" : "dependency", count: edge.weight };
 
       if (typeOnly.has(key(edge))) line.typeOnly = true;
 

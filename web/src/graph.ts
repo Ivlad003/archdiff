@@ -4,11 +4,11 @@
 // matching a search. Pure functions of the current diagram's nodes and
 // edges, which app.ts passes in.
 
-import type { DiagramEdge, DiagramNode } from "./api.ts";
+import type { Line, Shape } from "./api.ts";
 import type { PickedLine } from "./editor.tsx";
 /** The shortest chain of lines from `from` to `to` along the arrows (else against them), breadth first; null when none. */
-export function pathBetween(edges: readonly DiagramEdge[], from: string, to: string, directed: boolean): { edge: DiagramEdge; index: number }[] | null {
-  const previous = new Map<string, { edge: DiagramEdge; index: number; node: string }>();
+export function pathBetween(edges: readonly Line[], from: string, to: string, directed: boolean): { edge: Line; index: number }[] | null {
+  const previous = new Map<string, { edge: Line; index: number; node: string }>();
   const seen = new Set([from]);
   let frontier = [from];
 
@@ -31,7 +31,7 @@ export function pathBetween(edges: readonly DiagramEdge[], from: string, to: str
   }
 
   if (!seen.has(to)) return null;
-  const chain: { edge: DiagramEdge; index: number }[] = [];
+  const chain: { edge: Line; index: number }[] = [];
 
   for (let at = to; at !== from; ) {
     const step = previous.get(at)!;
@@ -43,7 +43,7 @@ export function pathBetween(edges: readonly DiagramEdge[], from: string, to: str
 }
 
 /** The shapes whose label or ID holds the text, case-insensitively; the first is the best match (a label that starts with it). */
-export function findShapes(nodes: ReadonlyMap<string, DiagramNode>, text: string): DiagramNode[] {
+export function findShapes(nodes: ReadonlyMap<string, Shape>, text: string): Shape[] {
   const needle = text.trim().toLowerCase();
 
   if (needle === "") return [];
@@ -55,7 +55,7 @@ export function findShapes(nodes: ReadonlyMap<string, DiagramNode>, text: string
 // ── The minimap ───────────────────────────────────────────────────────────────
 
 /** A shape, its lines and the shapes at their other ends: what stays lit under the focus tool. */
-export function neighbourhoodOf(edges: readonly DiagramEdge[], id: string): string[] {
+export function neighbourhoodOf(edges: readonly Line[], id: string): string[] {
   const keep = new Set([id]);
   edges.forEach((edge, index) => {
     if (edge.from === id || edge.to === id) {
@@ -70,16 +70,16 @@ export function neighbourhoodOf(edges: readonly DiagramEdge[], id: string): stri
 
 /** The page of a tapped line: what it joins and the imports and calls behind it. */
 /** The canvas element ID of a line, as the export names it (a message by its index, since one pair may exchange several). */
-export function lineElementId(edge: DiagramEdge, index: number): string {
+export function lineElementId(edge: Line, index: number): string {
   return `edge:${edge.from}->${edge.to}${edge.kind === "message" ? `:${index}` : ""}`;
 }
 
 /** The chain onward from a line: every line reachable from its target along the arrows, with the shapes on the way, breadth first, capped. */
-export function chainFrom(edges: readonly DiagramEdge[], line: PickedLine, cap = 300): { lineIds: string[]; nodeIds: string[]; hops: { edge: DiagramEdge; depth: number }[] } {
+export function chainFrom(edges: readonly Line[], line: PickedLine, cap = 300): { lineIds: string[]; nodeIds: string[]; hops: { edge: Line; depth: number }[] } {
   const lineIds = [line.id];
   const nodeIds = [line.from, line.to];
   const seen = new Set([line.from, line.to]);
-  const hops: { edge: DiagramEdge; depth: number }[] = [];
+  const hops: { edge: Line; depth: number }[] = [];
   let frontier = [line.to];
   let depth = 1;
 

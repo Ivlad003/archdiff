@@ -4,7 +4,7 @@
 // and kind, so a drawing opened in draw.io keeps the link to the code.
 // Byte-stable for the same placed diagram.
 
-import type { Diagram, DiagramNode } from "../diagram.ts";
+import type { Diagram, Shape } from "../diagram.ts";
 import { routeEdges } from "./excalidraw.ts";
 import { heatColour } from "./colour.ts";
 
@@ -14,8 +14,8 @@ function escape(text: string): string {
 
 const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00", planned: "#1565c0" } as const;
 
-function style(node: DiagramNode): string {
-  const base: Record<DiagramNode["kind"], string> = {
+function style(node: Shape): string {
+  const base: Record<Shape["kind"], string> = {
     layer: "rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;",
     module: "rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f1f1f;",
     fn: "rounded=1;whiteSpace=wrap;html=1;arcSize=50;fillColor=#e3f2fd;strokeColor=#1565c0;",

@@ -2,8 +2,8 @@
 // by import, so the page and the server cannot drift) and one typed fetch
 // per API route of src/server.ts.
 
-export type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "../../src/diagram.ts";
-export type { ProjectMap, ProjectMapEdge, ProjectMapNode } from "../../src/diagram.ts";
+export type { Diagram, Line, Lane, Shape } from "../../src/diagram.ts";
+export type { ProjectMap, MapLine, MapDot } from "../../src/diagram.ts";
 import type { ProjectMap } from "../../src/diagram.ts";
 import type { Diagram } from "../../src/diagram.ts";
 import { pictureQueryText, type PictureOptions } from "../../src/options.ts";

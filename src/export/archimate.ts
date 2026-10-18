@@ -7,7 +7,7 @@
 // at its laid-out place, lanes as Group nodes. Byte-stable for the same
 // placed diagram.
 
-import type { Diagram, DiagramEdge, DiagramNode } from "../diagram.ts";
+import type { Diagram, Line, Shape } from "../diagram.ts";
 
 function escape(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -18,7 +18,7 @@ function xmlId(prefix: string, id: string): string {
   return `${prefix}-${id.replace(/[^A-Za-z0-9]/g, (char) => `_${char.charCodeAt(0).toString(16)}`)}`;
 }
 
-function elementType(node: DiagramNode): string {
+function elementType(node: Shape): string {
   switch (node.kind) {
     case "layer":
     case "module":
@@ -55,7 +55,7 @@ function elementType(node: DiagramNode): string {
   }
 }
 
-function relationType(edge: DiagramEdge): string {
+function relationType(edge: Line): string {
   return edge.kind === "dependency" ? "Serving" : edge.kind === "call" || edge.kind === "message" || edge.kind === "flow" ? "Triggering" : "Association";
 }
 

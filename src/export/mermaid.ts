@@ -3,10 +3,10 @@
 // marks of a diff as classes. Text only, byte-stable for the same diagram,
 // so it pastes into a pull request comment or a Markdown file.
 
-import type { Diagram, DiagramNode } from "../diagram.ts";
+import type { Diagram, Shape } from "../diagram.ts";
 
 /** A Mermaid-safe node ID: letters, digits and underscores, unique per diagram. */
-function mermaidIds(nodes: readonly DiagramNode[]): Map<string, string> {
+function mermaidIds(nodes: readonly Shape[]): Map<string, string> {
   const ids = new Map<string, string>();
   const taken = new Set<string>();
 
@@ -26,7 +26,7 @@ function label(text: string): string {
   return `"${text.replace(/"/g, "#quot;").replace(/\n/g, "<br/>")}"`;
 }
 
-function shape(node: DiagramNode, id: string): string {
+function shape(node: Shape, id: string): string {
   const text = label(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
 
   switch (node.kind) {
@@ -166,11 +166,11 @@ export { MERMAID_STYLES, type MermaidStyle } from "../options.ts";
 function c4Mermaid(diagram: Diagram): string {
   const ids = mermaidIds(diagram.nodes);
   const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "C4Context", `  title ${diagram.title.replace(/\n/g, " ")}`];
-  const byGroup = new Map<string | undefined, DiagramNode[]>();
+  const byGroup = new Map<string | undefined, Shape[]>();
 
   for (const node of diagram.nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);
 
-  const container = (node: DiagramNode, indent: string): string => {
+  const container = (node: Shape, indent: string): string => {
     const id = ids.get(node.id)!;
     const name = node.label.split("\n")[0]!.replace(/"/g, "'");
     const tech = node.kind === "external" ? "package" : node.kind;
@@ -251,7 +251,7 @@ function gitgraphMermaid(diagram: Diagram): string {
 /** The shapes as a mindmap under their lanes: a directory or layer tree at a glance. */
 function mindmapMermaid(diagram: Diagram): string {
   const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), "mindmap", `  root((${diagram.title.split("\n")[0]!.replace(/[()]/g, "")}))`];
-  const byGroup = new Map<string | undefined, DiagramNode[]>();
+  const byGroup = new Map<string | undefined, Shape[]>();
 
   for (const node of diagram.nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);
 
@@ -300,7 +300,7 @@ export function toMermaid(diagram: Diagram, style: MermaidStyle = "auto"): strin
   if (diagram.reason) lines.push(`%% ${diagram.reason}`);
   // A function's logic reads top down, as flowcharts do; the rest left to right, as the canvas draws them.
   lines.push(`flowchart ${diagram.direction === "down" || diagram.logic ? "TB" : "LR"}`);
-  const byGroup = new Map<string | undefined, DiagramNode[]>();
+  const byGroup = new Map<string | undefined, Shape[]>();
 
   for (const node of diagram.nodes) byGroup.set(node.group, [...(byGroup.get(node.group) ?? []), node]);
 

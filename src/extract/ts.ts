@@ -1866,14 +1866,14 @@ function newClass(value: Node | null): string | null {
 }
 
 /** What binds a name in scope: a declarator, a parameter (with its function and position), or another kind of binding. */
-type Declaration = { kind: "local"; node: Node } | { kind: "parameter"; node: Node; fn: Node; index: number } | { kind: "other" };
+type BindingSite = { kind: "local"; node: Node } | { kind: "parameter"; node: Node; fn: Node; index: number } | { kind: "other" };
 
 /**
  * The nearest binding of `name` between `from` and `stop`, in the scopes
  * `bindingOf` walks: a declarator or a parameter; `other` for a loop or
  * `catch` variable, a nested function or class name. Null when nothing binds it.
  */
-function declarationOf(from: Node, name: string, stop: Node): Declaration | null {
+function declarationOf(from: Node, name: string, stop: Node): BindingSite | null {
   // Walk out from `from` to `stop`, checking at each level the scope that level opens. The nearest binding wins.
   for (let at: Node | null = from; at; at = parentOf(at)) {
     // A function: its parameters (`x =>` has a single one), then its own name, which a named

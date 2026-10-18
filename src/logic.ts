@@ -13,9 +13,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, DiagramEdge, DiagramNode, LogicData, LogicPath } from "./diagram.ts";
-import { readLogic, type LogicFact, type LogicNode } from "./extract/logic.ts";
-import { moduleOf, type GraphNode } from "./graph.ts";
+import type { Diagram, Line, Shape, LogicData, LogicPath } from "./diagram.ts";
+import { readLogic, type LogicFact, type LogicStep } from "./extract/logic.ts";
+import { moduleOf, type Declaration } from "./graph.ts";
 import { lane, unplaced } from "./nodes.ts";
 
 /** Paths listed in the table of a function, at most. */
@@ -43,12 +43,12 @@ export async function withLogic(analysis: Analysis, id: string): Promise<Analysi
 }
 
 /** The functions with branches in them, the most branching first; what the `logic` list draws and the views list names. */
-export function logicList(analysis: Analysis): GraphNode[] {
+export function logicList(analysis: Analysis): Declaration[] {
   return [...analysis.graph.nodes.values()].filter((node) => node.kind === "fn" && (node.branches ?? 0) > 0).sort((a, b) => (b.branches ?? 0) - (a.branches ?? 0) || (a.id < b.id ? -1 : 1));
 }
 
 /** The label of a function in prose: `Class.method` or `name`. */
-function fnLabel(node: GraphNode): string {
+function fnLabel(node: Declaration): string {
   return node.parent ? `${node.parent}.${node.name}` : node.name;
 }
 
@@ -108,7 +108,7 @@ function pathsOf(fact: LogicFact): { paths: LogicPath[]; more: number } {
 }
 
 /** The resolved callee of a step: the first call of the function whose line falls in the step, by preference one with logic of its own. */
-function calleeOf(analysis: Analysis, fnId: string, step: LogicNode): string | null {
+function calleeOf(analysis: Analysis, fnId: string, step: LogicStep): string | null {
   const calls = analysis.graph.calls.filter((call) => call.from === fnId && call.line >= step.line && call.line <= step.endLine && call.kind === "call");
   const branching = calls.find((call) => (analysis.graph.nodes.get(call.to)?.branches ?? 0) > 0);
 
@@ -127,9 +127,9 @@ export function logicView(analysis: Analysis, scope: string | null): Diagram {
   const fact = analysis.logic.fact;
 
   if (!fact) return unplaced(key, `Logic of ${fnLabel(fn)}`, [], [], [], { reason: `the body of ${fnLabel(fn)} could not be read: ${fn.module} is not TypeScript, JavaScript or Python, or the function was not found at line ${fn.line}` });
-  const nodes: DiagramNode[] = fact.nodes.map((step) => {
-    const kind: DiagramNode["kind"] = step.kind === "start" ? "start" : step.kind === "decision" || step.kind === "loop" ? "decision" : step.kind === "action" ? "action" : "end";
-    const node: DiagramNode = { id: step.id, kind, label: step.kind === "loop" ? `↻ ${step.text}` : step.text, ref: { file: fn.module, line: step.line, endLine: step.endLine }, x: 0, y: 0, w: 0, h: 0 };
+  const nodes: Shape[] = fact.nodes.map((step) => {
+    const kind: Shape["kind"] = step.kind === "start" ? "start" : step.kind === "decision" || step.kind === "loop" ? "decision" : step.kind === "action" ? "action" : "end";
+    const node: Shape = { id: step.id, kind, label: step.kind === "loop" ? `↻ ${step.text}` : step.text, ref: { file: fn.module, line: step.line, endLine: step.endLine }, x: 0, y: 0, w: 0, h: 0 };
 
     if (step.kind === "throw") node.diff = "warning";
     // A step that calls a function of the repository links to it: a second tap opens that function's own logic.
@@ -139,7 +139,7 @@ export function logicView(analysis: Analysis, scope: string | null): Diagram {
 
     return node;
   });
-  const edges: DiagramEdge[] = fact.edges.map((edge) => (edge.label === undefined ? { from: edge.from, to: edge.to, kind: "flow" } : { from: edge.from, to: edge.to, kind: "flow", label: edge.label }));
+  const edges: Line[] = fact.edges.map((edge) => (edge.label === undefined ? { from: edge.from, to: edge.to, kind: "flow" } : { from: edge.from, to: edge.to, kind: "flow", label: edge.label }));
   const decisions = fact.nodes.filter((step) => step.kind === "decision").length;
   const loops = fact.nodes.filter((step) => step.kind === "loop").length;
   const exits = fact.nodes.filter((step) => step.kind === "return" || step.kind === "throw").length;
@@ -160,7 +160,7 @@ function logicListView(analysis: Analysis): Diagram {
 
   if (all.length === 0) return unplaced("logic", "Logic", [], [], [], { reason: "no function with a branch in it: no if, switch, loop or try in any body" });
   const listed = all.slice(0, MAX_LISTED);
-  const nodes: DiagramNode[] = listed.map((fn) => ({ id: fn.id, kind: "action", label: `${fnLabel(fn)}\n${fn.branches} ${fn.branches === 1 ? "branch" : "branches"}`, ref: { id: fn.id, file: fn.module, line: fn.line, endLine: fn.endLine }, group: moduleOf(fn.id), x: 0, y: 0, w: 0, h: 0 }));
+  const nodes: Shape[] = listed.map((fn) => ({ id: fn.id, kind: "action", label: `${fnLabel(fn)}\n${fn.branches} ${fn.branches === 1 ? "branch" : "branches"}`, ref: { id: fn.id, file: fn.module, line: fn.line, endLine: fn.endLine }, group: moduleOf(fn.id), x: 0, y: 0, w: 0, h: 0 }));
   const modules = [...new Set(listed.map((fn) => moduleOf(fn.id)))];
   const left = all.length - listed.length;
 

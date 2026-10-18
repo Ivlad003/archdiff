@@ -13,7 +13,7 @@
 // coordinates and `layout` leaves them alone.
 
 import type { Analysis } from "./analyze.ts";
-import { SIZE, type Diagram, type DiagramEdge, type DiagramNode } from "./diagram.ts";
+import { SIZE, type Diagram, type Line, type Shape } from "./diagram.ts";
 import type { HistoryRow } from "./diff.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
@@ -88,7 +88,7 @@ export function matrixView(graph: Graph, scope: string | null = null, types = fa
 
   const cell = SIZE.cell;
   const head = scope === null ? 150 : 220;
-  const nodes: DiagramNode[] = [];
+  const nodes: Shape[] = [];
   const max = Math.max(1, ...counts.values());
 
   order.forEach((item, row) => {
@@ -100,7 +100,7 @@ export function matrixView(graph: Graph, scope: string | null = null, types = fa
   order.forEach((from, row) => {
     order.forEach((to, column) => {
       const count = counts.get(`${from}\u0000${to}`) ?? 0;
-      const node: DiagramNode = { id: `cell:${from}>${to}`, kind: "cell", label: row === column ? "·" : count === 0 ? "" : String(count), x: head + column * cell.w, y: head + row * cell.h, w: cell.w, h: cell.h, count };
+      const node: Shape = { id: `cell:${from}>${to}`, kind: "cell", label: row === column ? "·" : count === 0 ? "" : String(count), x: head + column * cell.w, y: head + row * cell.h, w: cell.w, h: cell.h, count };
 
       if (count > 0) node.heat = count / max;
 
@@ -140,7 +140,7 @@ export function typeView(analysis: Analysis, id: string): Diagram {
 
   if (!type || type.kind !== "type") return unplaced(`type:${id}`, id, [], [], [], { reason: `no type "${id}"`, missing: true });
   const importers = new Set([type.module, ...graph.deps.filter((dep) => dep.to === type.module).map((dep) => dep.from)]);
-  const members: { node: DiagramNode; role: string }[] = [];
+  const members: { node: Shape; role: string }[] = [];
 
   for (const node of graph.nodes.values()) {
     if (node.kind !== "fn" || !importers.has(node.module)) continue;
@@ -152,9 +152,9 @@ export function typeView(analysis: Analysis, id: string): Diagram {
     members.push({ node: drawn, role });
   }
 
-  const typeNode: DiagramNode = { id, kind: "fn", label: `type ${type.name}`, ref: { id, file: type.module, line: type.line, endLine: type.endLine }, group: graph.modules.get(type.module)!.layer, x: 0, y: 0, w: 0, h: 0 };
+  const typeNode: Shape = { id, kind: "fn", label: `type ${type.name}`, ref: { id, file: type.module, line: type.line, endLine: type.endLine }, group: graph.modules.get(type.module)!.layer, x: 0, y: 0, w: 0, h: 0 };
   const ids = new Set(members.map((member) => member.node.id));
-  const edges: DiagramEdge[] = [];
+  const edges: Line[] = [];
   const seen = new Set<string>();
 
   for (const call of graph.calls) {
@@ -247,7 +247,7 @@ export function pathView(analysis: Analysis, id: string, depth: number): Diagram
   if (kept.size === 0) return unplaced(`path:${id}`, `Path from ${start.name} to the storages`, [], [], [], { reason: `no storage within ${depth} calls (modules named like stores or importing a database package)` });
   kept.add(id);
   const nodes = [...kept].sort((a, b) => (a === id ? -1 : b === id ? 1 : a < b ? -1 : 1)).map((node) => (isStorage(node) && node !== id ? { ...fnNode(graph, node), label: `${graph.nodes.get(node)!.name}\nstorage` } : fnNode(graph, node)));
-  const drawn: DiagramEdge[] = [...edges].map((edge) => edge.split("\u0000") as [string, string]).filter(([from, to]) => kept.has(from) && kept.has(to)).map(([from, to]) => ({ from, to, kind: "call" }));
+  const drawn: Line[] = [...edges].map((edge) => edge.split("\u0000") as [string, string]).filter(([from, to]) => kept.has(from) && kept.has(to)).map(([from, to]) => ({ from, to, kind: "call" }));
 
   return unplaced(`path:${id}`, `Path from ${start.name} to the storages`, nodes, drawn, lanesOf(graph, nodes));
 }
@@ -283,13 +283,13 @@ export function contractView(analysis: Analysis, id: string): Diagram {
     }
   }
 
-  const nodes: DiagramNode[] = exported.map((node) => {
+  const nodes: Shape[] = exported.map((node) => {
     const users = used.get(node.id)!;
     const drawn = node.kind === "type" ? { ...fnNode(graph, node.id), label: `type ${node.name}` } : fnNode(graph, node.id);
 
     return users.size === 0 ? { ...drawn, label: `${drawn.label}\n(unused outside)`, diff: "changed" as const, group: id } : { ...drawn, group: id };
   });
-  const edges: DiagramEdge[] = [];
+  const edges: Line[] = [];
   const usedImporters = new Set<string>();
 
   for (const [target, users] of used) {
@@ -317,11 +317,11 @@ const LISTENERS = new Set(["on", "once", "addListener", "addEventListener", "sub
  */
 export function eventsView(analysis: Analysis): Diagram {
   const { graph, facts } = analysis;
-  const nodes = new Map<string, DiagramNode>();
-  const edges: DiagramEdge[] = [];
+  const nodes = new Map<string, Shape>();
+  const edges: Line[] = [];
   const seen = new Set<string>();
 
-  const add = (edge: DiagramEdge): void => {
+  const add = (edge: Line): void => {
     const key = `${edge.from}\u0000${edge.to}\u0000${edge.label ?? ""}`;
 
     if (seen.has(key)) return;
@@ -384,7 +384,7 @@ export function testsView(graph: Graph): Diagram {
   const subjects = [...graph.modules.keys()].filter((id) => !TEST_MODULE.test(id)).sort();
 
   if (subjects.length === 0) return unplaced("tests", "Tests", [], [], [], { reason: "no modules" });
-  const nodes = subjects.map((id): DiagramNode => {
+  const nodes = subjects.map((id): Shape => {
     const by = covered.get(id)?.size ?? 0;
     const node = { ...moduleNode(graph, id), label: `${id}\n${by === 0 ? "no tests" : `${by} test file${by === 1 ? "" : "s"}`}`, count: by };
 
@@ -411,7 +411,7 @@ export function hotspotsView(graph: Graph): Diagram {
   }
 
   const maxIn = Math.max(1, ...callsIn.values());
-  const nodes: DiagramNode[] = [];
+  const nodes: Shape[] = [];
   const groups: Diagram["groups"] = [];
   const width = 1100;
   const gap = 10;
@@ -474,8 +474,8 @@ export function packagesView(analysis: Analysis): Diagram {
     if (owner) modulesOf.set(owner, (modulesOf.get(owner) ?? 0) + 1);
   }
 
-  const nodes = packages.map((candidate): DiagramNode => ({ id: candidate.name, kind: "package", label: `${candidate.name}\n${candidate.dir || "."} · ${modulesOf.get(candidate.name) ?? 0} modules`, ref: { id: candidate.dir ? `dir:${candidate.dir}` : "layers", file: candidate.dir ? `${candidate.dir}/package.json` : "package.json", line: 1 }, count: modulesOf.get(candidate.name) ?? 0, x: 0, y: 0, w: 0, h: 0 }));
-  const edges: DiagramEdge[] = [];
+  const nodes = packages.map((candidate): Shape => ({ id: candidate.name, kind: "package", label: `${candidate.name}\n${candidate.dir || "."} · ${modulesOf.get(candidate.name) ?? 0} modules`, ref: { id: candidate.dir ? `dir:${candidate.dir}` : "layers", file: candidate.dir ? `${candidate.dir}/package.json` : "package.json", line: 1 }, count: modulesOf.get(candidate.name) ?? 0, x: 0, y: 0, w: 0, h: 0 }));
+  const edges: Line[] = [];
   const seen = new Set<string>();
 
   for (const candidate of packages) {
@@ -624,7 +624,7 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
 
   const all = [...boxes.values()].sort((a, b) => (modules.includes(a.module) === modules.includes(b.module) ? (a.id < b.id ? -1 : 1) : modules.includes(a.module) ? -1 : 1)).slice(0, limit);
   const kept = new Set(all.map((box) => box.id));
-  const nodes: DiagramNode[] = all.map((box) => {
+  const nodes: Shape[] = all.map((box) => {
     const head = box.kind === "class" ? box.name : `«${box.kind}» ${box.name}`;
     const lines = [head, "────────", ...box.fields, ...(box.fields.length > 0 && box.methods.length > 0 ? ["────────"] : []), ...box.methods];
     const shown = lines.slice(0, 18);
@@ -634,7 +634,7 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
 
     return { id: box.id, kind: "class", label: shown.join("\n"), ref: { id: box.id, file: box.module, line: box.line, endLine: box.endLine }, group: box.module, x: 0, y: 0, w: width, h: 24 + 15 * shown.length };
   });
-  const edges: DiagramEdge[] = [];
+  const edges: Line[] = [];
 
   for (const box of all) {
     for (const name of box.extends) {
@@ -667,13 +667,13 @@ export function timelineDiagram(rows: readonly HistoryRow[], base: string, head:
   const max = Math.max(1, ...rows.map(magnitude));
   const column = 110;
   const chart = 240;
-  const nodes: DiagramNode[] = [];
+  const nodes: Shape[] = [];
 
   rows.forEach((row, i) => {
     const height = Math.max(8, Math.round((chart * magnitude(row)) / max));
     const x = 20 + i * column;
     const couplings = [...row.layerEdgesAdded.map((edge) => `+${edge.from}→${edge.to}`), ...row.layerEdgesRemoved.map((edge) => `−${edge.from}→${edge.to}`)];
-    const bar: DiagramNode = { id: `bar:${row.commit.sha}`, kind: "cell", label: `+${row.depsAdded} −${row.depsRemoved} imp\n~${row.fnsChanged} fn${couplings.length > 0 ? `\n${couplings.join(" ")}` : ""}`, x, y: 20 + chart - height, w: column - 20, h: height, heat: magnitude(row) / max, count: magnitude(row) };
+    const bar: Shape = { id: `bar:${row.commit.sha}`, kind: "cell", label: `+${row.depsAdded} −${row.depsRemoved} imp\n~${row.fnsChanged} fn${couplings.length > 0 ? `\n${couplings.join(" ")}` : ""}`, x, y: 20 + chart - height, w: column - 20, h: height, heat: magnitude(row) / max, count: magnitude(row) };
 
     if (row.layerEdgesAdded.length > 0) bar.diff = "removed";
     else if (row.layerEdgesRemoved.length > 0) bar.diff = "added";

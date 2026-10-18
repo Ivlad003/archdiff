@@ -19,7 +19,7 @@ import { greedyOrder } from "./order.ts";
 export type DiffMark = "added" | "removed" | "changed" | "warning" | "planned";
 
 /** One shape: what it stands for, its lane, and its box once laid out. */
-export interface DiagramNode {
+export interface Shape {
   id: string;
   /**
    * `layer`: a lane drawn as a box (the layers view); `module`: a file;
@@ -64,7 +64,7 @@ export interface DiagramNode {
 }
 
 /** One line between two shapes. */
-export interface DiagramEdge {
+export interface Line {
   from: string;
   to: string;
   /**
@@ -84,7 +84,7 @@ export interface DiagramEdge {
 }
 
 /** A lane: one layer, a band across the diagram. */
-export interface DiagramGroup {
+export interface Lane {
   id: string;
   label: string;
   kind: "lane";
@@ -99,9 +99,9 @@ export interface Diagram {
   /** The view key the picture answers (`layers`, `module:src/x.ts`, …). */
   view: string;
   title: string;
-  nodes: DiagramNode[];
-  edges: DiagramEdge[];
-  groups: DiagramGroup[];
+  nodes: Shape[];
+  edges: Line[];
+  groups: Lane[];
   /** Why the diagram is empty or cut short. */
   reason?: string;
   /** The one question the picture answers, for the page and the Markdown ("which modules of the layer import which"). */
@@ -178,13 +178,13 @@ export interface LogicPath {
 /** The whole repository for the page's project map (project-map.ts): a dot per module (or directory), a line per import. */
 export interface ProjectMap {
   layers: string[];
-  nodes: ProjectMapNode[];
-  edges: ProjectMapEdge[];
+  nodes: MapDot[];
+  edges: MapLine[];
   /** `module`, or `dir:<depth>` when the modules were folded to directories of that depth. */
   level: string;
 }
 
-export interface ProjectMapNode {
+export interface MapDot {
   /** The module's path, or a directory's when the map is folded (`dir:` prefix). */
   id: string;
   label: string;
@@ -196,7 +196,7 @@ export interface ProjectMapNode {
   modules?: number;
 }
 
-export interface ProjectMapEdge {
+export interface MapLine {
   from: string;
   to: string;
   count: number;
@@ -249,7 +249,7 @@ export function farFromMainSequence(row: ModuleMetrics): boolean {
 export type Positions = Readonly<Record<string, { x: number; y: number; w?: number; h?: number }>>;
 
 /** The box of every kind of shape. */
-export const SIZE: Record<DiagramNode["kind"], { w: number; h: number }> = {
+export const SIZE: Record<Shape["kind"], { w: number; h: number }> = {
   layer: { w: 180, h: 60 },
   module: { w: 170, h: 56 },
   fn: { w: 170, h: 56 },
@@ -372,7 +372,7 @@ interface Ordered {
  * forth (by predecessors), the usual layered ordering, which settles most
  * crossings a single pass leaves.
  */
-function orderRanks(diagram: Diagram, ranked: Ranked, index: ReadonlyMap<string, number>, laneOf: (node: DiagramNode) => number): Ordered {
+function orderRanks(diagram: Diagram, ranked: Ranked, index: ReadonlyMap<string, number>, laneOf: (node: Shape) => number): Ordered {
   const preds = new Map<string, string[]>();
   const succs = new Map<string, string[]>();
 
@@ -385,7 +385,7 @@ function orderRanks(diagram: Diagram, ranked: Ranked, index: ReadonlyMap<string,
   }
 
   const ordinal = new Map<string, number>();
-  const byRank = new Map<number, DiagramNode[]>();
+  const byRank = new Map<number, Shape[]>();
 
   for (const node of diagram.nodes) byRank.set(ranked.rank.get(node.id)!, [...(byRank.get(ranked.rank.get(node.id)!) ?? []), node]);
   const slot = new Map<string, number>();
@@ -394,7 +394,7 @@ function orderRanks(diagram: Diagram, ranked: Ranked, index: ReadonlyMap<string,
   // One pass over a rank: sort its shapes by lane, the mean place of their neighbours on the side given, then diagram
   // order, and give each its slot in its (lane, rank) cell.
   const place = (r: number, neighbours: Map<string, string[]>): void => {
-    const pull = (node: DiagramNode): number => {
+    const pull = (node: Shape): number => {
       const known = (neighbours.get(node.id) ?? []).map((id) => ordinal.get(id)).filter((value): value is number => value !== undefined);
 
       return known.length === 0 ? (ordinal.get(node.id) ?? Infinity) : known.reduce((sum, value) => sum + value, 0) / known.length;
@@ -444,7 +444,7 @@ interface Grid {
  * any lane's cell needs; a lane is as tall as its fullest rank; cells grow
  * to the tallest and widest shape (class boxes carry their own size).
  */
-function gridOf(diagram: Diagram, ordered: Ordered, laneCount: number, sized: (node: DiagramNode) => { w: number; h: number }): Grid {
+function gridOf(diagram: Diagram, ordered: Ordered, laneCount: number, sized: (node: Shape) => { w: number; h: number }): Grid {
   const columns = new Map<number, number>();
 
   const rowsOf = (key: string): number => {
@@ -506,14 +506,14 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
 
   const index = new Map(diagram.nodes.map((node, i) => [node.id, i]));
   const laneIds = diagram.groups.map((group) => group.id);
-  const laneOf = (node: DiagramNode): number => (node.group !== undefined && laneIds.includes(node.group) ? laneIds.indexOf(node.group) : laneIds.length);
-  const sized = (node: DiagramNode): { w: number; h: number } => (node.w > 0 && node.h > 0 ? { w: node.w, h: node.h } : SIZE[node.kind]);
+  const laneOf = (node: Shape): number => (node.group !== undefined && laneIds.includes(node.group) ? laneIds.indexOf(node.group) : laneIds.length);
+  const sized = (node: Shape): { w: number; h: number } => (node.w > 0 && node.h > 0 ? { w: node.w, h: node.h } : SIZE[node.kind]);
   const ranked = rankNodes(diagram, index);
   const ordered = orderRanks(diagram, ranked, index, laneOf);
   const { left, top, rows, gridW, gridH, rowsOf } = gridOf(diagram, ordered, laneIds.length, sized);
 
   // Place each shape centred in its grid cell; a manual position wins.
-  const nodes = diagram.nodes.map((node): DiagramNode => {
+  const nodes = diagram.nodes.map((node): Shape => {
     const size = sized(node);
     const lane = laneOf(node);
     const r = ranked.rank.get(node.id)!;
@@ -544,7 +544,7 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
   const right = Math.max(0, ...nodes.map((node) => node.x + node.w)) + LANE_PAD;
 
   // Lanes span the full width and grow to enclose any shape moved outside their band.
-  const groups = diagram.groups.map((group, lane): DiagramGroup => {
+  const groups = diagram.groups.map((group, lane): Lane => {
     const members = nodes.filter((node) => laneOf(node) === lane);
     const from = Math.min(top.get(lane) ?? 0, ...members.map((node) => node.y - LANE_PAD));
     const to = Math.max((top.get(lane) ?? 0) + (rows.get(lane) ?? 0) * gridH + 2 * LANE_PAD, ...members.map((node) => node.y + node.h + LANE_PAD));
@@ -561,10 +561,10 @@ export function layout(diagram: Diagram, positions: Positions = {}): Diagram {
 }
 
 /** Shapes the user placed keep their place; a computed shape on top of one moves down its column until it is clear. */
-function avoidManual(nodes: DiagramNode[], manualIds: ReadonlySet<string>, step: number): void {
+function avoidManual(nodes: Shape[], manualIds: ReadonlySet<string>, step: number): void {
   const manual = nodes.filter((node) => manualIds.has(node.id));
 
-  const clashes = (node: DiagramNode): boolean => manual.some((other) => node.x < other.x + other.w + MANUAL_MARGIN && node.x + node.w + MANUAL_MARGIN > other.x && node.y < other.y + other.h + MANUAL_MARGIN && node.y + node.h + MANUAL_MARGIN > other.y);
+  const clashes = (node: Shape): boolean => manual.some((other) => node.x < other.x + other.w + MANUAL_MARGIN && node.x + node.w + MANUAL_MARGIN > other.x && node.y < other.y + other.h + MANUAL_MARGIN && node.y + node.h + MANUAL_MARGIN > other.y);
 
   for (const node of nodes) {
     if (manualIds.has(node.id) || node.kind === "anchor") continue;
@@ -580,7 +580,7 @@ function avoidManual(nodes: DiagramNode[], manualIds: ReadonlySet<string>, step:
  * the rest imports first), top-aligned. Shapes without a lane make a
  * last block. Pure: a new diagram.
  */
-function lanesAsColumns(diagram: Diagram, laneOf: (node: DiagramNode) => number): Diagram {
+function lanesAsColumns(diagram: Diagram, laneOf: (node: Shape) => number): Diagram {
   const laneCount = diagram.groups.length;
   const counts = new Map<string, number>();
   const index = new Map(diagram.nodes.map((node) => [node.id, node]));
@@ -598,7 +598,7 @@ function lanesAsColumns(diagram: Diagram, laneOf: (node: DiagramNode) => number)
 
   const lanes = [...new Set(diagram.nodes.map((node) => String(laneOf(node))))];
   const order = greedyOrder(lanes, counts);
-  const moved = new Map<string, DiagramNode>();
+  const moved = new Map<string, Shape>();
   const boxes = new Map<string, { x: number; w: number; h: number }>();
   let offset = LANE_PAD;
 
@@ -615,7 +615,7 @@ function lanesAsColumns(diagram: Diagram, laneOf: (node: DiagramNode) => number)
   }
 
   const nodes = diagram.nodes.map((node) => moved.get(node.id) ?? node);
-  const groups = diagram.groups.map((group, lane): DiagramGroup => {
+  const groups = diagram.groups.map((group, lane): Lane => {
     const box = boxes.get(String(lane));
 
     return box ? { ...group, x: box.x, y: 0, w: box.w, h: box.h } : { ...group, x: 0, y: 0, w: 0, h: 0 };

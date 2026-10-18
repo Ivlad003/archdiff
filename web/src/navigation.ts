@@ -3,9 +3,9 @@
 // above a view for the breadcrumbs (`crumbsOf`). Pure functions of view
 // keys and the views list.
 
-import type { DiagramNode, ViewEntry } from "./api.ts";
+import type { Shape, ViewEntry } from "./api.ts";
 /** The view a shape opens: a layer its modules, a module its imports, a function its calls. */
-export function ownView(node: DiagramNode): string | null {
+export function ownView(node: Shape): string | null {
   const id = node.ref?.id ?? node.id;
 
   switch (node.kind) {
@@ -29,7 +29,7 @@ export function ownView(node: DiagramNode): string | null {
 }
 
 /** The chat tag of a shape (`@module:…`, `@fn:…`), with the label the chip shows; null for a shape the agent cannot be asked about by name. */
-export function tagOf(node: DiagramNode): { tag: string; label: string } | null {
+export function tagOf(node: Shape): { tag: string; label: string } | null {
   const id = node.ref?.id ?? node.id;
   const label = node.label.split("\n")[0] ?? id;
 
@@ -54,7 +54,7 @@ export function tagOf(node: DiagramNode): { tag: string; label: string } | null 
 }
 
 /** The view key of a shape's subject (`module:…`, `calls:…`), for the pictures of the same subject; null for a shape without one. */
-export function subjectOf(node: DiagramNode): string | null {
+export function subjectOf(node: Shape): string | null {
   const id = node.ref?.id ?? node.id;
 
   switch (node.kind) {

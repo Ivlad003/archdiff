@@ -8,7 +8,7 @@
 // page apply them in order after the review's own overlay (diff.ts).
 
 import type { Analysis } from "./analyze.ts";
-import type { Diagram, DiagramNode } from "./diagram.ts";
+import type { Diagram, Shape } from "./diagram.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { overlayInstability } from "./metrics.ts";
@@ -21,7 +21,7 @@ export { OVERLAYS, type Overlay } from "./options.ts";
 const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|[.\-_](test|spec|stories)\.[cm]?[jt]sx?$|_test\.(py|rs|php)$|(^|\/)tests?_[^/]*\.py$|Test\.php$/;
 
 /** The module a shape stands for, when it stands for a module or a function of one. */
-function moduleOfNode(node: DiagramNode): string | null {
+function moduleOfNode(node: Shape): string | null {
   if (node.kind === "module" || node.kind === "participant") return node.ref?.id ?? node.id;
 
   if (node.kind === "fn" || node.kind === "class") return moduleOf(node.ref?.id ?? node.id);

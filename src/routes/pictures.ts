@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { coverageReport } from "../coverage.ts";
-import type { DiagramNode } from "../diagram.ts";
+import type { Shape } from "../diagram.ts";
 import { compareBranches, review } from "../diff.ts";
 import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, MERMAID_STYLES, type ExportFormat, type MermaidStyle } from "../export/index.ts";
 import { toExcalidraw } from "../export/excalidraw.ts";
@@ -164,7 +164,7 @@ export async function getNode(ctx: RouteContext, { url, response }: RouteRequest
 
   if (!picked.ok) return failed(response, picked);
   // The same picture the page shows: with its expansions, hidden lanes, fold limit and weight, a shape is where the page has it.
-  const diagram = view.kind === "timeline" ? { nodes: [] as DiagramNode[] } : viewOf(await sourceFor(analysis, view), view, viewOptionsOf(picked.value));
+  const diagram = view.kind === "timeline" ? { nodes: [] as Shape[] } : viewOf(await sourceFor(analysis, view), view, viewOptionsOf(picked.value));
   const node = diagram.nodes.find((candidate) => candidate.id === id);
 
   if (!node) return problem(response, 404, "no such shape in the view");

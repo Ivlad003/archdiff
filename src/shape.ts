@@ -8,7 +8,7 @@
 // `dropLightLines`, `MAX_SHAPES`.
 
 import { DEFAULT_HUBS, type HubThresholds } from "./config.ts";
-import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "./diagram.ts";
+import type { Diagram, Line, Lane, Shape } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode } from "./nodes.ts";
 /**
@@ -52,7 +52,7 @@ export function fold(diagram: Diagram, limit: number): Diagram {
   const droppedModules = dropped.filter((node) => node.kind === "module").map((node) => node.id);
   const common = commonDirectory(droppedModules);
 
-  const groupOf = (node: DiagramNode): { id: string; label: string; view: string | null } => {
+  const groupOf = (node: Shape): { id: string; label: string; view: string | null } => {
     if (node.kind === "module") {
       const rest = common === "" ? node.id : node.id.slice(common.length + 1);
       const slash = rest.indexOf("/");
@@ -72,7 +72,7 @@ export function fold(diagram: Diagram, limit: number): Diagram {
     return { id: "more", label: "more", view: null };
   };
 
-  const groups = new Map<string, DiagramNode & { members: string[] }>();
+  const groups = new Map<string, Shape & { members: string[] }>();
   const groupOfId = new Map<string, string>();
 
   for (const node of dropped) {
@@ -98,7 +98,7 @@ export function fold(diagram: Diagram, limit: number): Diagram {
 
   if (folded.length > 12) {
     const rest = folded.slice(11);
-    const other: DiagramNode & { members: string[] } = { id: "more", kind: "more", label: "other", count: rest.reduce((sum, shape) => sum + (shape.count ?? 0), 0), x: 0, y: 0, w: 0, h: 0, members: rest.flatMap((shape) => shape.members) };
+    const other: Shape & { members: string[] } = { id: "more", kind: "more", label: "other", count: rest.reduce((sum, shape) => sum + (shape.count ?? 0), 0), x: 0, y: 0, w: 0, h: 0, members: rest.flatMap((shape) => shape.members) };
 
     for (const member of other.members) groupOfId.set(member, "more");
     folded = [...folded.slice(0, 11), other];
@@ -107,7 +107,7 @@ export function fold(diagram: Diagram, limit: number): Diagram {
   for (const shape of folded) shape.label = `… ${shape.count} in ${shape.label}`;
   // The lines into or out of a folded shape merge into one per (from, to, kind), which counts the lines behind it, so
   // a weight filter can thin them and the Markdown can say how many.
-  const merged = new Map<string, DiagramEdge>();
+  const merged = new Map<string, Line>();
 
   for (const edge of diagram.edges) {
     const from = keptIds.has(edge.from) ? edge.from : (groupOfId.get(edge.from) ?? "more");
@@ -190,9 +190,9 @@ export function expandInPlace(diagram: Diagram, graph: Graph, expand: readonly s
 
   if (opened.length === 0) return diagram;
   const openedSet = new Set(opened);
-  const nodes: DiagramNode[] = diagram.nodes.filter((node) => !openedSet.has(node.id));
-  const edges: DiagramEdge[] = [];
-  const groups: DiagramGroup[] = [...diagram.groups];
+  const nodes: Shape[] = diagram.nodes.filter((node) => !openedSet.has(node.id));
+  const edges: Line[] = [];
+  const groups: Lane[] = [...diagram.groups];
   const restOf = (module: string): string => `${module}#(rest)`;
   // The functions of every opened module, by module, and the calls among them.
   const fnsOf = new Map<string, string[]>();
@@ -217,7 +217,7 @@ export function expandInPlace(diagram: Diagram, graph: Graph, expand: readonly s
 
   const seen = new Set<string>();
 
-  const push = (edge: DiagramEdge): void => {
+  const push = (edge: Line): void => {
     const key = `${edge.from}\u0000${edge.to}\u0000${edge.kind}`;
 
     if (seen.has(key)) return;

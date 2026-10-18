@@ -34,7 +34,7 @@ export interface Module {
 }
 
 /** A declaration: a function, a class (with its members as further nodes) or a type. */
-export interface GraphNode {
+export interface Declaration {
   /** `<path>#<name>` or `<path>#<Class>.<member>`. */
   id: string;
   kind: "fn" | "class" | "type";
@@ -102,7 +102,7 @@ export interface External {
 export interface Graph {
   readonly layers: readonly string[];
   readonly modules: ReadonlyMap<string, Module>;
-  readonly nodes: ReadonlyMap<string, GraphNode>;
+  readonly nodes: ReadonlyMap<string, Declaration>;
   readonly deps: readonly Dependency[];
   readonly calls: readonly CallEdge[];
   readonly externals: ReadonlyMap<string, External>;
@@ -141,10 +141,10 @@ class ExportTable {
   /** Imports binding no name, per module (`module.exports = require("./x")`, a bare `require`). */
   private readonly bareImports = new Map<string, string[]>();
 
-  private readonly nodes: Map<string, GraphNode>;
+  private readonly nodes: Map<string, Declaration>;
   private readonly resolve: (from: string, specifier: string) => Resolution;
 
-  constructor(facts: readonly FileFacts[], nodes: Map<string, GraphNode>, resolve: (from: string, specifier: string) => Resolution) {
+  constructor(facts: readonly FileFacts[], nodes: Map<string, Declaration>, resolve: (from: string, specifier: string) => Resolution) {
     this.nodes = nodes;
     this.resolve = resolve;
 
@@ -250,7 +250,7 @@ interface Building {
   config: Config;
   resolve: (from: string, specifier: string) => Resolution;
   modules: Map<string, Module>;
-  nodes: Map<string, GraphNode>;
+  nodes: Map<string, Declaration>;
   deps: Dependency[];
   calls: CallEdge[];
   externals: Map<string, External>;
@@ -267,7 +267,7 @@ function declareModules(b: Building): void {
 
     const addDecl = (decl: DeclFact, parent?: string): void => {
       const id = nodeId(file.path, decl.name, parent);
-      const node: GraphNode = { id, kind: decl.kind, name: decl.name, module: file.path, line: decl.line, endLine: decl.endLine, signature: decl.signature, exported: decl.exported };
+      const node: Declaration = { id, kind: decl.kind, name: decl.name, module: file.path, line: decl.line, endLine: decl.endLine, signature: decl.signature, exported: decl.exported };
 
       if (parent) node.parent = parent;
 

@@ -7,41 +7,41 @@
 // Entry points: `lane`, `unplaced`, `lanesOf`, `moduleNode`,
 // `externalNode`, `fnNode`, `depEdges`, `grow`.
 
-import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode } from "./diagram.ts";
+import type { Diagram, Line, Lane, Shape } from "./diagram.ts";
 import type { Graph } from "./graph.ts";
-export function lane(id: string): DiagramGroup {
+export function lane(id: string): Lane {
   return { id, label: id, kind: "lane", x: 0, y: 0, w: 0, h: 0 };
 }
 
-export function unplaced(view: string, title: string, nodes: DiagramNode[], edges: DiagramEdge[], groups: DiagramGroup[], extra: Partial<Diagram> = {}): Diagram {
+export function unplaced(view: string, title: string, nodes: Shape[], edges: Line[], groups: Lane[], extra: Partial<Diagram> = {}): Diagram {
   return { view, title, nodes, edges, groups, ...extra };
 }
 
 /** The lanes of the layers the nodes use, in the graph's order. */
-export function lanesOf(graph: Graph, nodes: readonly DiagramNode[]): DiagramGroup[] {
+export function lanesOf(graph: Graph, nodes: readonly Shape[]): Lane[] {
   const used = new Set(nodes.map((node) => node.group).filter((group): group is string => group !== undefined));
 
   return graph.layers.filter((layer) => used.has(layer)).map(lane);
 }
 
-export function moduleNode(graph: Graph, id: string): DiagramNode {
+export function moduleNode(graph: Graph, id: string): Shape {
   const module = graph.modules.get(id)!;
-  const node: DiagramNode = { id, kind: "module", label: id, ref: { id, file: id, line: 1 }, group: module.layer, x: 0, y: 0, w: 0, h: 0 };
+  const node: Shape = { id, kind: "module", label: id, ref: { id, file: id, line: 1 }, group: module.layer, x: 0, y: 0, w: 0, h: 0 };
 
   if (module.doc) node.doc = module.doc;
 
   return node;
 }
 
-export function externalNode(graph: Graph, id: string): DiagramNode {
+export function externalNode(graph: Graph, id: string): Shape {
   const external = graph.externals.get(id)!;
 
   return { id, kind: "external", label: external.kind === "builtin" ? `node:${external.name}` : external.name, x: 0, y: 0, w: 0, h: 0 };
 }
 
-export function fnNode(graph: Graph, id: string): DiagramNode {
+export function fnNode(graph: Graph, id: string): Shape {
   const fn = graph.nodes.get(id)!;
-  const node: DiagramNode = { id, kind: "fn", label: fn.parent ? `${fn.parent}.${fn.name}` : fn.name, ref: { id, file: fn.module, line: fn.line, endLine: fn.endLine }, group: graph.modules.get(fn.module)!.layer, x: 0, y: 0, w: 0, h: 0 };
+  const node: Shape = { id, kind: "fn", label: fn.parent ? `${fn.parent}.${fn.name}` : fn.name, ref: { id, file: fn.module, line: fn.line, endLine: fn.endLine }, group: graph.modules.get(fn.module)!.layer, x: 0, y: 0, w: 0, h: 0 };
 
   if (fn.signature) node.signature = fn.signature;
 
@@ -51,7 +51,7 @@ export function fnNode(graph: Graph, id: string): DiagramNode {
 }
 
 /** Module-level dependencies between the given modules (and to externals when `externals`), one edge per pair with its count. */
-export function depEdges(graph: Graph, members: ReadonlySet<string>, externals: boolean): DiagramEdge[] {
+export function depEdges(graph: Graph, members: ReadonlySet<string>, externals: boolean): Line[] {
   const counts = new Map<string, number>();
 
   for (const dep of graph.deps) {

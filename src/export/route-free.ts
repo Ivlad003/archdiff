@@ -11,7 +11,7 @@
 // Pure: a placed diagram in, a route per line out. Entry point:
 // `routeFree`; `routeEdges` picks it when the shapes do not lie in columns.
 
-import type { Diagram, DiagramEdge, DiagramNode } from "../diagram.ts";
+import type { Diagram, Line, Shape } from "../diagram.ts";
 import type { Point } from "./excalidraw.ts";
 
 /** The room kept between a line and a shape. */
@@ -34,7 +34,7 @@ function distinct(values: number[]): number[] {
 }
 
 /** The side of `from` that faces `to`, as the port of a line between them, and which axis the line leaves along. */
-function portOf(from: DiagramNode, to: DiagramNode, outgoing: boolean): { x: number; y: number; axis: "x" | "y" } {
+function portOf(from: Shape, to: Shape, outgoing: boolean): { x: number; y: number; axis: "x" | "y" } {
   const dx = to.x + to.w / 2 - (from.x + from.w / 2);
   const dy = to.y + to.h / 2 - (from.y + from.h / 2);
 
@@ -49,11 +49,11 @@ function portOf(from: DiagramNode, to: DiagramNode, outgoing: boolean): { x: num
  * grid of the shapes' sides. A line between shapes that overlap, or whose
  * ends the grid cannot reach, is drawn straight.
  */
-export function routeFree(diagram: Diagram): Map<DiagramEdge, Point[]> {
+export function routeFree(diagram: Diagram): Map<Line, Point[]> {
   const boxes = new Map(diagram.nodes.filter((node) => node.kind !== "anchor" && node.kind !== "fragment").map((node) => [node.id, node]));
   const obstacles = [...boxes.values()];
   const usable = diagram.edges.filter((edge) => boxes.has(edge.from) && boxes.has(edge.to) && edge.from !== edge.to && !edge.route);
-  const routes = new Map<DiagramEdge, Point[]>();
+  const routes = new Map<Line, Point[]>();
 
   if (usable.length === 0) return routes;
   // The grid lines: every side pushed out by the margin, and the middle of every gap between neighbouring sides.
@@ -68,7 +68,7 @@ export function routeFree(diagram: Diagram): Map<DiagramEdge, Point[]> {
     return distinct(out);
   };
   // The ports of every line are grid lines too, so a route starts and ends exactly at a side.
-  const ports = new Map<DiagramEdge, { start: ReturnType<typeof portOf>; end: ReturnType<typeof portOf> }>();
+  const ports = new Map<Line, { start: ReturnType<typeof portOf>; end: ReturnType<typeof portOf> }>();
 
   for (const edge of usable) {
     const from = boxes.get(edge.from)!;
