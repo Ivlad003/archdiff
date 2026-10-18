@@ -1415,6 +1415,8 @@ test("a browser extension's listeners are entry points, labelled with the role m
   assert.ok(views.includes("calls:background.js#openPanel\topenPanel (background.js) — listener chrome.action.onClicked of the background"), views);
   assert.ok(views.includes("calls:content.js#onMessage\tonMessage (content.js) — listener chrome.runtime.onMessage of the content script"), views);
   assert.ok(views.includes("calls:panel.js#onMessage\tonMessage (panel.js) — listener port.onMessage of the side panel"), views);
+  // A page the manifest does not name is a page of the extension still, by its file.
+  assert.ok(views.includes("calls:options.js#onChanged\tonChanged (options.js) — listener chrome.storage.onChanged of the page options.html"), views);
   // The function a listener written in place calls is reached from the listener's own tree, no entry of its own.
   assert.ok(!views.includes("calls:background.js#fromPanel"), views);
   const tree = archdiff(["diagram", "calls:background.js#onConnect", extension, "--format", "mermaid"]).stdout;

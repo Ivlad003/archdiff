@@ -238,8 +238,9 @@ function extensionRoles(root: string, allFiles: readonly string[], sources: Read
     if (!isJsonObject(parsed) || typeof parsed["manifest_version"] !== "number") continue;
     const dir = posix.dirname(manifest);
     const at = (path: string, from: string): string => posix.normalize(posix.join(from, path));
+    // The first role wins: the manifest's own before a page's, a page's before another page's.
     const script = (path: JsonValue | undefined, role: string, from = dir): void => {
-      if (isJsonString(path) && sources.has(at(path, from))) roles.set(at(path, from), role);
+      if (isJsonString(path) && sources.has(at(path, from)) && !roles.has(at(path, from))) roles.set(at(path, from), role);
     };
     // A page's scripts: `<script src="panel.js">`, relative to the page.
     const page = (path: JsonValue | undefined, role: string): void => {
@@ -283,6 +284,9 @@ function extensionRoles(root: string, allFiles: readonly string[], sources: Read
 
     if (isJsonObject(optionsUi)) page(optionsUi["page"], "options");
     page(parsed["devtools_page"], "devtools");
+
+    // A page the manifest does not name (a side panel set at run time, a tab the extension opens): its scripts run as that page's.
+    for (const html of allFiles.filter((path) => path.startsWith(dir === "." ? "" : `${dir}/`) && path.endsWith(".html")).sort()) page(posix.relative(dir, html), `page ${posix.relative(dir, html)}`);
   }
 
   return roles;
