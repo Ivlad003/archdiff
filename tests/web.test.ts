@@ -373,11 +373,12 @@ test("chat tags are suggested and expanded into context; mocks come from the typ
   assert.ok(tags.tags.some((tag) => tag.tag === "@module:src/lib/orders.ts"), JSON.stringify(tags.tags.slice(0, 5)));
   assert.ok(tags.tags.some((tag) => tag.tag === "@fn:src/lib/orders.ts#placeOrder"));
   assert.ok(tags.tags.some((tag) => tag.tag === "@type:src/lib/orders.ts#Order"));
-  const expanded = await fetch(`${base}/api/expand`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Refactor @fn:src/lib/orders.ts#placeOrder and keep @layer:db small." }) });
+  const expanded = await fetch(`${base}/api/expand`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Refactor @fn:src/lib/orders.ts#placeOrder and keep @layer:db small (see @layer:db)." }) });
   const context = ((await expanded.json()) as { context: string }).context;
   assert.ok(context.startsWith("## Context from the diagrams"), context.slice(0, 80));
   assert.ok(context.includes("### @fn:src/lib/orders.ts#placeOrder") && context.includes("## Calls"), context);
-  assert.ok(context.includes("### @layer:db") && context.includes("src/db/store.ts"), context);
+  // The punctuation after a tag is the sentence's: the heading is the tag, and a tag written twice is one section.
+  assert.ok(context.includes("### @layer:db\n") && !context.includes("### @layer:db)") && context.split("### @layer:db").length === 2 && context.includes("src/db/store.ts"), context);
   // The fake agent answers "Done.", no JSON: the mocks fall back to the types of the signature.
   const mocks = await fetch(`${base}/api/flow/mocks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "calls:src/lib/orders.ts#placeOrder", description: "an order of 42" }) });
   const body = (await mocks.json()) as { source: string; input: Record<string, unknown>; storages: Record<string, unknown> };

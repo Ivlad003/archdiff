@@ -66,12 +66,13 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
   const seenTags = new Set<string>();
 
   for (const match of text.matchAll(/@(module|fn|layer|dir|flow|type|logic|view):(\S+)/g)) {
-    const tag = match[0];
+    const kind = match[1]!;
+    // The punctuation after a tag (`(@module:x).`) is the sentence's, not the subject's.
+    const subject = match[2]!.replace(/[.,;:)]+$/, "");
+    const tag = `@${kind}:${subject}`;
 
     if (seenTags.has(tag)) continue;
     seenTags.add(tag);
-    const kind = match[1]!;
-    const subject = match[2]!.replace(/[.,;:)]+$/, "");
 
     if (kind === "flow") {
       sections.push(`### ${tag}\n\n${flowMarkdown(dataFlow(analysis, subject, readDrawing(root, `calls:${subject}`)?.mocks ?? [], 4))}`);

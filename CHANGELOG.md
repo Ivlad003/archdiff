@@ -15,6 +15,7 @@ A smoke test of the packed package on real repositories, and of code → spec wi
 
 - Claude Code never got its task on a repository whose archdiff.json names `checks`: the tools it may run (`--allowedTools …`) took the prompt for one more tool, and Claude exited at once with "Input must be provided either through stdin or as a prompt argument" — the Chat tab showed a run with nothing but the checks' results. The list of tools ends before the prompt, and the OpenSpec CLI is on it: *spec this view* had the agent asked to run `openspec init` and `validate`, which it was not allowed to.
 - `archdiff spec --tests DIR` with an absolute `DIR` wrote the skeletons under the repository (`<root>/<DIR>/…`) while naming the absolute path. They go where `DIR` says.
+- In the chat's context, a tag followed by the sentence's punctuation (`(@module:x).`) headed its section with the punctuation and counted as a tag of its own; the heading is the tag, and a tag written twice is one section.
 
 Three test passes over every feature — the CLI and the exports, the page and the API, the analysis — and what they found, fixed.
 
