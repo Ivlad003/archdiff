@@ -15,6 +15,7 @@
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
 
 import type { Analysis } from "./analyze.ts";
+import type { HubThresholds } from "./config.ts";
 import { SIZE, type Diagram, type Line, type PictureContent, type SequenceFragment, type Shape } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
@@ -539,10 +540,14 @@ const SELF_CALL = { out: 70, rise: 12, back: 6 } as const;
 /** Lifelines a sequence keeps apart; beyond it the picture is a wall of arrows (the usual guidance says 10–12). */
 const MAX_PARTICIPANTS = 12;
 
-/** A guard a message sits under, as a fragment frames it: an `opt` (a branch) or a `loop`, with its condition. */
-type SequenceGuard = { id: string; kind: "opt" | "loop"; label: string };
+/** A guard a message sits under, as a fragment frames it: the guarding statement's kind and its condition. */
+type SequenceGuard = { id: string; kind: GuardFact["kind"]; label: string };
 
-/** One message of a sequence: the modules it goes between, the function it calls, where, how deep, how many times in a row, and its guards outermost first. */
+/**
+ * One message of a sequence: the modules it goes between, the function it calls, where, how deep, how many times in
+ * a row, its guards outermost first, and the message whose call led into the function making it (null for the
+ * entry's own).
+ */
 interface SequenceMessage {
   from: string;
   to: string;
@@ -551,15 +556,16 @@ interface SequenceMessage {
   depth: number;
   times: number;
   chain: SequenceGuard[];
+  parent: number | null;
 }
 
 /**
  * The calls from a function, depth first and by line, `depth` levels deep and at most `limit` of them. A message's
  * guards are those its caller sat under (the calls a guarded call makes happen under the same guards), then its own
  * call's branches and loops; a guard's id is made unique per function it sits in. A call back into a function on the
- * stack is drawn, not followed.
+ * stack is drawn, not followed; so is a call into a hub module (`hubs`), which `stopped` names.
  */
-function sequenceMessages(graph: Graph, id: string, depth: number, limit: number): SequenceMessage[] {
+function sequenceMessages(graph: Graph, id: string, depth: number, limit: number, hubs: ReadonlySet<string>): { messages: SequenceMessage[]; stopped: string[] } {
   const callsFrom = new Map<string, typeof graph.calls>();
 
   for (const call of graph.calls) if (call.kind === "call") callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call]);
@@ -569,20 +575,23 @@ function sequenceMessages(graph: Graph, id: string, depth: number, limit: number
   const messages: SequenceMessage[] = [];
   const active = new Set<string>();
   // A guard's id is made unique per function it sits in; its label is the condition, the case, the kind.
-  const guardsOf = (from: string, guards: readonly GuardFact[] | undefined): SequenceGuard[] => (guards ?? []).map((guard) => ({ id: `${from}:${guard.id}`, kind: guard.kind === "loop" ? "loop" : "opt", label: guard.kind === "loop" || guard.kind === "if" || guard.kind === "else" ? guard.text : guard.text === "" || guard.text === guard.kind ? guard.kind : `${guard.kind} ${guard.text}` }));
+  const guardsOf = (from: string, guards: readonly GuardFact[] | undefined): SequenceGuard[] => (guards ?? []).map((guard) => ({ id: `${from}:${guard.id}`, kind: guard.kind, label: guard.kind === "loop" || guard.kind === "if" || guard.kind === "else" ? guard.text : guard.text === "" || guard.text === guard.kind ? guard.kind : `${guard.kind} ${guard.text}` }));
 
-  const walk = (from: string, level: number, inherited: SequenceGuard[]): void => {
-    if (level >= depth || messages.length >= limit) return;
+  // The walk goes well past the limit, so the cut can leave the deepest calls out first rather than the last ones.
+  const budget = limit * 25;
+
+  const walk = (from: string, level: number, inherited: SequenceGuard[], parent: number | null): void => {
+    if (level >= depth || messages.length >= budget) return;
     active.add(from);
     // The calls into the repository and the operations of an API, in the order the code makes them.
     const steps = [...(callsFrom.get(from) ?? []).map((call) => ({ line: call.line, call })), ...(apiFrom.get(from) ?? []).map((api) => ({ line: api.line, api }))].sort((a, b) => a.line - b.line);
 
     for (const step of steps) {
-      if (messages.length >= limit) break;
+      if (messages.length >= budget) break;
 
       // An operation of an API: a message to its family's lifeline, not followed further.
       if ("api" in step) {
-        messages.push({ from: moduleOf(from), to: familyId(step.api.api, step.api.family), label: step.api.operation, line: step.line, depth: level, times: 1, chain: [...inherited, ...guardsOf(from, step.api.guards)] });
+        messages.push({ from: moduleOf(from), to: familyId(step.api.api, step.api.family), label: step.api.operation, line: step.line, depth: level, times: 1, chain: [...inherited, ...guardsOf(from, step.api.guards)], parent });
         continue;
       }
 
@@ -591,17 +600,44 @@ function sequenceMessages(graph: Graph, id: string, depth: number, limit: number
 
       if (!target) continue;
       const chain = [...inherited, ...guardsOf(from, call.guards)];
-      messages.push({ from: moduleOf(from), to: moduleOf(call.to), label: target.parent ? `${target.parent}.${target.name}` : target.name, line: call.line, depth: level, times: 1, chain });
+      messages.push({ from: moduleOf(from), to: moduleOf(call.to), label: target.parent ? `${target.parent}.${target.name}` : target.name, line: call.line, depth: level, times: 1, chain, parent });
 
-      if (!active.has(call.to)) walk(call.to, level + 1, chain);
+      if (hubs.has(moduleOf(call.to)) && moduleOf(call.to) !== moduleOf(id)) stopped.add(moduleOf(call.to));
+      else if (!active.has(call.to)) walk(call.to, level + 1, chain, messages.length - 1);
     }
 
     active.delete(from);
   };
 
-  walk(id, 0, []);
+  const stopped = new Set<string>();
+  walk(id, 0, [], null);
 
-  return messages;
+  return { messages: cutToLimit(messages, limit), stopped: [...stopped].sort() };
+}
+
+/**
+ * At most `limit` messages, in their order. Over it, the operations of an API and the calls leading to them stay —
+ * the business of the flow — then the shallowest of the rest fill the room, so a utility's inner steps leave first;
+ * operations alone past the limit lose the last ones.
+ */
+function cutToLimit(messages: readonly SequenceMessage[], limit: number): SequenceMessage[] {
+  if (messages.length <= limit) return [...messages];
+  const keep = new Set<number>();
+
+  for (const [i, message] of messages.entries()) {
+    if (parseApiId(message.to) === null) continue;
+
+    for (let at: number | null = i; at !== null && !keep.has(at); at = messages[at]!.parent) keep.add(at);
+  }
+
+  const rest = messages.map((_, i) => i).filter((i) => !keep.has(i)).sort((a, b) => messages[a]!.depth - messages[b]!.depth || a - b);
+
+  for (const i of rest) {
+    if (keep.size >= limit) break;
+    keep.add(i);
+  }
+
+  return [...keep].sort((a, b) => a - b).slice(0, limit).map((i) => messages[i]!);
 }
 
 /** Consecutive repeats of one call under the same guards (a loop body, a helper called twice in a row) as one message "×N". */
@@ -619,12 +655,18 @@ function collapseRepeats(messages: readonly SequenceMessage[]): SequenceMessage[
   return collapsed;
 }
 
-/** Consecutive messages under one guard form a fragment, labelled with the condition; the guards inside a guard nest, up to FRAGMENT_LEVELS deep. */
+/**
+ * Consecutive messages under one guard form a frame, labelled with the condition; the guards inside a guard nest,
+ * up to FRAGMENT_LEVELS deep. Frames that are the arms of one statement — an `if` and its `else`, the cases of a
+ * `switch`, a `try` and its `catch` — side by side at one level join into one `alt` fragment with parts; a loop is a
+ * `loop`, any other guard alone an `opt`.
+ */
 function fragmentsOf(messages: readonly SequenceMessage[]): SequenceFragment[] {
   const fragments: SequenceFragment[] = [];
 
   const frame = (first: number, last: number, level: number): void => {
     if (level >= FRAGMENT_LEVELS) return;
+    const frames: { guard: SequenceGuard; first: number; last: number }[] = [];
     let i = first;
 
     while (i <= last) {
@@ -638,9 +680,27 @@ function fragmentsOf(messages: readonly SequenceMessage[]): SequenceFragment[] {
       let end = i;
 
       while (end + 1 <= last && messages[end + 1]!.chain[level]?.id === guard.id) end++;
-      fragments.push({ kind: guard.kind, label: guard.label, first: i, last: end, level });
-      frame(i, end, level + 1);
+      frames.push({ guard, first: i, last: end });
       i = end + 1;
+    }
+
+    // An arm that continues the frame before it: `else` after its `if`, a case after a case, `catch` after `try`.
+    const continues = (previous: SequenceGuard, next: SequenceGuard): boolean =>
+      (previous.kind === "if" && next.kind === "else" && next.label === `not ${previous.label}`) || (previous.kind === "case" && next.kind === "case") || (previous.kind === "try" && next.kind === "catch");
+
+    for (let at = 0; at < frames.length; ) {
+      const head = frames[at]!;
+      let end = at;
+
+      while (end + 1 < frames.length && frames[end + 1]!.first === frames[end]!.last + 1 && continues(frames[end]!.guard, frames[end + 1]!.guard)) end++;
+
+      if (end > at) {
+        const parts = frames.slice(at + 1, end + 1).map((arm) => ({ first: arm.first, label: arm.guard.kind === "else" ? "else" : arm.guard.label }));
+        fragments.push({ kind: "alt", label: head.guard.label, first: head.first, last: frames[end]!.last, level, parts });
+      } else fragments.push({ kind: head.guard.kind === "loop" ? "loop" : "opt", label: head.guard.label, first: head.first, last: head.last, level });
+
+      for (const arm of frames.slice(at, end + 1)) frame(arm.first, arm.last, level + 1);
+      at = end + 1;
     }
   };
 
@@ -651,7 +711,8 @@ function fragmentsOf(messages: readonly SequenceMessage[]): SequenceFragment[] {
 
 /**
  * The participants of a sequence, the subject's module first, then as the messages meet them. Beyond
- * MAX_PARTICIPANTS the rest share one "… N more" lifeline: the messages to and from them are moved onto it.
+ * MAX_PARTICIPANTS the rest share one "… N more" lifeline: the messages to and from them are moved onto it. The
+ * families of an API stay (what the business calls is the point), the modules met last fold first.
  */
 function participantsOf(subject: string, messages: SequenceMessage[]): { participants: string[]; folded: number } {
   const participants = [subject];
@@ -659,7 +720,10 @@ function participantsOf(subject: string, messages: SequenceMessage[]): { partici
   for (const message of messages) for (const module of [message.from, message.to]) if (!participants.includes(module)) participants.push(module);
 
   if (participants.length <= MAX_PARTICIPANTS) return { participants, folded: 0 };
-  const kept = new Set(participants.slice(0, MAX_PARTICIPANTS - 1));
+  // The subject, the families and the modules kept make MAX_PARTICIPANTS - 1 lifelines; the fold is the last.
+  const families = participants.filter((module) => module !== subject && parseApiId(module) !== null).slice(0, MAX_PARTICIPANTS - 2);
+  const modules = participants.filter((module) => module !== subject && parseApiId(module) === null).slice(0, Math.max(0, MAX_PARTICIPANTS - 2 - families.length));
+  const kept = new Set([subject, ...families, ...modules]);
   const folded = participants.length - kept.size;
   const more = `… ${folded} more`;
 
@@ -669,7 +733,8 @@ function participantsOf(subject: string, messages: SequenceMessage[]): { partici
     if (!kept.has(message.to)) message.to = more;
   }
 
-  return { participants: [...kept, more], folded };
+  // In the order the messages met them, the fold last.
+  return { participants: [...participants.filter((module) => kept.has(module)), more], folded };
 }
 
 /** The y of a message's row. */
@@ -703,6 +768,14 @@ function drawSequence(participants: readonly string[], messages: readonly Sequen
     const top = messageY(fragment.first) - FRAGMENT_ABOVE + inset;
     const end = messageY(fragment.last) + FRAGMENT_BELOW - inset;
     nodes.push({ id: `fragment:${i}`, kind: "fragment", label: `${fragment.kind} [${fragment.label}]`, x: 6 + inset, y: top, w: participants.length * SEQ_COLUMN - 2 * inset, h: end - top });
+
+    // The later arms of an `alt`: each framed inside the fragment, from its first message to the arm after it.
+    for (const [p, part] of (fragment.parts ?? []).entries()) {
+      const next = fragment.parts![p + 1];
+      const armTop = messageY(part.first) - FRAGMENT_ABOVE + inset + FRAGMENT_INSET / 2;
+      const armEnd = next ? messageY(next.first) - FRAGMENT_ABOVE + inset : end - FRAGMENT_INSET / 2;
+      nodes.push({ id: `fragment:${i}:${p}`, kind: "fragment", label: part.label, x: 6 + inset + FRAGMENT_INSET / 2, y: armTop, w: participants.length * SEQ_COLUMN - 2 * inset - FRAGMENT_INSET, h: armEnd - armTop });
+    }
   }
 
   messages.forEach((message, i) => {
@@ -747,7 +820,7 @@ function messagesView(analysis: Analysis, scope: string | null): PictureContent 
       const known = byKey.get(key);
 
       if (known) known.times++;
-      else byKey.set(key, { from: send.module, to, label: send.type, line: send.line, depth: 0, times: 1, chain: [] });
+      else byKey.set(key, { from: send.module, to, label: send.type, line: send.line, depth: 0, times: 1, chain: [], parent: null });
     }
   }
 
@@ -773,11 +846,11 @@ function messagesView(analysis: Analysis, scope: string | null): PictureContent 
  * a call repeated in a row is one message "×N", the calls under a branch
  * or a loop are framed as fragments.
  */
-function sequenceView(graph: Graph, id: string, depth: number, limit: number): PictureContent {
+function sequenceView(graph: Graph, id: string, depth: number, limit: number, hubs: ReadonlySet<string>): PictureContent {
   const start = graph.nodes.get(id);
 
   if (!start) return unplaced(id, [], [], [], { reason: `no function "${id}"`, missing: true });
-  const walked = sequenceMessages(graph, id, depth, limit);
+  const { messages: walked, stopped } = sequenceMessages(graph, id, depth, limit, hubs);
   const messages = collapseRepeats(walked);
   const fragments = fragmentsOf(messages);
   const { participants, folded } = participantsOf(moduleOf(id), messages);
@@ -788,11 +861,41 @@ function sequenceView(graph: Graph, id: string, depth: number, limit: number): P
   if (fragments.length > 0) diagram.reason = `${fragments.length} fragments: the calls under a branch or a loop, framed`;
 
   if (messages.length === 0) diagram.reason = depth === 0 && graph.calls.some((call) => call.from === id && call.kind === "call") ? "depth 0 draws no message (--depth 1 draws the function's own calls)" : "the function calls nothing archdiff can follow";
-  else if (messages.length >= limit) diagram.reason = `cut at ${limit} messages; --limit raises it`;
+  else if (walked.length > limit) diagram.reason = `cut at ${limit} messages: the operations of an API and the calls to them stay, the deepest of the rest leave first; --limit raises it`;
 
   if (folded > 0) diagram.reason = [diagram.reason, `${counted(folded, "module")} ${folded === 1 ? "shares" : "share"} the last lifeline (at most ${MAX_PARTICIPANTS})`].filter(Boolean).join("; ");
 
+  if (stopped.length > 0) diagram.reason = [diagram.reason, `calls into ${stopped.join(", ")} drawn, not followed: hubs of the repository (--no-hubs follows them)`].filter(Boolean).join("; ");
+
   return diagram;
+}
+
+/**
+ * The modules most of the repository imports — a logger, the shared types — by archdiff.json's "hubs" thresholds
+ * over every module: a sequence draws a call into one as a message and does not follow it, else the logger's own
+ * steps drown the business calls. A module whose functions reach an operation of an API within three calls is no
+ * hub, however many import it: an auth middleware every route imports holds business calls the sequence must reach.
+ */
+function hubModules(graph: Graph, thresholds: HubThresholds): Set<string> {
+  const importers = new Map<string, Set<string>>();
+
+  for (const dep of graph.deps) if (graph.modules.has(dep.to) && dep.from !== dep.to && !dep.typeOnly) importers.set(dep.to, new Set([...(importers.get(dep.to) ?? []), dep.from]));
+  const threshold = Math.max(thresholds.min, Math.min(thresholds.max, Math.ceil(graph.modules.size * thresholds.share)));
+  // Up from the operations' callers, three calls: the modules of what reaches an operation.
+  const callers = new Map<string, string[]>();
+
+  for (const call of graph.calls) if (call.kind === "call") callers.set(call.to, [...(callers.get(call.to) ?? []), call.from]);
+  const business = new Set<string>();
+  let frontier = [...new Set(graph.apiCalls.map((call) => call.from))];
+
+  for (let hop = 0; hop < 3 && frontier.length > 0; hop++) {
+    for (const node of frontier) business.add(moduleOf(node));
+    frontier = [...new Set(frontier.flatMap((node) => callers.get(node) ?? []))].filter((node) => !business.has(moduleOf(node)));
+  }
+
+  for (const node of frontier) business.add(moduleOf(node));
+
+  return new Set([...importers].filter(([to, from]) => from.size >= threshold && !business.has(to)).map(([to]) => to));
 }
 
 /**
@@ -823,7 +926,7 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
       case "calls":
         return callsView(graph, view.subject, depth);
       case "sequence":
-        return sequenceView(graph, view.subject, depth, limit);
+        return sequenceView(graph, view.subject, depth, limit, options.hubs ? hubModules(graph, analysis.config.hubs) : new Set());
       case "path":
         return pathView(analysis, view.subject, depth);
       case "type":

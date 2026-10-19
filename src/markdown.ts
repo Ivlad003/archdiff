@@ -110,7 +110,7 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
     const fragments = diagram.sequence.fragments ?? [];
 
     for (const [i, message] of diagram.sequence.messages.entries()) {
-      for (const fragment of fragments) if (fragment.first === i) lines.push(`- _${fragment.kind} [${fragment.label}]_ — messages ${fragment.first + 1}–${fragment.last + 1}`);
+      for (const fragment of fragments) if (fragment.first === i) lines.push(`- _${fragment.kind} [${fragment.label}]${(fragment.parts ?? []).map((part) => ` / ${part.label} from ${part.first + 1}`).join("")}_ — messages ${fragment.first + 1}–${fragment.last + 1}`);
       lines.push(`${i + 1}. \`${message.from}\` → \`${participantLabel(message.to)}\`: **${message.label}${diagram.sequence.kind === "messages" ? "" : "()"}**${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""} — ${message.from}:${message.line}`);
     }
 

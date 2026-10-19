@@ -192,6 +192,10 @@ The system SHALL draw, as `apis`, the families of an external API the code calls
 - **WHEN** `addToCart` calls `clients.shopperBasketsV2.getBasket()` and `clients.shopperProducts.getProduct()`, and a cartridge's hooks.json names `dw.ocapi.shop.basket.modifyGETResponse`
 - **THEN** `apis` draws `ShopperBasketsV2` and `ShopperProducts` with the module calling them and the hook joined to `ShopperBasketsV2` with the label `modify GET response basket`; `apis:ShopperBasketsV2` draws `getBasket` with `addToCart` calling it and the hook on `getBasket`; `calls:` of `addToCart` ends at `ShopperBasketsV2.getBasket`; the coverage report counts the calls under `api` and not as blind
 
+### Requirement: A sequence frames alternatives and stops at hubs
+
+The system SHALL frame, in a sequence, the messages under an `if` and its `else`, under the cases of a `switch`, or under a `try` and its `catch` as one `alt` fragment whose later arms are named (`else`, the case, `catch (e)`), the messages under a loop as `loop`, and under a lone branch as `opt`, nested up to three deep, as the Markdown lists and Mermaid's `alt … else … end` writes them; and SHALL draw a call into a hub module (imported by at least the "hubs" threshold of the repository's modules, unless its functions reach an operation of an API within three calls) as a message without following its calls, naming the hubs in the reason, unless hubs are drawn (`--no-hubs`); over the message limit it SHALL keep the operations of an API and the calls leading to them and drop the deepest of the rest first, and over the lifeline limit fold modules before the families of an API.
+
 #### Scenario: A basket read with an else, a loop and a catch
 
 - **WHEN** `addToCart` reads the basket, logs under `if (!basket)` and adds an item in the `else`, reads each product in a loop, and updates the basket in a `try` whose `catch` logs

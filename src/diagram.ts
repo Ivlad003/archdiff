@@ -158,14 +158,20 @@ export interface Diagram {
 /** What a view draws, before `viewOf` names it with the view's key (view-keys.ts): a picture without its `view`. */
 export type PictureContent = Omit<Diagram, "view">;
 
-/** A frame of a sequence around the messages `first`..`last` (indices): the calls under one guard. */
+/**
+ * A frame of a sequence around the messages `first`..`last` (indices): the calls under one guard — `opt` a branch,
+ * `loop` a loop, `alt` an `if` with its `else`, a `switch`'s cases or a `try` with its `catch`, whose later arms
+ * `parts` name by the message each starts at.
+ */
 export interface SequenceFragment {
-  kind: "opt" | "loop";
+  kind: "opt" | "loop" | "alt";
   label: string;
   first: number;
   last: number;
   /** How deep the frame nests: 0 outermost. */
   level: number;
+  /** The arms of an `alt` after its first: where each starts and what it says (`else`, `case 'b'`, `catch`). */
+  parts?: { first: number; label: string }[];
 }
 
 /** A state machine as a picture carries it (machines.ts). */

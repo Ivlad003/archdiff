@@ -1507,6 +1507,21 @@ test("APIs: the SCAPI operations the code calls are shapes, storages, messages a
   assert.equal(coverage.blind, 0);
 });
 
+test("a sequence frames an if with its else, a try with its catch and a loop as alt and loop fragments, with the operations of an API on their family's lifeline", () => {
+  const scapi = join(root, "tests/fixtures/scapi");
+  const sequence = archdiff(["diagram", "sequence:src/routes/cart.tsx#action", scapi]).stdout;
+  assert.ok(sequence.includes("participant P3 as ShopperBasketsV2 (SCAPI)"), sequence);
+  assert.ok(sequence.includes("  P2->>P3: 4. getBasket()\n  alt !basket\n  P2->>P4: 5. log()\n  else\n  P2->>P3: 6. addItemToBasket()\n  end\n  loop const item of basket.productItems ?? []\n  P2->>P5: 7. getProduct()\n  end\n  alt try\n  P2->>P3: 8. updateBasket()\n  else catch (error)\n  P2->>P4: 9. log()\n  end"), sequence);
+  assert.ok(sequence.includes("- _alt [!basket] / else from 6_ — messages 5–6") && sequence.includes("4. `src/lib/cart.ts` → `ShopperBasketsV2 (SCAPI)`: **getBasket()**"), sequence);
+  const json = JSON.parse(archdiff(["diagram", "sequence:src/routes/cart.tsx#action", scapi, "--format", "json"]).stdout) as { nodes: { id: string; kind: string; label: string; opens?: string }[]; sequence: { fragments: { kind: string; label: string; parts?: { first: number; label: string }[] }[] } };
+  assert.deepEqual(json.sequence.fragments.map((fragment) => [fragment.kind, fragment.label, fragment.parts?.map((part) => part.label)]), [["alt", "!basket", ["else"]], ["loop", "const item of basket.productItems ?? []", undefined], ["alt", "try", ["catch (error)"]]]);
+  const family = json.nodes.find((node) => node.id === "api:scapi:ShopperBasketsV2");
+  assert.equal(family?.kind, "external");
+  assert.equal(family?.opens, "apis:ShopperBasketsV2");
+  // The arms of an alt are framed inside it on the canvas.
+  assert.ok(json.nodes.some((node) => node.kind === "fragment" && node.label === "alt [!basket]") && json.nodes.some((node) => node.kind === "fragment" && node.label === "else"), JSON.stringify(json.nodes.filter((node) => node.kind === "fragment")));
+});
+
 test("hotspots of a big repository keeps a screen's shape: 400 modules draw wider than tall, not a column", () =>
   withTempDir("archdiff-hotspots-big-", (dir) => {
     mkdirSync(join(dir, "src"), { recursive: true });
@@ -1636,10 +1651,11 @@ test("state machines: the implicit ones written with literals, the explicit ones
   assert.equal(archdiff(["diagram", "machine:src/order.ts#nope", machines]).status, 2);
   // A sequence frames the calls under a loop, a branch, a try and a catch, nesting the branch inside the loop.
   const sequence = archdiff(["diagram", "sequence:src/checkout.ts#checkout", machines]).stdout;
-  assert.ok(sequence.includes("  loop const order of orders\n  P0->>P1: 1. pay()\n    opt rush\n  P0->>P1: 2. ship()\n    end\n    opt not rush\n  P0->>P1: 3. cancel()\n    end\n  end\n  opt try\n  P0->>P0: 4. audit()\n  end\n  opt catch\n  P0->>P1: 5. cancel()\n  end"), sequence);
+  assert.ok(sequence.includes("  loop const order of orders\n  P0->>P1: 1. pay()\n    alt rush\n  P0->>P1: 2. ship()\n    else\n  P0->>P1: 3. cancel()\n    end\n  end\n  alt try\n  P0->>P0: 4. audit()\n  else catch\n  P0->>P1: 5. cancel()\n  end"), sequence);
   assert.ok(sequence.includes("- _loop [const order of orders]_ — messages 1–3"), sequence);
   const json = JSON.parse(archdiff(["diagram", "sequence:src/checkout.ts#checkout", machines, "--format", "json"]).stdout) as { nodes: { kind: string; label: string }[] };
-  assert.deepEqual(json.nodes.filter((node) => node.kind === "fragment").map((node) => node.label), ["loop [const order of orders]", "opt [rush]", "opt [not rush]", "opt [try]", "opt [catch]"]);
+  // An if with its else and a try with its catch are one alt each, their arms framed inside.
+  assert.deepEqual(json.nodes.filter((node) => node.kind === "fragment").map((node) => node.label), ["loop [const order of orders]", "alt [rush]", "else", "alt [try]", "catch"]);
 });
 
 test("two entities with a field of one name are two machines: by the class the code names, else by the object's name, two names of one entity as one", () =>

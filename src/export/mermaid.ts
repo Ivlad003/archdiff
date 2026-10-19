@@ -96,7 +96,10 @@ function sequenceMermaid(diagram: Diagram): string {
   const fragments = sequence.fragments ?? [];
 
   for (const [i, message] of sequence.messages.entries()) {
-    // A fragment opens before its first message (opt or loop, labelled) and closes after its last; outer ones first.
+    // A later arm of an `alt` opens at its first message (after the arm before it closed its own fragments).
+    for (const fragment of fragments) for (const part of fragment.parts ?? []) if (part.first === i) lines.push(`  ${"  ".repeat(fragment.level)}else${part.label === "else" ? "" : ` ${part.label.replace(/[:;]/g, " ")}`}`);
+
+    // A fragment opens before its first message (opt, loop or alt, labelled) and closes after its last; outer ones first.
     for (const fragment of fragments) if (fragment.first === i) lines.push(`  ${"  ".repeat(fragment.level)}${fragment.kind} ${fragment.label.replace(/[:;]/g, " ")}`);
     lines.push(`  ${ids.get(message.from)}->>${ids.get(message.to)}: ${i + 1}. ${message.label}${sequence.kind === "messages" ? "" : "()"}${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`);
 
