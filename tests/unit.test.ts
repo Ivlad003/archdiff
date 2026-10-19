@@ -11,6 +11,7 @@ import { DEFAULT_PICTURE_OPTIONS, DEEP_DEPTH, depthWarning, pictureOptionsHelp, 
 import { components, cycleThrough, stronglyConnected } from "../src/scc.ts";
 import { firstMatchingGlob, matchesGlob } from "../src/glob.ts";
 import { attempt, ok, wrong } from "../src/result.ts";
+import { OVERVIEW_GROUP, VIEW_KINDS, listGroup, listGroups, overviews, parseView, tagOf, type ViewKind } from "../src/view-keys.ts";
 
 test("the picture options read the same from flags and from a query, and write back to the same query", () => {
   const flags = new Map<string, string | true>([["depth", "2"], ["limit", "30"], ["no-hubs", true], ["overlay", "tests,heat"], ["expand", "src/a.ts,src/b.ts"], ["changes", true], ["only-changes", true], ["mermaid", "c4"], ["lanes", "columns"]]);
@@ -291,4 +292,37 @@ test("the resolver follows tsconfig paths, extensionless specifiers, index files
     assert.deepEqual(resolve("src/routes/home.tsx", "./+types/home"), { kind: "asset", path: ".react-router/types/src/routes/+types/home.ts", source: true });
     assert.deepEqual(resolve("src/routes/home.tsx", "./+types/about"), { kind: "unresolved", reason: "no such file: ./+types/about, nor .react-router/types/src/routes/+types/about of the tsconfig rootDirs" });
   });
+});
+
+test("the table of kinds registers every view once: the page lists what the server lists, the overviews parse, the tags are distinct", async () => {
+  const { analyze } = await import("../src/analyze.ts");
+  const { viewList } = await import("../src/views.ts");
+  const { join } = await import("node:path");
+  // The groups of the page's list: the overviews first, then each kind's group once, in the table's order.
+  const groups = listGroups();
+  assert.equal(groups[0], OVERVIEW_GROUP);
+  assert.equal(new Set(groups).size, groups.length);
+
+  // Every overview key parses to its kind; a group holds subject views, an overview is a bare view.
+  for (const { key } of overviews()) assert.ok(parseView(key), `overview ${key} parses`);
+
+  for (const [kind, spec] of Object.entries(VIEW_KINDS)) {
+    if ("group" in spec) assert.notEqual(spec.subject, "none", `${kind}: a group holds subject views`);
+
+    if ("overview" in spec) assert.notEqual(spec.subject, "required", `${kind}: an overview is a bare view`);
+  }
+
+  // The chat tags of the kinds are distinct prefixes.
+  const prefixes = Object.keys(VIEW_KINDS).flatMap((kind) => tagOf(kind as ViewKind)?.prefix ?? []);
+  assert.equal(new Set(prefixes).size, prefixes.length);
+
+  // Every view the server lists for the fixtures lands in a group of the page: none is dropped on the way.
+  for (const fixture of ["sample", "scapi", "machines"]) {
+    const analysis = await analyze(join(import.meta.dirname, "fixtures", fixture), { cache: false });
+
+    for (const entry of viewList(analysis)) {
+      const view = parseView(entry.key);
+      assert.ok(view && listGroup(view) !== null, `${entry.key} is listed by the server and shown by the page`);
+    }
+  }
 });

@@ -76,6 +76,15 @@ The system SHALL draw every picture that is no change (a review, a comparison, t
 - **WHEN** the head field is set to `a`, a branch that added `src/db/report.ts`, on the whole map
 - **THEN** the title reads "… @ a", the views list holds `module:src/db/report.ts`, and the Code tab of it shows the branch's file
 
+### Requirement: The list shows every view the server lists
+
+The system SHALL place every view the server lists in a group of the page's list — the overviews, then the subject views of each kind under the group the table of kinds names — so that a kind the table does not place cannot be listed by the server and dropped by the page; the overview picker and the breadcrumbs SHALL follow the same table.
+
+#### Scenario: Every listed view has a group
+
+- **WHEN** the views of the sample, the SCAPI and the machines fixtures are listed
+- **THEN** each — `logic:<path>#<fn>`, `intent`, `modules`, `branches`, `apis:<family>`, `postman:<file>` among them — has a group of the list, and every overview key parses to its kind
+
 ### Requirement: The canvas shows the picture the link names
 
 The system SHALL draw the picture of the link on one canvas, however fast the link changes: a view opened while the first picture is still mounting the canvas waits for that canvas, and a picture that comes after a newer link is dropped. A picture with nothing to draw SHALL say why in the middle of the canvas, without the minimap; a picture that cannot be drawn SHALL clear the canvas and say why there, never leave the last picture standing for it.

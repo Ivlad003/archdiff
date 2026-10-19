@@ -329,8 +329,10 @@ function mindmapMermaid(diagram: Diagram): string {
 /** The Mermaid type that suits a view best when `auto`: a sequence or class view has its own; the timeline is a gitGraph; the rest a flowchart. */
 export function mermaidStyleFor(diagram: Diagram, style: MermaidStyle): Exclude<MermaidStyle, "auto"> {
   if (style !== "auto") return style;
+  // The commits of the timeline or of the branches are a gitGraph: the kinds that type draws alone.
+  const kind = parseView(diagram.view)?.kind;
 
-  if (diagram.view === "timeline" || diagram.view === "branches") return "gitgraph";
+  if (kind !== undefined && MERMAID_ONLY_FOR.gitgraph?.kinds.includes(kind)) return "gitgraph";
 
   if (diagram.metrics) return "quadrant";
 
@@ -342,8 +344,9 @@ export function mermaidStyleFor(diagram: Diagram, style: MermaidStyle): Exclude<
 /** Why a Mermaid type asked for does not fit a picture, or null when it does: a gitGraph draws the commits of the timeline, a state diagram a machine. */
 export function mermaidMismatch(diagram: Diagram, style: MermaidStyle): string | null {
   const only = MERMAID_ONLY_FOR[style];
+  const kind = parseView(diagram.view)?.kind;
 
-  return only && !only.kinds.includes(parseView(diagram.view)?.kind ?? "") ? `${style} draws ${only.what}` : null;
+  return only && (kind === undefined || !only.kinds.includes(kind)) ? `${style} draws ${only.what}` : null;
 }
 
 /** The text with a Mermaid comment after its first line (the generated mark). */

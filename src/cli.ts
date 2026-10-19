@@ -28,7 +28,7 @@ import { analysisAt, history } from "./review.ts";
 import { defaultBase, isIgnored, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { CACHE_DIRECTORY } from "./cache.ts";
 import { serve } from "./server.ts";
-import { drawnAtHead, usesDepth } from "./view-keys.ts";
+import { drawnAtHead, usesDepth, viewSyntax } from "./view-keys.ts";
 import { parseView, viewList, viewOf, type View } from "./views.ts";
 import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
@@ -185,6 +185,23 @@ function formatOf(call: Call, command: string): ExportFormat | null {
   return null;
 }
 
+/** Text broken into lines of at most `width` characters at its spaces, for the help. */
+function wrapped(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+
+  for (const word of text.split(" ")) {
+    if (line !== "" && line.length + 1 + word.length > width) {
+      lines.push(line);
+      line = word;
+    } else line = line === "" ? word : `${line} ${word}`;
+  }
+
+  if (line !== "") lines.push(line);
+
+  return lines;
+}
+
 const COMMANDS: readonly Command[] = [
   {
     name: "analyze",
@@ -229,16 +246,12 @@ const COMMANDS: readonly Command[] = [
     usage: "<view> [dir] [--format F] [--out FILE] [--base REF] [--head REF] [--heads A,B] [picture options]",
     help: [
       "Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,",
-      "drawio, excalidraw, archimate. Views: layers | layer:<name> | dir:<path> |",
-      "module:<path> | inside:<path> | usage:<path> | calls:<path>#<fn> |",
-      "sequence:<path>#<fn> | path:<path>#<fn> | type:<path>#<Type> | cycles |",
-      "cycle:<path> | classes | classes:<path|dir> | matrix | matrix:<dir> | events | messages | messages:<path> | apis | apis:<family|path> | postman | postman:<file> | tests |",
-      "hotspots | packages | timeline [--base --head] | coverage | intent | modules | metrics |",
-      "metrics:<layer> | cycles:fns | machines | machine:<path>#<name> | focus:<path>[#<fn>] |",
-      "logic | logic:<path>#<fn> (the function's body as a flowchart, with its paths as rules) |",
-      "review [--base --head] | compare [--base --heads] | commit:<sha> (one commit's change",
-      "against the commit before it). Every export names the commit it was drawn from. The",
-      "picture options:",
+      "drawio, excalidraw, archimate. Views (the table of kinds, view-keys.ts):",
+      ...wrapped(viewSyntax().join(" | "), 88),
+      "timeline and review take --base --head, compare --base --heads; logic:<path>#<fn> is the",
+      "function's body as a flowchart, with its paths as rules; commit:<sha> is one commit's",
+      "change against the commit before it. Every export names the commit it was drawn from.",
+      "The picture options:",
       ...pictureOptionsHelp().map((line) => `  ${line}`),
     ],
     arity: 2,

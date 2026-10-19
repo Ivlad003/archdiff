@@ -13,7 +13,7 @@
 // `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`.
 
 import { DEFAULT_PICTURE_OPTIONS, readEachPictureOption, writePictureParams, type PictureOptionKey, type PictureOptions } from "../../src/options.ts";
-import { codeRevision, defaultDepth, parseView, usesDepth } from "../../src/view-keys.ts";
+import { codeRevision, defaultDepth, overviews, parseView, usesDepth } from "../../src/view-keys.ts";
 import type { Refs } from "./api.ts";
 
 export type { PictureOptions } from "../../src/options.ts";
@@ -168,5 +168,5 @@ export function detailPresets(view: string): Record<Detail, Partial<Link>> {
   };
 }
 
-/** The overview pictures of the picture select, after those of the current subject. */
-export const OVERVIEWS: [string, string][] = [["layers", "layers"], ["modules", "every module and import"], ["intent", "the intent against the code"], ["matrix", "matrix of the layers"], ["cycles", "import cycles"], ["cycles:fns", "call cycles"], ["metrics", "coupling and cohesion"], ["machines", "state machines"], ["classes", "class diagram"], ["hotspots", "hotspots"], ["tests", "test coverage"], ["events", "events"], ["messages", "messages between the parts"], ["apis", "operations of external APIs"], ["packages", "packages"], ["coverage", "blind spots"], ["timeline", "timeline"], ["branches", "branches and their commits"]];
+/** The overview pictures of the picture select, after those of the current subject: the overviews the table of kinds names, in its order. */
+export const OVERVIEWS: [key: string, label: string][] = overviews().map(({ key, label }) => [key, label]);

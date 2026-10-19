@@ -6,7 +6,7 @@
 // Entry points: `siblingViews`, `crumbsOf`.
 
 import type { ViewEntry } from "./api.ts";
-import { parseView } from "../../src/view-keys.ts";
+import { crumbTemplate, parseView } from "../../src/view-keys.ts";
 
 export function siblingViews(key: string): { label: string; key: string }[] {
   const view = parseView(key);
@@ -27,7 +27,7 @@ export function siblingViews(key: string): { label: string; key: string }[] {
   return [];
 }
 
-/** The path above a view, for the breadcrumbs: layers › layer › directories › module › function. */
+/** The path above a view, for the breadcrumbs: layers › layer › directories › module › function, as the kind's template says. */
 export function crumbsOf(views: readonly ViewEntry[], key: string): { label: string; key: string }[] {
   const crumbs: { label: string; key: string }[] = [{ label: "layers", key: "layers" }];
   const view = parseView(key);
@@ -53,38 +53,42 @@ export function crumbsOf(views: readonly ViewEntry[], key: string): { label: str
   }
 
   const subject = view.subject;
+  const template = crumbTemplate(view.kind);
 
-  if (view.kind === "layer") crumbs.push({ label: subject, key });
-  else if (view.kind === "dir") {
+  if (template === "layer") crumbs.push({ label: subject, key });
+  else if (template === "dir") {
     const parts = subject.split("/");
 
     for (let depth = 1; depth <= parts.length; depth++) crumbs.push({ label: `${parts[depth - 1]}/`, key: `dir:${parts.slice(0, depth).join("/")}` });
-  } else if (view.kind === "classes") {
+  } else if (template === "classes") {
+    // A directory's or a module's classes: the layer and the directories above it, then it, then the picture.
     const layer = layerOf(subject);
 
     if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
     directories(subject);
     crumbs.push({ label: subject.slice(subject.lastIndexOf("/") + 1), key: /\.[a-z]+$/.test(subject) ? `module:${subject}` : `dir:${subject}` });
     crumbs.push({ label: "classes", key });
-  } else if (["module", "inside", "usage", "cycle", "calls", "sequence", "path", "type", "focus", "logic", "messages"].includes(view.kind)) {
-    // The layer, the directories and the module above the subject; then the function, then the picture of it.
+  } else if (template === "code" || template === "type") {
+    // The layer, the directories and the module above the subject; then the function (its call tree), then the picture of it.
     const hash = subject.indexOf("#");
     const module = hash === -1 ? subject : subject.slice(0, hash);
     const layer = layerOf(module);
-    const ofFn = hash !== -1 && (view.kind === "focus" || view.kind === "logic" || view.kind === "cycle");
 
     if (layer) crumbs.push({ label: layer, key: `layer:${layer}` });
     directories(module);
     crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: `module:${module}` });
 
-    if (hash === -1 && (view.kind === "inside" || view.kind === "usage" || view.kind === "cycle" || view.kind === "focus" || view.kind === "messages")) crumbs.push({ label: view.kind, key });
+    if (template === "type") crumbs.push({ label: `type ${subject.slice(hash + 1)}`, key });
+    else if (hash === -1) {
+      // A module's own picture: the module view is the module crumb itself; the others add their name.
+      if (view.kind !== "module") crumbs.push({ label: view.kind, key });
+    } else {
+      // A function's picture: the function (its call tree), then the picture unless it is the call tree.
+      crumbs.push({ label: subject.slice(hash + 1), key: `calls:${subject}` });
 
-    if (view.kind === "calls" || view.kind === "sequence" || view.kind === "path" || ofFn) crumbs.push({ label: subject.slice(hash + 1), key: `calls:${subject}` });
-
-    if (view.kind === "sequence" || view.kind === "path" || ofFn) crumbs.push({ label: view.kind, key });
-
-    if (view.kind === "type") crumbs.push({ label: `type ${subject.slice(hash + 1)}`, key });
-  } else if (view.kind === "apis" || view.kind === "postman") {
+      if (view.kind !== "calls") crumbs.push({ label: view.kind, key });
+    }
+  } else if (template === "under") {
     // The overview of the kind, then the family, the module or the collection file the picture is of.
     crumbs.push({ label: view.kind, key: view.kind }, { label: subject.slice(subject.lastIndexOf("/") + 1), key });
   } else crumbs.push({ label: view.kind, key });

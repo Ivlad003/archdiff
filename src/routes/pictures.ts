@@ -25,7 +25,7 @@ import { moduleChangeMarkdown } from "../diff.ts";
 import { commitMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView, viewList } from "../views.ts";
-import { codeRevision, type ViewKind } from "../view-keys.ts";
+import { codeRevision, tagOf } from "../view-keys.ts";
 import { projectMap } from "../project-map.ts";
 import { standsFor } from "../shape-keys.ts";
 import { failed, json, optionsOf, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
@@ -276,22 +276,19 @@ export async function getChanges(ctx: RouteContext, { response, request }: Route
   return;
 }
 
-/** The tag a view of the list gives, by its kind: `@layer:`, `@dir:`, `@module:`, `@flow:` (an entry point's data flow), `@type:`, `@logic:`. */
-const TAG_OF_KIND: Partial<Record<ViewKind, string>> = { layer: "layer", dir: "dir", module: "module", calls: "flow", type: "type", logic: "logic" };
-
 export async function getTags(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
   // What `@` can name in the chat: layers, directories, modules, functions, flows (entry points), types; filtered by `q`.
   const q = (url.searchParams.get("q") ?? "").toLowerCase();
   const analysis = await ctx.fresh();
   const tags: { tag: string; title: string }[] = [];
 
-  // A view of the list with a subject gives the tag of its kind: a layer, a directory, a module, an entry's flow, a type, a function's logic.
+  // A view of the list with a subject gives the tag of its kind (view-keys.ts): a layer, a directory, a module, an entry's flow, a type, a function's logic.
   for (const entry of viewList(analysis)) {
     const view = parseView(entry.key);
-    const prefix = view ? TAG_OF_KIND[view.kind] : undefined;
+    const tag = view ? tagOf(view.kind) : undefined;
 
-    if (!view || prefix === undefined || view.subject === null) continue;
-    tags.push({ tag: `@${prefix}:${view.subject}`, title: prefix === "flow" ? `${entry.title} — its data flow` : prefix === "logic" ? `${entry.title} — the flowchart and its rules` : entry.title });
+    if (!view || tag === undefined || view.subject === null) continue;
+    tags.push({ tag: `@${tag.prefix}:${view.subject}`, title: tag.says === undefined ? entry.title : `${entry.title} — ${tag.says}` });
   }
 
   for (const node of analysis.graph.nodes.values()) if (node.kind === "fn") tags.push({ tag: `@fn:${node.id}`, title: `${node.parent ? `${node.parent}.` : ""}${node.name} (${node.module})` });

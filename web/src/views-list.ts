@@ -1,10 +1,10 @@
 // The list of views on the left: every picture the repository has, in
-// groups (the overviews, the machines, the layers, the directories, the
-// entry points, the types, the modules), filtered as you type (`v`); and
-// the header's line with the repository's root and its numbers. The list
-// is of the code the page shows: the link's head (a branch, a commit) or
-// the working tree. `loadViews` asks the server again after every change
-// of the code and of the head.
+// the groups the table of kinds names (the overviews first, then the
+// subject views of each kind under its group), filtered as you type
+// (`v`); and the header's line with the repository's root and its
+// numbers. The list is of the code the page shows: the link's head (a
+// branch, a commit) or the working tree. `loadViews` asks the server
+// again after every change of the code and of the head.
 //
 // Entry points: `loadViews`, `viewEntries`, `renderViews`,
 // `focusViewSearch`, `listedHead`.
@@ -13,22 +13,11 @@ import { api, type ViewEntry } from "./api.ts";
 import { element } from "./dom.ts";
 import { codeHead, currentLink, setLink } from "./link.ts";
 import { togglePanel } from "./panel.ts";
+import { listGroup, listGroups, parseView } from "../../src/view-keys.ts";
 
 const list = element<HTMLUListElement>("views");
 const search = element<HTMLInputElement>("search");
 
-/** The groups of the list: the overviews by key (`cycles:fns` is a key of the cycles kind), the rest by kind. */
-const GROUPS: [label: string, overview: boolean, members: string[]][] = [
-  ["Overview", true, ["layers", "coverage", "classes", "matrix", "metrics", "cycles", "cycles:fns", "machines", "events", "messages", "tests", "hotspots", "packages", "timeline"]],
-  ["APIs (operations by family)", false, ["apis"]],
-  ["Postman collections (against the code)", false, ["postman"]],
-  ["State machines", false, ["machine"]],
-  ["Layers", false, ["layer"]],
-  ["Directories", false, ["dir"]],
-  ["Entry points (call trees)", false, ["calls"]],
-  ["Types (where they flow)", false, ["type"]],
-  ["Modules", false, ["module"]],
-];
 /** How many views of a group show unfiltered, and filtered: a long group (every module) shows its first; the filter finds the rest. */
 const SHOWN = { all: 60, filtered: 400 };
 
@@ -49,9 +38,18 @@ export function renderViews(): void {
   list.replaceChildren();
   const needle = search.value.trim().toLowerCase();
   const cap = needle === "" ? SHOWN.all : SHOWN.filtered;
+  // Each view under the group its kind names (view-keys.ts): the overviews, then the groups in the table's order.
+  const grouped = new Map<string, ViewEntry[]>(listGroups().map((label) => [label, []]));
 
-  for (const [label, overview, kinds] of GROUPS) {
-    const members = views.filter((view) => (overview ? kinds.includes(view.key) : kinds.includes(view.kind)) && (needle === "" || view.title.toLowerCase().includes(needle) || view.key.toLowerCase().includes(needle)));
+  for (const view of views) {
+    const parsed = parseView(view.key);
+    const group = parsed ? listGroup(parsed) : null;
+
+    if (group !== null) grouped.get(group)!.push(view);
+  }
+
+  for (const [label, all] of grouped) {
+    const members = all.filter((view) => needle === "" || view.title.toLowerCase().includes(needle) || view.key.toLowerCase().includes(needle));
 
     if (members.length === 0) continue;
     const head = document.createElement("li");

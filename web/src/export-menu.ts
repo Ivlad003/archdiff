@@ -9,19 +9,16 @@ import { api } from "./api.ts";
 import { element, h } from "./dom.ts";
 import { refsOf, type Link } from "./link.ts";
 import type { MermaidStyle } from "../../src/options.ts";
-import { parseView } from "../../src/view-keys.ts";
+import { mermaidTypesOf, parseView, type ViewKind } from "../../src/view-keys.ts";
 
 const FORMATS = ["mermaid", "drawio", "excalidraw", "archimate", "json"] as const;
 
-/** The Mermaid types that read better than the default for a kind of view. */
-function mermaidStylesOf(kind: string | undefined): [MermaidStyle, string][] {
-  if (kind === "hotspots") return [["quadrant", "mermaid: quadrant chart"]];
+/** How the menu names a Mermaid type that reads better than the default for some kinds of view (the table of kinds says which). */
+const MERMAID_LABELS: Partial<Record<MermaidStyle, string>> = { quadrant: "mermaid: quadrant chart", c4: "mermaid: C4 context", pie: "mermaid: pie of modules", mindmap: "mermaid: mindmap" };
 
-  if (kind === "layers" || kind === "packages") return [["c4", "mermaid: C4 context"], ["pie", "mermaid: pie of modules"]];
-
-  if (kind === "dir" || kind === "layer") return [["mindmap", "mermaid: mindmap"]];
-
-  return [];
+/** The Mermaid types the kind offers besides the default, each with its label. */
+function mermaidStylesOf(kind: ViewKind | undefined): [MermaidStyle, string][] {
+  return kind === undefined ? [] : mermaidTypesOf(kind).flatMap((style) => (MERMAID_LABELS[style] === undefined ? [] : [[style, MERMAID_LABELS[style]] as [MermaidStyle, string]]));
 }
 
 export function renderExports(state: Link): void {

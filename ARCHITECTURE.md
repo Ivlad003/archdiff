@@ -60,7 +60,7 @@ flowchart LR
     n_src_intent_ts["src/intent.ts<br>the contract: parse and write ARCHITECTURE.md, check the code against it"]
     n_src_cache_ts["src/cache.ts<br>the fact cache, keyed by content hash and extractor version"]
     n_src_options_ts["src/options.ts<br>the options of a picture, described once for the CLI, the API and the page"]
-    n_src_view_keys_ts["src/view-keys.ts<br>the kinds of view and their keys, read and written by one codec for the CLI, the API and the page"]
+    n_src_view_keys_ts["src/view-keys.ts<br>the table of the kinds of view — key, question, where each shows — and the codec of their keys for the CLI, the API and the page"]
     n_src_shape_keys_ts["src/shape-keys.ts<br>what a shape stands for and the view it opens, for the exports and the page"]
     n_src_run_hooks_ts["src/run-hooks.ts<br>the child process of a run: module hooks that trace and mock"]
     n_src_checks_ts["src/checks.ts<br>the contract check and the commands run after an agent"]

@@ -19,6 +19,7 @@
 // `MERMAID_STYLES`, `MERMAID_ONLY_FOR`, `LANE_MODES`.
 
 import { ok, wrong, type Result } from "./result.ts";
+import type { ViewKind } from "./view-keys.ts";
 
 /** The overlays a picture can carry, in the order `--overlay` lists them. */
 export const OVERLAYS = ["tests", "storages", "heat", "instability"] as const;
@@ -31,7 +32,7 @@ export const MERMAID_STYLES = ["auto", "flowchart", "c4", "quadrant", "pie", "gi
 export type MermaidStyle = (typeof MERMAID_STYLES)[number];
 
 /** The Mermaid types that draw one kind of view alone (a machine, the timeline): elsewhere a picture is written as its own type, with a comment saying why. */
-export const MERMAID_ONLY_FOR: Partial<Record<MermaidStyle, { kinds: readonly string[]; what: string }>> = {
+export const MERMAID_ONLY_FOR: Partial<Record<MermaidStyle, { kinds: readonly ViewKind[]; what: string }>> = {
   state: { kinds: ["machine"], what: "a machine" },
   gitgraph: { kinds: ["timeline", "branches"], what: "the commits of the timeline or of the branches" },
   quadrant: { kinds: ["hotspots", "metrics"], what: "the hotspots or the metrics" },

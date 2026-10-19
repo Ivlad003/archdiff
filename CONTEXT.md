@@ -59,7 +59,7 @@ _Avoid_: utility, common module
 ## Pictures
 
 **View**:
-A question about the code, named by a kind and a subject (`module:src/x.ts`); the same view always gives the same picture of the same code.
+A question about the code, named by a kind and a subject (`module:src/x.ts`); the same view always gives the same picture of the same code. A kind is registered once, in the table of kinds (`src/view-keys.ts`), from which the page's list groups and overview picker, the chat's tags, the breadcrumbs, the export menu and the CLI's help derive.
 _Avoid_: diagram (for the question), page, screen
 
 **Picture**:
