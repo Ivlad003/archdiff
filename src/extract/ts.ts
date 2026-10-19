@@ -2278,64 +2278,80 @@ function newClass(value: Node | null): string | null {
 type BindingSite = { kind: "local"; node: Node } | { kind: "parameter"; node: Node; fn: Node; index: number } | { kind: "other" };
 
 /**
- * The nearest binding of `name` between `from` and `stop`, in the scopes
- * `bindingOf` walks: a declarator or a parameter; `other` for a loop or
- * `catch` variable, a nested function or class name. Null when nothing binds it.
+ * The nearest binding of `name` between `from` and `stop`, the module's own
+ * declarations among the scopes: a declarator or a parameter; `other` for a
+ * loop or `catch` variable, a nested function or class name. Null when
+ * nothing binds it.
  */
 function declarationOf(from: Node, name: string, stop: Node): BindingSite | null {
   // Walk out from `from` to `stop`, checking at each level the scope that level opens. The nearest binding wins.
   for (let at: Node | null = from; at; at = parentOf(at)) {
-    // A function: its parameters (`x =>` has a single one), then its own name, which a named
-    // function expression binds inside itself.
-    if (FUNCTION_NODES.has(at.type)) {
-      const single = at.childForFieldName("parameter");
+    const site = boundAt(at, name, stop, true);
 
-      if (single?.type === "identifier" && single.text === name) return { kind: "parameter", node: single, fn: at, index: 0 };
-      const params = at.childForFieldName("parameters")?.namedChildren.filter((p) => p.type !== "comment") ?? [];
-
-      for (const [index, param] of params.entries()) if (patternNames(param).includes(name)) return { kind: "parameter", node: param, fn: at, index };
-
-      if (at.id !== stop.id && at.type !== "arrow_function" && at.childForFieldName("name")?.text === name) return { kind: "other" };
-    }
-
-    // A block or the module: `const`/`let`/`var` declarators and other declarations among its statements.
-    // Position is not checked: a declaration anywhere in the block binds the name in all of it, as JS scoping does.
-    if (BLOCK_NODES.has(at.type) || at.type === "program") {
-      for (const stmt of blockStatements(at)) {
-        const target = stmt.type === "export_statement" ? stmt.childForFieldName("declaration") : stmt;
-
-        if (!target) continue;
-
-        if (target.type === "lexical_declaration" || target.type === "variable_declaration") {
-          for (const d of target.namedChildren) {
-            const pattern = d.type === "variable_declarator" ? d.childForFieldName("name") : null;
-
-            if (pattern && patternNames(pattern).includes(name)) return { kind: "local", node: d };
-          }
-        } else if (declaredNames(target).includes(name)) return { kind: "other" };
-      }
-    }
-
-    // Loop and `catch` variables bind the name, but carry no value archdiff reads.
-    if (at.type === "for_in_statement") {
-      const left = at.childForFieldName("left");
-
-      if (left && patternNames(left).includes(name)) return { kind: "other" };
-    }
-
-    if (at.type === "for_statement") {
-      const init = at.childForFieldName("initializer");
-
-      if (init && declaredNames(init).includes(name)) return { kind: "other" };
-    }
-
-    if (at.type === "catch_clause") {
-      const param = at.childForFieldName("parameter");
-
-      if (param && patternNames(param).includes(name)) return { kind: "other" };
-    }
+    if (site) return site;
 
     if (at.id === stop.id) break;
+  }
+
+  return null;
+}
+
+/**
+ * What the scope `at` opens binds `name` as — the one walk of the scopes,
+ * which `declarationOf` and `bindingOf` share: a function's parameter
+ * (`x =>` has a single one) or its own name, which a named function
+ * expression binds inside itself; a declarator or another declaration
+ * among the statements of a block (position is not checked: a declaration
+ * anywhere in the block binds the name in all of it, as JS scoping does);
+ * a loop or `catch` variable, which carries no value archdiff reads. Null
+ * when it binds nothing there. The module's own statements count only when
+ * `module` says so: for the head of a call they do not, since a name bound
+ * there is the module's symbol, not a local.
+ */
+function boundAt(at: Node, name: string, stop: Node, module: boolean): BindingSite | null {
+  if (FUNCTION_NODES.has(at.type)) {
+    const single = at.childForFieldName("parameter");
+
+    if (single?.type === "identifier" && single.text === name) return { kind: "parameter", node: single, fn: at, index: 0 };
+    const params = at.childForFieldName("parameters")?.namedChildren.filter((p) => p.type !== "comment") ?? [];
+
+    for (const [index, param] of params.entries()) if (patternNames(param).includes(name)) return { kind: "parameter", node: param, fn: at, index };
+
+    if (at.id !== stop.id && at.type !== "arrow_function" && at.childForFieldName("name")?.text === name) return { kind: "other" };
+  }
+
+  if (BLOCK_NODES.has(at.type) || (module && at.type === "program")) {
+    for (const stmt of blockStatements(at)) {
+      const target = stmt.type === "export_statement" ? stmt.childForFieldName("declaration") : stmt;
+
+      if (!target) continue;
+
+      if (target.type === "lexical_declaration" || target.type === "variable_declaration") {
+        for (const d of target.namedChildren) {
+          const pattern = d.type === "variable_declarator" ? d.childForFieldName("name") : null;
+
+          if (pattern && patternNames(pattern).includes(name)) return { kind: "local", node: d };
+        }
+      } else if (declaredNames(target).includes(name)) return { kind: "other" };
+    }
+  }
+
+  if (at.type === "for_in_statement") {
+    const left = at.childForFieldName("left");
+
+    if (left && patternNames(left).includes(name)) return { kind: "other" };
+  }
+
+  if (at.type === "for_statement") {
+    const init = at.childForFieldName("initializer");
+
+    if (init && declaredNames(init).includes(name)) return { kind: "other" };
+  }
+
+  if (at.type === "catch_clause") {
+    const param = at.childForFieldName("parameter");
+
+    if (param && patternNames(param).includes(name)) return { kind: "other" };
   }
 
   return null;
@@ -2600,52 +2616,30 @@ const BLOCK_NODES = new Set(["statement_block", "switch_body", "class_body"]);
 
 /**
  * Where the head identifier of a call is bound between the call and `stop`
- * (the declaration being extracted): a parameter, a local, a destructured
- * name, a nested function or class, a loop or catch variable. Such a call
- * does not name the module-level symbol of the same name.
+ * (the declaration being extracted): a parameter, or a local — a
+ * declarator, a destructured name, a nested function or class, a loop or
+ * catch variable. Such a call does not name the module-level symbol of the
+ * same name, so the module's own declarations are not read (`boundAt`).
  */
 function bindingOf(call: Node, name: string, stop: Node): "parameter" | "local" | null {
-  // Walk out from the call to `stop`; the first scope that binds the name decides.
+  // Walk out from the call to `stop`; the first scope that binds the name decides. At `stop` itself its body's
+  // locals count too: a call outside the body (a parameter's default) is walked to the declaration, not through the body.
   for (let at: Node | null = call; at; at = parentOf(at)) {
-    if (FUNCTION_NODES.has(at.type)) {
-      const params = at.childForFieldName("parameters") ?? at.childForFieldName("parameter");
+    const site = boundAt(at, name, stop, false) ?? (at.id === stop.id ? stopBodyBinding(at, name) : null);
 
-      if (params && patternNames(params).includes(name)) return "parameter";
-
-      // A named function expression sees its own name.
-      if (at.id !== stop.id && at.type !== "arrow_function" && at.childForFieldName("name")?.text === name) return "local";
-    }
-
-    // A block, or the body of the declaration itself (its locals shadow module names too).
-    if (BLOCK_NODES.has(at.type) || (at.id === stop.id && at.childForFieldName("body")?.type === "statement_block")) {
-      const block = BLOCK_NODES.has(at.type) ? at : at.childForFieldName("body");
-
-      if (block && blockDeclares(block, name)) return "local";
-    }
-
-    // Loop and `catch` variables are locals of their statement.
-    if (at.type === "for_in_statement") {
-      const left = at.childForFieldName("left");
-
-      if (left && patternNames(left).includes(name)) return "local";
-    }
-
-    if (at.type === "for_statement") {
-      const init = at.childForFieldName("initializer");
-
-      if (init && declaredNames(init).includes(name)) return "local";
-    }
-
-    if (at.type === "catch_clause") {
-      const param = at.childForFieldName("parameter");
-
-      if (param && patternNames(param).includes(name)) return "local";
-    }
+    if (site) return site.kind === "parameter" ? "parameter" : "local";
 
     if (at.id === stop.id) break;
   }
 
   return null;
+}
+
+/** The body of the declaration being extracted declares `name`: a local of it, for a call the walk reaches from outside the body. */
+function stopBodyBinding(stop: Node, name: string): BindingSite | null {
+  const body = stop.childForFieldName("body");
+
+  return body?.type === "statement_block" && blockDeclares(body, name) ? { kind: "other" } : null;
 }
 
 /** The statements of a block. A `switch` is one block: a `const` or `function` of one case is in scope in every case. */
