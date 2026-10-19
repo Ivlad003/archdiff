@@ -12,7 +12,7 @@ An analysis of archdiff 0.1 on real repositories (keylang, 480 files; storefront
 
 **Imports through `paths` of a tsconfig that `extends` a package** (`@tsconfig/node20`) or sits in a sub-package of a monorepo are read as packages, not files. Only the root `tsconfig.json` and one level of relative `extends` are read. *State:* fixed since — the nearest `tsconfig.json` or `jsconfig.json` governs each file, `extends` is followed into node_modules, `paths`, `baseUrl` and `rootDirs` are read, and an alias or path of an asset (`@/locales/en.json`, `/images/x.svg` of `public/`) is an asset, not an unresolved import.
 
-**Files tree-sitter cannot parse** (97 test files of the storefront, over `importOriginal<typeof import('…')>()`) keep the declarations recovered around the error and are listed under syntax errors. *State:* reported, not hidden.
+**Files tree-sitter cannot parse** (97 test files of the storefront, over `importOriginal<typeof import('…')>()`) keep the declarations recovered around the error and are listed under syntax errors. *State:* fixed since — `typeof import(…)` is masked before parsing and a bare `&` in JSX text is blanked and the file parsed again, so the storefront has no syntax error left; a real one is reported, not hidden.
 
 **Dot-directories are skipped** (`.github`, `.storybook`, `.agents`): a project that keeps sources there sees them missing. *State:* documented; `layers` globs cannot bring them back yet.
 

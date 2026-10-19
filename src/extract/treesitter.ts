@@ -203,6 +203,28 @@ function firstAtOrAfter(sorted: readonly number[], value: number): number {
   return low;
 }
 
+/** The syntax errors of a tree in document order: its ERROR nodes and the tokens the grammar had to assume (`isMissing`). */
+export function syntaxErrors(root: Node): Node[] {
+  const found: Node[] = [];
+  // A stack, not recursion: a deep tree must not overflow the call stack. Only a subtree with an error is entered.
+  const stack: Node[] = [root];
+
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+
+    if (node.type === "ERROR" || node.isMissing) {
+      found.push(node);
+      continue;
+    }
+
+    const children = node.children;
+
+    for (let i = children.length - 1; i >= 0; i--) if (children[i]!.hasError) stack.push(children[i]!);
+  }
+
+  return found;
+}
+
 /** First syntax-error line, or the start of the tree when the grammar only sets `hasError`. */
 export function errorLine(node: Node): number {
   // A loop down the first erroneous child, not recursion: a deep tree must not overflow the stack.

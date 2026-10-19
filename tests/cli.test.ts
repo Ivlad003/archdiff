@@ -1477,6 +1477,21 @@ test("an import type expression does not make a file a syntax error; a dynamic i
     assert.equal(inside.nodes.find((node) => node.id === "src/page.ts#load")?.ref?.line, 5);
   }));
 
+test("a bare & in JSX text is no syntax error: the file is read whole; a real error still marks its file", () =>
+  withTempDir("archdiff-jsx-amp-", (dir) => {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    // An emoji before the ampersands: the offsets blanked are UTF-16 ones, as the source is indexed.
+    writeFileSync(join(dir, "src/features.tsx"), 'import { count } from "./count";\nexport const smile = "😀";\nexport function Features() {\n  return <section><h3>Cart & Checkout</h3><p>{count()} items &more</p></section>;\n}\nexport function Footer() {\n  return <><b>a</b> & <i>b</i></>;\n}\n');
+    writeFileSync(join(dir, "src/count.ts"), "export function count(): number { return 1; }\n");
+    writeFileSync(join(dir, "src/broken.ts"), "export function a(): number {\n  const x = ;\n  return 1;\n}\n");
+    const report = JSON.parse(archdiff(["coverage", dir, "--json"]).stdout) as { parseErrors: string[] };
+    assert.deepEqual(report.parseErrors, ["src/broken.ts"]);
+    const calls = archdiff(["diagram", "calls:src/features.tsx#Features", dir, "--format", "mermaid"]).stdout;
+    assert.ok(calls.includes("src_features_tsx_Features ==> src_count_ts_count"), calls);
+    const inside = JSON.parse(archdiff(["diagram", "inside:src/features.tsx", dir, "--format", "json"]).stdout) as { nodes: { id: string }[] };
+    assert.deepEqual(inside.nodes.map((node) => node.id).filter((id) => id.startsWith("src/features.tsx#")).sort(), ["src/features.tsx#Features", "src/features.tsx#Footer"]);
+  }));
+
 test("metrics: coupling and cohesion by module and layer, as Markdown and JSON; the pictures of cycles say where to cut", () => {
   const { status, stdout } = archdiff(["metrics", fixture]);
   assert.equal(status, 0, stdout);

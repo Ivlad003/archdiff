@@ -117,6 +117,7 @@ What the Salesforce storefront (2348 files) taught the analysis.
 
 - An alias of a tsconfig `paths` that names an asset — `@/locales/en-US/translations.json`, `@/theme/index.css?url` — was an unresolved import, 156 of the storefront's 296; so was an absolute `/images/x.svg` that `public/` holds (Vite, Next and CRA serve it at `/`), and a relative import of a source archdiff leaves out (`.storybook/test-wrapper`, a hidden directory). They are assets now, like a relative `./data.json`: nothing to draw, nothing missing.
 - A relative import under tsconfig `rootDirs` is looked for under the other ones too: React Router's `./+types/home` is `.react-router/types/src/routes/+types/home.ts` once `react-router typegen` ran; before it ran, the reason names that twin path.
+- A bare `&` in JSX text (`<h3>Cart & Checkout</h3>`) made its file a syntax error, the facts opaque: tree-sitter wants `&amp;`, React does not. Such an `&` is blanked in place and the file parsed again, as `export type *` already was.
 
 ## 0.5.0 — 2026-10-18
 

@@ -13,7 +13,7 @@ import { builtinModules } from "node:module";
 import { dottedForm, passable, type Callee, type CallFact, type DeclFact, type CodeDecorator, type DecoratorArg, type EntryFact, type WebCallFact, type WebFacts, type FileFacts, type HookFact, type ImportBinding, type ImportFact, type PassFact, type ResultTypeFact, type TypeFieldFact, type TypeRefFact, type ValueOfFact, type ValueRefFact } from "./facts.ts";
 import { addMember } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
-import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Query, type Tree } from "./treesitter.ts";
+import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, syntaxErrors, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Query, type Tree } from "./treesitter.ts";
 import { collectTsMachines, collectTsStates, countBranches, guardsOf, TS_CONTROL } from "./control.ts";
 
 // Every call and `new`, whatever its callee: each becomes an edge or a gap, never nothing.
@@ -79,27 +79,57 @@ export function extractTs(path: string, src: string): Promise<FileFacts> {
  * `export type * from` and `export type * as NS from` (TypeScript 5.0) are
  * syntax errors for the bundled grammar, while the same statement without
  * `type` is `export * from`: such a `type` is blanked with spaces — the same
- * length, so every position stays — and the source parsed again.
+ * length, so every position stays — and the source parsed again. So is a
+ * bare `&` in JSX text (`<h3>Cart & Checkout</h3>`), which the compiler
+ * reads as text and the grammar as an error it recovers from badly.
  * `typeStars`: the start offset of each such statement → its text as written.
  */
 export async function withTsTree<T>(path: string, src: string, use: (tree: Tree, language: Language, typeStars: ReadonlyMap<number, string>) => T): Promise<T> {
   const g = grammarFor(path);
+  const typeStars = new Map<number, string>();
+  let source = src;
 
-  // First parse. Most files have no `export type *`, so the tree is used as it is.
-  const first = await withTree(g, src, (tree, language): { done: T } | { keywords: TypeStar[] } => {
-    const keywords = typeStarKeywords(tree.rootNode);
+  // Most files have no `export type *` and no error, so the first tree is used as it is. Else the keywords and the
+  // ampersands are blanked and the source parsed again — up to three times, as the recovery around one `&` hides the
+  // next; the fourth tree stands as it is.
+  for (let round = 0; ; round++) {
+    const text = source;
+    const result = await withTree(g, text, (tree, language): { done: T } | { keywords: TypeStar[]; ampersands: number[] } => {
+      const again = round < 3 && tree.rootNode.hasError;
+      const keywords = again ? typeStarKeywords(tree.rootNode) : [];
+      const ampersands = again ? bareAmpersands(tree.rootNode, text) : [];
 
-    return keywords.length === 0 ? { done: use(tree, language, new Map()) } : { keywords };
-  });
+      return keywords.length === 0 && ampersands.length === 0 ? { done: use(tree, language, typeStars) } : { keywords, ampersands };
+    });
 
-  if ("done" in first) return first.done;
-  // Blank each `type` keyword in place (same length, so offsets, lines and columns stay) and parse again.
-  let blanked = src;
+    if ("done" in result) return result.done;
 
-  for (const k of first.keywords) blanked = `${blanked.slice(0, k.start)}${" ".repeat(k.end - k.start)}${blanked.slice(k.end)}`;
-  const typeStars = new Map(first.keywords.map((k) => [k.statement, k.text]));
+    for (const k of result.keywords) {
+      source = `${source.slice(0, k.start)}${" ".repeat(k.end - k.start)}${source.slice(k.end)}`;
+      typeStars.set(k.statement, k.text);
+    }
 
-  return withTree(g, blanked, (tree, language) => use(tree, language, typeStars));
+    for (const at of result.ampersands) source = `${source.slice(0, at)} ${source.slice(at + 1)}`;
+  }
+}
+
+/**
+ * The offsets of every bare `&` inside a syntax error. JSX text may hold one (`Cart & Checkout`) for the compiler but not
+ * for the grammar, which then recovers badly around it; `&&` and `&=` are operators and stay. Blanking one that is no
+ * JSX text (an operator in a region a real error mangled) leaves that error in place: the file stays a syntax error.
+ */
+function bareAmpersands(root: Node, source: string): number[] {
+  const found: number[] = [];
+
+  for (const error of syntaxErrors(root)) {
+    if (error.type !== "ERROR") continue;
+
+    for (let at = error.startIndex; at < error.endIndex; at++) {
+      if (source[at] === "&" && source[at - 1] !== "&" && source[at + 1] !== "&" && source[at + 1] !== "=") found.push(at);
+    }
+  }
+
+  return found;
 }
 
 /** The `type` of an `export type * from` statement the grammar could not read: offsets in the source (UTF-16 code units). */

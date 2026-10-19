@@ -20,6 +20,11 @@ The system SHALL parse every TypeScript, JavaScript, Python, Rust and PHP source
 - **WHEN** a source file is over the size limit
 - **THEN** it is listed under "files not analysed" with the reason, and an import of it still resolves to a module
 
+#### Scenario: A bare ampersand in JSX text
+
+- **WHEN** a `.tsx` or `.jsx` file holds `<h3>Cart & Checkout</h3>`, which the compiler accepts and the tree-sitter grammar does not
+- **THEN** the file is no syntax error: its declarations and calls are read whole, and it is not listed under syntax errors
+
 ### Requirement: Imports resolve per language
 
 The system SHALL resolve relative and aliased imports to files (TypeScript `paths`, `baseUrl` and `rootDirs` from the nearest `tsconfig.json` or `jsconfig.json` with its `extends` merged as the compiler merges them, the pattern with the longest prefix taken; `.js` to `.ts`, index files; a package of a monorepo imported by its name to its source; Python packages, from the repository's root, `src/` and a project directory with a pyproject.toml, setup.py, setup.cfg or manage.py; Rust modules and facade re-exports; PHP namespaces) and name packages and built-ins as externals. An import that resolves to nothing SHALL be listed as unresolved with its reason, never guessed: an alias whose file is missing is no package. A file of the repository that is no source (JSON, a stylesheet) SHALL be neither a module nor unresolved, nor an optional specifier that names no source. `import { type A }` SHALL be of types only unless the tsconfig sets `verbatimModuleSyntax`, and so SHALL a Python import under `if TYPE_CHECKING:`; a line of types only is drawn dashed.
