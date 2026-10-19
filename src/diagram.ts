@@ -141,8 +141,8 @@ export interface Diagram {
   lanes?: "rows" | "columns";
   /** Some shapes sit where the user put them, not in the layout's columns: the lines are routed on a grid around every shape (route-free.ts). */
   freeform?: true;
-  /** A sequence view: the Mermaid export is a sequenceDiagram and the Markdown lists the messages in order. */
-  sequence?: { participants: string[]; messages: { from: string; to: string; label: string; line: number; times?: number }[]; fragments?: SequenceFragment[] };
+  /** A sequence view: the Mermaid export is a sequenceDiagram and the Markdown lists the messages in order; `kind` messages: typed messages between the parts rather than calls (no `()` after a label). */
+  sequence?: { kind?: "messages"; participants: string[]; messages: { from: string; to: string; label: string; line: number; times?: number }[]; fragments?: SequenceFragment[] };
   /** A machine view: the states and transitions behind the picture (Mermaid: a stateDiagram-v2; Markdown: a table). */
   machine?: MachineData;
   /** A metrics view: the numbers behind the table, for the Markdown and the quadrant chart. */

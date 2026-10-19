@@ -18,7 +18,7 @@
 // `timelineDiagram`, `branchesDiagram` (views.ts's `viewOf` dispatches to them).
 
 import type { Analysis } from "./analyze.ts";
-import type { DeclFact } from "./extract/facts.ts";
+import type { CallFact, DeclFact, FileFacts } from "./extract/facts.ts";
 import { SIZE, type Diagram, type Line, type PictureContent, type Shape } from "./diagram.ts";
 import type { HistoryRow } from "./diff.ts";
 import type { BranchGraph, Commit } from "./git.ts";
@@ -326,6 +326,67 @@ const EMITTERS = new Set(["emit", "emitAsync", "publish", "dispatch", "trigger",
 /** Members that send a message whose `type` names the event (`port.postMessage({ type: 'ping' })`, `chrome.tabs.sendMessage`, `send`). */
 const MESSAGE_SENDS = new Set(["postMessage", "sendMessage", "send"]);
 
+/** A message sent with a `type`: who sends it (a function, or the module for its top level), from which module, by which member, where. */
+export interface MessageSend {
+  owner: string;
+  module: string;
+  type: string;
+  by: string;
+  line: number;
+}
+
+/** Every message sent with a `type` (`port.postMessage({ type: 'ping' })`, `chrome.tabs.sendMessage(tabId, { type })`, `send({ type })`), in the order of the files and their lines. */
+export function messageSends(facts: ReadonlyMap<string, FileFacts>): MessageSend[] {
+  const sends: MessageSend[] = [];
+
+  for (const file of facts.values()) {
+    const record = (owner: string, call: CallFact): void => {
+      const member = call.callee.slice(call.callee.lastIndexOf(".") + 1);
+
+      if (MESSAGE_SENDS.has(member) && call.nameArg?.literal) sends.push({ owner, module: file.path, type: call.nameArg.literal, by: member, line: call.line });
+    };
+
+    const walk = (decl: DeclFact, parent: string | null): void => {
+      const owner = `${file.path}#${parent ? `${parent}.` : ""}${decl.name}`;
+
+      for (const call of decl.calls) record(owner, call);
+
+      for (const child of decl.members) walk(child, parent ? `${parent}.${decl.name}` : decl.name);
+    };
+
+    for (const decl of file.decls) walk(decl, null);
+
+    for (const call of file.moduleCalls) record(file.path, call);
+  }
+
+  return sends;
+}
+
+/**
+ * Who handles each of the `types` sent: a function that compares or switches on the `type` of one of its parameters
+ * with that value (`msg.type === 'pong'`, `case 'ping':` in `handleMessage(msg)`), in any module; at a module's top
+ * level the message is a listener closure's parameter, so the module itself. A switch on the `type` of a local (an
+ * item being exported) is no handler. By type, the handlers' IDs in file order, each once.
+ */
+export function messageHandlers(facts: ReadonlyMap<string, FileFacts>, types: ReadonlySet<string>): Map<string, string[]> {
+  const handlers = new Map<string, string[]>();
+
+  for (const file of facts.values()) {
+    for (const state of file.states ?? []) {
+      if (state.kind === "assign" || !/(^|\.)type$/.test(state.subject) || !types.has(state.value)) continue;
+      const object = state.owner && "name" in state.owner ? state.owner.name : null;
+
+      if (state.within && object !== null && !parameterNames(file, state.within).has(object)) continue;
+      const handler = state.within ? `${file.path}#${state.within}` : file.path;
+      const known = handlers.get(state.value) ?? [];
+
+      if (!known.includes(handler)) handlers.set(state.value, [...known, handler]);
+    }
+  }
+
+  return handlers;
+}
+
 const LISTENERS = new Set(["on", "once", "addListener", "addEventListener", "subscribe", "listen"]);
 
 /**
@@ -411,23 +472,14 @@ export function eventsView(analysis: Analysis): PictureContent {
     for (const call of file.moduleCalls) record(file.path, call);
   }
 
-  // A message sent with a `type` is handled wherever a function compares or switches on the `type` of one of its
-  // parameters with that value (the page's `msg.type === 'pong'`, the host's `case 'ping':` in `handleMessage(msg)`),
-  // in any module; a switch on the `type` of a local (an item being exported) is not a handler, and a value no
-  // message is sent with is no event. At a module's top level the message is a listener closure's parameter.
-  const sent = new Set(edges.filter((edge) => edge.kind === "call").map((edge) => edge.to));
+  // A message sent with a `type` is handled wherever a function switches on the `type` of a parameter with that
+  // value (`messageHandlers`); a value no message is sent with is no event.
+  const sent = new Set(edges.filter((edge) => edge.kind === "call" && edge.to.startsWith("event:")).map((edge) => edge.to.slice("event:".length)));
 
-  for (const file of facts.values()) {
-    for (const state of file.states ?? []) {
-      if (state.kind === "assign" || !/(^|\.)type$/.test(state.subject) || !sent.has(`event:${state.value}`)) continue;
-
-      // The object whose `type` is read (`msg` of `msg.type`): a parameter of the function, or the picture says nothing.
-      const object = state.owner && "name" in state.owner ? state.owner.name : null;
-
-      if (state.within && object !== null && !parameterNames(file, state.within).has(object)) continue;
-      const receiver = state.within ? `${file.path}#${state.within}` : file.path;
+  for (const [type, receivers] of messageHandlers(facts, sent)) {
+    for (const receiver of receivers) {
       ownerNode(receiver);
-      add({ from: `event:${state.value}`, to: receiver, kind: "ref", label: "handles" });
+      add({ from: `event:${type}`, to: receiver, kind: "ref", label: "handles" });
     }
   }
 

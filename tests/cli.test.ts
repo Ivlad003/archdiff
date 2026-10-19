@@ -1436,6 +1436,21 @@ test("a message sent with a type is an event: from the sender to every function 
   assert.deepEqual(json.nodes.filter((node) => node.id.startsWith("event:")).map((node) => node.id).sort(), ["event:highlight", "event:ping", "event:pong"]);
 });
 
+test("messages draws what the parts say to each other as a sequence: a typed message from its sender's module to each handler's", () => {
+  const extension = join(root, "tests/fixtures/extension");
+  assert.ok(archdiff(["views", extension]).stdout.includes("messages\tMessages: who sends what to whom, by type"));
+  const mermaid = archdiff(["diagram", "messages", extension, "--format", "mermaid"]).stdout;
+  assert.ok(mermaid.includes("sequenceDiagram") && mermaid.includes("participant P0 as background.js") && mermaid.includes("participant P1 as panel.js") && mermaid.includes("participant P2 as content.js"), mermaid);
+  // One arrow per sender, handler and type, in the order the senders' code sends them; a type is no call, so no `()`.
+  assert.ok(mermaid.includes("P0->>P1: 1. pong") && mermaid.includes("P0->>P2: 3. highlight") && mermaid.includes("P1->>P0: 4. ping") && !mermaid.includes("pong()"), mermaid);
+  const md = archdiff(["diagram", "messages", extension]).stdout;
+  assert.ok(md.includes("# Messages: 4 messages between 3 parts") && md.includes("4. `panel.js` → `background.js`: **ping** — panel.js:4"), md);
+  // A module as the scope keeps the messages it sends or handles.
+  const own = archdiff(["diagram", "messages:panel.js", extension, "--format", "mermaid"]).stdout;
+  assert.ok(own.includes("P1->>P0: 1. pong") && own.includes("P0->>P1: 2. ping") && !own.includes("highlight"), own);
+  assert.equal(archdiff(["diagram", "messages:nope.js", extension]).status, 2);
+});
+
 test("a file named by a URL — a worker, a child process, a registered hook — is a dashed `loads` line, not an import", () =>
   withTempDir("archdiff-loads-", (dir) => {
     mkdirSync(join(dir, "src"), { recursive: true });

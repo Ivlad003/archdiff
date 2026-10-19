@@ -20,7 +20,7 @@ import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
 import { isBlindSpot, moduleOf, nodeId, type Graph, type Declaration } from "./graph.ts";
-import { classesView, usageView, eventsView, hotspotsView, matrixView, packagesView, pathView, testsView, typeView } from "./views-more.ts";
+import { classesView, usageView, eventsView, hotspotsView, matrixView, messageHandlers, messageSends, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
@@ -177,6 +177,7 @@ export function viewList(analysis: Analysis): ViewEntry[] {
 
   for (const fn of logicList(analysis)) list.push({ key: `logic:${fn.id}`, title: `${fn.parent ? `${fn.parent}.` : ""}${fn.name} (${fn.module}) — ${fn.branches} ${fn.branches === 1 ? "branch" : "branches"}`, kind: "logic", layer: graph.modules.get(fn.module)!.layer });
   list.push({ key: "events", title: "Events: emitters and listeners", kind: "events" });
+  list.push({ key: "messages", title: "Messages: who sends what to whom, by type", kind: "messages" });
   list.push({ key: "tests", title: "Tests: which modules the tests cover", kind: "tests" });
   list.push({ key: "hotspots", title: "Hotspots: size and calls in", kind: "hotspots" });
 
@@ -638,7 +639,7 @@ function messageY(index: number): number {
  * a dashed frame per fragment across every lifeline, a numbered message per row (a call within one module loops out
  * to the right and back).
  */
-function drawSequence(participants: readonly string[], messages: readonly SequenceMessage[], fragments: readonly SequenceFragment[]): { nodes: Shape[]; edges: Line[] } {
+function drawSequence(participants: readonly string[], messages: readonly SequenceMessage[], fragments: readonly SequenceFragment[], calls = true): { nodes: Shape[]; edges: Line[] } {
   const column = new Map(participants.map((module, i) => [module, SEQ_TOP + i * SEQ_COLUMN]));
   const centre = (module: string): number => column.get(module)! + SIZE.participant.w / 2;
   const bottom = messageY(messages.length);
@@ -664,10 +665,59 @@ function drawSequence(participants: readonly string[], messages: readonly Sequen
     const fromX = centre(message.from);
     const toX = centre(message.to);
     const route = message.from === message.to ? [{ x: fromX, y: y - SELF_CALL.rise }, { x: fromX + SELF_CALL.out, y: y - SELF_CALL.rise }, { x: fromX + SELF_CALL.out, y: y + SELF_CALL.rise }, { x: fromX + SELF_CALL.back, y: y + SELF_CALL.rise }] : [{ x: fromX, y }, { x: toX, y }];
-    edges.push({ from: message.from, to: message.to, kind: "message", label: `${i + 1}. ${message.label}()${message.times > 1 ? ` ×${message.times}` : ""}`, route });
+    edges.push({ from: message.from, to: message.to, kind: "message", label: `${i + 1}. ${message.label}${calls ? "()" : ""}${message.times > 1 ? ` ×${message.times}` : ""}`, route });
   });
 
   return { nodes, edges };
+}
+
+/**
+ * What the parts of the program say to each other, drawn like a sequence
+ * diagram: the modules as participants, every message sent with a `type`
+ * (`port.postMessage({ type: 'ping' })`, `sendMessage`, `send`) an arrow
+ * from the sender's module to the module of each function that handles
+ * that type — one arrow per sender, handler and type, in the order the
+ * senders' code sends them, counted when sent from several places. A type
+ * nothing handles is named in the reason. With a module as the scope,
+ * only the messages it sends or handles.
+ */
+function messagesView(analysis: Analysis, scope: string | null): PictureContent {
+  const { facts, graph } = analysis;
+  const title = scope === null ? "Messages" : `Messages of ${scope}`;
+
+  if (scope !== null && !graph.modules.has(scope)) return unplaced(title, [], [], [], { reason: `no module "${scope}"`, missing: true });
+  const sends = messageSends(facts).sort((a, b) => (a.module < b.module ? -1 : a.module > b.module ? 1 : a.line - b.line));
+  const handlers = messageHandlers(facts, new Set(sends.map((send) => send.type)));
+  const byKey = new Map<string, SequenceMessage>();
+  const unhandled = new Set<string>();
+
+  for (const send of sends) {
+    const targets = [...new Set((handlers.get(send.type) ?? []).map(moduleOf))];
+
+    if (targets.length === 0) unhandled.add(send.type);
+
+    for (const to of targets) {
+      if (scope !== null && send.module !== scope && to !== scope) continue;
+      const key = `${send.module}\u0000${to}\u0000${send.type}`;
+      const known = byKey.get(key);
+
+      if (known) known.times++;
+      else byKey.set(key, { from: send.module, to, label: send.type, line: send.line, depth: 0, times: 1, chain: [] });
+    }
+  }
+
+  const messages = [...byKey.values()];
+
+  if (messages.length === 0) return unplaced(title, [], [], [], { reason: scope === null ? "no message sent with a type (postMessage, sendMessage or send of an object with a type) that a function handles" : `${scope} sends no message with a type that a function handles, and handles none` });
+  const { participants, folded } = participantsOf(scope ?? messages[0]!.from, messages);
+  const { nodes, edges } = drawSequence(participants, messages, [], false);
+  const sequence = { kind: "messages" as const, participants, messages: messages.map(({ from, to, label, line, times }) => (times > 1 ? { from, to, label, line, times } : { from, to, label, line })) };
+  const diagram = unplaced(scope === null ? `Messages: ${counted(messages.length, "message")} between ${counted(participants.length, "part")}` : title, nodes, edges, [], { placed: true, sequence });
+  const notes = [unhandled.size > 0 ? `${counted(unhandled.size, "type")} no function handles: ${[...unhandled].sort().slice(0, 8).join(", ")}${unhandled.size > 8 ? ", …" : ""}` : "", folded > 0 ? `${counted(folded, "module")} ${folded === 1 ? "shares" : "share"} the last lifeline (at most ${MAX_PARTICIPANTS})` : ""].filter(Boolean);
+
+  if (notes.length > 0) diagram.reason = notes.join("; ");
+
+  return diagram;
 }
 
 /**
@@ -753,6 +803,8 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
         return logicView(analysis, view.subject, reads.logic);
       case "events":
         return eventsView(analysis);
+      case "messages":
+        return messagesView(analysis, view.subject);
       case "tests":
         return testsView(graph);
       case "hotspots":

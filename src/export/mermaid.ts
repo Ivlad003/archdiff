@@ -97,7 +97,7 @@ function sequenceMermaid(diagram: Diagram): string {
   for (const [i, message] of sequence.messages.entries()) {
     // A fragment opens before its first message (opt or loop, labelled) and closes after its last; outer ones first.
     for (const fragment of fragments) if (fragment.first === i) lines.push(`  ${"  ".repeat(fragment.level)}${fragment.kind} ${fragment.label.replace(/[:;]/g, " ")}`);
-    lines.push(`  ${ids.get(message.from)}->>${ids.get(message.to)}: ${i + 1}. ${message.label}()${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`);
+    lines.push(`  ${ids.get(message.from)}->>${ids.get(message.to)}: ${i + 1}. ${message.label}${sequence.kind === "messages" ? "" : "()"}${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""}`);
 
     for (const fragment of [...fragments].reverse()) if (fragment.last === i) lines.push(`  ${"  ".repeat(fragment.level)}end`);
   }

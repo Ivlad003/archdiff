@@ -66,7 +66,7 @@ export function crumbsOf(views: readonly ViewEntry[], key: string): { label: str
     directories(subject);
     crumbs.push({ label: subject.slice(subject.lastIndexOf("/") + 1), key: /\.[a-z]+$/.test(subject) ? `module:${subject}` : `dir:${subject}` });
     crumbs.push({ label: "classes", key });
-  } else if (["module", "inside", "usage", "cycle", "calls", "sequence", "path", "type", "focus", "logic"].includes(view.kind)) {
+  } else if (["module", "inside", "usage", "cycle", "calls", "sequence", "path", "type", "focus", "logic", "messages"].includes(view.kind)) {
     // The layer, the directories and the module above the subject; then the function, then the picture of it.
     const hash = subject.indexOf("#");
     const module = hash === -1 ? subject : subject.slice(0, hash);
@@ -77,7 +77,7 @@ export function crumbsOf(views: readonly ViewEntry[], key: string): { label: str
     directories(module);
     crumbs.push({ label: module.slice(module.lastIndexOf("/") + 1), key: `module:${module}` });
 
-    if (hash === -1 && (view.kind === "inside" || view.kind === "usage" || view.kind === "cycle" || view.kind === "focus")) crumbs.push({ label: view.kind, key });
+    if (hash === -1 && (view.kind === "inside" || view.kind === "usage" || view.kind === "cycle" || view.kind === "focus" || view.kind === "messages")) crumbs.push({ label: view.kind, key });
 
     if (view.kind === "calls" || view.kind === "sequence" || view.kind === "path" || ofFn) crumbs.push({ label: subject.slice(hash + 1), key: `calls:${subject}` });
 

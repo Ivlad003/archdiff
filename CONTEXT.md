@@ -162,6 +162,10 @@ _Avoid_: status, colour
 A new dependency between layers that the contract does not allow (any, without a contract): what makes a review fail.
 _Avoid_: issue, violation (in a review)
 
+**Messages**:
+What the parts of a program say to each other, as a sequence: every message sent with a type, from its sender's module to the module of the function that handles it.
+_Avoid_: events (for the typed messages), calls
+
 **Timeline**:
 How the dependencies between layers moved, commit by commit.
 _Avoid_: history graph

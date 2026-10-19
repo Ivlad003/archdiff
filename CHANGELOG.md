@@ -11,6 +11,7 @@ The architecture of a browser extension.
 
 - An extension had no entry point: its scripts export nothing, and what runs them is the browser. The functions a script hands to a browser event's `addListener` — `chrome.runtime.onConnect.addListener(onConnect)`, a port's `onMessage`, `chrome.action.onClicked` — are entry points now, so they have call trees, sequences and flows, labelled with the role `manifest.json` gives the script: background, content script, side panel, popup, options, devtools (a page's scripts are read from its `<script src>`).
 - What the parts of an extension say to each other was on no picture: the side panel, the service worker and the native host talk by messages, not imports. A message sent with a `type` (`port.postMessage({ type: 'ping' })`, `chrome.tabs.sendMessage`, `send`) is an event of `events`, from the sender to every function that compares or switches on a `type` with that value; a type nothing sends draws nothing. A worker and its page, or any code passing typed messages, get the same.
+- `messages` (and `messages:<module>`) draws the same as a sequence diagram, which reads where the events picture of a big extension is a wall: the modules as participants, every typed message an arrow from its sender's module to each handler's module, counted when sent from several places; a type nothing handles is named in the reason.
 
 What the pictures draw as an import.
 
