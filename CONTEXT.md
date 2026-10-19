@@ -50,6 +50,8 @@ _Avoid_: repository (overloaded), persistence
 
 **Operation**: a call out of the repository that names an operation of an external API archdiff knows — SCAPI's `ShopperBaskets.getBasket` (apis.ts). Named, not blind: a shape of its own on a call tree, a message to its family's lifeline, a storage the path ends at, the `apis` view's unit. A family is the API's client (`ShopperBaskets`); an OCAPI hook of a cartridge modifies the resource a family serves.
 
+**Contract as used**: of an operation — what the code sends (the first argument of the call, key by key: `CallFact.shape`) and what it reads of the result (`FileFacts.reads`, followed through the functions that return the result: `DeclFact.returnsFrom`), merged across the call sites (contracts.ts). Not the declared contract of the API (its types), which may say more; a Postman collection writes it as requests (postman.ts).
+
 **Hub**:
 A module most of a picture's modules import, drawn as a badge on its importers instead of as lines.
 _Avoid_: utility, common module

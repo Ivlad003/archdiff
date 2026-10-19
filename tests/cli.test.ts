@@ -1507,6 +1507,23 @@ test("APIs: the SCAPI operations the code calls are shapes, storages, messages a
   assert.equal(coverage.blind, 0);
 });
 
+test("apis: the contract of each operation as used — what the code sends, what it reads of the result, through the functions that return it — and the custom attributes", () => {
+  const scapi = join(root, "tests/fixtures/scapi");
+  const report = archdiff(["apis", scapi]).stdout;
+  assert.ok(report.startsWith("<!-- archdiff:generated — apis -->\n# APIs: 5 operations of SCAPI the code calls, with their contracts as used"), report.slice(0, 200));
+  // What getBasket sends and what is read of its result: in cart.ts directly, in the route through addToCart's result, an element of productItems through a callback.
+  assert.ok(report.includes("### getBasket\n\n1 call from src/lib/cart.ts.\n\nSends:\n\n- parameters.basketId — name basketId: string\n\nReads of the result:\n\n- data.currency\n- data.productItems (×2)\n- data.productItems.c_fromStoreId\n\nCustom attributes read: c_fromStoreId"), report);
+  assert.ok(report.includes("- body[].productId — name productId: string\n- body[].quantity — number 1"), report);
+  // A function returning the whole result (`return orders.getOrder(…)`): the loader's reads are the operation's.
+  assert.ok(report.includes("### getOrder\n\n1 call from src/lib/orders.ts.\n\nSends:\n\n- parameters.orderNo — name orderNo: string\n\nReads of the result:\n\n- data.orderNo\n- data.orderTotal"), report);
+  assert.ok(report.includes("## Custom attributes\n") && report.includes("- c_fromStoreId — ShopperBasketsV2.getBasket"), report);
+  const json = JSON.parse(archdiff(["apis", scapi, "--json"]).stdout) as { operation: { family: string; operation: string }; calls: number; reads: { path: string; count: number }[] }[];
+  assert.deepEqual(json.find((contract) => contract.operation.operation === "getOrder")?.reads, [{ path: "data.orderNo", count: 1 }, { path: "data.orderTotal", count: 1 }]);
+  // The operation's page carries the contract; the family picture's Markdown summarises each.
+  const page = archdiff(["diagram", "apis:ShopperBasketsV2", scapi]).stdout;
+  assert.ok(page.includes("## Contracts as used\n\n- **ShopperBasketsV2.getBasket** — sends parameters.basketId · reads data.currency, data.productItems, data.productItems.c_fromStoreId · custom: c_fromStoreId") && page.includes("- **ShopperBasketsV2.addItemToBasket** — sends parameters.basketId, body[].productId, body[].quantity"), page);
+});
+
 test("a sequence frames an if with its else, a try with its catch and a loop as alt and loop fragments, with the operations of an API on their family's lifeline", () => {
   const scapi = join(root, "tests/fixtures/scapi");
   const sequence = archdiff(["diagram", "sequence:src/routes/cart.tsx#action", scapi]).stdout;

@@ -9,6 +9,7 @@
 //
 // Entry points: `main` (bin/archdiff.js runs it), `helpText`.
 
+import { contractsMarkdown, contractsOf } from "./contracts.ts";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { analyze } from "./analyze.ts";
@@ -399,6 +400,18 @@ const COMMANDS: readonly Command[] = [
       const report = coverageReport(analysis);
 
       return writeOut(call.has("json") ? `${JSON.stringify(report, null, 2)}\n` : report.markdown, call.text("out"));
+    },
+  },
+  {
+    name: "apis",
+    usage: "[dir] [--json] [--out FILE]",
+    help: ["The operations of an external API the code calls (SCAPI), by family, each", "with its contract as used: who calls it, what the code sends (the first", "argument, key by key) and reads of the result; the custom attributes read"],
+    arity: 1,
+    flags: [flag("json"), flag("out", true)],
+    async run(call) {
+      const analysis = await analyze(call.dir(0));
+
+      return writeOut(call.has("json") ? `${JSON.stringify([...contractsOf(analysis).values()], null, 2)}\n` : contractsMarkdown(analysis), call.text("out"));
     },
   },
   {

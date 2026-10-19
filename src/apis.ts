@@ -54,7 +54,7 @@ const SCAPI_TYPE = /^Shopper[A-Z][A-Za-z0-9]*$/;
  * (`baskets: ShopperBasketsV2`). Asked of a call the graph could not follow into the repository,
  * so a class of the repository named like a client keeps its own calls.
  */
-export function operationOf(call: CallFact): ApiOperation | null {
+export function operationOf(call: Pick<CallFact, "callee" | "form">): ApiOperation | null {
   const { form } = call;
 
   if (form.kind === "typed") return SCAPI_TYPE.test(form.type) && /^[a-z]/.test(form.member) ? { api: "scapi", family: form.type.replace(/Client$/, ""), operation: form.member } : null;

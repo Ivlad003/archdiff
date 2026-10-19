@@ -27,7 +27,7 @@
 import type { Config } from "./config.ts";
 import { layerOf } from "./config.ts";
 import { operationOf, type ApiOperation } from "./apis.ts";
-import { dottedForm, type Callee, type CallFact, type DeclFact, type FileFacts, type GuardFact, type ValueOfFact } from "./extract/facts.ts";
+import { dottedForm, type Callee, type CallFact, type DeclFact, type FileFacts, type GuardFact, type ShapeFact, type ValueOfFact } from "./extract/facts.ts";
 import type { Resolution } from "./resolve.ts";
 
 /** A file of the repository. */
@@ -123,6 +123,8 @@ export interface ApiCall extends ApiOperation {
   line: number;
   /** The branches, loops and handlers the call sits under, outermost first (a sequence draws them as fragments). */
   guards?: GuardFact[];
+  /** What the call sends: its first argument as an object literal (`CallFact.shape`). */
+  shape?: ShapeFact;
 }
 
 /** A package or built-in the code imports. */
@@ -844,7 +846,15 @@ function resolveCalls(b: Building, resolver: CallResolver): void {
         // A call out of the repository that names an operation of an API archdiff knows (SCAPI's `clients.shopperBaskets.getBasket`): recorded, and a gap of its own reason.
         const operation = target.gap === "parse-error" || target.gap === "local" ? null : operationOf(call);
 
-        if (operation) b.apiCalls.push(call.guards ? { ...operation, from, line: call.line, guards: call.guards } : { ...operation, from, line: call.line });
+        if (operation) {
+          const made: ApiCall = { ...operation, from, line: call.line };
+
+          if (call.guards) made.guards = call.guards;
+
+          if (call.shape) made.shape = call.shape;
+          b.apiCalls.push(made);
+        }
+
         b.gaps.push({ from, callee: call.callee, reason: operation ? "api" : target.gap, line: call.line });
       }
 

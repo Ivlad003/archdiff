@@ -63,6 +63,8 @@ flowchart LR
     n_src_shape_keys_ts["src/shape-keys.ts<br>what a shape stands for and the view it opens, for the exports and the page"]
     n_src_run_hooks_ts["src/run-hooks.ts<br>the child process of a run: module hooks that trace and mock"]
     n_src_checks_ts["src/checks.ts<br>the contract check and the commands run after an agent"]
+    n_src_apis_ts["src/apis.ts<br>the operations of an external API a call names (SCAPI), the OCAPI hooks, the reader of the runtime's declarations"]
+    n_src_contracts_ts["src/contracts.ts<br>the contract of an operation as the code uses it: what it sends, what it reads of the result"]
   end
   subgraph n_extract["extract — the language frontends on tree-sitter"]
     n_src_extract_ts_ts["src/extract/ts.ts<br>TypeScript and JavaScript facts"]

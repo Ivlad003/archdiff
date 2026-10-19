@@ -10,6 +10,7 @@
 
 import type { Analysis } from "./analyze.ts";
 import { parseApiId, participantLabel, API_LABELS, API_SHORT } from "./apis.ts";
+import { contractMarkdown, contractSummary, contractsOf } from "./contracts.ts";
 import type { CommitInfo } from "./git.ts";
 import type { Diagram, Line, Shape } from "./diagram.ts";
 import { farFromMainSequence, type Metrics } from "./diagram.ts";
@@ -142,6 +143,23 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
     }
 
     lines.push("");
+  }
+
+  // An APIs picture: the contract of each operation drawn, as used — one line of sends and reads, the custom attributes.
+  if (diagram.view.startsWith("apis")) {
+    const contracts = contractsOf(analysis);
+    const drawn = diagram.nodes.filter((node) => node.kind === "external" && contracts.has(node.id));
+
+    if (drawn.length > 0) {
+      lines.push("## Contracts as used", "");
+
+      for (const node of drawn) {
+        const contract = contracts.get(node.id)!;
+        lines.push(`- **${contract.operation.family}.${contract.operation.operation}** — ${contractSummary(contract) || "nothing sent as an object literal, nothing read of the result"}${contract.custom.length > 0 ? ` · custom: ${contract.custom.join(", ")}` : ""}`);
+      }
+
+      lines.push("");
+    }
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
@@ -292,6 +310,11 @@ export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file:
       for (const call of calls) lines.push(`- ${call.from}${api.operation === null ? ` — ${call.operation}` : ""} — ${moduleOf(call.from)}:${call.line}`);
       lines.push("");
     }
+
+    // The contract as used: what the code sends and reads of the result (contracts.ts).
+    const contract = api.operation === null ? undefined : contractsOf(analysis).get(node.id);
+
+    if (contract) lines.push("## Contract as used", "", ...contractMarkdown(contract));
   }
 
   if (node.kind === "module") {

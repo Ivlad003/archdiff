@@ -119,6 +119,15 @@ The system SHALL record a call it cannot follow into the repository that names a
 - **WHEN** a function calls `clients.shopperBasketsV2.addItemToBasket(…)` and `this.clients.shopperCustomers.getCustomer(…)`
 - **THEN** the analysis records the operations `ShopperBasketsV2.addItemToBasket` and `ShopperCustomers.getCustomer` from that function, and the coverage report counts them under `api`
 
+### Requirement: The contract of an operation is read from the code
+
+The system SHALL record, for a member call whose first argument is an object literal, the literal's shape key by key, four levels deep, with each value's kind, its literal or name as written and the type the name's binding declares; the fields read from what a call returned, in every body — through a `const` bound to the result or to a part of it by a destructuring pattern, through a `const` bound to a field of such a value, and through the first parameter of a callback an array of it is iterated with — one per callee and path; and, for a function, the call whose result (or whose part) it returns. From these the system SHALL report an operation's contract as used: what is sent, merged across its call sites, and what is read of its result, directly or through the functions that return it, four calls deep, the custom attributes (`c_…`) among the fields listed on their own.
+
+#### Scenario: A basket read through a wrapper
+
+- **WHEN** `addToCart` has `const { data: basket } = await clients.shopperBasketsV2.getBasket({ parameters: { basketId } })` and returns `basket`, and a route action has `const basket = await addToCart(…); basket.productItems.map((item) => item.c_fromStoreId)`
+- **THEN** `getBasket`'s contract sends `parameters.basketId` (a name typed `string`) and reads `data.productItems` and `data.productItems.c_fromStoreId`, with `c_fromStoreId` among the custom attributes
+
 ### Requirement: The coverage report names the blind spots
 
 The system SHALL report, by module, the calls it could not follow with their reasons, the unresolved imports and the syntax errors, and list the constructs a frontend read but does not follow (an `eval`, a computed import, a decorator that may replace a function), as the map of what the diagrams cannot show.
