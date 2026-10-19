@@ -44,6 +44,8 @@ export interface FileFacts {
   decls: DeclFact[];
   /** Names exported by the file (ESM `export`, CommonJS `module.exports`/`exports.x`). */
   exports: Set<string>;
+  /** The fields read from what calls returned, in every body of the file (ReadFact): the contracts of API operations are read from these. */
+  reads?: ReadFact[];
   /** `export * from "./x"` — the file re-exports everything from these sources. */
   reexportsAll: string[];
   /**
@@ -350,6 +352,8 @@ export interface DeclFact {
    * The `logic` view lists the functions with the most; absent when zero.
    */
   branches?: number;
+  /** A function that returns (a part of) a call's result: which call and which part (ReturnFact). */
+  returnsFrom?: ReturnFact;
   /**
    * Names the declaration reads as values that an import binds whose syntax
    * does not tell whether its target is in the repository (Python
@@ -679,10 +683,63 @@ export interface CallFact {
   literal?: string | null;
   /** The branches, loops and handlers the call sits in, outermost first (control.ts): a sequence draws calls under one guard as a fragment. */
   guards?: GuardFact[];
+  /**
+   * The object literal written as the first argument of a member call (`clients.shopperBaskets.addItemToBasket({ params:
+   * { path: { basketId } }, body: items })`), key by key: what the call sends. The contract of an API operation is read
+   * from these; a call through a name (`fetch(url, {…})`) or `this.m({…})` carries none.
+   */
+  shape?: ShapeFact;
   line: number;
   col: number;
   endLine: number;
   endCol: number;
+}
+
+/**
+ * What a field of an object literal holds, as written: a literal's kind, a name (with the type its binding declares,
+ * `paymentInstrument: PaymentInstrument`), a nested object or array (its first element), a call, a spread, a function.
+ */
+export interface ShapeValue {
+  kind: "string" | "number" | "boolean" | "null" | "name" | "object" | "array" | "call" | "spread" | "function" | "other";
+  /** A literal's value, a name as written, a callee: for the examples a contract shows. */
+  text?: string;
+  /** The declared type of a name, when its parameter or `const` writes one. */
+  type?: string;
+  fields?: ShapeFact;
+  items?: ShapeValue;
+}
+
+/** An object literal key by key, four levels deep (`CallFact.shape`): a spread is the key `...x`. */
+export type ShapeFact = Record<string, ShapeValue>;
+
+/**
+ * A field read from what a call returned: `const { data: basket } = await clients.shopperBaskets.getBasket(…);
+ * basket.currency` reads `data.currency` of that call's result. A local bound to the result, or to a part of it by a
+ * destructuring pattern, carries the path; so does the parameter of a callback an array of it is iterated with
+ * (`basket.productItems.map((item) => item.productId)` reads `productItems.productId`). A method called on the chain
+ * is no field. One fact per callee and path in a body, at the first read.
+ */
+export interface ReadFact {
+  /** The call whose result is read, as written (`CallFact.callee`) and as read. */
+  callee: string;
+  form: Callee;
+  /** The fields from the result down: `["data", "currency"]`. */
+  path: string[];
+  /** The line of the call that made the value: the graph finds the call's edge or operation there. */
+  callLine: number;
+  line: number;
+  col: number;
+}
+
+/**
+ * What a function returns when it is (a part of) a call's result: `const { data } = await op(); return data` returns
+ * `data` of `op`'s result; `return op()` the result itself. A read of this function's result reads that call's.
+ */
+export interface ReturnFact {
+  callee: string;
+  form: Callee;
+  path: string[];
+  callLine: number;
 }
 
 /**

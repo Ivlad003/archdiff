@@ -10,7 +10,7 @@
 // handed to a call as a value.
 
 import { builtinModules } from "node:module";
-import { dottedForm, passable, type Callee, type CallFact, type DeclFact, type CodeDecorator, type DecoratorArg, type EntryFact, type WebCallFact, type WebFacts, type FileFacts, type HookFact, type ImportBinding, type ImportFact, type PassFact, type ResultTypeFact, type TypeFieldFact, type TypeRefFact, type ValueOfFact, type ValueRefFact } from "./facts.ts";
+import { dottedForm, passable, type Callee, type CallFact, type DeclFact, type ReadFact, type ReturnFact, type ShapeFact, type ShapeValue, type CodeDecorator, type DecoratorArg, type EntryFact, type WebCallFact, type WebFacts, type FileFacts, type HookFact, type ImportBinding, type ImportFact, type PassFact, type ResultTypeFact, type TypeFieldFact, type TypeRefFact, type ValueOfFact, type ValueRefFact } from "./facts.ts";
 import { addMember } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
 import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, syntaxErrors, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Query, type Tree } from "./treesitter.ts";
@@ -20,6 +20,11 @@ import { collectTsMachines, collectTsStates, countBranches, guardsOf, TS_CONTROL
 const CALLS_QUERY = `
 (call_expression function: (_) @call)
 (new_expression constructor: (_) @new)
+`;
+
+/** Every member expression, for the fields read from what a call returned (`readsOf`). */
+const MEMBERS_QUERY = `
+(member_expression) @member
 `;
 
 /**
@@ -322,6 +327,8 @@ interface Extraction {
   facts: FileFacts;
   root: Node;
   calls: Query;
+  /** Every member expression: the reads of fields from what calls returned (ReadFact). */
+  members: Query;
   jsxTags: Query | null;
   requires: Query;
   react: ReactBindings;
@@ -355,6 +362,7 @@ function extractIndexed(path: string, root: Node, language: Language, g: Grammar
     facts,
     root,
     calls: query(language, g, "calls", CALLS_QUERY),
+    members: query(language, g, "members", MEMBERS_QUERY),
     jsxTags: g === "typescript" ? null : query(language, g, "jsx", JSX_QUERY),
     requires: query(language, g, "require", REQUIRE_QUERY),
     react: reactBindings(root),
@@ -466,6 +474,14 @@ function declarationCalls(x: Extraction, body: Node, cls: ClassScope | null = nu
       if (message && type !== null) fact.nameArg = { literal: type, text: collapse(message.text).slice(0, MAX_CALLEE) };
     }
 
+    // What a member call sends: its first argument when that is an object literal (the contract of an API operation).
+    if (call?.type === "call_expression" && (fact.form.kind === "value" || fact.form.kind === "typed" || fact.form.kind === "member")) {
+      const first = call.childForFieldName("arguments")?.namedChildren[0];
+      const literal = first ? unwrapValue(first) : null;
+
+      if (literal?.type === "object") fact.shape = shapeOf(literal, body, 0);
+    }
+
     // Functions the call receives as values (`later(save)`), and whether the call sits in a closure.
     const passes = call ? passesOf(call, body, cls) : [];
 
@@ -485,6 +501,11 @@ function declarationCalls(x: Extraction, body: Node, cls: ClassScope | null = nu
     markClosure(component, c.node, body);
     out.push(component);
   }
+
+  // The fields read in the body from what calls returned, kept on the file.
+  const reads = readsOf(x, body, keep);
+
+  if (reads.length > 0) x.facts.reads = [...(x.facts.reads ?? []), ...reads];
 
   if (!x.jsxTags) return out;
 
@@ -886,14 +907,316 @@ function decl(kind: DeclFact["kind"], name: string, node: Node, signature: strin
   return fact;
 }
 
-/** A function's declaration fact: its signature and, when it names one, the class its result has. */
+/** A function's declaration fact: its signature and, when it names one, the class its result has, and the call's result it returns. */
 function fnDecl(name: string, at: Node, fn: Node, exported: boolean, calls: CallFact[], types: TypeRefFact[]): DeclFact {
   const fact = decl("fn", name, at, signature(fn), exported, calls, types, []);
   const result = resultOf(fn);
 
   if (result) fact.result = result;
+  const returns = returnsOf(fn);
+
+  if (returns) fact.returnsFrom = returns;
 
   return fact;
+}
+
+/** How deep an object literal's shape is read, and how many keys of one object. */
+const SHAPE_DEPTH = 4;
+const SHAPE_KEYS = 40;
+
+/** The shape of an object literal (ShapeFact): each key with what it holds, nested objects and arrays read `depth` levels down. */
+function shapeOf(object: Node, stop: Node, depth: number): ShapeFact {
+  const fields: ShapeFact = {};
+
+  for (const property of object.namedChildren) {
+    if (Object.keys(fields).length >= SHAPE_KEYS) break;
+
+    if (property.type === "pair") {
+      const key = property.childForFieldName("key");
+      const value = property.childForFieldName("value");
+
+      if (!key || !value || key.type === "computed_property_name") continue;
+      fields[memberName(key)] = shapeValue(value, stop, depth);
+    } else if (property.type === "shorthand_property_identifier") {
+      fields[property.text] = shapeValue(property, stop, depth);
+    } else if (property.type === "spread_element") {
+      fields[`...${collapse(property.namedChildren[0]?.text ?? "").slice(0, 40)}`] = { kind: "spread" };
+    } else if (property.type === "method_definition") {
+      const name = property.childForFieldName("name");
+
+      if (name) fields[memberName(name)] = { kind: "function" };
+    }
+  }
+
+  return fields;
+}
+
+/** What a value of an object literal holds, as written. */
+function shapeValue(written: Node, stop: Node, depth: number): ShapeValue {
+  const value = unwrapValue(written);
+
+  switch (value.type) {
+    case "string":
+    case "template_string":
+      return { kind: "string", text: (stringValue(value) ?? templateValue(value) ?? collapse(value.text)).slice(0, 60) };
+    case "number":
+      return { kind: "number", text: value.text };
+    case "true":
+    case "false":
+      return { kind: "boolean", text: value.text };
+    case "null":
+    case "undefined":
+      return { kind: "null" };
+    case "identifier":
+    case "shorthand_property_identifier": {
+      const type = typeOfBinding(value, value.text, stop);
+
+      return type ? { kind: "name", text: value.text, type } : { kind: "name", text: value.text };
+    }
+    case "member_expression":
+      return { kind: "name", text: collapse(value.text).slice(0, 60) };
+    case "object":
+      return depth + 1 < SHAPE_DEPTH ? { kind: "object", fields: shapeOf(value, stop, depth + 1) } : { kind: "object" };
+    case "array": {
+      const first = value.namedChildren.find((element) => element.type !== "comment");
+
+      return first && depth + 1 < SHAPE_DEPTH ? { kind: "array", items: shapeValue(first, stop, depth + 1) } : { kind: "array" };
+    }
+    case "call_expression":
+    case "await_expression":
+    case "new_expression":
+      return { kind: "call", text: collapse(value.text).slice(0, 60) };
+    default:
+      return FUNCTION_VALUES.has(value.type) ? { kind: "function" } : { kind: "other" };
+  }
+}
+
+/** The type a parameter or a `const` declares for `name` at `from` (`paymentInstrument: PaymentInstrument`), or null. */
+function typeOfBinding(from: Node, name: string, stop: Node): string | null {
+  const binding = declarationOf(from, name, stop);
+  const node = binding?.kind === "parameter" || binding?.kind === "local" ? binding.node : null;
+  const annotation = node?.childForFieldName("type");
+  const type = annotation?.type === "type_annotation" ? annotation.namedChildren[0] : null;
+
+  return type && (binding?.kind === "local" || node?.childForFieldName("pattern")?.type === "identifier" || node?.type === "identifier") ? collapse(type.text).slice(0, 60) : null;
+}
+
+/** A member chain read as a path: `basket.productItems[0].productId` → root `basket`, members `productItems`, `productId`; null when the chain starts elsewhere. */
+function memberChain(node: Node): { root: Node; members: string[] } | null {
+  const members: string[] = [];
+  let at = unwrapValue(node);
+
+  while (true) {
+    if (at.type === "member_expression") {
+      const property = at.childForFieldName("property");
+      const object = at.childForFieldName("object");
+
+      if (!property || !object || property.type !== "property_identifier") return null;
+      members.unshift(property.text);
+      at = unwrapValue(object);
+    } else if (at.type === "subscript_expression") {
+      // An index into an array or a map: the element, no field of its own.
+      const object = at.childForFieldName("object");
+
+      if (!object) return null;
+      at = unwrapValue(object);
+    } else if (at.type === "identifier") return { root: at, members };
+    else return null;
+  }
+}
+
+/** Methods of an array that hand each element to a callback: its first parameter is an element of the chain called on. */
+const ELEMENT_CALLBACKS = new Set(["map", "forEach", "filter", "find", "some", "every", "flatMap", "reduce", "findIndex", "sort"]);
+
+/** How many bindings a read follows back to the call that made the value (`const items = basket.productItems; items.map((item) => item.id)`). */
+const MAX_READ_CHAIN = 4;
+
+/**
+ * The call a name at `from` holds (a part of) the result of, with the path to that part: a `const` bound to an
+ * (awaited) call, directly or through a destructuring pattern; a `const` bound to a field of such a value; the first
+ * parameter of a callback an array of such a value is iterated with. Null for any other binding.
+ */
+function resultSource(from: Node, name: string, stop: Node, depth: number): { callee: string; form: Callee; callLine: number; prefix: string[] } | null {
+  if (depth > MAX_READ_CHAIN) return null;
+  const binding = declarationOf(from, name, stop);
+
+  if (binding?.kind === "local") {
+    const declarator = binding.node;
+    const written = declarator.parent?.children[0]?.type === "const" ? declarator.childForFieldName("value") : null;
+    const pattern = declarator.childForFieldName("name");
+
+    if (!written || !pattern) return null;
+    const part = patternPath(pattern, name);
+
+    if (part === null) return null;
+    let value = unwrapValue(written);
+
+    if (value.type === "await_expression" && value.namedChildren[0]) value = unwrapValue(value.namedChildren[0]);
+
+    if (value.type === "call_expression") {
+      const fn = value.childForFieldName("function");
+      const inner = fn ? calleeOfValue(fn, stop) : null;
+
+      return inner ? { callee: inner.callee, form: inner.form, callLine: located(value).line, prefix: part } : null;
+    }
+
+    // `const items = basket.productItems`: a part of another value.
+    const chain = memberChain(value);
+    const source = chain ? resultSource(chain.root, chain.root.text, stop, depth + 1) : null;
+
+    return source ? { ...source, prefix: [...source.prefix, ...chain!.members, ...part] } : null;
+  }
+
+  if (binding?.kind === "parameter" && binding.index === 0) {
+    // `basket.productItems.map((item) => item.productId)`: the callback's first parameter is an element of the chain.
+    const args = parentOf(binding.fn);
+    const call = args?.type === "arguments" ? parentOf(args) : null;
+    const callee = call?.type === "call_expression" ? call.childForFieldName("function") : null;
+    const property = callee?.type === "member_expression" ? callee.childForFieldName("property") : null;
+    const receiver = callee?.type === "member_expression" ? callee.childForFieldName("object") : null;
+
+    // The parameter itself, not a destructured one: `(item) =>` or `item =>`.
+    const plain = binding.node.type === "identifier" || (binding.node.type === "required_parameter" && binding.node.childForFieldName("pattern")?.type === "identifier");
+
+    if (!property || !receiver || !ELEMENT_CALLBACKS.has(property.text) || !plain) return null;
+    const chain = memberChain(receiver);
+    const source = chain ? resultSource(chain.root, chain.root.text, stop, depth + 1) : null;
+
+    return source ? { ...source, prefix: [...source.prefix, ...chain!.members] } : null;
+  }
+
+  return null;
+}
+
+/**
+ * The callee of the call a value is made by, as `declarationCalls` names the same call: `calleeFact` for a name or
+ * `a.b`, the dotted text read as a value for a longer chain (`clients.shopperBaskets.getBasket`). Null for any other shape.
+ */
+function calleeOfValue(fn: Node, stop: Node): { callee: string; form: Callee } | null {
+  const node = unwrapValue(fn);
+  const fact = calleeFact(node, stop, null, 0);
+
+  if (fact) return { callee: fact.callee, form: fact.form };
+
+  if (node.type !== "member_expression") return null;
+  const text = node.text.replace(/\s+/g, "");
+
+  return text.length <= MAX_CALLEE && /^[\w$.]+$/.test(text) ? { callee: text, form: { kind: "value" } } : null;
+}
+
+/** The keys down to `name` in a destructuring pattern: `{ data: { items: list } }` → `["data", "items"]` for `list`; `[]` for the name itself; null when the pattern does not bind it by keys (an array pattern, a rest). */
+function patternPath(pattern: Node, name: string): string[] | null {
+  if (pattern.type === "identifier") return pattern.text === name ? [] : null;
+
+  if (pattern.type !== "object_pattern") return null;
+
+  for (const property of pattern.namedChildren) {
+    if (property.type === "shorthand_property_identifier_pattern") {
+      if (property.text === name) return [property.text];
+    } else if (property.type === "object_assignment_pattern") {
+      const left = property.childForFieldName("left");
+
+      if (left?.type === "shorthand_property_identifier_pattern" && left.text === name) return [left.text];
+    } else if (property.type === "pair_pattern") {
+      const key = property.childForFieldName("key");
+      const value = property.childForFieldName("value");
+
+      if (!key || !value || key.type === "computed_property_name") continue;
+      const inner = value.type === "assignment_pattern" ? value.childForFieldName("left") : value;
+      const below = inner ? patternPath(inner, name) : null;
+
+      if (below !== null) return [memberName(key), ...below];
+    }
+  }
+
+  return null;
+}
+
+/**
+ * The fields read in a body from what calls returned (ReadFact): the outermost member chain of each read, its root
+ * followed to the call that made the value; a method called on the chain is no field. One fact per callee and path.
+ */
+function readsOf(x: Extraction, body: Node, keep: (n: Node) => boolean): ReadFact[] {
+  const out = new Map<string, ReadFact>();
+
+  for (const c of x.members.captures(body)) {
+    if (!keep(c.node)) continue;
+    const node = c.node;
+    const parent = parentOf(node);
+
+    // The chain is read at its outermost member; a call of it drops the method, a field read stays.
+    if (parent?.type === "member_expression" && parent.childForFieldName("object")?.id === node.id) continue;
+
+    if (parent?.type === "subscript_expression" && parent.childForFieldName("object")?.id === node.id) continue;
+    const called = parent?.type === "call_expression" && parent.childForFieldName("function")?.id === node.id;
+    const chain = memberChain(node);
+
+    if (!chain) continue;
+    const members = called ? chain.members.slice(0, -1) : chain.members;
+    const source = resultSource(chain.root, chain.root.text, body, 0);
+
+    if (!source) continue;
+    const path = [...source.prefix, ...members];
+
+    if (path.length === 0) continue;
+    const key = `${source.callee}\u0000${path.join(".")}`;
+
+    if (out.has(key)) continue;
+    const at = located(node);
+    out.set(key, { callee: source.callee, form: source.form, path, callLine: source.callLine, line: at.line, col: at.col });
+  }
+
+  return [...out.values()];
+}
+
+/**
+ * What a function returns of a call's result (ReturnFact): the first `return` of its own body (an arrow's expression
+ * body) that is an (awaited) call, a local bound to one, or a field of such a local. Null when it returns something else.
+ */
+function returnsOf(fn: Node): ReturnFact | null {
+  const body = fn.childForFieldName("body");
+
+  if (!body) return null;
+  const returned: Node[] = [];
+
+  if (body.type !== "statement_block") returned.push(body);
+  else {
+    // The function's own returns: nested functions keep theirs.
+    const walk = (node: Node): void => {
+      for (const child of node.namedChildren) {
+        if (FUNCTION_NODES.has(child.type) || child.type === "class_body") continue;
+
+        if (child.type === "return_statement") {
+          const value = child.namedChildren[0];
+
+          if (value) returned.push(value);
+        } else walk(child);
+      }
+    };
+
+    walk(body);
+  }
+
+  for (const expression of returned) {
+    let value = unwrapValue(expression);
+
+    if (value.type === "await_expression" && value.namedChildren[0]) value = unwrapValue(value.namedChildren[0]);
+
+    if (value.type === "call_expression") {
+      const callee = value.childForFieldName("function");
+      const inner = callee ? calleeOfValue(callee, fn) : null;
+
+      if (inner && (inner.form.kind === "value" || inner.form.kind === "typed" || inner.form.kind === "member" || inner.form.kind === "name")) return { callee: inner.callee, form: inner.form, path: [], callLine: located(value).line };
+      continue;
+    }
+
+    const chain = memberChain(value);
+    const source = chain ? resultSource(chain.root, chain.root.text, fn, 0) : null;
+
+    if (source) return { callee: source.callee, form: source.form, path: [...source.prefix, ...chain!.members], callLine: source.callLine };
+  }
+
+  return null;
 }
 
 /**
