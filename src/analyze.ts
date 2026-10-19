@@ -132,10 +132,11 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
   const packages = repositoryPackages(root, allFiles);
   // One reading of the tsconfigs for both: the paths to resolve, and whether `import { type A }` stays in the code.
   const tsconfigOf = tsconfigResolver(root, [...facts.keys()]);
-  const graph = buildGraph([...facts.values()], config, createResolver(root, [...facts.keys()], [...facts.values()], tsconfigOf, packages), (file) => tsconfigOf(file)?.verbatimModuleSyntax === true);
+  // The SCAPI table first: the graph names an operation only of a family it holds.
+  const scapi = scapiTable(root);
+  const graph = buildGraph([...facts.values()], config, createResolver(root, [...facts.keys()], [...facts.values()], tsconfigOf, packages), (file) => tsconfigOf(file)?.verbatimModuleSyntax === true, new Set(Object.keys(scapi.table)));
   const declaredEntries = [...frameworkEntries(root, files, allFiles), ...extensionEntries(root, allFiles, facts)];
   const collections = readCollections(root, allFiles, config.postman);
-  const scapi = scapiTable(root);
   const built = performance.now();
   const kinds = [...graph.nodes.values()].reduce((counts, node) => ({ ...counts, [node.kind]: (counts[node.kind] ?? 0) + 1 }), {} as Record<string, number>);
   const stats: AnalysisStats = {

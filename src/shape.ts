@@ -8,7 +8,7 @@
 // Entry points: `withBeyond`, `BEYOND_NAMED`, `hubsAsBadges`, `hideLanes`,
 // `expandInPlace`, `fold`, `dropLightLines`.
 
-import { DEFAULT_HUBS, type HubThresholds } from "./config.ts";
+import { DEFAULT_HUBS, hubThreshold, type HubThresholds } from "./config.ts";
 import type { BeyondSide, Diagram, Line, Lane, Shape } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
 import { fnNode } from "./nodes.ts";
@@ -189,7 +189,7 @@ export function hubsAsBadges(diagram: Diagram, subject: string | null, threshold
   }
 
   // At least `min` importers and `share` of the picture's modules, or `max` whatever its size (archdiff.json "hubs").
-  const threshold = Math.max(thresholds.min, Math.min(thresholds.max, Math.ceil(modules.length * thresholds.share)));
+  const threshold = hubThreshold(modules.length, thresholds);
   // A shape a review marked stays drawn: a changed logger is news, not noise.
   const hubs = modules.filter((node) => node.id !== subject && node.diff === undefined && (importers.get(node.id)?.size ?? 0) >= threshold).map((node) => node.id);
 

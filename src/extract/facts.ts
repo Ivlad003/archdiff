@@ -507,6 +507,9 @@ export type Callee =
   /** `f()()`, `(a || b)()`, PHP `$obj->$m()`: an expression archdiff does not name — never an edge, always a gap. */
   | { kind: "opaque" };
 
+/** The forms of a callee that is a member of something: what an operation of an API is read from, what sends an object literal. */
+export const MEMBER_FORMS: ReadonlySet<Callee["kind"]> = new Set<Callee["kind"]>(["value", "member", "typed"]);
+
 /**
  * The form of a callee a frontend writes as a dotted name composed of the
  * parts it read — `f`, `ns.f`, `Cls.m`, `this.m`, `super.m`, `crate::a.f` —

@@ -257,7 +257,9 @@ export async function getPostman(ctx: RouteContext, { url, response }: RouteRequ
 
   if (!analysis) return;
   const family = url.searchParams.get("family");
-  const collection = postmanCollection(analysis, `${analysis.root.split(/[\\/]/).pop() ?? "archdiff"} — SCAPI${family ? ` ${family}` : ""}`, family);
+  const collection = postmanCollection(analysis, family);
+
+  if (collection === null) return problem(response, 400, `the code calls no operation of "${family}"`);
   const name = `scapi${family ? `-${family.replace(/[^A-Za-z0-9._-]+/g, "_")}` : ""}.postman_collection.json`;
   response.writeHead(200, { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="${name}"` });
 

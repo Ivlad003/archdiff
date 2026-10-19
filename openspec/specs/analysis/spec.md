@@ -110,18 +110,36 @@ The system SHALL treat as entry points exported functions under `bin/`, the func
 - **WHEN** `src/routes/checkout.tsx` exports `action`
 - **THEN** `archdiff views` lists `calls:src/routes/checkout.tsx#action` labelled "route checkout.tsx: action"
 
+### Requirement: A cartridge hook's entry is the export its name ends with, else every export
+
+The system SHALL take, for a hook of `hooks.json`, the export of the script named by the hook's last segment (`dw.ocapi.shop.basket.modifyGETResponse` runs `exports.modifyGETResponse`) as the entry point, and, when the script exports no function of that name (`app.payment.processor.BASIC_CREDIT` exports `Handle` and `Authorize`), every exported function of the script, each labelled with the hook.
+
+#### Scenario: A payment processor hook
+
+- **WHEN** hooks.json names `app.payment.processor.BASIC_CREDIT` with a script exporting `Handle` and `Authorize`
+- **THEN** both are entry points labelled `hook app.payment.processor.BASIC_CREDIT`
+
+### Requirement: A source the analysis left out is counted, not missing
+
+The system SHALL treat an import of a source file that is on disk but not analysed — under a hidden directory, an excluded glob, or not listed by git — as an asset marked as a source left out: no module is drawn, the import is not unresolved, and the coverage report counts these imports and lists each with its importer.
+
+#### Scenario: A helper under a hidden directory
+
+- **WHEN** `src/a.ts` imports `../.tooling/helper` and `.tooling/helper.ts` is on disk
+- **THEN** the coverage report has no unresolved import and one import of a source left out, `.tooling/helper.ts ← src/a.ts:1`
+
 ### Requirement: A call of a known API's operation is named
 
-The system SHALL record a call it cannot follow into the repository that names an operation of an API it knows — SCAPI's `clients.shopperBaskets.getBasket()`, a destructured `shopperProducts.getProducts()`, a client typed `ShopperOrders` — as an API call with its family and operation (a gap of reason `api`, not a blind spot), leaving a call it can follow to a class of the repository as that class's; and SHALL read an OCAPI hook's name (`dw.ocapi.shop.basket.modifyGETResponse`) as the resource, the method and the stage it names, served by the SCAPI families of that resource.
+The system SHALL record a call it cannot follow into the repository that names an operation of an API it knows — SCAPI's `clients.shopperBaskets.getBasket()`, a destructured `shopperProducts.getProducts()`, a client typed `ShopperOrders`, the family being one of the SCAPI table's (the runtime's in node_modules, else the shipped one), so a store named `shopperStore` is no API — as an API call with its family and operation (a gap of reason `api`, not a blind spot), leaving a call it can follow to a class of the repository as that class's; and SHALL read an OCAPI hook's name (`dw.ocapi.shop.basket.modifyGETResponse`) as the resource, the method and the stage it names, served by the SCAPI families of that resource.
 
 #### Scenario: A client of the runtime
 
-- **WHEN** a function calls `clients.shopperBasketsV2.addItemToBasket(…)` and `this.clients.shopperCustomers.getCustomer(…)`
-- **THEN** the analysis records the operations `ShopperBasketsV2.addItemToBasket` and `ShopperCustomers.getCustomer` from that function, and the coverage report counts them under `api`
+- **WHEN** a function calls `clients.shopperBasketsV2.addItemToBasket(…)` and `this.clients.shopperCustomers.getCustomer(…)`, and another calls `shopperStore.getState()` on a store of the repository
+- **THEN** the analysis records the operations `ShopperBasketsV2.addItemToBasket` and `ShopperCustomers.getCustomer` from that function, the coverage report counts them under `api`, and `shopperStore.getState()` is no operation
 
 ### Requirement: The contract of an operation is read from the code
 
-The system SHALL record, for a member call whose first argument is an object literal, the literal's shape key by key, four levels deep, with each value's kind, its literal or name as written and the type the name's binding declares; the fields read from what a call returned, in every body — through a `const` bound to the result or to a part of it by a destructuring pattern, through a `const` bound to a field of such a value, and through the first parameter of a callback an array of it is iterated with — one per callee and path; and, for a function, the call whose result (or whose part) it returns. From these the system SHALL report an operation's contract as used: what is sent, merged across its call sites, and what is read of its result, directly or through the functions that return it, four calls deep, the custom attributes (`c_…`) among the fields listed on their own.
+The system SHALL record, for a member call whose first argument is an object literal, the literal's shape key by key, four levels deep, with each value's kind, its literal or name as written and the type the name's binding declares; the fields read from what a call returned, in every body — through a `const` bound to the result or to a part of it by a destructuring pattern, through a `const` bound to a field of such a value, and through the first parameter of a callback an array of it is iterated with (`map`, `filter`, `forEach`, `find`, `some`, `every`, `flatMap`, `findIndex`, `sort`; not `reduce`, whose first parameter is the accumulator) — one per callee and path; and, for a function, the call whose result (or whose part) it returns. From these the system SHALL report an operation's contract as used: what is sent, merged across its call sites, and what is read of its result, directly or through the functions that return it, four calls deep, the custom attributes (`c_…`) among the fields listed on their own.
 
 #### Scenario: A basket read through a wrapper
 

@@ -12,9 +12,9 @@
 // Entry points: `contractsOf`, `contractsMarkdown`, `sendsText`, `readsText`.
 
 import type { Analysis } from "./analyze.ts";
-import { operationOf, operationId, API_SHORT, type ApiOperation } from "./apis.ts";
+import { operationLabel, operationOf, operationId, API_SHORT, type ApiOperation } from "./apis.ts";
 import type { ShapeFact, ShapeValue } from "./extract/facts.ts";
-import { moduleOf, type Graph } from "./graph.ts";
+import { moduleOf } from "./graph.ts";
 import { counted } from "./words.ts";
 
 /** What a field holds across the call sites that send it: how many send it, as what, with which literals, names and declared types. */
@@ -64,6 +64,7 @@ const RETURN_HOPS = 4;
 
 function computeContracts(analysis: Analysis): Map<string, OperationContract> {
   const { graph, facts } = analysis;
+  const families = new Set(Object.keys(analysis.scapi.table));
   const out = new Map<string, OperationContract>();
 
   const entry = (operation: ApiOperation): OperationContract => {
@@ -92,7 +93,12 @@ function computeContracts(analysis: Analysis): Map<string, OperationContract> {
   // What is read of each operation's result: directly, or through the functions that return it.
   const edgesAt = new Map<string, string[]>();
 
-  for (const edge of graph.calls) if (edge.kind === "call") edgesAt.set(`${moduleOf(edge.from)}\u0000${edge.line}`, [...(edgesAt.get(`${moduleOf(edge.from)}\u0000${edge.line}`) ?? []), edge.to]);
+  for (const edge of graph.calls) {
+    if (edge.kind !== "call") continue;
+    const key = `${moduleOf(edge.from)}\u0000${edge.line}`;
+    edgesAt.set(key, [...(edgesAt.get(key) ?? []), edge.to]);
+  }
+
   const sources = new Map<string, { operation: ApiOperation; prefix: string[] } | null>();
 
   /** The operation a call at `line` of `module` gives the result of, with the path of the part the function returns, followed `hops` deep. */
@@ -110,10 +116,10 @@ function computeContracts(analysis: Analysis): Map<string, OperationContract> {
     else if (hops < RETURN_HOPS) {
       for (const target of edgesAt.get(key) ?? []) {
         const node = graph.nodes.get(target);
-        const returned = node ? declOf(graph, facts, node.module, node.name, node.parent ?? null)?.returnsFrom : undefined;
+        const returned = node ? declOf(facts, node.module, node.name, node.parent ?? null)?.returnsFrom : undefined;
 
         if (!returned) continue;
-        const operation = operationOf(returned);
+        const operation = operationOf(returned, families);
         const below = operation ? { operation, prefix: [] } : sourceOf(node!.module, returned.callLine, hops + 1);
 
         if (below) {
@@ -132,7 +138,7 @@ function computeContracts(analysis: Analysis): Map<string, OperationContract> {
 
   for (const file of facts.values()) {
     for (const read of file.reads ?? []) {
-      const direct = operationOf(read);
+      const direct = operationOf(read, families);
       const source = direct ? { operation: direct, prefix: [] } : sourceOf(file.path, read.callLine, 0);
 
       if (!source) continue;
@@ -155,13 +161,12 @@ function computeContracts(analysis: Analysis): Map<string, OperationContract> {
 }
 
 /** The declaration fact of a node, by its module, name and class. */
-function declOf(graph: Graph, facts: Analysis["facts"], module: string, name: string, parent: string | null) {
+function declOf(facts: Analysis["facts"], module: string, name: string, parent: string | null) {
   const file = facts.get(module);
 
   if (!file) return undefined;
 
   if (parent === null) return file.decls.find((decl) => decl.name === name);
-  void graph;
 
   return file.decls.find((decl) => decl.name === parent)?.members.find((member) => member.name === name);
 }
@@ -274,7 +279,7 @@ export function contractsMarkdown(analysis: Analysis): string {
 
   const customs = new Map<string, Set<string>>();
 
-  for (const contract of all) for (const custom of contract.custom) customs.set(custom, new Set([...(customs.get(custom) ?? []), `${contract.operation.family}.${contract.operation.operation}`]));
+  for (const contract of all) for (const custom of contract.custom) customs.set(custom, new Set([...(customs.get(custom) ?? []), operationLabel(contract.operation)]));
   const families = [...new Set(all.map((contract) => contract.operation.family))].sort();
   lines.push(`${counted(families.length, "family", "families")}: ${families.join(", ")}. The contract of an operation is what the code sends (the first argument, key by key, with the literals, names and declared types written) and what it reads of the result, directly or through the functions that return it.`, "");
 

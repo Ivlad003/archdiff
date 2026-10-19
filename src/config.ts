@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { firstMatchingGlob } from "./glob.ts";
 import { agentFromConfig, type AgentSpec } from "./agent.ts";
+import { collectionOf } from "./collections.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
 
 export const CONFIG_FILE = "archdiff.json";
@@ -52,6 +53,11 @@ export interface HubThresholds {
   min: number;
   share: number;
   max: number;
+}
+
+/** How many importers make a module a hub among `modules` of them: at least `min` and `share` of them, or `max` whatever the number. */
+export function hubThreshold(modules: number, thresholds: HubThresholds): number {
+  return Math.max(thresholds.min, Math.min(thresholds.max, Math.ceil(modules * thresholds.share)));
 }
 
 /** A quarter of a picture marks the logger and the shared types, not a busy neighbour; at least 6 importers, and 40 on a big map whatever its size. */
@@ -108,7 +114,27 @@ export function loadConfig(root: string): Config {
 
   if (other !== undefined && !isJsonString(other)) throw new Error(`${CONFIG_FILE}: "other" must be a string`);
 
-  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: named(() => agentFromConfig(parsed["agent"])), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages"), checks: stringList(parsed["checks"], CONFIG_FILE, "checks"), postman: stringList(parsed["postman"], CONFIG_FILE, "postman") };
+  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: named(() => agentFromConfig(parsed["agent"])), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages"), checks: stringList(parsed["checks"], CONFIG_FILE, "checks"), postman: collectionPaths(root, stringList(parsed["postman"], CONFIG_FILE, "postman")) };
+}
+
+/** The configured Postman collections, each a file that is there and reads as a collection; a wrong one names the field and the file. */
+function collectionPaths(root: string, paths: string[]): string[] {
+  for (const path of paths) {
+    const file = join(root, path);
+
+    if (!existsSync(file)) throw new Error(`${CONFIG_FILE}: "postman" names a file that is not there: ${path}`);
+    let parsed: JsonValue;
+
+    try {
+      parsed = parseJson(readFileSync(file, "utf8"));
+    } catch (error) {
+      throw new Error(`${CONFIG_FILE}: "postman": ${path} is not valid JSON (${error instanceof Error ? error.message : String(error)})`);
+    }
+
+    if (collectionOf(parsed, path) === null) throw new Error(`${CONFIG_FILE}: "postman": ${path} is not a Postman collection (no "info" and "item")`);
+  }
+
+  return paths;
 }
 
 /** `"hubs": { "min": 6, "share": 0.25, "max": 40 }`, each field optional; a wrong field names itself. */

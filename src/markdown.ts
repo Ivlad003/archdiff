@@ -9,7 +9,7 @@
 // `metricsMarkdown`, `commitMarkdown`.
 
 import type { Analysis } from "./analyze.ts";
-import { parseApiId, participantLabel, API_LABELS, API_SHORT } from "./apis.ts";
+import { operationLabel, parseApiId, participantLabel, API_LABELS, API_SHORT } from "./apis.ts";
 import { contractMarkdown, contractSummary, contractsOf } from "./contracts.ts";
 import type { CommitInfo } from "./git.ts";
 import type { Diagram, Line, Shape } from "./diagram.ts";
@@ -146,7 +146,7 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
   }
 
   // An APIs picture: the contract of each operation drawn, as used — one line of sends and reads, the custom attributes.
-  if (diagram.view.startsWith("apis")) {
+  if (parseView(diagram.view)?.kind === "apis") {
     const contracts = contractsOf(analysis);
     const drawn = diagram.nodes.filter((node) => node.kind === "external" && contracts.has(node.id));
 
@@ -155,7 +155,7 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
 
       for (const node of drawn) {
         const contract = contracts.get(node.id)!;
-        lines.push(`- **${contract.operation.family}.${contract.operation.operation}** — ${contractSummary(contract) || "nothing sent as an object literal, nothing read of the result"}${contract.custom.length > 0 ? ` · custom: ${contract.custom.join(", ")}` : ""}`);
+        lines.push(`- **${operationLabel(contract.operation)}** — ${contractSummary(contract) || "nothing sent as an object literal, nothing read of the result"}${contract.custom.length > 0 ? ` · custom: ${contract.custom.join(", ")}` : ""}`);
       }
 
       lines.push("");
@@ -232,7 +232,7 @@ function callLines(id: string, analysis: Analysis): string[] {
 
   for (const call of calls) lines.push(`- ${call.kind === "ref" ? "passes " : "calls "}\`${call.to}\` — line ${call.line}`);
 
-  for (const api of graph.apiCalls) if (api.from === id) lines.push(`- calls ${API_SHORT[api.api]} \`${api.family}.${api.operation}\` — line ${api.line}`);
+  for (const api of graph.apiCalls) if (api.from === id) lines.push(`- calls ${API_SHORT[api.api]} \`${operationLabel(api)}\` — line ${api.line}`);
 
   for (const gap of gaps) lines.push(`- cannot follow \`${gap.callee}\` (${gap.reason}) — line ${gap.line}`);
 
@@ -282,7 +282,7 @@ export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file:
     if (operations.length > 0) {
       lines.push("## Operations of external APIs", "");
 
-      for (const call of operations) lines.push(`- ${API_SHORT[call.api]} \`${call.family}.${call.operation}\` — line ${call.line}`);
+      for (const call of operations) lines.push(`- ${API_SHORT[call.api]} \`${operationLabel(call)}\` — line ${call.line}`);
       lines.push("");
     }
 

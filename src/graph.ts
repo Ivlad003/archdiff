@@ -27,6 +27,7 @@
 import type { Config } from "./config.ts";
 import { layerOf } from "./config.ts";
 import { operationOf, type ApiOperation } from "./apis.ts";
+import { SCAPI_TABLE } from "./scapi-table.ts";
 import { dottedForm, type Callee, type CallFact, type DeclFact, type FileFacts, type GuardFact, type ShapeFact, type ValueOfFact } from "./extract/facts.ts";
 import type { Resolution } from "./resolve.ts";
 
@@ -145,6 +146,8 @@ export interface Graph {
   readonly gaps: readonly Gap[];
   /** The calls of operations of external APIs the code names (SCAPI): each is a gap of reason `api` too. */
   readonly apiCalls: readonly ApiCall[];
+  /** Imports of source files the analysis left out (a hidden directory, an excluded glob, a file git does not list): no module, nothing unresolved, but told. */
+  readonly leftOutImports: readonly { from: string; path: string; specifier: string; line: number }[];
   /** Imports that resolve to no file, package or built-in, with the reason. */
   readonly unresolvedImports: readonly { from: string; specifier: string; reason: string; line: number }[];
   /** Per module, every exported name → the node it stands for, re-exports followed (`module.exports = require("./x")`, `export * from`). */
@@ -351,8 +354,11 @@ interface Building {
   externals: Map<string, External>;
   gaps: Gap[];
   apiCalls: ApiCall[];
+  leftOutImports: { from: string; path: string; specifier: string; line: number }[];
   unresolvedImports: { from: string; specifier: string; reason: string; line: number }[];
   scopes: Map<string, Scope>;
+  /** The families of the API table: a call names an operation only of one of these (apis.ts). */
+  apiFamilies: ReadonlySet<string>;
 }
 
 /** Pass 1: every file is a module, every declaration (and member) a node, so calls across files can find their targets. */
@@ -412,6 +418,8 @@ function bindImports(b: Building): void {
       if (fact.glob && target.kind === "file") scope.globs.push(target.path);
 
       // The file itself, or a file that is no module (JSON, a stylesheet, a source left out): nothing to draw, nothing missing.
+      if (target.kind === "asset" && target.source) b.leftOutImports.push({ from: file.path, path: target.path, specifier: fact.source, line: fact.line });
+
       if (target.kind === "self" || target.kind === "asset") continue;
       // `import type`, or `import { type A }` that the compiler erases (it keeps it under `verbatimModuleSyntax`).
       const typeOnly = fact.typeOnly === true || (fact.inlineTypeOnly === true && !b.keepsTypeImports(file.path));
@@ -844,7 +852,7 @@ function resolveCalls(b: Building, resolver: CallResolver): void {
       else if ("ids" in target) for (const to of target.ids) b.calls.push(edge(to));
       else {
         // A call out of the repository that names an operation of an API archdiff knows (SCAPI's `clients.shopperBaskets.getBasket`): recorded, and a gap of its own reason.
-        const operation = target.gap === "parse-error" || target.gap === "local" ? null : operationOf(call);
+        const operation = target.gap === "parse-error" || target.gap === "local" ? null : operationOf(call, b.apiFamilies);
 
         if (operation) {
           const made: ApiCall = { ...operation, from, line: call.line };
@@ -906,8 +914,8 @@ function classOf(b: Building, id: string): string | null {
 }
 
 /** Builds the graph of the repository from the facts of every file: three passes over the files in path order. */
-export function buildGraph(facts: readonly FileFacts[], config: Config, resolve: (from: string, specifier: string) => Resolution, keepsTypeImports: (file: string) => boolean = () => false): Graph {
-  const b: Building = { facts: [...facts].sort((a, c) => (a.path < c.path ? -1 : a.path > c.path ? 1 : 0)), config, resolve, keepsTypeImports, modules: new Map(), nodes: new Map(), deps: [], calls: [], externals: new Map(), gaps: [], apiCalls: [], unresolvedImports: [], scopes: new Map() };
+export function buildGraph(facts: readonly FileFacts[], config: Config, resolve: (from: string, specifier: string) => Resolution, keepsTypeImports: (file: string) => boolean = () => false, apiFamilies: ReadonlySet<string> = new Set(Object.keys(SCAPI_TABLE))): Graph {
+  const b: Building = { facts: [...facts].sort((a, c) => (a.path < c.path ? -1 : a.path > c.path ? 1 : 0)), config, resolve, keepsTypeImports, modules: new Map(), nodes: new Map(), deps: [], calls: [], externals: new Map(), gaps: [], apiCalls: [], leftOutImports: [], unresolvedImports: [], scopes: new Map(), apiFamilies };
   declareModules(b);
   bindImports(b);
   const exports = new ExportTable(b.facts, b.nodes, resolve);
@@ -917,5 +925,5 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
   resolveCalls(b, new CallResolver(b, exports));
   const layers = [...new Set([...b.modules.values()].map((module) => module.layer))].sort();
 
-  return { layers, modules: b.modules, nodes: b.nodes, deps: b.deps, calls: b.calls, externals: b.externals, gaps: b.gaps, apiCalls: b.apiCalls, unresolvedImports: b.unresolvedImports, resolvedExports };
+  return { layers, modules: b.modules, nodes: b.nodes, deps: b.deps, calls: b.calls, externals: b.externals, gaps: b.gaps, apiCalls: b.apiCalls, leftOutImports: b.leftOutImports, unresolvedImports: b.unresolvedImports, resolvedExports };
 }

@@ -10,6 +10,7 @@
 // Pure: Analysis + entry + mocks → DataFlow. Entry points: `dataFlow`,
 // `parseSignature`, `storageOf`, `DataFlow`.
 
+import { operationLabel } from "./apis.ts";
 import type { Analysis } from "./analyze.ts";
 import { matchesGlob } from "./glob.ts";
 import { isBlindSpot, moduleOf, type Declaration } from "./graph.ts";
@@ -221,7 +222,7 @@ export function dataFlow(analysis: Analysis, entry: string, mocks: readonly Mock
   for (const gap of graph.gaps) if (isBlindSpot(gap)) gapsFrom.set(gap.from, (gapsFrom.get(gap.from) ?? 0) + 1);
   const apiFrom = new Map<string, string[]>();
 
-  for (const api of graph.apiCalls) apiFrom.set(api.from, [...(apiFrom.get(api.from) ?? []), `${api.family}.${api.operation}`]);
+  for (const api of graph.apiCalls) apiFrom.set(api.from, [...(apiFrom.get(api.from) ?? []), operationLabel(api)]);
   const seen = new Set<string>();
   const storageCache = new Map<string, string | null>();
   // The storage fields seen so far on the path: a parameter named like a field of a mocked storage reads it.

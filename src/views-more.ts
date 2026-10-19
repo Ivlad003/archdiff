@@ -18,7 +18,7 @@
 // `timelineDiagram`, `branchesDiagram` (views.ts's `viewOf` dispatches to them).
 
 import type { Analysis } from "./analyze.ts";
-import { hookOf, isApiId, operationFromId, operationId, familyId, parseApiId, API_SHORT, type ApiHook, type ApiOperation } from "./apis.ts";
+import { hookOf, isApiId, operationFromId, operationId, operationLabel, familyId, API_SHORT, SCAPI, type ApiHook, type ApiOperation } from "./apis.ts";
 import { COLLECTION_SUFFIX, pathSegments, routeMatch } from "./collections.ts";
 import { operationPath } from "./scapi-runtime.ts";
 import type { CallFact, DeclFact, FileFacts } from "./extract/facts.ts";
@@ -27,7 +27,7 @@ import type { HistoryRow } from "./diff.ts";
 import type { BranchGraph, Commit } from "./git.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Declaration, type Graph } from "./graph.ts";
-import { apiLane, familyNode, fnNode, lane, lanesOf, moduleNode, operationNode, unplaced } from "./nodes.ts";
+import { apiLanesOf, familyNode, fnNode, lane, lanesOf, moduleNode, operationNode, unplaced } from "./nodes.ts";
 import { greedyOrder } from "./order.ts";
 import { counted } from "./words.ts";
 
@@ -270,7 +270,7 @@ export function pathView(analysis: Analysis, id: string, depth: number): Picture
   const nodes = [...kept].sort((a, b) => (a === id ? -1 : b === id ? 1 : a < b ? -1 : 1)).map((node) => (isApiId(node) ? operationNode(operationFromId(node)!) : isStorage(node) && node !== id ? { ...fnNode(graph, node), label: `${graph.nodes.get(node)!.name}\nstorage` } : fnNode(graph, node)));
   const drawn: Line[] = [...edges].map((edge) => edge.split("\u0000") as [string, string]).filter(([from, to]) => kept.has(from) && kept.has(to)).map(([from, to]) => ({ from, to, kind: "call" }));
 
-  return unplaced(`Path from ${start.name} to the storages`, nodes, drawn, [...lanesOf(graph, nodes), ...(nodes.some((node) => isApiId(node.id)) ? [apiLane("scapi")] : [])]);
+  return unplaced(`Path from ${start.name} to the storages`, nodes, drawn, [...lanesOf(graph, nodes), ...apiLanesOf(nodes)]);
 }
 
 /**
@@ -531,6 +531,9 @@ export function testsView(graph: Graph): PictureContent {
  * bigger than a canvas at the smallest zoom: 2348 modules in rows of
  * 1100 px were a column 5 boxes wide that no zoom could show.
  */
+/** What a canvas shows at the page's smallest zoom (0.1 of about 900 × 560 px on screen): a picture bigger than this cannot be seen whole. */
+const CANVAS_AT_MIN_ZOOM = { w: 9000, h: 5600 };
+
 export function hotspotsView(graph: Graph): PictureContent {
   const callsIn = new Map<string, number>();
 
@@ -588,8 +591,8 @@ export function hotspotsView(graph: Graph): PictureContent {
   const first = layoutAt(Math.max(1100, Math.round(Math.sqrt(area * 1.6))), 1);
   const width = Math.max(1100, Math.round(Math.sqrt((first.groups[0]?.w ?? 1100) * first.height * 1.6)));
   const second = layoutAt(width, 1);
-  // Bigger than a canvas shows at the smallest zoom (0.1 of 9000 × 5600): the boxes shrink to fit.
-  const scale = Math.min(1, 9000 / (width + 20), 5600 / second.height);
+  // Bigger than a canvas shows at the smallest zoom: the boxes shrink to fit.
+  const scale = Math.min(1, CANVAS_AT_MIN_ZOOM.w / (width + 20), CANVAS_AT_MIN_ZOOM.h / second.height);
   const laid = scale < 1 ? layoutAt(Math.round(width * scale), scale) : second;
 
   return unplaced("Hotspots: size by lines, shade by calls in", laid.nodes, [], laid.groups, { placed: true });
@@ -1040,96 +1043,89 @@ export interface HookEntry {
   hook: string;
 }
 
+/** Lines counted per pair: the keys `from\u0000to` with how many times each pair was met, as lines with a count. */
+function countedLines(pairs: Iterable<[from: string, to: string]>): Line[] {
+  const counts = new Map<string, number>();
+
+  for (const [from, to] of pairs) counts.set(`${from}\u0000${to}`, (counts.get(`${from}\u0000${to}`) ?? 0) + 1);
+
+  return [...counts].map(([key, count]) => {
+    const [from, to] = key.split("\u0000") as [string, string];
+
+    return { from, to, kind: "call", count };
+  });
+}
+
+/** A hook's line to an operation or a family is by the resource and the method the hook's name holds: said on the line. */
+function hookLineLabel(hook: ApiHook, resource = false): string {
+  return `${hook.does}${resource ? ` ${hook.resource}` : ""} (by resource)`;
+}
+
 /**
  * The operations of an external API the code calls (apis.ts). Without a
  * scope: every family of SCAPI the code uses as a box in the API's lane,
  * its operations and calls counted, the modules calling it in their
  * layers' lanes with a line per module and family, and the cartridge
  * hooks (hooks.json) joined to the family serving the resource they
- * modify. With a family as the scope: its operations as boxes, the
- * functions calling each, and the hooks on the operations of the resource
- * they name (a GET hook on the `get…` ones). With a module as the scope:
- * the operations its functions call.
+ * modify, when the code calls that family. With a family as the scope: its
+ * operations as boxes, the functions calling each, and the hooks on the
+ * operations of the resource and method they name (a GET hook on the
+ * `get…` ones), said to be by resource. With a module as the scope: the
+ * operations its functions call.
  */
 export function apisView(analysis: Analysis, scope: string | null, hooks: readonly HookEntry[]): PictureContent {
   const { graph } = analysis;
   const families = apiFamilies(graph);
-  const read = hooks.map((entry) => ({ node: entry.node, hook: hookOf(entry.hook) })).filter((entry): entry is { node: Declaration; hook: ApiHook } => entry.hook !== null);
-  const counted2 = (count: number, word: string): string => counted(count, word);
+  const hookEntries = hooks.map((entry) => ({ node: entry.node, hook: hookOf(entry.hook) })).filter((entry): entry is { node: Declaration; hook: ApiHook } => entry.hook !== null);
 
-  if (graph.apiCalls.length === 0 && read.length === 0) return unplaced("APIs", [], [], [], { reason: "no call of an operation of an API archdiff knows (SCAPI's clients.shopperBaskets.getBasket()), no hook of one" });
+  if (graph.apiCalls.length === 0 && hookEntries.length === 0) return unplaced("APIs", [], [], [], { reason: "no call of an operation of an API archdiff knows (SCAPI's clients.shopperBaskets.getBasket()), no hook of one" });
   // A caller is a function, or a module for a call at its top level.
   const callerNode = (id: string): Shape => (graph.nodes.has(id) ? fnNode(graph, id) : moduleNode(graph, id));
 
   if (scope === null) {
-    const nodes: Shape[] = [];
-    const edges: Line[] = [];
-    const counts = new Map<string, number>();
+    const familyShapes = new Map(families.map((family) => [familyId(family.api, family.family), familyNode(family.api, family.family, `${family.family}\n${counted(family.operations, "operation")} · ${counted(family.calls, "call")}`)]));
+    const edges = countedLines(graph.apiCalls.map((call): [string, string] => [moduleOf(call.from), familyId(call.api, call.family)]));
+    const modules = [...new Set(edges.map((edge) => edge.from))].sort();
+    const nodes = modules.map((module) => moduleNode(graph, module));
+    const unjoined: string[] = [];
 
-    for (const call of graph.apiCalls) {
-      const key = `${moduleOf(call.from)}\u0000${familyId(call.api, call.family)}`;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-
-    const familyShapes = new Map<string, Shape>();
-
-    for (const family of families) familyShapes.set(familyId(family.api, family.family), familyNode(family.api, family.family, `${family.family}\n${counted2(family.operations, "operation")} · ${counted2(family.calls, "call")}`));
-    const modules = [...new Set([...counts.keys()].map((key) => key.split("\u0000")[0]!))].sort();
-
-    for (const module of modules) nodes.push(moduleNode(graph, module));
-
-    for (const [key, count] of counts) {
-      const [from, to] = key.split("\u0000") as [string, string];
-      edges.push({ from, to, kind: "call", count });
-    }
-
-    // A hook modifies a resource: joined to the families serving it, drawn even when the code calls none of their operations.
-    for (const { node, hook } of read) {
+    // A hook joins the families serving its resource that the code calls; one serving nothing the code calls is said in the reason, not drawn as a family.
+    for (const { node, hook } of hookEntries) {
       nodes.push(fnNode(graph, node.id));
+      const served = hook.families.map((family) => familyId(SCAPI, family)).filter((id) => familyShapes.has(id));
 
-      for (const family of hook.families) {
-        const id = familyId("scapi", family);
+      if (served.length === 0) unjoined.push(`${node.name} (${hook.resource})`);
 
-        if (!familyShapes.has(id)) familyShapes.set(id, familyNode("scapi", family, `${family}\nno operation called`));
-        edges.push({ from: node.id, to: id, kind: "call", label: `${hook.does} ${hook.resource}` });
-      }
+      for (const id of served) edges.push({ from: node.id, to: id, kind: "call", label: hookLineLabel(hook, true) });
     }
 
     const operations = new Set(graph.apiCalls.map(operationId)).size;
-    const title = `APIs: ${counted2(operations, "operation")} of ${API_SHORT.scapi} called from ${counted2(modules.length, "module")}${read.length > 0 ? `, ${counted2(read.length, "hook")}` : ""}`;
-
+    const title = `APIs: ${counted(operations, "operation")} of ${API_SHORT.scapi} called from ${counted(modules.length, "module")}${hookEntries.length > 0 ? `, ${counted(hookEntries.length, "hook")}` : ""}`;
     // The API's shapes first: a big picture folds its tail, and the families are what the picture is of.
-    return unplaced(title, [...familyShapes.values(), ...nodes], edges, [...lanesOf(graph, nodes), apiLane("scapi")]);
+    const picture = unplaced(title, [...familyShapes.values(), ...nodes], edges, [...lanesOf(graph, nodes), ...apiLanesOf([...familyShapes.values()])]);
+
+    if (unjoined.length > 0) picture.reason = `${counted(unjoined.length, "hook")} on a resource the code calls no operation of: ${unjoined.join(", ")}`;
+
+    return picture;
   }
 
   const family = families.find((row) => row.family === scope);
-  const hooksOf = read.filter((entry) => entry.hook.families.includes(scope));
+  const hooksOf = hookEntries.filter((entry) => entry.hook.families.includes(scope));
 
   if (family || hooksOf.length > 0) {
-    const nodes: Shape[] = [];
-    const edges: Line[] = [];
-    const operations = new Map<string, Shape>();
-    const counts = new Map<string, number>();
-    const callsOf = new Map<string, number>();
+    const calls = graph.apiCalls.filter((call) => call.family === scope);
+    // An operation's box with its calls counted; the callers are functions, or modules for a call at the top level.
+    const operations = new Map<string, { shape: Shape; operation: string }>();
 
-    for (const call of graph.apiCalls) {
-      if (call.family !== scope) continue;
+    for (const call of calls) {
       const id = operationId(call);
 
-      if (!operations.has(id)) operations.set(id, { ...operationNode(call), label: call.operation });
-      counts.set(`${call.from}\u0000${id}`, (counts.get(`${call.from}\u0000${id}`) ?? 0) + 1);
-      callsOf.set(id, (callsOf.get(id) ?? 0) + 1);
+      if (!operations.has(id)) operations.set(id, { shape: { ...operationNode(call), label: `${call.operation}\n${counted(calls.filter((other) => other.operation === call.operation).length, "call")}` }, operation: call.operation });
     }
 
-    for (const [id, shape] of operations) shape.label = `${shape.label}\n${counted2(callsOf.get(id) ?? 0, "call")}`;
-    const callers = [...new Set([...counts.keys()].map((key) => key.split("\u0000")[0]!))].sort();
-
-    for (const caller of callers) nodes.push(callerNode(caller));
-
-    for (const [key, count] of counts) {
-      const [from, to] = key.split("\u0000") as [string, string];
-      edges.push({ from, to, kind: "call", count });
-    }
+    const edges = countedLines(calls.map((call): [string, string] => [call.from, operationId(call)]));
+    const callers = [...new Set(edges.map((edge) => edge.from))].sort();
+    const nodes = callers.map(callerNode);
 
     // A hook on the operations of the resource it names, of its method's verbs: a GET hook on `get…`, a POST one on `add…`/`create…`.
     for (const { node, hook } of hooksOf) {
@@ -1137,40 +1133,24 @@ export function apisView(analysis: Analysis, scope: string | null, hooks: readon
       const word = hook.resource.split(".")[0]!.replace(/_/g, "").toLowerCase();
       const verbs = hook.method === null ? null : METHOD_VERBS[hook.method];
 
-      for (const shape of operations.values()) {
-        const operation = parseApiId(shape.id)!.operation!;
-
-        if (operation.toLowerCase().includes(word) && (!verbs || verbs.test(operation))) edges.push({ from: node.id, to: shape.id, kind: "call", label: hook.does });
-      }
+      for (const { shape, operation } of operations.values()) if (operation.toLowerCase().includes(word) && (!verbs || verbs.test(operation))) edges.push({ from: node.id, to: shape.id, kind: "call", label: hookLineLabel(hook) });
     }
 
-    const calls = [...callsOf.values()].reduce((sum, n) => sum + n, 0);
+    const shapes = [...operations.values()].map((entry) => entry.shape);
 
-    return unplaced(`${scope} (${API_SHORT.scapi}): ${counted2(operations.size, "operation")}, ${counted2(calls, "call")}${hooksOf.length > 0 ? `, ${counted2(hooksOf.length, "hook")}` : ""}`, [...operations.values(), ...nodes], edges, [...lanesOf(graph, nodes), apiLane("scapi")]);
+    return unplaced(`${scope} (${API_SHORT.scapi}): ${counted(operations.size, "operation")}, ${counted(calls.length, "call")}${hooksOf.length > 0 ? `, ${counted(hooksOf.length, "hook")}` : ""}`, [...shapes, ...nodes], edges, [...lanesOf(graph, nodes), ...apiLanesOf(shapes)]);
   }
 
   if (graph.modules.has(scope)) {
     const own = graph.apiCalls.filter((call) => moduleOf(call.from) === scope);
 
     if (own.length === 0) return unplaced(`APIs of ${scope}`, [], [], [], { reason: "the module calls no operation of an API archdiff knows" });
-    const operations = new Map<string, Shape>();
-    const counts = new Map<string, number>();
+    const operations = new Map(own.map((call) => [operationId(call), operationNode(call)]));
+    const edges = countedLines(own.map((call): [string, string] => [call.from, operationId(call)]));
+    const callers = [...new Set(edges.map((edge) => edge.from))].sort().map(callerNode);
+    const shapes = [...operations.values()];
 
-    for (const call of own) {
-      const id = operationId(call);
-
-      if (!operations.has(id)) operations.set(id, operationNode(call));
-      counts.set(`${call.from}\u0000${id}`, (counts.get(`${call.from}\u0000${id}`) ?? 0) + 1);
-    }
-
-    const callers = [...new Set([...counts.keys()].map((key) => key.split("\u0000")[0]!))].sort().map(callerNode);
-    const edges: Line[] = [...counts].map(([key, count]) => {
-      const [from, to] = key.split("\u0000") as [string, string];
-
-      return { from, to, kind: "call", count };
-    });
-
-    return unplaced(`APIs of ${scope}: ${counted2(operations.size, "operation")}, ${counted2(own.length, "call")}`, [...operations.values(), ...callers], edges, [...lanesOf(graph, callers), apiLane("scapi")]);
+    return unplaced(`APIs of ${scope}: ${counted(operations.size, "operation")}, ${counted(own.length, "call")}`, [...shapes, ...callers], edges, [...lanesOf(graph, callers), ...apiLanesOf(shapes)]);
   }
 
   return unplaced(`APIs of ${scope}`, [], [], [], { reason: `no family of an API the code calls, no module "${scope}"`, missing: true });
@@ -1202,17 +1182,17 @@ export function postmanView(analysis: Analysis, scope: string | null): PictureCo
   const callers = new Map<string, Set<string>>();
 
   for (const call of graph.apiCalls) {
-    const id = operationId(call);
+    const operation = operationId(call);
 
-    if (!routes.has(id)) {
+    if (!routes.has(operation)) {
       const known = operationPath(scapi.table, call);
-      routes.set(id, known ? { operation: call, method: known.method, segments: pathSegments(known.path) } : null);
+      routes.set(operation, known ? { operation: call, method: known.method, segments: pathSegments(known.path) } : null);
     }
 
-    callers.set(id, new Set([...(callers.get(id) ?? []), moduleOf(call.from)]));
+    callers.set(operation, new Set([...(callers.get(operation) ?? []), moduleOf(call.from)]));
   }
 
-  const nodes: Shape[] = [];
+  const requests: Shape[] = [];
   const edges: Line[] = [];
   const lanes: Lane[] = [];
   const modules = new Set<string>();
@@ -1227,29 +1207,29 @@ export function postmanView(analysis: Analysis, scope: string | null): PictureCo
       const laneId = `postman:${collection.file}:${request.folder.join("/") || "(root)"}`;
 
       if (!lanes.some((candidate) => candidate.id === laneId)) lanes.push({ ...lane(laneId), label: request.folder.length > 0 ? `${collection.name} / ${request.folder.join(" / ")}` : collection.name });
-      const id = `postman:${collection.file}#${i}`;
+      const requestId = `postman:${collection.file}#${i}`;
       // The route that agrees with the request most: a literal against a literal, a variable against a variable.
       let hit: [string, Route] | null = null;
       let best = -1;
 
-      for (const [id, route] of routes) {
+      for (const [operation, route] of routes) {
         const score = route === null ? null : routeMatch(request.method, request.segments, route.method, route.segments);
 
         if (route !== null && score !== null && score > best) {
           best = score;
-          hit = [id, route];
+          hit = [operation, route];
         }
       }
 
-      const shape: Shape = { id, kind: "external", label: `${request.method} ${request.name}\n/${request.segments.join("/")}`, group: laneId, ref: { file: collection.file }, x: 0, y: 0, w: 0, h: 0 };
+      const shape: Shape = { id: requestId, kind: "external", label: `${request.method} ${request.name}\n/${request.segments.join("/")}`, group: laneId, ref: { file: collection.file }, x: 0, y: 0, w: 0, h: 0 };
 
       if (hit) {
         matched++;
         matchedOperations.add(hit[0]);
-        shape.opens = `apis:${hit[1]!.operation.family}`;
+        shape.opens = `apis:${hit[1].operation.family}`;
 
         for (const module of [...(callers.get(hit[0]) ?? [])].sort()) {
-          edges.push({ from: module, to: id, kind: "call" });
+          edges.push({ from: module, to: requestId, kind: "call" });
           modules.add(module);
         }
       } else {
@@ -1258,29 +1238,27 @@ export function postmanView(analysis: Analysis, scope: string | null): PictureCo
         unmatched.push(`${request.method} ${request.name}`);
       }
 
-      nodes.push(shape);
+      requests.push(shape);
     }
   }
 
-  for (const module of [...modules].sort()) nodes.push(moduleNode(graph, module));
+  const callerShapes = [...modules].sort().map((module) => moduleNode(graph, module));
   // The operations the code calls that no chosen collection has: added, in the API's lane.
   const missing: Shape[] = [];
 
-  for (const [id, route] of routes) {
-    if (matchedOperations.has(id)) continue;
-    const operation = route?.operation ?? operationFromId(id);
+  for (const [operation, route] of routes) {
+    if (matchedOperations.has(operation)) continue;
+    const named = route?.operation ?? operationFromId(operation);
 
-    if (!operation) continue;
-    missing.push({ ...operationNode(operation), diff: "added", label: `${operation.family}.${operation.operation}\n${route ? "not in the collection" : "path unknown to the table"}` });
+    if (!named) continue;
+    missing.push({ ...operationNode(named), diff: "added", label: `${operationLabel(named)}\n${route ? "not in the collection" : "path unknown to the table"}` });
   }
 
   const name = chosen.length === 1 ? chosen[0]!.name : `${chosen.length} collections`;
-  const title = `Postman: ${name} against the code — ${matched} of ${total} requests called, ${missing.length} ${missing.length === 1 ? "operation" : "operations"} not in it`;
+  const title = `Postman: ${name} against the code — ${matched} of ${total} requests called, ${counted(missing.length, "operation")} not in it`;
   const notes = [unmatched.length > 0 ? `${counted(unmatched.length, "request")} the code never calls (red): ${unmatched.slice(0, 6).join(", ")}${unmatched.length > 6 ? ", …" : ""}` : "", missing.length > 0 ? `${counted(missing.length, "operation")} the code calls that the collection lacks (green): ${missing.slice(0, 6).map((shape) => shape.label.split("\n")[0]).join(", ")}${missing.length > 6 ? ", …" : ""}` : ""].filter(Boolean);
   // The requests and the missing operations first: a big picture folds its tail, and the callers fold by directory.
-  const callerShapes = nodes.filter((shape) => shape.kind === "module");
-  const requestShapes = nodes.filter((shape) => shape.kind !== "module");
-  const picture = unplaced(title, [...requestShapes, ...missing, ...callerShapes], edges, [...lanes, ...lanesOf(graph, nodes), ...(missing.length > 0 ? [apiLane("scapi")] : [])]);
+  const picture = unplaced(title, [...requests, ...missing, ...callerShapes], edges, [...lanes, ...lanesOf(graph, callerShapes), ...apiLanesOf(missing)]);
 
   if (notes.length > 0) picture.reason = notes.join("; ");
 

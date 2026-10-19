@@ -10,7 +10,7 @@
 // handed to a call as a value.
 
 import { builtinModules } from "node:module";
-import { dottedForm, passable, type Callee, type CallFact, type DeclFact, type ReadFact, type ReturnFact, type ShapeFact, type ShapeValue, type CodeDecorator, type DecoratorArg, type EntryFact, type WebCallFact, type WebFacts, type FileFacts, type HookFact, type ImportBinding, type ImportFact, type PassFact, type ResultTypeFact, type TypeFieldFact, type TypeRefFact, type ValueOfFact, type ValueRefFact } from "./facts.ts";
+import { dottedForm, passable, MEMBER_FORMS, type Callee, type CallFact, type DeclFact, type ReadFact, type ReturnFact, type ShapeFact, type ShapeValue, type CodeDecorator, type DecoratorArg, type EntryFact, type WebCallFact, type WebFacts, type FileFacts, type HookFact, type ImportBinding, type ImportFact, type PassFact, type ResultTypeFact, type TypeFieldFact, type TypeRefFact, type ValueOfFact, type ValueRefFact } from "./facts.ts";
 import { addMember } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, lineCommentsBody, nonEmpty } from "./doc-comments.ts";
 import { collapse, errorLine, fingerprintFacts, grammarFor, located, query, startCol, syntaxErrors, unsupportedAt, valuesFingerprint, withTree, type Grammar, type Language, type Node, type Query, type Tree } from "./treesitter.ts";
@@ -475,7 +475,7 @@ function declarationCalls(x: Extraction, body: Node, cls: ClassScope | null = nu
     }
 
     // What a member call sends: its first argument when that is an object literal (the contract of an API operation).
-    if (call?.type === "call_expression" && (fact.form.kind === "value" || fact.form.kind === "typed" || fact.form.kind === "member")) {
+    if (call?.type === "call_expression" && MEMBER_FORMS.has(fact.form.kind)) {
       const first = call.childForFieldName("arguments")?.namedChildren[0];
       const literal = first ? unwrapValue(first) : null;
 
@@ -920,9 +920,10 @@ function fnDecl(name: string, at: Node, fn: Node, exported: boolean, calls: Call
   return fact;
 }
 
-/** How deep an object literal's shape is read, and how many keys of one object. */
+/** How deep an object literal's shape is read, how many keys of one object, and how long a literal or a name kept as an example. */
 const SHAPE_DEPTH = 4;
 const SHAPE_KEYS = 40;
+const MAX_SHAPE_TEXT = 60;
 
 /** The shape of an object literal (ShapeFact): each key with what it holds, nested objects and arrays read `depth` levels down. */
 function shapeOf(object: Node, stop: Node, depth: number): ShapeFact {
@@ -958,7 +959,7 @@ function shapeValue(written: Node, stop: Node, depth: number): ShapeValue {
   switch (value.type) {
     case "string":
     case "template_string":
-      return { kind: "string", text: (stringValue(value) ?? templateValue(value) ?? collapse(value.text)).slice(0, 60) };
+      return { kind: "string", text: (stringValue(value) ?? templateValue(value) ?? collapse(value.text)).slice(0, MAX_SHAPE_TEXT) };
     case "number":
       return { kind: "number", text: value.text };
     case "true":
@@ -974,7 +975,7 @@ function shapeValue(written: Node, stop: Node, depth: number): ShapeValue {
       return type ? { kind: "name", text: value.text, type } : { kind: "name", text: value.text };
     }
     case "member_expression":
-      return { kind: "name", text: collapse(value.text).slice(0, 60) };
+      return { kind: "name", text: collapse(value.text).slice(0, MAX_SHAPE_TEXT) };
     case "object":
       return depth + 1 < SHAPE_DEPTH ? { kind: "object", fields: shapeOf(value, stop, depth + 1) } : { kind: "object" };
     case "array": {
@@ -985,7 +986,7 @@ function shapeValue(written: Node, stop: Node, depth: number): ShapeValue {
     case "call_expression":
     case "await_expression":
     case "new_expression":
-      return { kind: "call", text: collapse(value.text).slice(0, 60) };
+      return { kind: "call", text: collapse(value.text).slice(0, MAX_SHAPE_TEXT) };
     default:
       return FUNCTION_VALUES.has(value.type) ? { kind: "function" } : { kind: "other" };
   }
@@ -998,7 +999,7 @@ function typeOfBinding(from: Node, name: string, stop: Node): string | null {
   const annotation = node?.childForFieldName("type");
   const type = annotation?.type === "type_annotation" ? annotation.namedChildren[0] : null;
 
-  return type && (binding?.kind === "local" || node?.childForFieldName("pattern")?.type === "identifier" || node?.type === "identifier") ? collapse(type.text).slice(0, 60) : null;
+  return type && (binding?.kind === "local" || node?.childForFieldName("pattern")?.type === "identifier" || node?.type === "identifier") ? collapse(type.text).slice(0, MAX_SHAPE_TEXT) : null;
 }
 
 /** A member chain read as a path: `basket.productItems[0].productId` → root `basket`, members `productItems`, `productId`; null when the chain starts elsewhere. */
@@ -1025,8 +1026,8 @@ function memberChain(node: Node): { root: Node; members: string[] } | null {
   }
 }
 
-/** Methods of an array that hand each element to a callback: its first parameter is an element of the chain called on. */
-const ELEMENT_CALLBACKS = new Set(["map", "forEach", "filter", "find", "some", "every", "flatMap", "reduce", "findIndex", "sort"]);
+/** Methods of an array that hand each element to a callback as its first parameter (`reduce` hands the accumulator first: not one of them). */
+const ELEMENT_CALLBACKS = new Set(["map", "forEach", "filter", "find", "some", "every", "flatMap", "findIndex", "sort"]);
 
 /** How many bindings a read follows back to the call that made the value (`const items = basket.productItems; items.map((item) => item.id)`). */
 const MAX_READ_CHAIN = 4;
@@ -1101,7 +1102,7 @@ function calleeOfValue(fn: Node, stop: Node): { callee: string; form: Callee } |
   if (node.type !== "member_expression") return null;
   const text = node.text.replace(/\s+/g, "");
 
-  return text.length <= MAX_CALLEE && /^[\w$.]+$/.test(text) ? { callee: text, form: { kind: "value" } } : null;
+  return text.length <= MAX_CALLEE && /^[\w$.]+$/.test(text) ? { callee: text, form: dottedForm(text) } : null;
 }
 
 /** The keys down to `name` in a destructuring pattern: `{ data: { items: list } }` → `["data", "items"]` for `list`; `[]` for the name itself; null when the pattern does not bind it by keys (an array pattern, a rest). */
@@ -1206,7 +1207,7 @@ function returnsOf(fn: Node): ReturnFact | null {
       const callee = value.childForFieldName("function");
       const inner = callee ? calleeOfValue(callee, fn) : null;
 
-      if (inner && (inner.form.kind === "value" || inner.form.kind === "typed" || inner.form.kind === "member" || inner.form.kind === "name")) return { callee: inner.callee, form: inner.form, path: [], callLine: located(value).line };
+      if (inner && (MEMBER_FORMS.has(inner.form.kind) || inner.form.kind === "name")) return { callee: inner.callee, form: inner.form, path: [], callLine: located(value).line };
       continue;
     }
 

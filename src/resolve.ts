@@ -18,7 +18,7 @@ import { join, posix } from "node:path";
 import type { FileFacts } from "./extract/facts.ts";
 import type { Resolution as LanguageResolution, SourceResolver } from "./imports.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
-import { languageOf } from "./languages.ts";
+import { isSourceFile, languageOf } from "./languages.ts";
 import { PhpResolver } from "./php-imports.ts";
 import { PythonResolver } from "./python-imports.ts";
 import { RustResolver } from "./rust-imports.ts";
@@ -32,8 +32,12 @@ export type Resolution =
   | { kind: "builtin"; name: string; runtime?: "python" | "rust" | "php" }
   /** The importing file itself (Rust `use self::Kind::*`, a Python relative import of the package's own module): no dependency, nothing unresolved. */
   | { kind: "self" }
-  /** A file of the repository that is no module: no source (JSON, a stylesheet, an image), or a source archdiff leaves out (a hidden directory's tooling, an excluded glob). Nothing to draw, nothing unresolved. */
-  | { kind: "asset"; path: string }
+  /**
+   * A file of the repository that is no module: no source (JSON, a stylesheet, an image), or — `source` — a source
+   * file archdiff left out (a hidden directory's tooling, an excluded glob, a file git does not list). Nothing to
+   * draw, nothing unresolved; the coverage report counts the sources left out.
+   */
+  | { kind: "asset"; path: string; source?: true }
   | { kind: "unresolved"; reason: string };
 
 /** A package of the repository that an import may name (a workspace): its name, its directory and its entry file. */
@@ -379,8 +383,13 @@ function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsco
   };
 
   // A candidate that is a file on disk but in no file list: an asset (JSON, a stylesheet, an image a bundler imports), or a
-  // source archdiff leaves out (a hidden directory's tooling, an excluded glob). No module to draw, nothing missing.
-  const onDisk = (candidate: string): string | null => probe(candidate, (path) => isFileIn(rootPosix, path));
+  // source archdiff leaves out (a hidden directory's tooling, an excluded glob, a file git does not list). No module to
+  // draw, nothing missing; a source left out is marked, for the coverage report.
+  const onDisk = (candidate: string): Resolution | null => {
+    const path = probe(candidate, (found) => isFileIn(rootPosix, found));
+
+    return path === null ? null : isSourceFile(path) ? { kind: "asset", path, source: true } : { kind: "asset", path };
+  };
 
   // A tsconfig `paths` target directory, relative to the root.
   const relativeToRoot = (absolute: string): string => {
@@ -428,7 +437,7 @@ function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsco
       for (const place of [candidate, ...mirrored, ...(clean.startsWith("/") ? [posix.join("public", candidate)] : [])]) {
         const asset = onDisk(place);
 
-        if (asset) return { kind: "asset", path: asset };
+        if (asset) return asset;
       }
 
       return { kind: "unresolved", reason: `no such file: ${specifier}${mirrored.length > 0 ? `, nor ${mirrored.join(" or ")} of the tsconfig rootDirs` : ""}` };
@@ -449,7 +458,7 @@ function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsco
         // `@/locales/en/translations.json`, `@/theme/index.css?url`: an alias names an asset as well as a module.
         const asset = onDisk(candidate);
 
-        if (asset) return { kind: "asset", path: asset };
+        if (asset) return asset;
       }
 
       // `baseUrl`: a bare specifier names a file under it too (`lib/util` → `src/lib/util.ts` with `baseUrl: "src"`). Every

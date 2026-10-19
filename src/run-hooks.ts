@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isJsonObject, isJsonString, parseJson } from "./json.ts";
 
 /** What the parent computed for the run: see run.ts `RunPlan`. */
 interface Plan {
@@ -136,10 +137,11 @@ function packageType(directory: string): string | null {
 
   // The nearest package.json decides, with or without a `type`; the walk goes on only where there is none.
   if (existsSync(file)) {
+    // A package.json that is no JSON object, or has no `type`: no type, as Node reads it.
     try {
-      const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+      const parsed = parseJson(readFileSync(file, "utf8"));
 
-      type = typeof parsed === "object" && parsed !== null && typeof (parsed as { type?: unknown }).type === "string" ? (parsed as { type: string }).type : null;
+      type = isJsonObject(parsed) && isJsonString(parsed["type"]) ? parsed["type"] : null;
     } catch {
       type = null;
     }

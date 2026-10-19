@@ -282,12 +282,13 @@ test("the resolver follows tsconfig paths, extensionless specifiers, index files
     assert.deepEqual(resolve("src/b.ts", "@/locales/en/translations.json"), { kind: "asset", path: "src/locales/en/translations.json" });
     assert.deepEqual(resolve("src/b.ts", "@/theme/index.css?url"), { kind: "asset", path: "src/theme/index.css" });
     assert.deepEqual(resolve("src/b.ts", "/images/a.svg"), { kind: "asset", path: "public/images/a.svg" });
-    assert.deepEqual(resolve("src/b.ts", "@storybook/test-utils"), { kind: "asset", path: ".storybook/test-utils.ts" });
-    assert.deepEqual(resolve("src/b.ts", "../.storybook/test-utils"), { kind: "asset", path: ".storybook/test-utils.ts" });
+    // A source archdiff left out (a hidden directory) is an asset marked `source`, for the coverage report to count.
+    assert.deepEqual(resolve("src/b.ts", "@storybook/test-utils"), { kind: "asset", path: ".storybook/test-utils.ts", source: true });
+    assert.deepEqual(resolve("src/b.ts", "../.storybook/test-utils"), { kind: "asset", path: ".storybook/test-utils.ts", source: true });
     assert.deepEqual(resolve("src/b.ts", "@/nope"), { kind: "unresolved", reason: "no file for the tsconfig path @/*: @/nope" });
     assert.deepEqual(resolve("src/b.ts", "/images/nope.svg"), { kind: "unresolved", reason: "no such file: /images/nope.svg" });
     // `rootDirs` read as one directory: React Router's `./+types/home` is the generated twin; one not generated says so.
-    assert.deepEqual(resolve("src/routes/home.tsx", "./+types/home"), { kind: "asset", path: ".react-router/types/src/routes/+types/home.ts" });
+    assert.deepEqual(resolve("src/routes/home.tsx", "./+types/home"), { kind: "asset", path: ".react-router/types/src/routes/+types/home.ts", source: true });
     assert.deepEqual(resolve("src/routes/home.tsx", "./+types/about"), { kind: "unresolved", reason: "no such file: ./+types/about, nor .react-router/types/src/routes/+types/about of the tsconfig rootDirs" });
   });
 });

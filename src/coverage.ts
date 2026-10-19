@@ -38,6 +38,8 @@ export interface CoverageReport {
   ratio: number;
   byReason: Partial<Record<Gap["reason"], number>>;
   unresolvedImports: number;
+  /** Imports of source files the analysis left out (a hidden directory, an excluded glob, a file git does not list). */
+  leftOutImports: number;
   parseErrors: string[];
   /** Source files left out of the analysis (too large), with the reason. */
   skipped: { path: string; reason: string }[];
@@ -96,7 +98,7 @@ export function coverageReport(analysis: Analysis): CoverageReport {
     "<!-- archdiff:generated — coverage -->",
     "# Coverage: what the diagrams cannot show",
     "",
-    `${analysis.files.length} files. Calls into the repository: ${calls} followed, ${blind} blind (${Math.round(ratio * 100)}% followed). ${gaps - blind - local} calls go out of it (packages, built-ins, globals, methods of untyped values)${local > 0 ? `, ${local} stay in their function (a nested function, a local arrow)` : ""}. ${graph.unresolvedImports.length} unresolved imports, ${parseErrors.length} files with syntax errors${unsupported.length > 0 ? `, ${counted(unsupported.length, "construct")} read but not followed` : ""}.`,
+    `${analysis.files.length} files. Calls into the repository: ${calls} followed, ${blind} blind (${Math.round(ratio * 100)}% followed). ${gaps - blind - local} calls go out of it (packages, built-ins, globals, methods of untyped values)${local > 0 ? `, ${local} stay in their function (a nested function, a local arrow)` : ""}. ${graph.unresolvedImports.length} unresolved imports,${graph.leftOutImports.length > 0 ? ` ${graph.leftOutImports.length} imports of sources left out,` : ""} ${parseErrors.length} files with syntax errors${unsupported.length > 0 ? `, ${counted(unsupported.length, "construct")} read but not followed` : ""}.`,
     "",
     "## Why calls were not followed",
     "",
@@ -124,6 +126,16 @@ export function coverageReport(analysis: Analysis): CoverageReport {
     lines.push("");
   }
 
+  // Sources the analysis left out but the code imports: no module is drawn for them, and a picture is not read as proof there is none.
+  if (graph.leftOutImports.length > 0) {
+    lines.push("## Sources left out", "", `${graph.leftOutImports.length} imports name source files the analysis left out — a hidden directory, an excluded glob, a file git does not list — drawn as nothing: each is listed with its importer.`, "");
+
+    for (const left of graph.leftOutImports.slice(0, 40)) lines.push(`- ${left.path} ← ${left.from}:${left.line} (\`${left.specifier}\`)`);
+
+    if (graph.leftOutImports.length > 40) lines.push(`- … ${graph.leftOutImports.length - 40} more`);
+    lines.push("");
+  }
+
   // What a frontend read and could not follow, so a picture without it is not read as proof there is none.
   if (unsupported.length > 0) {
     lines.push("## Constructs read but not followed", "");
@@ -142,5 +154,5 @@ export function coverageReport(analysis: Analysis): CoverageReport {
     lines.push("");
   }
 
-  return { files: analysis.files.length, calls, gaps, blind, ratio, byReason, unresolvedImports: graph.unresolvedImports.length, parseErrors, skipped: analysis.skipped, unsupported, modules, markdown: `${lines.join("\n").trimEnd()}\n` };
+  return { files: analysis.files.length, calls, gaps, blind, ratio, byReason, unresolvedImports: graph.unresolvedImports.length, leftOutImports: graph.leftOutImports.length, parseErrors, skipped: analysis.skipped, unsupported, modules, markdown: `${lines.join("\n").trimEnd()}\n` };
 }

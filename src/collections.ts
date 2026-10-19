@@ -8,8 +8,8 @@
 // Sits in the core beside the analysis, which reads the collections once;
 // the `postman` view and its Markdown match them against the operations.
 //
-// Entry points: `readCollections`, `requestSegments`, `pathSegments`,
-// `routeMatch`, `COLLECTION_SUFFIX`.
+// Entry points: `readCollections`, `collectionOf`, `requestSegments`,
+// `pathSegments`, `routeMatch`, `COLLECTION_SUFFIX`.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -90,13 +90,15 @@ export function collectionOf(parsed: JsonValue, file: string): ImportedCollectio
   return { file, name, requests };
 }
 
-/** The URL of a request object: `raw`, else its host and path joined. */
+/** The URL of a request object: `raw`, else its host and path joined as `//host/path` (the host's parts dotted, a variable among them or not), so the host is no segment of the path. */
 function rawOf(url: Record<string, JsonValue>): string | null {
   if (isJsonString(url["raw"])) return url["raw"];
   const host = Array.isArray(url["host"]) ? url["host"].filter(isJsonString).join(".") : isJsonString(url["host"]) ? url["host"] : "";
   const path = Array.isArray(url["path"]) ? url["path"].filter(isJsonString).join("/") : isJsonString(url["path"]) ? url["path"] : "";
 
-  return host || path ? `${host}/${path}` : null;
+  if (!host && !path) return null;
+
+  return host === "" ? `/${path}` : `//${host}/${path}`;
 }
 
 /**
@@ -105,8 +107,8 @@ function rawOf(url: Record<string, JsonValue>): string | null {
  */
 export function requestSegments(raw: string): string[] {
   let path = raw.split(/[?#]/)[0]!.trim();
-  // A host variable: `{{baseUrl}}/checkout/…`, `{{host}}/…`; a scheme and host: `https://x.y/…`.
-  path = path.replace(/^\{\{[^}]*\}\}/, "").replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, "");
+  // A host variable: `{{baseUrl}}/checkout/…`, `{{host}}/…`; a scheme and host, or a host alone after `//`: `https://x.y/…`, `//x.y/…`.
+  path = path.replace(/^\{\{[^}]*\}\}/, "").replace(/^(?:[a-z][a-z0-9+.-]*:)?\/\/[^/]*/i, "");
 
   return path.split("/").filter((segment) => segment !== "").map((segment) => (/^(\{\{[^}]*\}\}|:[\w-]+|\{[^}]*\})$/.test(segment) ? "*" : segment));
 }

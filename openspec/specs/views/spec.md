@@ -185,7 +185,7 @@ The system SHALL, when a saved drawing moved shapes out of the layout's columns,
 
 ### Requirement: The operations of an external API are shapes
 
-The system SHALL draw, as `apis`, the families of an external API the code calls (SCAPI: a call `clients.shopper<Family>.<operation>()`, a destructured `shopper<Family>.<operation>()`, or a call on a value typed `Shopper<Family>`) in the API's lane with their operations and calls counted, the modules calling them in their layers' lanes, and the cartridge hooks of `hooks.json` joined to the family serving the resource their name holds; as `apis:<Family>` the family's operations with the functions calling each and the hooks on the operations of the resource and method they name; as `apis:<path>` the operations a module calls. The same operations SHALL be external shapes on `calls:` trees, storages of `path:` and `flow`, messages to the family's lifeline in `sequence:`, and the reason `api` in the coverage report, never a blind spot.
+The system SHALL draw, as `apis`, the families of an external API the code calls (SCAPI: a call `clients.shopper<Family>.<operation>()`, a destructured `shopper<Family>.<operation>()`, or a call on a value typed `Shopper<Family>`) in the API's lane with their operations and calls counted, the modules calling them in their layers' lanes (one lane for the API, its families as boxes), and the cartridge hooks of `hooks.json` joined — by the resource their name holds, said on the line — to the families serving it that the code calls, a hook on a resource the code calls nothing of named in the reason and no family drawn for it; as `apis:<Family>` the family's operations with the functions calling each and the hooks on the operations of the resource and method they name, said to be by resource; as `apis:<path>` the operations a module calls. The same operations SHALL be external shapes on `calls:` trees, storages of `path:` and `flow`, messages to the family's lifeline in `sequence:`, and the reason `api` in the coverage report, never a blind spot.
 
 #### Scenario: A cart action over SCAPI
 
@@ -214,3 +214,21 @@ The system SHALL read every `*.postman_collection.json` the repository lists and
 
 - **WHEN** `archdiff postman` wrote the collection and it is read back as `postman:<file>`
 - **THEN** every request is called and no operation is missing
+
+### Requirement: The hotspots fit the canvas
+
+The system SHALL lay the hotspots' boxes in rows as wide as makes the whole a 16:10 picture (laid out twice, as each lane's own rows and heading add height), never under 1100 px, and SHALL shrink the boxes when even that is more than a canvas shows at the page's smallest zoom (9000 × 5600 px of scene), so a repository of thousands of modules is seen whole; a small repository keeps its 1100 px rows and its sizes.
+
+#### Scenario: Four hundred modules
+
+- **WHEN** a repository has 400 modules
+- **THEN** the hotspots picture is wider than tall, within 9000 × 5600
+
+### Requirement: A configured collection is checked when the configuration is read
+
+The system SHALL, when `archdiff.json`'s `postman` names a file that is not there, not valid JSON, or no Postman collection, fail with an error naming the field and the file (`archdiff.json: "postman" names a file that is not there: postman/nope.json`), as any wrong field of the configuration does; a collection the repository lists by its name alone is read and, when it is no collection, left out without an error.
+
+#### Scenario: A path to no file
+
+- **WHEN** archdiff.json has `"postman": ["postman/nope.json"]` and no such file
+- **THEN** every command exits 2 with `archdiff.json: "postman" names a file that is not there: postman/nope.json`

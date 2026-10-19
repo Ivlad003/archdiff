@@ -7,7 +7,7 @@
 // Entry points: `lane`, `unplaced`, `lanesOf`, `moduleNode`,
 // `externalNode`, `fnNode`, `depEdges`, `grow`.
 
-import { familyId, operationId, API_LABELS, type ApiOperation } from "./apis.ts";
+import { familyId, operationId, operationLabel, parseApiId, API_LABELS, type ApiOperation } from "./apis.ts";
 import type { Line, Lane, PictureContent, Shape } from "./diagram.ts";
 import type { Graph } from "./graph.ts";
 export function lane(id: string): Lane {
@@ -46,9 +46,16 @@ export function apiLane(api: ApiOperation["api"]): Lane {
   return { ...lane(`api:${api}`), label: API_LABELS[api] };
 }
 
+/** The lanes of the APIs the given shapes belong to (one per API, in order of appearance), for a picture that mixes them with layers. */
+export function apiLanesOf(shapes: readonly Shape[]): Lane[] {
+  const apis = [...new Set(shapes.map((shape) => parseApiId(shape.id)?.api).filter((api): api is ApiOperation["api"] => api !== undefined))];
+
+  return apis.map(apiLane);
+}
+
 /** An operation of an external API (apis.ts): an external box named `Family.operation` in the API's lane, opening the family's view. */
 export function operationNode(operation: ApiOperation): Shape {
-  return { id: operationId(operation), kind: "external", label: `${operation.family}.${operation.operation}`, group: `api:${operation.api}`, opens: `apis:${operation.family}`, x: 0, y: 0, w: 0, h: 0 };
+  return { id: operationId(operation), kind: "external", label: operationLabel(operation), group: `api:${operation.api}`, opens: `apis:${operation.family}`, x: 0, y: 0, w: 0, h: 0 };
 }
 
 /** A family of an external API (SCAPI's ShopperBaskets) as an external box in the API's lane, opening its view. */

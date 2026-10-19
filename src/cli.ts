@@ -423,7 +423,10 @@ const COMMANDS: readonly Command[] = [
     flags: [flag("family", true), flag("out", true)],
     async run(call) {
       const analysis = await analyze(call.dir(0));
-      const collection = postmanCollection(analysis, `${analysis.root.split(/[\\/]/).pop() ?? "archdiff"} — SCAPI`, call.text("family"));
+      const family = call.text("family");
+      const collection = postmanCollection(analysis, family);
+
+      if (collection === null) return fail(`postman: the code calls no operation of "${family}" (archdiff apis lists the families)`);
 
       return writeOut(`${JSON.stringify(collection, null, 2)}\n`, call.text("out"));
     },

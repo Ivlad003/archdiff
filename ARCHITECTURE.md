@@ -28,7 +28,6 @@ flowchart LR
     n_src_spec_ts["src/spec.ts<br>the specs and features of the repository, the agent's task for them, the OpenSpec CLI"]
     n_src_scaffold_ts["src/scaffold.ts<br>a project from scratch with its intent and first commit"]
     n_src_gherkin_ts["src/gherkin.ts<br>Gherkin features as data, and test skeletons written from them"]
-    n_src_postman_ts["src/postman.ts<br>a Postman collection of the operations the code calls; the runtime's SCAPI table read from node_modules, else the shipped one"]
   end
   subgraph n_views["views — one picture per question, and the reports; pure functions of the analysis"]
     n_src_views_ts["src/views.ts<br>the structural views and viewOf: the chain of pure steps after a view"]
@@ -47,6 +46,7 @@ flowchart LR
   subgraph n_exports["exports — the picture as text and files"]
     n_src_export_index_ts["src/export/index.ts<br>Mermaid, draw.io, Excalidraw, ArchiMate, JSON"]
     n_src_markdown_ts["src/markdown.ts<br>the Markdown of a picture, a shape, a line"]
+    n_src_postman_ts["src/postman.ts<br>a Postman collection of the operations the code calls, with their contracts as used"]
     n_src_export_mermaid_ts["src/export/mermaid.ts<br>the Mermaid of a picture: flowchart, sequence, class, C4, quadrant"]
     n_src_export_excalidraw_ts["src/export/excalidraw.ts<br>the Excalidraw scene, and the router of the lines around the shapes"]
   end
@@ -64,10 +64,10 @@ flowchart LR
     n_src_shape_keys_ts["src/shape-keys.ts<br>what a shape stands for and the view it opens, for the exports and the page"]
     n_src_run_hooks_ts["src/run-hooks.ts<br>the child process of a run: module hooks that trace and mock"]
     n_src_checks_ts["src/checks.ts<br>the contract check and the commands run after an agent"]
-    n_src_apis_ts["src/apis.ts<br>the operations of an external API a call names (SCAPI), the OCAPI hooks, the reader of the runtime's declarations"]
+    n_src_apis_ts["src/apis.ts<br>the operations of an external API a call names (SCAPI), the OCAPI hooks, the ids and labels"]
     n_src_contracts_ts["src/contracts.ts<br>the contract of an operation as the code uses it: what it sends, what it reads of the result"]
     n_src_scapi_table_ts["src/scapi-table.ts<br>the SCAPI families and operations of the storefront-next runtime, generated"]
-    n_src_scapi_runtime_ts["src/scapi-runtime.ts<br>the SCAPI table a repository works against: its runtime in node_modules, else the shipped one"]
+    n_src_scapi_runtime_ts["src/scapi-runtime.ts<br>the SCAPI table a repository works against: its runtime's declarations read in node_modules, else the shipped table"]
     n_src_collections_ts["src/collections.ts<br>the Postman collections of the repository as requests with routes, read against the code"]
   end
   subgraph n_extract["extract — the language frontends on tree-sitter"]
@@ -92,7 +92,7 @@ flowchart LR
     n_scripts_scapi_table_mjs["scripts/scapi-table.mjs<br>regenerates src/scapi-table.ts from a runtime's declarations, with core's reader"]
   end
   n_bin_archdiff_js --> n_src_cli_ts
-  n_scripts_scapi_table_mjs --> n_src_apis_ts
+  n_scripts_scapi_table_mjs --> n_src_scapi_runtime_ts
   n_src_cli_ts --> n_src_server_ts
   n_src_cli_ts --> n_src_views_ts
   n_src_cli_ts --> n_src_export_index_ts

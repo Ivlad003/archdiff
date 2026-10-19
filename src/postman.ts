@@ -12,11 +12,14 @@
 // a collection read against the code — is collections.ts and the `postman`
 // view.
 //
-// Entry points: `postmanCollection`.
+// Entry points: `postmanCollection`, `collectionName`.
 
+import { basename } from "node:path";
 import type { Analysis } from "./analyze.ts";
-import { API_LABELS, type ScapiTable } from "./apis.ts";
+import { operationLabel, API_LABELS, API_SHORT } from "./apis.ts";
 import { contractsOf, sendsLines, type ContractField, type ContractShape, type OperationContract } from "./contracts.ts";
+import { operationPath } from "./scapi-runtime.ts";
+import { counted } from "./words.ts";
 
 /** A Postman collection as its v2.1 schema writes it, as far as archdiff fills it. */
 export interface PostmanCollection {
@@ -44,47 +47,58 @@ export interface PostmanRequest {
 
 const SCHEMA = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json";
 
-/** The collection of every operation the code calls, or of one family's. */
-export function postmanCollection(analysis: Analysis, name: string, family: string | null = null): PostmanCollection {
+/** The name a collection is written with: the repository's directory and the API, the family when it is one family's. */
+export function collectionName(analysis: Analysis, family: string | null): string {
+  return `${basename(analysis.root)} — ${API_SHORT.scapi}${family ? ` ${family}` : ""}`;
+}
+
+/** The collection of every operation the code calls, or of one family's; null for a family the code calls no operation of. */
+export function postmanCollection(analysis: Analysis, family: string | null = null, name = collectionName(analysis, family)): PostmanCollection | null {
   const { table, source } = analysis.scapi;
   const contracts = [...contractsOf(analysis).values()].filter((contract) => family === null || contract.operation.family === family);
+
+  if (family !== null && contracts.length === 0) return null;
   const variables = new Map<string, string>([["baseUrl", "https://{{shortCode}}.api.commercecloud.salesforce.com"], ["shortCode", ""], ["organizationId", ""], ["siteId", ""], ["token", ""]]);
   const folders: PostmanFolder[] = [];
 
   for (const familyName of [...new Set(contracts.map((contract) => contract.operation.family))].sort()) {
     const spec = table[familyName];
-    const items = contracts.filter((contract) => contract.operation.family === familyName).map((contract) => requestOf(contract, spec, variables));
+    const items = contracts.filter((contract) => contract.operation.family === familyName).map((contract) => {
+      const made = requestOf(contract, table);
+
+      for (const variable of made.variables) if (!variables.has(variable)) variables.set(variable, "");
+
+      return made.request;
+    });
     folders.push({ name: familyName, description: spec ? `${API_LABELS.scapi}, base path ${spec.basePath}` : `${API_LABELS.scapi}; the family is not in ${source}: paths unknown`, item: items });
   }
 
-  const description = `The ${API_LABELS.scapi} operations ${analysis.root.split(/[\\/]/).pop() ?? "the repository"} calls, as archdiff read them: a request per operation with the parameters and the body the code sends, who calls it and what it reads of the result in the description. Paths from ${source}. Fill the variables: shortCode, organizationId, siteId, token (a SLAS access token), and each path parameter.`;
+  const description = `The ${API_LABELS.scapi} operations ${basename(analysis.root)} calls, as archdiff read them: a request per operation with the parameters and the body the code sends, who calls it and what it reads of the result in the description. Paths from ${source}. Fill the variables: shortCode, organizationId, siteId, token (a SLAS access token), and each path parameter.`;
 
   return { info: { name, description, schema: SCHEMA }, variable: [...variables].map(([key, value]) => ({ key, value })), item: folders };
 }
 
-/** The request of one operation: its URL from the family's spec, the query and body from what the code sends, the contract in the description. */
-function requestOf(contract: OperationContract, spec: ScapiTable[string] | undefined, variables: Map<string, string>): PostmanRequest {
+/** The request of one operation: its URL from the table, the query and body from what the code sends, the contract in the description; and the variables the URL and query name. */
+function requestOf(contract: OperationContract, table: Analysis["scapi"]["table"]): { request: PostmanRequest; variables: string[] } {
   const { operation } = contract;
-  const known = spec?.operations[operation.operation];
+  const known = operationPath(table, operation);
   // `{basketId}` of the path becomes the variable `{{basketId}}`.
-  const path = known ? `${spec!.basePath}${known.path}`.replace(/\{(\w+)\}/g, (_, name: string) => `{{${name}}}`) : `/${operation.family}/${operation.operation}`;
-
-  for (const match of path.matchAll(/\{\{(\w+)\}\}/g)) if (!variables.has(match[1]!)) variables.set(match[1]!, "");
+  const path = known ? known.path.replace(/\{(\w+)\}/g, (_, name: string) => `{{${name}}}`) : `/${operation.family}/${operation.operation}`;
+  const variables = [...path.matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1]!);
   const sent = contract.sends;
   // The query parameters the code sends, each a variable of its own name; `siteId` always, as every shopper API takes it.
   const queryKeys = Object.keys(fieldsAt(sent, ["params", "query"]) ?? fieldsAt(sent, ["parameters"]) ?? {}).filter((key) => !/^(organizationId|siteId)$/.test(key) && !pathHas(path, key));
   const query = [{ key: "siteId", value: "{{siteId}}" }, ...queryKeys.map((key) => ({ key, value: `{{${key}}}` }))];
-
-  for (const key of queryKeys) if (!variables.has(key)) variables.set(key, "");
+  variables.push(...queryKeys);
   const headers = [{ key: "Authorization", value: "Bearer {{token}}" }];
   const body = sent["body"];
   const raw = body ? exampleOf(body) : undefined;
 
   if (raw !== undefined) headers.push({ key: "Content-Type", value: "application/json" });
   const lines = [
-    known ? `${known.method} ${spec!.basePath}${known.path}` : `Path unknown: ${operation.family}.${operation.operation} is not among the runtime's declared operations; the URL is a placeholder.`,
+    known ? `${known.method} ${known.path}` : `Path unknown: ${operationLabel(operation)} is not among the runtime's declared operations; the URL is a placeholder.`,
     "",
-    `Called from: ${contract.callers.join(", ") || "no module directly"} (${contract.calls} call${contract.calls === 1 ? "" : "s"}).`,
+    `Called from: ${contract.callers.join(", ") || "no module directly"} (${counted(contract.calls, "call")}).`,
     ...(sendsLines(contract).length > 0 ? ["", "Sends:", ...sendsLines(contract).map((line) => `- ${line}`)] : []),
     ...(contract.reads.length > 0 ? ["", "Reads of the result:", ...contract.reads.map((read) => `- ${read.path}`)] : []),
     ...(contract.custom.length > 0 ? ["", `Custom attributes read: ${contract.custom.join(", ")}`] : []),
@@ -98,7 +112,7 @@ function requestOf(contract: OperationContract, spec: ScapiTable[string] | undef
 
   if (raw !== undefined) request.body = { mode: "raw", raw: JSON.stringify(raw, null, 2), options: { raw: { language: "json" } } };
 
-  return { name: operation.operation, request };
+  return { request: { name: operation.operation, request }, variables };
 }
 
 /** The fields under a path of keys in a contract shape, or null. */

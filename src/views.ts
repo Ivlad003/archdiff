@@ -15,7 +15,7 @@
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
 
 import type { Analysis } from "./analyze.ts";
-import type { HubThresholds } from "./config.ts";
+import { hubThreshold, type HubThresholds } from "./config.ts";
 import { SIZE, type Diagram, type Line, type PictureContent, type SequenceFragment, type Shape } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
@@ -28,7 +28,7 @@ import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
 import { logicList, logicView } from "./logic.ts";
-import { apiLane, depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, operationNode, unplaced } from "./nodes.ts";
+import { apiLanesOf, depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, operationNode, unplaced } from "./nodes.ts";
 import { defaultDepth, foldLimit, viewKey, type View } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
 import { branchesDiagram, timelineDiagram } from "./views-more.ts";
@@ -122,6 +122,14 @@ export function entryPoints(analysis: Analysis): EntryPoint[] {
       const node = declared.local ? (local?.kind === "fn" ? local : null) : exportedNode(declared.module, declared.exportName);
 
       if (node && !entries.has(node.id)) entries.set(node.id, declared.hook ? { node, label: declared.label, hook: declared.hook } : { node, label: declared.label });
+      // A hook whose script exports no function of the hook's name (`app.payment.processor.X` exports `Handle` and `Authorize`): every export is its entry.
+      else if (!node && declared.hook) {
+        for (const id of graph.resolvedExports.get(declared.module)?.values() ?? []) {
+          const exported = graph.nodes.get(id);
+
+          if (exported && exported.kind === "fn" && !entries.has(id)) entries.set(id, { node: exported, label: declared.label, hook: declared.hook });
+        }
+      }
     }
   }
 
@@ -366,7 +374,7 @@ function callsView(graph: Graph, id: string, depth: number): PictureContent {
   const lone = depth === 0 && callees > 0 ? `depth 0 draws ${name} alone, without the ${counted(callees, "function")} it calls (--depth 1 draws them)` : `${name} calls no function of the repository${outside > 0 ? `; its ${outside === 1 ? "call goes" : `${outside} calls go`} to packages, the language or values archdiff does not track` : ""}`;
   const alone = members.size === 1 && holes.length === 0 ? { reason: lone } : {};
 
-  return unplaced(`Calls from ${name}`, [...nodes, ...holes], edges, [...lanesOf(graph, [...nodes, ...holes]), ...(operations.size > 0 ? [apiLane("scapi")] : [])], alone);
+  return unplaced(`Calls from ${name}`, [...nodes, ...holes], edges, [...lanesOf(graph, [...nodes, ...holes]), ...apiLanesOf([...operations.values()])], alone);
 }
 
 /** The modules with calls into the repository archdiff could not follow (blind spots) or imports it could not resolve, by layer, labelled with the counts. */
@@ -546,6 +554,8 @@ const FRAGMENT_LEVELS = 3;
 const SELF_CALL = { out: 70, rise: 12, back: 6 } as const;
 /** Lifelines a sequence keeps apart; beyond it the picture is a wall of arrows (the usual guidance says 10–12). */
 const MAX_PARTICIPANTS = 12;
+/** How many times the message limit the walk goes to, so the cut can keep the operations and drop the deepest calls first. */
+const WALK_BUDGET = 25;
 
 /** A guard a message sits under, as a fragment frames it: the guarding statement's kind and its condition. */
 type SequenceGuard = { id: string; kind: GuardFact["kind"]; label: string };
@@ -585,7 +595,8 @@ function sequenceMessages(graph: Graph, id: string, depth: number, limit: number
   const guardsOf = (from: string, guards: readonly GuardFact[] | undefined): SequenceGuard[] => (guards ?? []).map((guard) => ({ id: `${from}:${guard.id}`, kind: guard.kind, label: guard.kind === "loop" || guard.kind === "if" || guard.kind === "else" ? guard.text : guard.text === "" || guard.text === guard.kind ? guard.kind : `${guard.kind} ${guard.text}` }));
 
   // The walk goes well past the limit, so the cut can leave the deepest calls out first rather than the last ones.
-  const budget = limit * 25;
+  const budget = limit * WALK_BUDGET;
+  const stopped = new Set<string>();
 
   const walk = (from: string, level: number, inherited: SequenceGuard[], parent: number | null): void => {
     if (level >= depth || messages.length >= budget) return;
@@ -616,7 +627,6 @@ function sequenceMessages(graph: Graph, id: string, depth: number, limit: number
     active.delete(from);
   };
 
-  const stopped = new Set<string>();
   walk(id, 0, [], null);
 
   return { messages: cutToLimit(messages, limit), stopped: [...stopped].sort() };
@@ -887,7 +897,7 @@ function hubModules(graph: Graph, thresholds: HubThresholds): Set<string> {
   const importers = new Map<string, Set<string>>();
 
   for (const dep of graph.deps) if (graph.modules.has(dep.to) && dep.from !== dep.to && !dep.typeOnly) importers.set(dep.to, new Set([...(importers.get(dep.to) ?? []), dep.from]));
-  const threshold = Math.max(thresholds.min, Math.min(thresholds.max, Math.ceil(graph.modules.size * thresholds.share)));
+  const threshold = hubThreshold(graph.modules.size, thresholds);
   // Up from the operations' callers, three calls: the modules of what reaches an operation.
   const callers = new Map<string, string[]>();
 

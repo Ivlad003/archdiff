@@ -12,9 +12,10 @@
 // operations the graph recorded. Plain data and pure functions.
 //
 // Entry points: `operationOf`, `hookOf`, `familyId`, `operationId`,
-// `API_LABELS`, `isApiId`.
+// `operationFromId`, `parseApiId`, `isApiId`, `operationLabel`,
+// `participantLabel`, `API_LABELS`, `API_SHORT`, `SCAPI`.
 
-import type { CallFact } from "./extract/facts.ts";
+import { MEMBER_FORMS, type CallFact } from "./extract/facts.ts";
 
 /** An operation of an external API: SCAPI's `ShopperBaskets.getBasket`. */
 export interface ApiOperation {
@@ -38,9 +39,17 @@ export interface ApiHook {
   families: string[];
 }
 
+/** The one API archdiff knows today: the hooks of a cartridge are joined to its families. */
+export const SCAPI: ApiOperation["api"] = "scapi";
+
 /** The name an API is drawn with, and its short form for a label's second line. */
 export const API_LABELS: Record<ApiOperation["api"], string> = { scapi: "Salesforce Commerce API (SCAPI)" };
 export const API_SHORT: Record<ApiOperation["api"], string> = { scapi: "SCAPI" };
+
+/** An operation as a label: `ShopperBaskets.getBasket`. */
+export function operationLabel(operation: ApiOperation): string {
+  return `${operation.family}.${operation.operation}`;
+}
 
 /** `shopperBasketsV2`, `shopperProducts`: an SCAPI client as the runtime's `AppClients` and the SDK name them. */
 const SCAPI_CLIENT = /^shopper[A-Z][A-Za-z0-9]*$/;
@@ -51,24 +60,24 @@ const SCAPI_TYPE = /^Shopper[A-Z][A-Za-z0-9]*$/;
  * The operation a call names, or null: `clients.shopperBaskets.getBasket()`,
  * `this.clients.shopperOrders.getOrder()`, a destructured `shopperProducts.getProducts()`
  * (the client's name before the operation), or a call on a value typed with a client's class
- * (`baskets: ShopperBasketsV2`). Asked of a call the graph could not follow into the repository,
- * so a class of the repository named like a client keeps its own calls.
+ * (`baskets: ShopperBasketsV2`) — when the family is one the SCAPI table knows (`families`), so a
+ * store named `shopperStore` is no API. Asked of a call the graph could not follow into the
+ * repository, so a class of the repository named like a client keeps its own calls.
  */
-export function operationOf(call: Pick<CallFact, "callee" | "form">): ApiOperation | null {
+export function operationOf(call: Pick<CallFact, "callee" | "form">, families: ReadonlySet<string>): ApiOperation | null {
   const { form } = call;
+  const known = (family: string, operation: string): ApiOperation | null => (families.has(family) && /^[a-z][A-Za-z0-9]*$/.test(operation) ? { api: SCAPI, family, operation } : null);
 
-  if (form.kind === "typed") return SCAPI_TYPE.test(form.type) && /^[a-z]/.test(form.member) ? { api: "scapi", family: form.type.replace(/Client$/, ""), operation: form.member } : null;
+  if (form.kind === "typed") return SCAPI_TYPE.test(form.type) ? known(form.type.replace(/Client$/, ""), form.member) : null;
 
-  if (form.kind !== "value" && form.kind !== "member") return null;
+  if (!MEMBER_FORMS.has(form.kind)) return null;
   const parts = call.callee.split(".");
 
   if (parts.length < 2) return null;
   const operation = parts[parts.length - 1]!;
   const client = parts[parts.length - 2]!;
 
-  if (!SCAPI_CLIENT.test(client) || !/^[a-z][A-Za-z0-9]*$/.test(operation)) return null;
-
-  return { api: "scapi", family: client[0]!.toUpperCase() + client.slice(1), operation };
+  return SCAPI_CLIENT.test(client) ? known(client[0]!.toUpperCase() + client.slice(1), operation) : null;
 }
 
 /** The SCAPI families serving an OCAPI resource (the first segment of a nested one: `basket.billing_address` is the basket's). */
@@ -145,33 +154,3 @@ export interface ScapiFamilySpec {
 }
 
 export type ScapiTable = Record<string, ScapiFamilySpec>;
-
-/**
- * The SCAPI table read from the runtime's `scapi.d.ts` (openapi-typescript output): `BUILT_IN_CLIENT_DEFAULTS` gives each
- * client key its base path, the clients record binds a family's `endpoints` to its `operations$N` table, and each table
- * lists an operation's method, base and suffix. Empty when the text holds none of these.
- */
-export function scapiTableFromDts(text: string): ScapiTable {
-  const defaults = /declare const BUILT_IN_CLIENT_DEFAULTS: \{([\s\S]*?)\n\};/.exec(text)?.[1] ?? "";
-  const bases = new Map<string, string>();
-
-  for (const match of defaults.matchAll(/readonly (\w+): \{\s*readonly basePath: "([^"]+)";/g)) bases.set(match[1]!, match[2]!);
-  const tables = new Map<string, string>();
-
-  for (const match of text.matchAll(/declare const (operations\$\d+): \{([\s\S]*?)\n\};/g)) tables.set(match[1]!, match[2]!);
-  const families: ScapiTable = {};
-
-  for (const match of text.matchAll(/(\w+): ProxyClient<Client<(\w+)\.endpoints>, typeof (operations\$\d+)>;/g)) {
-    const [, key, family, table] = match;
-    const basePath = bases.get(key!);
-    const body = tables.get(table!);
-
-    if (!basePath || body === undefined) continue;
-    const operations: ScapiFamilySpec["operations"] = {};
-
-    for (const op of body.matchAll(/readonly (\w+): \{\s*readonly m: "(\w+)";\s*readonly b: "([^"]*)";\s*readonly s: "([^"]*)";/g)) operations[op[1]!] = { method: op[2]!, path: op[3]! + op[4]! };
-    families[family!] = { basePath, operations };
-  }
-
-  return families;
-}

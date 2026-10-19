@@ -1485,11 +1485,16 @@ test("APIs: the SCAPI operations the code calls are shapes, storages, messages a
   assert.ok(views.includes("basket.js#modifyGETResponse\tmodifyGETResponse (cartridges/app/cartridge/scripts/hooks/basket.js) — hook dw.ocapi.shop.basket.modifyGETResponse") && views.includes("basket.js#beforePOST\tbeforePOST (cartridges/app/cartridge/scripts/hooks/basket.js) — hook dw.ocapi.shop.basket.beforePOST"), views);
   const overview = archdiff(["diagram", "apis", scapi, "--format", "mermaid"]).stdout;
   assert.ok(overview.includes('subgraph "Salesforce Commerce API (SCAPI)"') && overview.includes('api_scapi_ShopperBasketsV2[("ShopperBasketsV2<br/>3 operations · 3 calls")]'), overview);
-  assert.ok(overview.includes("src_lib_cart_ts ==> api_scapi_ShopperBasketsV2") && overview.includes('hooks_basket_js_modifyGETResponse ==>|"modify GET response basket"| api_scapi_ShopperBasketsV2'), overview);
+  assert.ok(overview.includes("src_lib_cart_ts ==> api_scapi_ShopperBasketsV2") && overview.includes('hooks_basket_js_modifyGETResponse ==>|"modify GET response basket (by resource)"| api_scapi_ShopperBasketsV2'), overview);
+  // The resource's other family (ShopperBaskets v1) is served by the hook too, but the code calls none of it: no box for it.
+  assert.ok(!overview.includes("api_scapi_ShopperBaskets[("), overview);
+  // A hook whose script exports no function of the hook's name: every export of the script is its entry; a store named like a client is no API.
+  assert.ok(views.includes("payment.js#Handle\tHandle (cartridges/app/cartridge/scripts/hooks/payment.js) — hook app.payment.processor.BASIC_CREDIT") && views.includes("payment.js#Authorize\tAuthorize (cartridges/app/cartridge/scripts/hooks/payment.js) — hook app.payment.processor.BASIC_CREDIT"), views);
+  assert.ok(!views.includes("apis:ShopperStore"), views);
   // A family: its operations with their calls, the functions calling them; a GET hook on the get… operations, a POST one on add…, never the other way.
   const family = archdiff(["diagram", "apis:ShopperBasketsV2", scapi, "--format", "mermaid"]).stdout;
   assert.ok(family.includes('api_scapi_ShopperBasketsV2_getBasket[("getBasket<br/>1 call")]') && family.includes("src_lib_cart_ts_addToCart ==> api_scapi_ShopperBasketsV2_getBasket"), family);
-  assert.ok(family.includes('modifyGETResponse ==>|"modify GET response"| api_scapi_ShopperBasketsV2_getBasket') && family.includes('beforePOST ==>|"before POST"| api_scapi_ShopperBasketsV2_addItemToBasket') && !family.includes('beforePOST ==>|"before POST"| api_scapi_ShopperBasketsV2_getBasket'), family);
+  assert.ok(family.includes('modifyGETResponse ==>|"modify GET response (by resource)"| api_scapi_ShopperBasketsV2_getBasket') && family.includes('beforePOST ==>|"before POST (by resource)"| api_scapi_ShopperBasketsV2_addItemToBasket') && !family.includes('beforePOST ==>|"before POST (by resource)"| api_scapi_ShopperBasketsV2_getBasket'), family);
   // A client typed with the SDK's class (`orders: ShopperOrders`) names an operation too; a module has the view of its own operations.
   const module = archdiff(["diagram", "apis:src/lib/orders.ts", scapi, "--format", "mermaid"]).stdout;
   assert.ok(module.includes("src_lib_orders_ts_findOrder ==> api_scapi_ShopperOrders_getOrder"), module);
@@ -1504,7 +1509,9 @@ test("APIs: the SCAPI operations the code calls are shapes, storages, messages a
   // Coverage counts them as operations of an API, not as blind spots.
   const coverage = JSON.parse(archdiff(["coverage", scapi, "--json"]).stdout) as { byReason: Record<string, number>; blind: number };
   assert.equal(coverage.byReason["api"], 5);
-  assert.equal(coverage.blind, 0);
+  // `shopperStore.getState()` is an object literal's method: a blind spot, not an operation.
+  assert.equal(coverage.byReason["unknown-member"], 1);
+  assert.equal(coverage.blind, 1);
 });
 
 test("apis: the contract of each operation as used — what the code sends, what it reads of the result, through the functions that return it — and the custom attributes", () => {
@@ -1544,24 +1551,27 @@ test("postman: a collection of the operations the code calls, a folder per famil
   // One family only, and nothing for a family the code does not call.
   const one = JSON.parse(archdiff(["postman", scapi, "--family", "ShopperOrders"]).stdout) as { item: { name: string }[] };
   assert.deepEqual(one.item.map((folder) => folder.name), ["ShopperOrders"]);
-  assert.deepEqual((JSON.parse(archdiff(["postman", scapi, "--family", "Nope"]).stdout) as { item: unknown[] }).item, []);
+  const nope = archdiff(["postman", scapi, "--family", "Nope"]);
+  assert.equal(nope.status, 2);
+  assert.ok(nope.stderr.includes('the code calls no operation of "Nope"'), nope.stderr);
 });
 
 test("postman view: a collection read against the code — the requests the code calls joined to their callers, the ones it never calls red, the operations it calls that the collection lacks green; a collection archdiff wrote matches whole", () =>
   withTempDir("archdiff-postman-view-", (dir) => {
     cpSync(join(root, "tests/fixtures/scapi"), dir, { recursive: true });
     const views = archdiff(["views", dir]).stdout;
-    assert.ok(views.includes("postman\tPostman: 1 collection against the code") && views.includes("postman:postman/cart.postman_collection.json\tCart (postman/cart.postman_collection.json) — 4 requests"), views);
+    assert.ok(views.includes("postman\tPostman: 1 collection against the code") && views.includes("postman:postman/cart.postman_collection.json\tCart (postman/cart.postman_collection.json) — 5 requests"), views);
     const picture = JSON.parse(archdiff(["diagram", "postman", dir, "--format", "json"]).stdout) as { title: string; reason?: string; nodes: { id: string; label: string; diff?: string; group?: string }[]; edges: { from: string; to: string }[] };
-    assert.equal(picture.title, "Postman: Cart against the code — 2 of 4 requests called, 3 operations not in it");
-    // `{{organizationId}}`, `:basketId` and `{basketId}` are one route: Get basket and Add item are called from cart.ts.
+    assert.equal(picture.title, "Postman: Cart against the code — 3 of 5 requests called, 2 operations not in it");
+    // `{{organizationId}}`, `:basketId` and `{basketId}` are one route; a URL written as an object (protocol, host, path) is one too: three requests are called from cart.ts.
     const byLabel = (start: string) => picture.nodes.find((node) => node.label.startsWith(start))!;
-    assert.deepEqual(picture.edges.map((edge) => [edge.from, picture.nodes.find((node) => node.id === edge.to)?.label.split("\n")[0]]), [["src/lib/cart.ts", "GET Get basket"], ["src/lib/cart.ts", "POST Add item"]]);
+    assert.deepEqual(picture.edges.map((edge) => [edge.from, picture.nodes.find((node) => node.id === edge.to)?.label.split("\n")[0]]), [["src/lib/cart.ts", "GET Get basket"], ["src/lib/cart.ts", "POST Add item"], ["src/lib/cart.ts", "PATCH Update basket"]]);
     assert.equal(byLabel("GET Get basket").diff, undefined);
+    assert.equal(byLabel("PATCH Update basket").diff, undefined);
     assert.equal(byLabel("DELETE Delete basket").diff, "removed");
     assert.equal(byLabel("GET Loyalty points").diff, "removed");
-    assert.deepEqual(picture.nodes.filter((node) => node.diff === "added").map((node) => node.label.split("\n")[0]).sort(), ["ShopperBasketsV2.updateBasket", "ShopperOrders.getOrder", "ShopperProducts.getProduct"]);
-    assert.ok(picture.reason?.startsWith("2 requests the code never calls (red): DELETE Delete basket, GET Loyalty points; 3 operations the code calls that the collection lacks (green): "), picture.reason);
+    assert.deepEqual(picture.nodes.filter((node) => node.diff === "added").map((node) => node.label.split("\n")[0]).sort(), ["ShopperOrders.getOrder", "ShopperProducts.getProduct"]);
+    assert.ok(picture.reason?.startsWith("2 requests the code never calls (red): DELETE Delete basket, GET Loyalty points; 2 operations the code calls that the collection lacks (green): "), picture.reason);
     // The collection archdiff writes, read back: every request called, nothing missing.
     mkdirSync(join(dir, "postman"), { recursive: true });
     writeFileSync(join(dir, "postman/all.postman_collection.json"), archdiff(["postman", dir]).stdout);
@@ -1569,6 +1579,33 @@ test("postman view: a collection read against the code — the requests the code
     assert.ok(own.title.endsWith(" — SCAPI against the code — 5 of 5 requests called, 0 operations not in it"), own.title);
     assert.ok(own.nodes.every((node) => node.diff === undefined), JSON.stringify(own.nodes.filter((node) => node.diff)));
     assert.equal(archdiff(["diagram", "postman:nope.json", dir]).status, 2);
+  }));
+
+test("an import of a source the analysis left out (a hidden directory) is no module and no unresolved import: the coverage report counts it", () =>
+  withTempDir("archdiff-left-out-", (dir) => {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    mkdirSync(join(dir, ".tooling"), { recursive: true });
+    writeFileSync(join(dir, ".tooling/helper.ts"), "export function helper(): number {\n  return 1;\n}\n");
+    writeFileSync(join(dir, "src/a.ts"), 'import { helper } from "../.tooling/helper";\nexport function a(): number {\n  return helper();\n}\n');
+    const report = JSON.parse(archdiff(["coverage", dir, "--json"]).stdout) as { unresolvedImports: number; leftOutImports: number; markdown: string };
+    assert.equal(report.unresolvedImports, 0);
+    assert.equal(report.leftOutImports, 1);
+    assert.ok(report.markdown.includes("## Sources left out\n") && report.markdown.includes("- .tooling/helper.ts ← src/a.ts:1 (`../.tooling/helper`)"), report.markdown);
+  }));
+
+test("archdiff.json names a Postman collection that is not there or is no collection: the error names the field and the file", () =>
+  withTempDir("archdiff-postman-config-", (dir) => {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/a.ts"), "export const a = 1;\n");
+    writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ postman: ["postman/nope.json"] }));
+    const missing = archdiff(["views", dir]);
+    assert.equal(missing.status, 2);
+    assert.ok(missing.stderr.includes('archdiff.json: "postman" names a file that is not there: postman/nope.json'), missing.stderr);
+    mkdirSync(join(dir, "postman"), { recursive: true });
+    writeFileSync(join(dir, "postman/nope.json"), JSON.stringify({ not: "a collection" }));
+    const wrong = archdiff(["views", dir]);
+    assert.equal(wrong.status, 2);
+    assert.ok(wrong.stderr.includes('archdiff.json: "postman": postman/nope.json is not a Postman collection'), wrong.stderr);
   }));
 
 test("a sequence frames an if with its else, a try with its catch and a loop as alt and loop fragments, with the operations of an API on their family's lifeline", () => {

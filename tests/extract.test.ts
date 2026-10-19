@@ -230,6 +230,7 @@ test("TypeScript: what a member call sends (its object literal, key by key), wha
     `export async function addItem(clients: AppClients, basketId: string, item: ProductItem) {
   const { data: basket } = await clients.shopperBasketsV2.addItemToBasket({ params: { path: { basketId }, query: { locale: "en-US" } }, body: [item] });
   const names = basket.productItems.map((line) => line.productName);
+  const sum = basket.productItems.reduce((acc, line) => acc + line.price, 0);
   return basket;
 }
 export async function total(clients: AppClients) {
@@ -242,7 +243,7 @@ export async function total(clients: AppClients) {
   const call = addItem!.calls.find((candidate) => candidate.callee === "clients.shopperBasketsV2.addItemToBasket")!;
   assert.deepEqual(call.shape, { params: { kind: "object", fields: { path: { kind: "object", fields: { basketId: { kind: "name", text: "basketId", type: "string" } } }, query: { kind: "object", fields: { locale: { kind: "string", text: "en-US" } } } } }, body: { kind: "array", items: { kind: "name", text: "item", type: "ProductItem" } } });
   // The destructured `basket` is `data` of the result; the callback's parameter an element of `productItems`; `return basket` returns `data`.
-  assert.deepEqual(facts.reads?.map((read) => [read.callee, read.path.join("."), read.callLine]), [["clients.shopperBasketsV2.addItemToBasket", "data.productItems", 2], ["clients.shopperBasketsV2.addItemToBasket", "data.productItems.productName", 2], ["addItem", "orderTotal", 7]]);
+  assert.deepEqual(facts.reads?.map((read) => [read.callee, read.path.join("."), read.callLine]), [["clients.shopperBasketsV2.addItemToBasket", "data.productItems", 2], ["clients.shopperBasketsV2.addItemToBasket", "data.productItems.productName", 2], ["addItem", "orderTotal", 8]]);
   assert.deepEqual(addItem!.returnsFrom, { callee: "clients.shopperBasketsV2.addItemToBasket", form: { kind: "value" }, path: ["data"], callLine: 2 });
-  assert.deepEqual(total!.returnsFrom, { callee: "addItem", form: { kind: "name", name: "addItem" }, path: ["orderTotal"], callLine: 7 });
+  assert.deepEqual(total!.returnsFrom, { callee: "addItem", form: { kind: "name", name: "addItem" }, path: ["orderTotal"], callLine: 8 });
 });

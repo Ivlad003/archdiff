@@ -7,10 +7,17 @@
 // Reads dist/scapi.d.ts and package.json of that directory; writes src/scapi-table.ts.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { scapiTableFromDts } from "../src/apis.ts";
+import { scapiTableFromDts } from "../src/scapi-runtime.ts";
 
 const directory = resolve(process.argv[2] ?? "node_modules/@salesforce/storefront-next-runtime");
-const version = JSON.parse(readFileSync(join(directory, "package.json"), "utf8")).version;
+const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+const version = manifest !== null && typeof manifest === "object" && typeof manifest.version === "string" ? manifest.version : null;
+
+if (version === null) {
+  console.error(`${join(directory, "package.json")}: no "version" string`);
+  process.exit(2);
+}
+
 const table = scapiTableFromDts(readFileSync(join(directory, "dist", "scapi.d.ts"), "utf8"));
 const count = Object.values(table).reduce((sum, family) => sum + Object.keys(family.operations).length, 0);
 

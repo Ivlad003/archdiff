@@ -22,8 +22,7 @@
       "src/spec.ts",
       "src/scaffold.ts",
       "src/run.ts",
-      "src/gherkin.ts",
-      "src/postman.ts"
+      "src/gherkin.ts"
     ],
     "views": [
       "src/views.ts",
@@ -45,7 +44,8 @@
     ],
     "exports": [
       "src/export/**",
-      "src/markdown.ts"
+      "src/markdown.ts",
+      "src/postman.ts"
     ],
     "diagram": [
       "src/diagram.ts",

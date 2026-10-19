@@ -1,14 +1,88 @@
 {
-  "info": { "name": "Cart", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+  "info": {
+    "name": "Cart",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
   "item": [
     {
       "name": "Baskets",
       "item": [
-        { "name": "Get basket", "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/checkout/shopper-baskets/v2/organizations/{{organizationId}}/baskets/{{basketId}}?siteId={{siteId}}", "host": ["{{baseUrl}}"], "path": ["checkout", "shopper-baskets", "v2", "organizations", "{{organizationId}}", "baskets", "{{basketId}}"] } } },
-        { "name": "Add item", "request": { "method": "POST", "url": "https://{{shortCode}}.api.commercecloud.salesforce.com/checkout/shopper-baskets/v2/organizations/:organizationId/baskets/:basketId/items?siteId={{siteId}}", "body": { "mode": "raw", "raw": "[{\"productId\": \"p1\", \"quantity\": 1}]" } } },
-        { "name": "Delete basket", "request": { "method": "DELETE", "url": "{{baseUrl}}/checkout/shopper-baskets/v2/organizations/{{organizationId}}/baskets/{{basketId}}" } }
+        {
+          "name": "Get basket",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/checkout/shopper-baskets/v2/organizations/{{organizationId}}/baskets/{{basketId}}?siteId={{siteId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout",
+                "shopper-baskets",
+                "v2",
+                "organizations",
+                "{{organizationId}}",
+                "baskets",
+                "{{basketId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add item",
+          "request": {
+            "method": "POST",
+            "url": "https://{{shortCode}}.api.commercecloud.salesforce.com/checkout/shopper-baskets/v2/organizations/:organizationId/baskets/:basketId/items?siteId={{siteId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"productId\": \"p1\", \"quantity\": 1}]"
+            }
+          }
+        },
+        {
+          "name": "Delete basket",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/checkout/shopper-baskets/v2/organizations/{{organizationId}}/baskets/{{basketId}}"
+          }
+        },
+        {
+          "name": "Update basket",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "protocol": "https",
+              "host": [
+                "{{shortCode}}",
+                "api",
+                "commercecloud",
+                "salesforce",
+                "com"
+              ],
+              "path": [
+                "checkout",
+                "shopper-baskets",
+                "v2",
+                "organizations",
+                "{{organizationId}}",
+                "baskets",
+                "{{basketId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        }
       ]
     },
-    { "name": "Loyalty points", "request": { "method": "GET", "url": "{{baseUrl}}/custom/loyalty/v1/organizations/{{organizationId}}/points" } }
+    {
+      "name": "Loyalty points",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/custom/loyalty/v1/organizations/{{organizationId}}/points"
+      }
+    }
   ]
 }

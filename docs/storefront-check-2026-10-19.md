@@ -36,6 +36,10 @@
 4. Хук SFCC входить через експорт, названий у хуку (`exports.modifyGETResponse`), а не через всі експорти скрипта.
 5. Фікстура `tests/fixtures/scapi`, тести CLI (вид `apis`, дерево/шлях/flow/coverage з операціями, фрагменти `alt`), документація: README, CHANGELOG, CONTEXT (термін **Operation**), спеки `views` і `analysis`.
 
+## Решта фіч (smoke-прогін, без окремої перевірки бізнес-логіки)
+
+Окрім чотирьох картин вище, той самий день прогнав на storefront кожну команду CLI (`$S/smoke-one.mjs`, 82 з 83 команд: `metrics`, `classes`, `machines`, `events`, `messages`, `packages`, `cycles`, `matrix`, `tests`, `review`/`history`/`compare`, `coverage`, `intent`, експорти Mermaid/draw.io/Excalidraw/ArchiMate; відмова лише `run` SFCC-хука — платформа `dw/*` не Node) і сторінку в headless Chrome (18 видів, 0.9–3.1 с, без помилок консолі; карта проєкту 1.9 с). Їхній зміст на storefront не звірявся з бізнес-логікою так детально, як `sequence`/`logic`/`calls`/`path`.
+
 ## Межі й наступні кроки
 
 - Адаптер знає SCAPI за конвенцією імен клієнтів (`AppClients` runtime-у та commerce-sdk-isomorphic); інший SDK потребує свого рядка в таблиці (`apis.ts`).
