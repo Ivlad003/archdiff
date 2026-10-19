@@ -23,7 +23,7 @@
 // Entry points: `extractPhp`, `NAME_ARG_MEMBERS`.
 
 import { asciiLowerCase } from "../languages.ts";
-import { boundForm, passable, type ArgFact, type AttributeFact, type CallFact, type ChainLinkFact, type DeclFact, type ExportRow, type FieldFact, type FileFacts, type ImportFact, type LiteralFact, type MethodSigFact, type ParamFact, type PassFact, type PropertyFact, type ResultTypeFact, type TypeRefFact, type UnsupportedFact, type ValueOfFact, type ValueRefFact } from "./facts.ts";
+import { boundForm, passable, type CallFact, type DeclFact, type ExportRow, type FieldFact, type FileFacts, type ImportFact, type LiteralFact, type PassFact, type PropertyFact, type ResultTypeFact, type TypeRefFact, type UnsupportedFact, type ValueOfFact, type ValueRefFact } from "./facts.ts";
 import { blockCommentBody, isLicense, jsdocDescription, nonEmpty } from "./doc-comments.ts";
 import { errorLine, fingerprintFacts, located, startCol, unsupportedAt, valuesFingerprint, withTree, type Node } from "./treesitter.ts";
 
@@ -42,7 +42,7 @@ const CONSTRUCTS = new Set(["isset", "empty"]);
 /** Grammar nodes that call something: a function, a method (`->`, `?->`, `::`) or a constructor (`new`). */
 const CALL_NODES = new Set(["function_call_expression", "member_call_expression", "nullsafe_member_call_expression", "scoped_call_expression", "object_creation_expression"]);
 
-/** Values whose code runs later, when they are called or instantiated: calls inside them are marked `closure`. */
+/** Values whose code runs later, when they are called or instantiated. */
 const CLOSURE_NODES = new Set(["anonymous_function", "arrow_function", "anonymous_class"]);
 
 /** Named top-level declarations: each becomes a `DeclFact` and a symbol of the namespace. */
@@ -240,7 +240,7 @@ function extractTree(path: string, root: Node): FileFacts {
       }
 
       // Code outside declarations runs when the file is included.
-      facts.moduleCalls.push(...callsIn(node, { names, ctx: null, bound: new Map(), vars: () => null, symbol: null }, collector, false));
+      facts.moduleCalls.push(...callsIn(node, { names, ctx: null, bound: new Map(), vars: () => null, symbol: null }, collector));
     }
   }
 
@@ -490,16 +490,11 @@ function declarationOf(node: Node, names: Names, collector: Collector): DeclFact
 
   if (node.type === "interface_declaration") {
     // An interface is a type: a call through a value typed with it stays a gap, as in TypeScript.
-    // What its methods return is a fact every class implementing it keeps (PHP checks it).
-    const methods = interfaceMethods(node, names, collector);
-
     const decl: DeclFact = { kind: "type", name, line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol, signature: null, exported: true, calls: [], types, members: [], ...fingerprintFacts(node) };
 
     if (supers.length > 0) decl.implements = supers;
 
     if (doc !== undefined) decl.doc = doc;
-
-    if (methods.length > 0) decl.methods = methods;
 
     return decl;
   }
@@ -515,7 +510,6 @@ function declarationOf(node: Node, names: Names, collector: Collector): DeclFact
   /** Properties the constructor settled: typed, or an unsupported fact for conflicting classes. */
   const decided = new Set<string>();
   const traits: string[] = [];
-  const traitRules: NonNullable<DeclFact["traitRules"]> = [];
   /** Property → the constructor parameter assigned to it; null when assignments disagree or are no parameter. */
   const params = new Map<string, string | null>();
 
@@ -554,7 +548,7 @@ function declarationOf(node: Node, names: Names, collector: Collector): DeclFact
         traits.push(local);
       }
 
-      // `{ Loud::hello insteadof Quiet; Quiet::hello as whisper; }`: which trait's method the class takes.
+      // `{ Loud::hello insteadof Quiet; Quiet::hello as whisper; }`: every trait a conflict rule names is a dependency too.
       for (const clause of item.namedChildren.find((c) => c.type === "use_list")?.namedChildren ?? []) {
         if (clause.type !== "use_instead_of_clause" && clause.type !== "use_as_clause") continue;
         const [subject, ...rest] = clause.namedChildren;
@@ -563,26 +557,15 @@ function declarationOf(node: Node, names: Names, collector: Collector): DeclFact
         // The subject is `Trait::method` (the grammar reads it as a constant access) or a bare `method`.
         const qualified = subject.type === "class_constant_access_expression" ? subject.namedChildren : null;
         const traitName = qualified ? classNameOf(qualified[0] ?? null) : null;
-        const method = qualified ? qualified[1]?.text : subject.type === "name" ? subject.text : undefined;
 
-        if (!method) continue;
-        const trait = traitName ? collector.klass(traitName, qualified![0]!, names) : null;
+        if (traitName) collector.klass(traitName, qualified![0]!, names);
 
-        if (clause.type === "use_instead_of_clause") {
-          const insteadof: string[] = [];
+        if (clause.type !== "use_instead_of_clause") continue;
 
-          for (const other of rest) {
-            const written = classNameOf(other);
+        for (const other of rest) {
+          const written = classNameOf(other);
 
-            if (written) insteadof.push(collector.klass(written, other, names));
-          }
-
-          if (trait) traitRules.push({ trait, method, insteadof });
-        } else {
-          // `as protected whisper` and `as whisper`: the new name is the last name; a visibility-only `as` has none.
-          const alias = rest.filter((c) => c.type === "name").at(-1)?.text;
-
-          if (alias) traitRules.push({ trait, method, alias });
+          if (written) collector.klass(written, other, names);
         }
       }
     }
@@ -634,7 +617,6 @@ function declarationOf(node: Node, names: Names, collector: Collector): DeclFact
     }
   }
 
-  const attributes = attributesOf(node, names, self);
   const ctx: ClassContext = { name, statics, fields, params: filled };
   const members: DeclFact[] = [];
 
@@ -646,9 +628,6 @@ function declarationOf(node: Node, names: Names, collector: Collector): DeclFact
     // PHP names the constructor in any case; its ID is `<class>.__construct`, the name `new X()` runs.
     const member = asciiLowerCase(written) === "__construct" ? "__construct" : written;
     const decl = fnDecl(method, member, names, ctx, collector, `${name}.${member}`);
-    const own = attributesOf(method, names, self);
-
-    if (own.length > 0) decl.attributes = own;
     // A method without a visibility modifier is public in PHP.
     const visibility = asciiLowerCase(method.namedChildren.find((c) => c.type === "visibility_modifier")?.text ?? "");
     decl.exported = visibility !== "private" && visibility !== "protected";
@@ -667,13 +646,9 @@ function declarationOf(node: Node, names: Names, collector: Collector): DeclFact
 
   if (traits.length > 0) decl.traits = traits;
 
-  if (traitRules.length > 0) decl.traitRules = traitRules;
-
   if (supers.length > 0) decl.implements = supers;
 
   if (doc !== undefined) decl.doc = doc;
-
-  if (attributes.length > 0) decl.attributes = attributes;
 
   if (properties.length > 0) decl.properties = properties;
 
@@ -691,27 +666,6 @@ function fieldFact(name: string, field: FieldType): FieldFact {
   if (field.docblock) fact.docblock = field.docblock;
 
   return fact;
-}
-
-/** The methods of an interface with their result types. */
-function interfaceMethods(node: Node, names: Names, collector: Collector): MethodSigFact[] {
-  const out: MethodSigFact[] = [];
-
-  for (const item of node.childForFieldName("body")?.namedChildren ?? []) {
-    if (item.type !== "method_declaration") continue;
-    const name = item.childForFieldName("name")?.text;
-
-    if (!name) continue;
-    const result = resultOf(item, names, collector);
-    const sig: MethodSigFact = { name };
-
-    if (item.namedChildren.some((c) => c.type === "static_modifier")) sig.static = true;
-
-    if (result) sig.result = result;
-    out.push(sig);
-  }
-
-  return out;
 }
 
 /**
@@ -1091,10 +1045,7 @@ function resultCall(n: Node, scope: Scope, collector: Collector): ValueOfFact | 
   const nameNode = n.type === "function_call_expression" ? n.childForFieldName("function") : n.childForFieldName("name");
 
   if (nameNode?.type !== "name" && nameNode?.type !== "qualified_name") return null;
-  const args = argsOf(n, scope.names, scope.ctx ? qualify(scope.names.ns, scope.ctx.name) : null);
-
-  // Arguments are kept only when one of them is an informative literal, as on a call fact.
-  const value: ValueOfFact = args.some((a) => informative(a.value)) ? { call: fact.form, args } : { call: fact.form };
+  const value: ValueOfFact = { call: fact.form };
 
   if (fact.docblock) value.docblock = fact.docblock;
 
@@ -1164,14 +1115,12 @@ function fnDecl(node: Node, name: string, names: Names, ctx: ClassContext | null
     bindings.set(variable, [...(bindings.get(variable) ?? []), binding]);
   };
 
-  const self = ctx ? qualify(names.ns, ctx.name) : null;
-  const paramFacts: ParamFact[] = [];
   const paramDocs = new Map<string, DocType>();
 
   // `@param Type $name` (also `...$name`, `&$name`): the first tag per parameter wins.
   for (const doc of docTags(node, collector.header, /@param\s+(\S+)\s+(?:\.\.\.)?&?\$([A-Za-z_\x80-\uffff][A-Za-z0-9_\x80-\uffff]*)/)) if (doc.name && !paramDocs.has(doc.name)) paramDocs.set(doc.name, doc);
 
-  // Each parameter: its fact (with the qualified class when typed), its binding for variable typing, and the classes its type names.
+  // Each parameter: its binding for variable typing, and the classes its type names.
   for (const param of params?.namedChildren ?? []) {
     const variable = param.childForFieldName("name")?.text.replace(/^\$/, "");
 
@@ -1179,9 +1128,6 @@ function fnDecl(node: Node, name: string, names: Names, ctx: ClassContext | null
     bound.set(variable, "parameter");
     const type = param.childForFieldName("type");
     const single = singleClass(type);
-    // The parameter fact's type: `self`/`static` is the enclosing class, `parent` unknown.
-    const qualified = single === null ? null : SPECIAL_CLASSES.has(asciiLowerCase(single)) ? (asciiLowerCase(single) === "parent" ? null : self) : canonicalClass(single, names).qualified;
-    paramFacts.push(qualified ? { name: variable, type: qualified } : { name: variable });
     // A class PHP checks; else the `@param` where the declared type leaves room for one (none, `mixed`, `object`, an array of a class).
     const declared = type ? asciiLowerCase(type.text.replace(/\s+/g, "").replace(/^\?/, "")) : null;
     const doc = paramDocs.get(variable);
@@ -1312,15 +1258,8 @@ function fnDecl(node: Node, name: string, names: Names, ctx: ClassContext | null
     return type;
   };
 
-  const calls = body ? callsIn(body, scope, collector, false) : [];
+  const calls = body ? callsIn(body, scope, collector) : [];
   const doc = docOf(node, collector.header);
-  // `return [Event::class => 'on'];` as the whole body: a literal a framework reads.
-  const statements = body?.namedChildren.filter((c) => c.type !== "comment") ?? [];
-  const returned = statements.length === 1 && statements[0]!.type === "return_statement" && statements[0]!.namedChildren[0] ? literalOf(statements[0]!.namedChildren[0], names, self) : OTHER;
-  // Parameter facts only when at least one parameter names a class.
-  const typed = paramFacts.some((p) => p.type !== undefined);
-  // A method's attributes are read by `declarationOf`, with the class as `self`.
-  const attributes = node.type === "function_definition" ? attributesOf(node, names, null) : [];
   const result = resultOf(node, names, collector);
 
   const decl: DeclFact = {
@@ -1340,12 +1279,6 @@ function fnDecl(node: Node, name: string, names: Names, ctx: ClassContext | null
 
   if (doc !== undefined) decl.doc = doc;
 
-  if (typed) decl.params = paramFacts;
-
-  if (informative(returned)) decl.returns = returned;
-
-  if (attributes.length > 0) decl.attributes = attributes;
-
   if (result) decl.result = result;
 
   return decl;
@@ -1363,19 +1296,17 @@ function walkScope(node: Node, visit: (n: Node) => void): void {
 
 /**
  * The calls under `node`: in a function body, or in code outside declarations.
- * A call inside a closure, an arrow function or an anonymous class has
- * `closure`: it runs when that value is called.
+ * Closures, arrow functions and anonymous classes are walked too: their
+ * calls are the enclosing declaration's.
  */
-function callsIn(node: Node, scope: Scope, collector: Collector, closure: boolean): CallFact[] {
+function callsIn(node: Node, scope: Scope, collector: Collector): CallFact[] {
   const out: CallFact[] = [];
-  const self = scope.ctx ? qualify(scope.names.ns, scope.ctx.name) : null;
 
-  /** `nested`: the closure literals passed as arguments the walk is in, outermost first. */
-  const walk = (n: Node, inner: ClosureState, nested: readonly { line: number; col: number }[], sc: Scope): void => {
+  const walk = (n: Node, sc: Scope): void => {
     // A nested named declaration is its own declaration: its calls are not this one's.
     if (DECLARATION_NODES.has(n.type) && n.id !== node.id) return;
 
-    // A call: its callee, then what archdiff reads around it (callables passed, a name argument, literal arguments, the chain).
+    // A call: its callee, then what archdiff reads around it (callables passed, a name argument).
     if (CALL_NODES.has(n.type)) {
       const fact = callOf(n, sc, collector);
 
@@ -1383,27 +1314,13 @@ function callsIn(node: Node, scope: Scope, collector: Collector, closure: boolea
         const at = located(n);
         const passes = passesOf(n, sc, collector);
         const nameArg = nameArgOf(n, fact.callee);
-        const args = argsOf(n, scope.names, self);
-        const chain = chainOf(n, scope.names, self);
         const unplaced: UnplacedCall = { ...fact };
 
         if (passes.length > 0) unplaced.passes = passes;
 
         if (nameArg) unplaced.nameArg = nameArg;
         // Object.assign appends the position after `passes` and `nameArg`, the key order of every call fact.
-        const call: CallFact = Object.assign(unplaced, { line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol });
-
-        // Inside a closure the call runs later; inside a closure passed as an argument it also records where that closure starts.
-        if (inner) call.closure = true;
-
-        if (inner && inner !== "stored") call.closureArg = inner;
-
-        if (inner && inner !== "stored" && nested.length > 1) call.closures = [...nested];
-
-        if (args.some((a) => informative(a.value))) call.args = args;
-
-        if (chain) call.chain = chain;
-        out.push(call);
+        out.push(Object.assign(unplaced, { line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol }));
       }
     } else if (n.type === "class_constant_access_expression") {
       // `X::class` reads the class as a value: whoever holds it may construct it.
@@ -1419,25 +1336,14 @@ function callsIn(node: Node, scope: Scope, collector: Collector, closure: boolea
       if (written && !SPECIAL_CLASSES.has(asciiLowerCase(written))) collector.klass(written, n.childForFieldName("scope")!, scope.names);
     } else if (n.type === "array_creation_expression") arrayCallable(n, sc, collector);
 
-    // Entering a closure changes the closure state of everything under it; `nested` grows only through argument closures.
-    if (CLOSURE_NODES.has(n.type)) {
-      const state = closureState(n, inner);
-      const here = state === null || state === "stored" ? [] : [...nested, { line: n.startPosition.row + 1, col: startCol(n) }];
-
-      for (const child of n.namedChildren) walk(child, state, here, sc);
-
-      return;
-    }
-
     // `if ($x instanceof Foo) { … }`: in the branch, `$x` is a `Foo` — PHP checked it.
     const narrowed = n.type === "if_statement" ? narrowing(n, sc, collector) : null;
     const branch = narrowed ? n.childForFieldName("body") : null;
 
-    for (const child of n.namedChildren) walk(child, inner, nested, branch && child.id === branch.id ? narrowed! : sc);
+    for (const child of n.namedChildren) walk(child, branch && child.id === branch.id ? narrowed! : sc);
   };
 
-  // `closure`: the whole node already runs later, as a stored value.
-  walk(node, closure ? "stored" : null, [], scope);
+  walk(node, scope);
 
   return out;
 }
@@ -1550,110 +1456,8 @@ function literalOf(node: Node, names: Names, self: string | null, depth = 0): Li
   return OTHER;
 }
 
-/** The arguments of an `arguments` node as literals, named or positional. */
-function argList(args: Node | null | undefined, names: Names, self: string | null): ArgFact[] {
-  const out: ArgFact[] = [];
-
-  for (const arg of args?.namedChildren ?? []) {
-    if (arg.type !== "argument") continue;
-    const name = arg.childForFieldName("name");
-    // The value is the last child; for a named argument the first child is its name.
-    const value = arg.namedChildren.filter((c) => c.type !== "comment").at(-1);
-    const literal = value && value.id !== name?.id ? literalOf(value, names, self) : OTHER;
-    out.push(name ? { name: name.text, value: literal } : { value: literal });
-  }
-
-  return out;
-}
-
-/** The arguments of a call node as literals (`argList`); the grammar names the `arguments` field on some call nodes only. */
-function argsOf(call: Node, names: Names, self: string | null): ArgFact[] {
-  return argList(call.childForFieldName("arguments") ?? call.namedChildren.find((c) => c.type === "arguments"), names, self);
-}
-
-/** `X::a(…)->b(…)->c(…)`: the calls of the chain, root first; null for a call on no other call. */
-function chainOf(n: Node, names: Names, self: string | null): ChainLinkFact[] | null {
-  const links: ChainLinkFact[] = [];
-  let cur: Node | null = n;
-
-  // Walk from the outermost `->m()` down its object, collecting links in reverse; a dynamic member name ends the chain.
-  while (cur && (cur.type === "member_call_expression" || cur.type === "nullsafe_member_call_expression")) {
-    const name = cur.childForFieldName("name");
-
-    if (name?.type !== "name") return null;
-    links.unshift({ name: name.text, args: argsOf(cur, names, self) });
-    const object = cur.childForFieldName("object");
-    cur = object ? unparenthesized(object) : null;
-  }
-
-  // The root: a static call (`X::a()`) or a function call (`f()`); any other root (a variable, `$this`) adds no link.
-  if (cur?.type === "scoped_call_expression") {
-    const name = cur.childForFieldName("name");
-
-    if (name?.type !== "name") return null;
-    const cls = literalClass(cur.childForFieldName("scope"), names, self);
-    const args = argsOf(cur, names, self);
-    links.unshift(cls ? { name: name.text, class: cls, args } : { name: name.text, args });
-  } else if (cur?.type === "function_call_expression") {
-    const fn = cur.childForFieldName("function");
-
-    if (fn?.type !== "name" && fn?.type !== "qualified_name") return null;
-    links.unshift({ name: fn.text.replace(/\s+/g, ""), args: argsOf(cur, names, self) });
-  }
-
-  // A single call is no chain.
-  return links.length >= 2 ? links : null;
-}
-
-/** `#[A(…), B] #[C]` on a declaration, names qualified as PHP resolves them. */
-function attributesOf(decl: Node, names: Names, self: string | null): AttributeFact[] {
-  const out: AttributeFact[] = [];
-
-  // attribute_list → attribute_group (`#[…]`) → attribute; an attribute whose name does not resolve is skipped.
-  for (const list of decl.namedChildren) {
-    if (list.type !== "attribute_list") continue;
-
-    for (const group of list.namedChildren) {
-      if (group.type !== "attribute_group") continue;
-
-      for (const attribute of group.namedChildren) {
-        if (attribute.type !== "attribute") continue;
-        const written = classNameOf(attribute.namedChildren[0] ?? null);
-        const qualified = written ? canonicalClass(written, names).qualified : null;
-
-        if (!qualified) continue;
-        out.push({ name: qualified, args: argList(attribute.childForFieldName("parameters"), names, self), line: attribute.startPosition.row + 1, col: startCol(attribute) });
-      }
-    }
-  }
-
-  return out;
-}
-
-/**
- * Where a call sits with respect to closures: null outside them; `stored`
- * under a closure some value holds (`$f = fn() => …`, a returned closure, an
- * anonymous class); otherwise the position of the outermost closure, every
- * closure between being an argument of a call (`$mutex->execute($id, fn() => …)`).
- */
-type ClosureState = null | "stored" | { line: number; col: number };
-
 /** A call fact before its position is known. */
 type UnplacedCall = Omit<CallFact, "line" | "col" | "endLine" | "endCol">;
-
-/** The closure state under `closure`, given the state `inner` around it (see `ClosureState`). */
-function closureState(closure: Node, inner: ClosureState): ClosureState {
-  // Once stored, always stored: an argument closure inside a stored one still runs only when the stored one does.
-  if (inner === "stored") return "stored";
-
-  if (closure.type === "anonymous_class" || closure.parent?.type !== "argument") return "stored";
-
-  // An argument closure inside another keeps the outermost one's position.
-  if (inner) return inner;
-  const at = located(closure);
-
-  return { line: at.line, col: at.col };
-}
 
 /** Builtins whose string argument PHP reads as a function name: `'helper'` there is a callable, not text. */
 const CALLABLE_TAKING = new Set([...CALLABLE_CALLS, "array_map", "array_filter", "array_walk", "array_walk_recursive", "array_reduce", "usort", "uasort", "uksort", "iterator_apply", "is_callable", "register_shutdown_function", "spl_autoload_register", "set_error_handler", "set_exception_handler"]);

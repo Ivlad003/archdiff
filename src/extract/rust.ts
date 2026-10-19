@@ -533,22 +533,14 @@ interface CallScope {
   imports: boolean;
 }
 
-/**
- * Where a call sits with respect to closures: null outside them; `stored`
- * under a nested `fn`, an `async` block or a closure some value holds
- * (`let g = |x| …`); otherwise the position of the outermost closure, every
- * closure between being an argument of a call (`items.iter().map(|x| self.m(x))`).
- */
-type ClosureState = null | "stored" | { line: number; col: number };
-
 /** A call fact before its position is known. */
 type UnplacedCall = Omit<CallFact, "line" | "col" | "endLine" | "endCol">;
 
-/** Every call in a body as a call fact (with closure state and fn arguments), and an unsupported fact for each unknown macro. */
+/** Every call in a body as a call fact (with fn arguments), and an unsupported fact for each unknown macro; closures and nested fns are walked too. */
 function bodyCalls(body: Node, scope: CallScope, facts: FileFacts): CallFact[] {
   const out: CallFact[] = [];
 
-  const walk = (node: Node, closure: ClosureState): void => {
+  const walk = (node: Node): void => {
     if (node.type === "call_expression") {
       const fact = callOf(node.childForFieldName("function"), scope, facts);
 
@@ -560,10 +552,6 @@ function bodyCalls(body: Node, scope: CallScope, facts: FileFacts): CallFact[] {
         if (passes.length > 0) unplaced.passes = passes;
         // Object.assign appends the position after `passes`, the key order of every call fact.
         const call: CallFact = Object.assign(unplaced, { line: at.line, col: at.col, endLine: at.endLine, endCol: at.endCol });
-
-        if (closure) call.closure = true;
-
-        if (closure && closure !== "stored") call.closureArg = closure;
         out.push(call);
       }
     } else if (node.type === "macro_invocation") {
@@ -575,19 +563,10 @@ function bodyCalls(body: Node, scope: CallScope, facts: FileFacts): CallFact[] {
       if (!KNOWN_MACROS.has(name) && !foreign) facts.unsupported.push(unsupportedAt(node, `macro \`${name}!\` is not expanded`));
     }
 
-    // A nested `fn` runs only when something calls it, like a closure.
-    // The closure state for the children: an async block, a nested fn or a
-    // closure stored in a value makes them "stored"; a closure passed
-    // straight as an argument keeps the outermost such closure's position.
-    let inner = closure;
-
-    if (node.type === "async_block" || node.type === "function_item") inner = "stored";
-    else if (node.type === "closure_expression") inner = closure === "stored" || node.parent?.type !== "arguments" ? "stored" : (closure ?? { line: located(node).line, col: located(node).col });
-
-    for (const c of node.namedChildren) walk(c, inner);
+    for (const c of node.namedChildren) walk(c);
   };
 
-  walk(body, null);
+  walk(body);
 
   return out;
 }
@@ -595,7 +574,7 @@ function bodyCalls(body: Node, scope: CallScope, facts: FileFacts): CallFact[] {
 /**
  * Function paths among the arguments: `run(Self::m)`, `run(m)`,
  * `run(crate::util::helper)`, `.map(Order::total)`. A closure is not a pass:
- * its calls carry `closureArg`.
+ * its calls are the caller's own.
  */
 function passesOf(call: Node, scope: CallScope, facts: FileFacts): PassFact[] {
   const args = call.childForFieldName("arguments");

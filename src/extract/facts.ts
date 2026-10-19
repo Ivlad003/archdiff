@@ -1,37 +1,15 @@
 // Language-independent facts extracted from one source file: everything the
-// graph needs — imports, declarations, calls, the constructs not turned
-// into edges (`UnsupportedFact`), the control flow, the facts the framework
-// adapters read — and nothing about layers or IDs yet.
+// graph and the views need — imports, declarations, calls, the constructs not
+// turned into edges (`UnsupportedFact`), the control flow, states and
+// messages — and nothing about layers or IDs yet. A fact nothing past this
+// directory reads does not belong here: the frontends keep what they need
+// for their own resolution in their own scope.
 //
 // The contract between the language frontends (`ts.ts`, `python.ts`,
 // `rust.ts`, `php.ts`) and the graph: source → FileFacts → graph. Types,
 // and `reviveFacts`, which gives back the one Set a JSON trip loses. Facts
 // are cached on disk between runs (cache.ts) and cross worker threads
 // (pool.ts). Entry points: `FileFacts`, `reviveFacts`.
-
-/** A decorator of a declaration as the code writes it: `@Get("/x")` → `Get` with its arguments. */
-export interface CodeDecorator {
-  name: string;
-  args: DecoratorArg[];
-  param?: { index: number; name: string | null; type: string | null };
-  line: number;
-  col: number;
-}
-
-/**
- * A decorator argument: a string literal (a template without substitutions
- * too), a number, a name (`ORDER_REPO`, `CronExpression.EVERY_HOUR`), an
- * object or an array literal of those, a function (`() => String`), else
- * `other` with the text.
- */
-export type DecoratorArg =
-  | { kind: "string"; value: string }
-  | { kind: "number"; value: number }
-  | { kind: "name"; name: string }
-  | { kind: "object"; props: { key: string; value: DecoratorArg; line: number; col: number }[] }
-  | { kind: "array"; items: (DecoratorArg & { line: number; col: number })[] }
-  | { kind: "function" }
-  | { kind: "other"; text: string };
 
 /** Everything archdiff reads of one source file, before layers and IDs. */
 export interface FileFacts {
@@ -57,13 +35,6 @@ export interface FileFacts {
   instances?: ({ name: string; class: string } | { name: string; of: ValueOfFact })[];
   /** Public names with their kinds. Empty only when the file exports nothing. */
   exportRows: ExportRow[];
-  /**
-   * Why `exportRows` may miss a public name, when it may: a Python module
-   * without `__all__` whose module level binds names archdiff does not list
-   * (`for x in`, `with … as x`, `a, b = …`). A glob import of the file may
-   * then bring any name. Absent when the list is exhaustive.
-   */
-  exportsIncomplete?: string;
   /** Constructs the extractor does not turn into edges, each with the source fragment. */
   unsupported: UnsupportedFact[];
   /**
@@ -100,156 +71,10 @@ export interface FileFacts {
    * declares it). The resolver finds a name's file by them.
    */
   symbols?: QualifiedSymbol[];
-  /**
-   * Places where execution starts, as the code writes them: a handler
-   * registered on a literal path, a script block that calls a fn. Read by
-   * no view yet: the entry points come from frameworks.ts and the names.
-   */
-  entries?: EntryFact[];
-  /**
-   * Python: the decorators of the file's declarations archdiff does not know
-   * to keep the function, with their literal arguments. A framework adapter
-   * reads a registration in them (`@router.get("/x")`, `@shared_task`,
-   * `@receiver(post_save, sender=Order)`); the extractor still records each
-   * as an unsupported fact of the declaration, which the adapter lifts for a decorator it
-   * recognises.
-   */
-  decorators?: DecoratorFact[];
-  /**
-   * Python: module-level statements whose value has a call in it, with the
-   * value as written: `urlpatterns = [path("x/", views.f)]`,
-   * `router = APIRouter(prefix="/x")`, `post_save.connect(h, sender=M)`,
-   * `app.conf.beat_schedule = {…}`. What a framework executes as its config.
-   */
-  statements?: StatementFact[];
-  /**
-   * Python: calls written in a declaration's parameter list (a default or an
-   * annotation): `db = Depends(get_db)`, `Annotated[S, Depends(get_s)]`.
-   */
-  paramCalls?: ParamCallFact[];
-  /**
-   * TypeScript/JavaScript: what the web adapters (Express, Fastify, Next.js)
-   * read of the file: route registrations with their arguments, the router
-   * values the top level creates, `'use server'` directives and an exported
-   * `config`. Absent when the file has none of them.
-   */
-  web?: WebFacts;
   /** States written and read as literals, for the implicit state machines (control.ts). Absent when the file has none. */
   states?: StateFact[];
   /** State machines a library declares (control.ts). Absent when the file has none. */
   machines?: MachineFact[];
-}
-
-/** See `FileFacts.web`. */
-export interface WebFacts {
-  /** `const r = express.Router()`, `const app = fastify()` at the top level: the name and the callee of the call (or `new`) it holds. */
-  values: { name: string; callee: string; line: number; col: number }[];
-  /** Registrations: `r.get('/x', a, h)`, `app.use('/api', r)`, `f.register(p, { prefix })`, `f.route({…})`, `r.route('/x').get(h)`. */
-  calls: WebCallFact[];
-  /** `'use server'` in the directive prologue of the file. */
-  useServer?: true;
-  /** Functions whose body starts with `'use server'`: their name (a declaration's or a declarator's), and whether that is a top-level declaration of the file. */
-  actions?: { name: string | null; top: boolean; line: number; col: number }[];
-  /** `export const config = {…}`: its value (Next.js `middleware.ts` `matcher`). */
-  config?: DecoratorArg;
-}
-
-/** A registration call on a receiver written as a name (`app`, `router`, `fastify`). */
-export interface WebCallFact {
-  receiver: string;
-  /** `get`, `post`, `use`, `register`, `route`, … as written. */
-  method: string;
-  /** `router.route('/x').get(h)`: the path `route` names. */
-  route?: DecoratorArg;
-  args: (DecoratorArg & { line: number; col: number })[];
-  /**
-   * The nearest enclosing function whose first parameter is the receiver (a
-   * Fastify plugin `async (fastify) => {…}`): its name (the declaration's,
-   * the declarator's, `default` for an anonymous default export; null for a
-   * function written in place) and position. Absent when the receiver is no
-   * such parameter: then it is a name of the file's top level or an import.
-   */
-  within?: { name: string | null; line: number; col: number };
-  line: number;
-  col: number;
-}
-
-/**
- * A value as the code writes it, for an adapter to read: literals, dotted
- * names and calls with their arguments; anything else is `other` with its
- * text. Containers keep their items in order.
- */
-export type LiteralValue =
-  | { kind: "string"; value: string }
-  | { kind: "number"; value: number }
-  /** A name or a dotted path: `views.detail`, `Order`, `True`. */
-  | { kind: "name"; value: string }
-  | { kind: "call"; callee: string; args: LiteralValue[]; kwargs: Kwarg[]; line: number; col: number }
-  /** A list, a tuple or a set. */
-  | { kind: "list"; items: LiteralValue[] }
-  | { kind: "dict"; entries: { key: LiteralValue; value: LiteralValue }[] }
-  | { kind: "other"; text: string };
-
-/** A keyword argument of a call: `prefix="/x"`. */
-export interface Kwarg {
-  name: string;
-  value: LiteralValue;
-}
-
-/** A decorator of a declaration: `@x.get("/a", tags=["t"])` → `x.get` with its arguments; `call` null for `@x`. */
-export interface DecoratorFact {
-  name: string;
-  call: { args: LiteralValue[]; kwargs: Kwarg[] } | null;
-  /** The declaration as a dotted path in the file: `place`, `Order.save`. */
-  target: string;
-  line: number;
-  col: number;
-}
-
-/**
- * A module-level statement: `target = value`, `target += value` (`augmented`),
- * or a call standing alone (`target` null, `value` the call).
- */
-export interface StatementFact {
-  /** The assigned name or dotted path (`urlpatterns`, `app.conf.beat_schedule`); null for a call statement. */
-  target: string | null;
-  augmented?: true;
-  value: LiteralValue;
-  line: number;
-  col: number;
-}
-
-/** A call in a parameter of a declaration: `symbol`'s parameter `param` is `Depends(get_db)`. */
-export interface ParamCallFact {
-  symbol: string;
-  param: string;
-  value: Extract<LiteralValue, { kind: "call" }>;
-}
-
-/**
- * A language-level entry point written in the code, before resolution.
- * `route`: `app.get('/x', h)` with a literal path and a named handler —
- * `label` is `GET /x`, `callee` is `h` as written. `main`: a Python
- * `if __name__ == "__main__":` block — `callee` is the fn it calls, or null
- * when it names none directly (the module's top level is the entry then).
- * `sfra`: `server.get('Show', …, h)` in an SFRA controller — `callee` is the
- * last argument when it is a name, null for a handler written in place.
- * `page`: an element `{ path: '/cart', component: Cart }` of an array in a
- * `routes.{js,jsx,ts,tsx}` file (React Router, PWA Kit) — `label` is the
- * path, `callee` the component's name, `source` the module a lazy component
- * loads (`const Cart = loadable(() => import('./pages/cart'))`).
- */
-export interface EntryFact {
-  kind: "route" | "main" | "sfra" | "page";
-  /** `sfra`: the action name, `Show`; the SFCC adapter adds the controller's. */
-  label: string;
-  /** `sfra`: the `server` method that registers it (`get`, `post`, `use`, `append`, `prepend`, `replace`). */
-  method?: string;
-  callee: string | null;
-  /** `page`: the specifier the component's `import()` names, when it is loaded lazily. */
-  source?: string;
-  line: number;
-  col: number;
 }
 
 /** A top-level declaration by its qualified name. */
@@ -355,14 +180,6 @@ export interface DeclFact {
   /** A function that returns (a part of) a call's result: which call and which part (ReturnFact). */
   returnsFrom?: ReturnFact;
   /**
-   * Names the declaration reads as values that an import binds whose syntax
-   * does not tell whether its target is in the repository (Python
-   * `from app.limits import MAX`, PHP `use App\Limits`): the graph marks the
-   * fingerprint as reading an imported value when such an import resolves to
-   * a file of the repository. Absent when there are none.
-   */
-  readsImports?: string[];
-  /**
    * Classes: SHA-256 of the class body's value code outside its members —
    * fields, constants, properties, static blocks (`valuesFingerprint`).
    * Absent when the body has none.
@@ -384,12 +201,6 @@ export interface DeclFact {
   /** Classes: the traits the class uses, as written (PHP `use Logs;`): their methods are the class's own. */
   traits?: string[];
   /**
-   * Classes: the conflict rules of the PHP `use` block, traits as written: `T::m insteadof U, V`
-   * (`insteadof`: U's and V's `m` are not the class's) and `T::m as alias` / `m as alias` (`alias`;
-   * `trait` null when not named).
-   */
-  traitRules?: { trait: string | null; method: string; insteadof?: string[]; alias?: string }[];
-  /**
    * Classes: the interfaces the class implements; interfaces: those it extends — as written
    * (PHP `implements A, B`, `interface I extends J`). A framework's interceptor on an
    * interface wraps the classes that implement it.
@@ -397,24 +208,10 @@ export interface DeclFact {
   implements?: string[];
   /** The declaration's documentation comment without comment syntax, lines kept; absent when it has none. */
   doc?: string;
-  /**
-   * TypeScript decorators of a class or a member, in source order (`@Controller('orders')`,
-   * `@Get(':id')`), and on a constructor those of its parameters (`@Inject(TOKEN)`, with
-   * `param`). A framework adapter reads them as its configuration; absent without any.
-   */
-  decorators?: CodeDecorator[];
-  /** PHP: the attributes written on the class or the method (`#[Route('/x', methods: ['POST'])]`), in order. A framework adapter reads them. */
-  attributes?: AttributeFact[];
   /** PHP classes: the properties whose default value is a literal a framework reads (`protected $listen = [OrderPlaced::class => [...]]`). */
   properties?: PropertyFact[];
-  /** PHP functions and methods: the parameters, when at least one is typed with a single class (`handle(OrderPlaced $event)`). */
-  params?: ParamFact[];
-  /** PHP functions and methods: the literal a body of one `return <literal>;` gives (`getSubscribedEvents`, `getFacadeAccessor`). */
-  returns?: LiteralFact;
   /** Functions and methods: the class of the result as the declaration writes it (PHP `: Order`, `: static`, `@return Item[]`; TypeScript `: Order`, `: Promise<Order>`; Python `-> Order`). */
   result?: ResultTypeFact;
-  /** PHP interfaces: their methods' result types (an interface's methods are no nodes). */
-  methods?: MethodSigFact[];
   /** PHP classes: the properties whose class the class body names (typed, from the constructor, or by `@var`): a subclass's `$this->x` reads them. */
   fields?: FieldFact[];
   /**
@@ -454,13 +251,6 @@ export interface ResultTypeFact {
   docblock?: { line: number; col: number };
 }
 
-/** PHP: one method of an interface (or of an `outside` class): its name and result type. */
-export interface MethodSigFact {
-  name: string;
-  static?: true;
-  result?: ResultTypeFact;
-}
-
 /** PHP: a property and the qualified class of its value (`element`: an array of them). */
 export interface FieldFact {
   name: string;
@@ -468,7 +258,6 @@ export interface FieldFact {
   element?: true;
   docblock?: { line: number; col: number };
 }
-
 
 /**
  * The callee of a call as the frontend read it: what the graph resolves,
@@ -563,8 +352,6 @@ export function passable(form: Callee): boolean {
 export interface ValueOfFact {
   /** The call, as its callee was read. */
   call: Callee;
-  /** PHP: the arguments as literals, as `CallFact.args`: a framework's service locator reads the class the first one names (`get(X::class)`). */
-  args?: ArgFact[];
   /** PHP: the receiver's class of the call is written only in a docblock, at this position. */
   docblock?: { line: number; col: number };
   element?: true;
@@ -572,7 +359,7 @@ export interface ValueOfFact {
 }
 
 /**
- * A value PHP code writes as a literal, as far as a framework adapter reads it
+ * A value PHP code writes as a literal, as far as archdiff reads it:
  * a string without interpolation, `X::class` (`self::class` is the
  * enclosing class), a class constant `X::NAME`, `new X(…)`, an array of them,
  * a closure literal at its position; anything else is `other`. Class names are
@@ -587,39 +374,12 @@ export type LiteralFact =
   | { kind: "closure"; line: number; col: number }
   | { kind: "other" };
 
-/** One argument of a call or an attribute: named (`methods: ['POST']`) or positional. */
-export interface ArgFact {
-  name?: string;
-  value: LiteralFact;
-}
-
-/** `#[Name(args)]` on a declaration; `name` qualified as PHP resolves it. */
-export interface AttributeFact {
-  name: string;
-  args: ArgFact[];
-  line: number;
-  col: number;
-}
-
 /** A class property with a literal default value. */
 export interface PropertyFact {
   name: string;
   value: LiteralFact;
   line: number;
   col: number;
-}
-
-/** A parameter of a function; `type` is the qualified class when the parameter is typed with one. */
-export interface ParamFact {
-  name: string;
-  type?: string;
-}
-
-/** One call of a chain `Route::prefix('admin')->name('a.')->group(…)`, root first; the root names its class when it is a static call. */
-export interface ChainLinkFact {
-  name: string;
-  class?: string;
-  args: ArgFact[];
 }
 
 /** One call written in the code, with its callee as written and as read, and its range. */
@@ -635,18 +395,13 @@ export interface CallFact {
   /** The callee as read: what the graph resolves. */
   form: Callee;
   /**
-   * The receiver is a property the constructor fills from its parameter `param` (PHP
-   * `$this->x = $x`, a promoted `private X $x`): a framework's config may set that argument.
+   * PHP: the receiver is a property the constructor fills from its parameter `param` (`$this->x = $x`, a promoted
+   * `private X $x`); `docblock`: the receiver's class is written in a docblock the language does not check (`@var Foo`
+   * above the property, `@param Foo $x` of the constructor parameter), at this position. The PHP frontend's own
+   * resolution reads both; the graph reads neither.
    */
   param?: string;
-  /**
-   * The receiver's class is written in a docblock the language does not check (PHP `@var Foo`
-   * above the property, `@param Foo $x` of the constructor parameter assigned to it), at this
-   * position: the edge's provenance is `docblock`, not `syntactic`.
-   */
   docblock?: { line: number; col: number };
-  /** The callee is a hook with a default: `const generate = request.generate ?? generateMap; generate()`. */
-  hook?: HookFact;
   /**
    * Function values the call passes: `analyze({ generate: worker.generate })`, `later(save)`,
    * and callable references — PHP `[$this, 'm']`, `'Cls::m'`, `\Closure::fromCallable(…)`,
@@ -663,27 +418,6 @@ export interface CallFact {
    * the `type`'s value, with the message as the text.
    */
   nameArg?: { literal: string | null; text: string };
-  /** The call sits in a function nested in the declaration: it runs when that value is called. */
-  closure?: true;
-  /**
-   * Every function the call is nested in is a closure literal written as an argument of a call
-   * (`run(() => hit())`, `items.map(fn($x) => $this->m($x))`): the enclosing call's callee holds
-   * them, so the call is a possible route from the declaration. Position of the outermost such
-   * closure. Absent when some enclosing closure is stored in a value (`const f = () => hit()`).
-   */
-  closureArg?: { line: number; col: number };
-  /** PHP: every closure literal the call is nested in as an argument, outermost first, when there are two or more (`closureArg` is the first). */
-  closures?: { line: number; col: number }[];
-  /** PHP: the arguments as literals, when at least one is a literal a framework reads (a string, `X::class`, `new X`, an array, a closure). */
-  args?: ArgFact[];
-  /** PHP: a call on the result of other calls (`Route::prefix('admin')->group(…)`): the calls of the chain, root first, this one last. */
-  chain?: ChainLinkFact[];
-  /**
-   * `setGlobalPrefix('api')`: the first argument of a call of a member named `setGlobalPrefix`
-   * when it is a string literal; null when it is another expression. The NestJS adapter reads it
-   * (the global route prefix).
-   */
-  literal?: string | null;
   /** The branches, loops and handlers the call sits in, outermost first (control.ts): a sequence draws calls under one guard as a fragment. */
   guards?: GuardFact[];
   /**
@@ -795,23 +529,6 @@ export interface MachineFact {
 }
 
 /**
- * A callable chosen at run time with a default written next to it. `param` and
- * `path` say where a caller injects the value: `analyze({ generate })` is
- * parameter 0, path `generate`; `function f(run = defaultRun)` is parameter 0, path "".
- */
-export interface HookFact {
-  /** Local, parameter or field the call goes through. */
-  name: string;
-  /** Callee text of the default: `generateMap`, `this.run`. */
-  fallback: string;
-  /** Parameter index of the function that receives the injected value; null when it is not a parameter. */
-  param: number | null;
-  path: string;
-  /** `self`: a parameter of the declaration itself; `constructor`: a field set from a constructor parameter. */
-  owner: "self" | "constructor";
-}
-
-/**
  * A function value in the arguments of a call: argument index, property path
  * ("" for the argument itself). `callee` names it as a call would (`this.m`,
  * `Cls.m`, `save`) and `form` is how it was read (`passable` forms only);
@@ -852,7 +569,6 @@ export interface TypeRefFact {
   endCol: number;
   text: string;
 }
-
 
 /**
  * One public name of a file, compared with the `exports` rule and followed by

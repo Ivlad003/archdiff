@@ -52,7 +52,6 @@ export default function main(): void {
   const store = facts.decls.find((decl) => decl.name === "Store")!;
   assert.equal(store.kind, "class");
   assert.deepEqual(store.members.map((member) => member.name), ["save"]);
-  assert.deepEqual(store.decorators?.map((decorator) => decorator.name) ?? store.members[0]?.decorators?.map((decorator) => decorator.name) ?? [], []);
   assert.ok(facts.exports.has("place") && facts.exports.has("Store") && facts.exports.has("default"));
   assert.ok(facts.exportRows.some((row) => row.name === "default" && row.local === "main"));
   assert.equal(facts.parseError, null);
