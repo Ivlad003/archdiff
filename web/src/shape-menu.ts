@@ -17,7 +17,7 @@ import { copyText, showCode } from "./panel.ts";
 import { askSelected, deeperView, labelOf, select, selection, showEdge, toggleSelected } from "./picking.ts";
 import { toggleProjectMap } from "./project-map.ts";
 import { reviewBase } from "./review.ts";
-import { standsFor, subjectView, tagOf } from "../../src/shape-keys.ts";
+import { commitOfShape, standsFor, subjectView, tagOf } from "../../src/shape-keys.ts";
 import { parseView } from "../../src/view-keys.ts";
 
 /** The words of "open" for the view a second tap opens, by its kind. */
@@ -45,8 +45,9 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
     if (own) items.push({ label: openLabel(own), hint: "tap again", run: go(own) });
 
     // A commit (of the branches, of the timeline): the code at it; in the branches, the code and the review of its branch.
-    if (node.opens?.startsWith("commit:")) {
-      const sha = node.opens.slice("commit:".length);
+    const sha = commitOfShape(node.opens);
+
+    if (sha !== null) {
       const branch = parseView(now.view)?.kind === "branches" ? node.group : undefined;
       items.push({ label: "The code at this commit", hint: `${sha.slice(0, 7)} in the head field`, run: () => setLink({ ...now, view: "layers", head: sha, heads: [] }) });
 

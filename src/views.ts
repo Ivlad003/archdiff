@@ -97,6 +97,20 @@ export interface EntryPoint {
  * which call something.
  */
 export function entryPoints(analysis: Analysis): EntryPoint[] {
+  // Once per analysis: the views list asks, then every `apis` picture.
+  const known = entryPointsOf.get(analysis);
+
+  if (known) return known;
+  const found = findEntryPoints(analysis);
+  entryPointsOf.set(analysis, found);
+
+  return found;
+}
+
+const entryPointsOf = new WeakMap<Analysis, EntryPoint[]>();
+
+/** The entry points of the analysis, found from its graph and config (`entryPoints` keeps them). */
+function findEntryPoints(analysis: Analysis): EntryPoint[] {
   const { graph, config } = analysis;
   const called = new Set(graph.calls.map((edge) => edge.to));
   const entries = new Map<string, EntryPoint>();

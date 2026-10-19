@@ -54,14 +54,17 @@ export interface RunResult {
 }
 
 /** The plan the child process reads: see run-hooks.ts and run-harness.ts. */
-interface RunPlan {
+export interface RunPlan {
   root: string;
   entryFile: string;
   entryExport: string;
   args: unknown[];
   timeoutMs: number;
+  /** Project file (absolute path) → specifier → absolute path of the file it names, or "mock:<name>" for a storage package. */
   resolutions: Record<string, Record<string, string>>;
+  /** Project file (absolute path) → the trace points of its functions: the offsets of each body and whether it is an expression. */
   bodies: Record<string, { id: string; start: number; end: number; expression: boolean }[]>;
+  /** Mock name (the package specifier) → its content and the names the project imports from it. */
   mocks: Record<string, { content: unknown; names: string[] }>;
 }
 

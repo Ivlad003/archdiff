@@ -177,6 +177,7 @@ function classMermaid(diagram: Diagram): string {
 }
 
 import { MERMAID_ONLY_FOR, type MermaidStyle } from "../options.ts";
+import { commitOfShape } from "../shape-keys.ts";
 import { parseView } from "../view-keys.ts";
 
 export { MERMAID_STYLES, type MermaidStyle } from "../options.ts";
@@ -297,9 +298,12 @@ function gitgraphMermaid(diagram: Diagram): string {
   // The reason first (a range of no commit says so, not an empty graph alone).
   const lines = [`%% archdiff:generated — view ${diagram.view}`, ...stampLines(diagram), ...(diagram.reason ? [`%% ${diagram.reason}`] : []), "gitGraph"];
 
-  for (const node of diagram.nodes.filter((candidate) => candidate.id.startsWith("commit:"))) {
+  for (const node of diagram.nodes) {
+    const sha = commitOfShape(node.id);
+
+    if (sha === null) continue;
     const [head, subject] = node.label.split("\n");
-    const bar = diagram.nodes.find((candidate) => candidate.id === `bar:${node.id.slice(7)}`);
+    const bar = diagram.nodes.find((candidate) => candidate.id === `bar:${sha}`);
     const tag = bar?.diff === "removed" ? "coupling added" : bar?.diff === "added" ? "coupling removed" : null;
     lines.push(`  commit id: "${(head ?? node.id).split(" ")[0]} ${(subject ?? "").replace(/"/g, "'")}"${tag ? ` tag: "${tag}"` : ""}${bar?.diff === "removed" ? " type: REVERSE" : ""}`);
   }

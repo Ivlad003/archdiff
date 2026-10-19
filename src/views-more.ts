@@ -27,6 +27,7 @@ import type { BranchGraph, Commit } from "./git.ts";
 import { storageOf } from "./flow.ts";
 import { moduleOf, type Declaration, type Graph } from "./graph.ts";
 import { apiLanesOf, familyNode, fnNode, lane, lanesOf, moduleNode, operationNode, unplaced } from "./nodes.ts";
+import { commitOfShape, commitShapeId } from "./shape-keys.ts";
 import { greedyOrder } from "./order.ts";
 import { counted } from "./words.ts";
 
@@ -400,6 +401,16 @@ const LISTENERS = new Set(["on", "once", "addListener", "addEventListener", "sub
  * (the function passed) is drawn as the receiver when it is a function of
  * the same module, else the function that registers it.
  */
+/** The shape of an event (`events`, `messages`): `event:<name>`. */
+function eventId(name: string): string {
+  return `event:${name}`;
+}
+
+/** The name an event's shape ID carries; null for any other shape. */
+function eventOf(id: string): string | null {
+  return id.startsWith("event:") ? id.slice("event:".length) : null;
+}
+
 /** The parameter names of a declaration of the file (`Class.method` for a member), read from its signature: `(msg, port)`, `(req: Request, res)`. */
 function parameterNames(file: { decls: readonly DeclFact[] }, within: string): ReadonlySet<string> {
   let decls: readonly DeclFact[] = file.decls;
@@ -430,7 +441,7 @@ export function eventsView(analysis: Analysis): PictureContent {
   };
 
   const eventNode = (name: string): string => {
-    const id = `event:${name}`;
+    const id = eventId(name);
 
     if (!nodes.has(id)) nodes.set(id, { id, kind: "event", label: name, x: 0, y: 0, w: 0, h: 0 });
 
@@ -479,12 +490,12 @@ export function eventsView(analysis: Analysis): PictureContent {
 
   // A message sent with a `type` is handled wherever a function switches on the `type` of a parameter with that
   // value (`messageHandlers`); a value no message is sent with is no event.
-  const sent = new Set(edges.filter((edge) => edge.kind === "call" && edge.to.startsWith("event:")).map((edge) => edge.to.slice("event:".length)));
+  const sent = new Set(edges.flatMap((edge) => (edge.kind === "call" ? (eventOf(edge.to) ?? []) : [])));
 
   for (const [type, receivers] of messageHandlers(facts, sent)) {
     for (const receiver of receivers) {
       ownerNode(receiver);
-      add({ from: `event:${type}`, to: receiver, kind: "ref", label: "handles" });
+      add({ from: eventId(type), to: receiver, kind: "ref", label: "handles" });
     }
   }
 
@@ -876,7 +887,7 @@ export function timelineDiagram(rows: readonly HistoryRow[], base: string, head:
     if (row.layerEdgesAdded.length > 0) bar.diff = "removed";
     else if (row.layerEdgesRemoved.length > 0) bar.diff = "added";
     nodes.push(bar);
-    nodes.push({ id: `commit:${row.commit.sha}`, kind: "cell", label: `${row.commit.short} ${row.commit.date}\n${row.commit.subject.slice(0, 28)}`, opens: `commit:${row.commit.sha}`, x, y: 20 + chart + 10, w: column - 20, h: 48 });
+    nodes.push({ id: commitShapeId(row.commit.sha), kind: "cell", label: `${row.commit.short} ${row.commit.date}\n${row.commit.subject.slice(0, 28)}`, opens: commitShapeId(row.commit.sha), x, y: 20 + chart + 10, w: column - 20, h: 48 });
   });
 
   return unplaced(`Timeline ${base}..${head}: ${counted(rows.length, "commit")}`, nodes, [], [], { placed: true, reason: "bars: imports and functions moved; red: a coupling between layers appeared, green: one went" });
@@ -906,9 +917,9 @@ export function branchesDiagram(graph: BranchGraph): PictureContent {
   const place = (column: number, lane: number): { x: number; y: number } => ({ x: 20 + column * (w + gap), y: lane * row + top });
   const commitShape = (commit: Commit, column: number, lane: number, branch: string): Shape => {
     columns = Math.max(columns, column + 1);
-    drawn.set(commit.sha, { id: `commit:${commit.sha}`, column, lane });
+    drawn.set(commit.sha, { id: commitShapeId(commit.sha), column, lane });
 
-    return { id: `commit:${commit.sha}`, kind: "cell", label: `${commit.short} · ${commit.date}\n${commit.subject.length > 24 ? `${commit.subject.slice(0, 23)}…` : commit.subject}`, opens: `commit:${commit.sha}`, group: branch, ...place(column, lane), w, h };
+    return { id: commitShapeId(commit.sha), kind: "cell", label: `${commit.short} · ${commit.date}\n${commit.subject.length > 24 ? `${commit.subject.slice(0, 23)}…` : commit.subject}`, opens: commitShapeId(commit.sha), group: branch, ...place(column, lane), w, h };
   };
   const moreShape = (id: string, count: number, column: number, lane: number, branch: string): Shape => {
     columns = Math.max(columns, column + 1);
@@ -930,8 +941,8 @@ export function branchesDiagram(graph: BranchGraph): PictureContent {
   for (const [i, commit] of baseRow.entries()) {
     nodes.push(commitShape(commit, baseStart + i, 0, graph.base));
 
-    if (previous) edges.push(flow(previous, `commit:${commit.sha}`));
-    previous = `commit:${commit.sha}`;
+    if (previous) edges.push(flow(previous, commitShapeId(commit.sha)));
+    previous = commitShapeId(commit.sha);
   }
 
   groups.push({ id: graph.base, label: `${graph.base} (base${graph.current === graph.base ? ", checked out" : ""})`, kind: "lane", x: 0, y: 0, w: 0, h: row });
@@ -980,8 +991,8 @@ export function branchesDiagram(graph: BranchGraph): PictureContent {
     for (const commit of [...own].reverse()) {
       nodes.push(commitShape(commit, column, index, lane.name));
 
-      if (last) edges.push(flow(last, `commit:${commit.sha}`));
-      last = `commit:${commit.sha}`;
+      if (last) edges.push(flow(last, commitShapeId(commit.sha)));
+      last = commitShapeId(commit.sha);
       column++;
     }
 
@@ -999,7 +1010,8 @@ export function branchesDiagram(graph: BranchGraph): PictureContent {
 
   // The branches with no lane, named on the commit they point at (when it is drawn).
   for (const node of nodes) {
-    const names = tips.get(node.id.slice("commit:".length));
+    const sha = commitOfShape(node.id);
+    const names = sha === null ? undefined : tips.get(sha);
 
     if (node.kind === "cell" && names) node.label += `\n⌂ ${names.join(", ")}`;
   }

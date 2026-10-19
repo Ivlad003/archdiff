@@ -14,17 +14,10 @@ import { stripTypeScriptTypes } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isJsonObject, isJsonString, parseJson } from "./json.ts";
+import type { RunPlan } from "./run.ts";
 
-/** What the parent computed for the run: see run.ts `RunPlan`. */
-interface Plan {
-  root: string;
-  /** Project file (absolute path) → specifier → absolute path of the file it names, or "mock:<name>" for a storage package. */
-  resolutions: Record<string, Record<string, string>>;
-  /** Project file (absolute path) → the trace points of its functions: the offsets of each body and whether it is an expression. */
-  bodies: Record<string, { id: string; start: number; end: number; expression: boolean }[]>;
-  /** Mock name (the package specifier) → its content and the names the project imports from it. */
-  mocks: Record<string, { content: unknown; names: string[] }>;
-}
+/** The part of the parent's plan the hooks read (run.ts `RunPlan`); the entry and its arguments are the harness's. */
+type Plan = Pick<RunPlan, "root" | "resolutions" | "bodies" | "mocks">;
 
 let plan: Plan = { root: "", resolutions: {}, bodies: {}, mocks: {} };
 

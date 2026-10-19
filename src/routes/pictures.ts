@@ -27,7 +27,7 @@ import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { parseView, viewList } from "../views.ts";
 import { codeRevision, tagOf } from "../view-keys.ts";
 import { projectMap } from "../project-map.ts";
-import { standsFor } from "../shape-keys.ts";
+import { commitOfShape, standsFor, tagView, tagsIn } from "../shape-keys.ts";
 import { failed, json, optionsOf, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
 
 export async function postDrawing(ctx: RouteContext, { url, body, response }: RouteRequest): Promise<void> {
@@ -64,31 +64,25 @@ export async function postExpand(ctx: RouteContext, { body, response }: RouteReq
   const analysis = await ctx.fresh();
   const readSource = (file: string): string | null => (analysis.facts.has(file) ? readFileSync(join(root, file), "utf8") : null);
   const sections: string[] = [];
-  const seenTags = new Set<string>();
 
-  for (const match of text.matchAll(/@(module|fn|layer|dir|flow|type|logic|view):(\S+)/g)) {
-    const kind = match[1]!;
-    // The punctuation after a tag (`(@module:x).`) is the sentence's, not the subject's.
-    const subject = match[2]!.replace(/[.,;:)]+$/, "");
-    const tag = `@${kind}:${subject}`;
-
-    if (seenTags.has(tag)) continue;
-    seenTags.add(tag);
-
-    if (kind === "flow") {
+  // Each tag once, as shape-keys.ts reads them: `@flow:` is the data flow of the entry, the others open a view.
+  for (const { tag, prefix, subject } of tagsIn(text)) {
+    if (prefix === "flow") {
       sections.push(`### ${tag}\n\n${flowMarkdown(dataFlow(analysis, subject, readDrawing(root, `calls:${subject}`)?.mocks ?? [], 4))}`);
       continue;
     }
 
-    const key = kind === "fn" ? `calls:${subject}` : kind === "type" ? `type:${subject}` : kind === "view" ? subject : `${kind}:${subject}`;
-    const query = kind === "view" ? new URLSearchParams(shown) : new URLSearchParams();
+    const key = tagView(prefix, subject);
+
+    if (key === null) continue;
+    const query = prefix === "view" ? new URLSearchParams(shown) : new URLSearchParams();
     query.set("view", key);
     const picture = await ctx.picture(query);
 
     if (!picture.ok) continue;
     const { diagram, markdown } = picture.value;
 
-    if (kind === "module" || kind === "fn" || kind === "type") {
+    if (prefix === "module" || prefix === "fn" || prefix === "type") {
       const node = diagram.nodes.find((candidate) => standsFor(candidate) === subject);
       sections.push(`### ${tag}\n\n${node ? nodeMarkdown(node, analysis, readSource) : markdown}`);
     } else sections.push(`### ${tag}\n\n${markdown}`);
@@ -171,10 +165,12 @@ export async function getShape(ctx: RouteContext, { url, response }: RouteReques
   if (!node) return problem(response, 404, "no such shape in the picture");
 
   // A commit (of the branches, of the timeline): its own page, read from git.
-  if (node.opens?.startsWith("commit:")) {
-    const commit = commitInfo(root, node.opens.slice("commit:".length));
+  const commitSha = commitOfShape(node.opens);
 
-    return commit ? json(response, { markdown: commitMarkdown(commit, commitFiles(root, commit.sha)) }) : problem(response, 404, `no commit ${node.opens.slice("commit:".length)}`);
+  if (commitSha !== null) {
+    const commit = commitInfo(root, commitSha);
+
+    return commit ? json(response, { markdown: commitMarkdown(commit, commitFiles(root, commit.sha)) }) : problem(response, 404, `no commit ${commitSha}`);
   }
 
   const analysis = await codeOf(ctx, url.searchParams, response);

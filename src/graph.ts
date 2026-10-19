@@ -447,6 +447,14 @@ function bindImports(b: Building): void {
 type CallTarget = { id: string } | { ids: string[] } | { gap: Gap["reason"] };
 
 /**
+ * A target that is no declaration, read as the owner of a member: a global's member is `as` — a member of a value
+ * (`list.map`, a package's class) or an unknown member of a package's base — and any other gap stays what it is.
+ */
+function memberOfGlobal<T extends { gap: Gap["reason"] }>(owner: T, as: "member-of-value" | "unknown-member"): T | { gap: typeof as } {
+  return owner.gap === "global" ? { gap: as } : owner;
+}
+
+/**
  * The resolver of calls: what a local name of a module stands for (a
  * declaration, or an import followed to its export), the member of a
  * class up its `extends` chain, the classes implementing a type, and
@@ -578,7 +586,7 @@ class CallResolver {
     const parent = this.nameTarget(owner.module, base.replace(/<.*$/, ""));
 
     // A base of a package's (`extends Component`): its member is the package's.
-    if (!("id" in parent)) return parent.gap === "global" ? { gap: "unknown-member" } : parent;
+    if (!("id" in parent)) return memberOfGlobal(parent, "unknown-member");
     const found = this.memberOf(parent.id, member);
 
     if (found) return { id: found };
@@ -594,7 +602,7 @@ class CallResolver {
     const owner = this.nameTarget(module, receiver);
 
     // A receiver typed with a package's class (`req: Request` of express) is a call out of the repository, not a blind spot.
-    if (!("id" in owner)) return owner.gap === "global" ? { gap: "member-of-value" } : owner;
+    if (!("id" in owner)) return memberOfGlobal(owner, "member-of-value");
 
     // Python's `repo = make_repo()` names a function: the value is what it returns.
     if (this.b.nodes.get(owner.id)?.kind === "fn") {
@@ -745,7 +753,7 @@ class CallResolver {
       if (made !== null) return "id" in made ? this.typedMemberTarget(made.id, member) : made;
 
       // `list.map`, `req.on`: the head is a value of the function, not a declaration or import.
-      return owner.gap === "global" ? { gap: "member-of-value" } : owner;
+      return memberOfGlobal(owner, "member-of-value");
     }
 
     const found = this.memberOf(owner.id, member);
@@ -770,7 +778,7 @@ class CallResolver {
       const made = this.nameTarget(module, own.class);
 
       // A value of the language's (`new Map()`, an array) or of a package's class: its members are theirs.
-      if (!("id" in made)) return made.gap === "global" ? { gap: "member-of-value" } : made.gap === "external" ? made : null;
+      if (!("id" in made)) return made.gap === "global" || made.gap === "external" ? memberOfGlobal(made, "member-of-value") : null;
 
       return this.b.nodes.get(made.id)?.kind === "class" ? made : null;
     }

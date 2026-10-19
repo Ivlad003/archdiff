@@ -17,6 +17,7 @@ import { element, h } from "./dom.ts";
 import { page } from "./page.ts";
 import { readOnlyView, setLink, currentLink } from "./link.ts";
 import { pictureQueryText } from "../../src/options.ts";
+import { tagsIn } from "../../src/shape-keys.ts";
 
 export const taskField = element<HTMLTextAreaElement>("task");
 export const runButton = element<HTMLButtonElement>("run");
@@ -113,9 +114,9 @@ function shapesOfFiles(files: readonly string[]): string[] {
   return ids;
 }
 
-/** Tags in a text (@module:…, @fn:…, @layer:…, @dir:…, @flow:…, @type:…, @logic:…, @view:…) become their context for the agent; @view: takes the picture's options. */
+/** Tags in a text (`tagsIn` of shape-keys.ts: @module:…, @fn:…, @flow:…, @view:…) become their context for the agent; @view: takes the picture's options. */
 async function withContext(prompt: string): Promise<string> {
-  if (!/@(module|fn|layer|dir|flow|type|logic|view):\S/.test(prompt)) return prompt;
+  if (tagsIn(prompt).length === 0) return prompt;
 
   try {
     const context = await api.expand(prompt, pictureQueryText(currentLink()).replace(/^&/, ""));

@@ -1,17 +1,21 @@
 // What a shape of a picture stands for and where it leads, said once for
 // the exports and the page: the code a shape stands for (`standsFor`),
 // the view a second tap on it opens (`opensView`), the view whose
-// pictures are its siblings (`subjectView`), its chat tag (`tagOf`), and
-// the element ID of a line on the canvas (`lineElementId`). The Excalidraw
-// export writes `opensView` into every shape (`customData.view`) and the
-// page calls the same function, so a double tap, Enter and the menu open
-// the same view. Node-free and with no imports but types: bundled into
-// the page beside options.ts and view-keys.ts.
+// pictures are its siblings (`subjectView`), its chat tag (`tagOf`), the
+// tags of the chat read back from a text (`tagsIn`, `tagView`), the shape
+// of a commit (`commitShapeId`, `commitOfShape`), and the element ID of a
+// line on the canvas (`lineElementId`). The Excalidraw export writes
+// `opensView` into every shape (`customData.view`) and the page calls the
+// same function, so a double tap, Enter and the menu open the same view.
+// Node-free, importing only the table of kinds: bundled into the page
+// beside options.ts and view-keys.ts.
 //
 // Entry points: `standsFor`, `moduleOfShape`, `opensView`, `subjectView`,
-// `tagOf`, `lineElementId`.
+// `tagOf`, `tagsIn`, `tagView`, `TAG_PREFIXES`, `commitShapeId`,
+// `commitOfShape`, `lineElementId`.
 
 import type { Line, Shape } from "./diagram.ts";
+import { VIEW_KINDS, tagOf as kindTagOf, type ViewKind } from "./view-keys.ts";
 
 /** The module part of a declaration's ID (`src/x.ts#f` → `src/x.ts`), or the ID itself. */
 function moduleOfId(id: string): string {
@@ -104,6 +108,52 @@ export function tagOf(shape: Shape): { tag: string; label: string } | null {
       // A shape that names its view (a folded directory, a package, a machine) is asked about as that picture.
       return shape.opens !== undefined ? { tag: `@view:${shape.opens}`, label } : null;
   }
+}
+
+/** The prefixes of the chat's tags: the subject tags of the table of kinds (`layer`, `dir`, `module`, `flow`, `type`, `logic`), `fn` for a function, `view` for a picture with its options. */
+export const TAG_PREFIXES: readonly string[] = [...new Set([...(Object.keys(VIEW_KINDS) as ViewKind[]).flatMap((kind) => kindTagOf(kind)?.prefix ?? []), "fn", "view"])];
+
+/** The tags written in a text (`@module:src/x.ts`, `@fn:src/x.ts#f`), each once, in order; the sentence's punctuation after a tag (`(@module:x).`) is not the subject's. */
+export function tagsIn(text: string): { tag: string; prefix: string; subject: string }[] {
+  const out: { tag: string; prefix: string; subject: string }[] = [];
+  const seen = new Set<string>();
+
+  for (const match of text.matchAll(new RegExp(`@(${TAG_PREFIXES.join("|")}):(\\S+)`, "g"))) {
+    const prefix = match[1]!;
+    const subject = match[2]!.replace(/[.,;:)]+$/, "");
+    const tag = `@${prefix}:${subject}`;
+
+    if (seen.has(tag)) continue;
+    seen.add(tag);
+    out.push({ tag, prefix, subject });
+  }
+
+  return out;
+}
+
+/**
+ * The view a tag's context is drawn from: a function's call tree (`@fn:`), the picture `@view:` names, a kind's own
+ * view of the subject (`@module:`, `@logic:`, …); null for `@flow:`, whose context is the data flow of the entry, no picture.
+ */
+export function tagView(prefix: string, subject: string): string | null {
+  if (prefix === "fn") return `calls:${subject}`;
+
+  if (prefix === "view") return subject;
+
+  if (prefix === "flow") return null;
+  const kind = (Object.keys(VIEW_KINDS) as ViewKind[]).find((candidate) => kindTagOf(candidate)?.prefix === prefix);
+
+  return kind === undefined ? null : `${kind}:${subject}`;
+}
+
+/** The shape of a commit (in the branches, the timeline): `commit:<sha>`, which the shape opens as its own page. */
+export function commitShapeId(sha: string): string {
+  return `commit:${sha}`;
+}
+
+/** The sha a commit's shape ID (or the view it opens) names; null for any other. */
+export function commitOfShape(id: string | undefined): string | null {
+  return id !== undefined && id.startsWith("commit:") ? id.slice("commit:".length) : null;
 }
 
 /**
