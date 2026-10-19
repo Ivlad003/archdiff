@@ -28,6 +28,7 @@ flowchart LR
     n_src_spec_ts["src/spec.ts<br>the specs and features of the repository, the agent's task for them, the OpenSpec CLI"]
     n_src_scaffold_ts["src/scaffold.ts<br>a project from scratch with its intent and first commit"]
     n_src_gherkin_ts["src/gherkin.ts<br>Gherkin features as data, and test skeletons written from them"]
+    n_src_postman_ts["src/postman.ts<br>a Postman collection of the operations the code calls; the runtime's SCAPI table read from node_modules, else the shipped one"]
   end
   subgraph n_views["views — one picture per question, and the reports; pure functions of the analysis"]
     n_src_views_ts["src/views.ts<br>the structural views and viewOf: the chain of pure steps after a view"]
@@ -65,6 +66,7 @@ flowchart LR
     n_src_checks_ts["src/checks.ts<br>the contract check and the commands run after an agent"]
     n_src_apis_ts["src/apis.ts<br>the operations of an external API a call names (SCAPI), the OCAPI hooks, the reader of the runtime's declarations"]
     n_src_contracts_ts["src/contracts.ts<br>the contract of an operation as the code uses it: what it sends, what it reads of the result"]
+    n_src_scapi_table_ts["src/scapi-table.ts<br>the SCAPI families and operations of the storefront-next runtime, generated"]
   end
   subgraph n_extract["extract — the language frontends on tree-sitter"]
     n_src_extract_ts_ts["src/extract/ts.ts<br>TypeScript and JavaScript facts"]
@@ -85,8 +87,10 @@ flowchart LR
   subgraph n_scripts["scripts — build and pack"]
     n_scripts_build_web_mjs["scripts/build-web.mjs<br>bundles the page into dist/web"]
     n_scripts_copy_wasm_mjs["scripts/copy-wasm.mjs<br>copies the grammar WASM files into dist"]
+    n_scripts_scapi_table_mjs["scripts/scapi-table.mjs<br>regenerates src/scapi-table.ts from a runtime's declarations, with core's reader"]
   end
   n_bin_archdiff_js --> n_src_cli_ts
+  n_scripts_scapi_table_mjs --> n_src_apis_ts
   n_src_cli_ts --> n_src_server_ts
   n_src_cli_ts --> n_src_views_ts
   n_src_cli_ts --> n_src_export_index_ts

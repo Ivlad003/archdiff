@@ -42,3 +42,12 @@ The system SHALL write for every picture a Markdown page with its title, the que
 
 - **WHEN** `layer:lib` is written with the tests, storages and heat overlays
 - **THEN** a line reads "- **src/db/store.ts** — no tests · ⛁ the file system · 2 calls in — src/db/store.ts:1"
+
+### Requirement: The operations the code calls export as a Postman collection
+
+The system SHALL write, with `archdiff postman` and from the page's export menu on an `apis` picture, a Postman collection (schema v2.1) of the SCAPI operations the code calls: a folder per family, a request per operation with the method and the path the storefront-next runtime declares (read from the runtime in `node_modules` when it is there, else from the table archdiff ships, the source named in the collection's description), the path parameters as `{{variables}}` listed among the collection's variables, `siteId` and the query parameters the code sends as query, a JSON body built from what the code sends (a literal's value, a name as its `{{variable}}`), and in the request's description who calls it, what it sends and what it reads of the result; an operation the runtime does not declare gets a placeholder path that says so.
+
+#### Scenario: A cart action's basket operations
+
+- **WHEN** the code calls `clients.shopperBasketsV2.addItemToBasket({ parameters: { basketId }, body: [{ productId, quantity: 1 }] })`
+- **THEN** the collection's `ShopperBasketsV2` folder has a `POST` request at `{{baseUrl}}/checkout/shopper-baskets/v2/organizations/{{organizationId}}/baskets/{{basketId}}/items?siteId={{siteId}}` with the body `[{ "productId": "{{productId}}", "quantity": 1 }]`, `basketId` among the variables, and a description naming the calling module

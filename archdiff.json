@@ -22,7 +22,8 @@
       "src/spec.ts",
       "src/scaffold.ts",
       "src/run.ts",
-      "src/gherkin.ts"
+      "src/gherkin.ts",
+      "src/postman.ts"
     ],
     "views": [
       "src/views.ts",

@@ -1524,6 +1524,29 @@ test("apis: the contract of each operation as used — what the code sends, what
   assert.ok(page.includes("## Contracts as used\n\n- **ShopperBasketsV2.getBasket** — sends parameters.basketId · reads data.currency, data.productItems, data.productItems.c_fromStoreId · custom: c_fromStoreId") && page.includes("- **ShopperBasketsV2.addItemToBasket** — sends parameters.basketId, body[].productId, body[].quantity"), page);
 });
 
+test("postman: a collection of the operations the code calls, a folder per family, the path from the runtime's table, the parameters and the body as the code sends them", () => {
+  const scapi = join(root, "tests/fixtures/scapi");
+  const collection = JSON.parse(archdiff(["postman", scapi]).stdout) as { info: { name: string; schema: string; description: string }; variable: { key: string; value: string }[]; item: { name: string; item: { name: string; request: { method: string; url: { raw: string; query: { key: string; value: string }[] }; body?: { raw: string }; header: { key: string; value: string }[]; description: string } }[] }[] };
+  assert.equal(collection.info.schema, "https://schema.getpostman.com/json/collection/v2.1.0/collection.json");
+  assert.ok(collection.info.description.includes("archdiff's table of @salesforce/storefront-next-runtime"), collection.info.description);
+  assert.deepEqual(collection.variable.map((variable) => variable.key), ["baseUrl", "shortCode", "organizationId", "siteId", "token", "basketId", "orderNo", "id"]);
+  assert.deepEqual(collection.item.map((folder) => [folder.name, folder.item.map((request) => request.name)]), [["ShopperBasketsV2", ["addItemToBasket", "getBasket", "updateBasket"]], ["ShopperOrders", ["getOrder"]], ["ShopperProducts", ["getProduct"]]]);
+  const add = collection.item[0]!.item[0]!.request;
+  assert.equal(add.method, "POST");
+  assert.equal(add.url.raw, "{{baseUrl}}/checkout/shopper-baskets/v2/organizations/{{organizationId}}/baskets/{{basketId}}/items?siteId={{siteId}}");
+  assert.deepEqual(JSON.parse(add.body!.raw), [{ productId: "{{productId}}", quantity: 1 }]);
+  assert.ok(add.header.some((header) => header.key === "Authorization" && header.value === "Bearer {{token}}") && add.header.some((header) => header.key === "Content-Type"), JSON.stringify(add.header));
+  assert.ok(add.description.startsWith("POST /checkout/shopper-baskets/v2/organizations/{organizationId}/baskets/{basketId}/items\n\nCalled from: src/lib/cart.ts (1 call)."), add.description);
+  const get = collection.item[0]!.item[1]!.request;
+  assert.equal(get.method, "GET");
+  assert.equal(get.body, undefined);
+  assert.ok(get.description.includes("Reads of the result:\n- data.currency"), get.description);
+  // One family only, and nothing for a family the code does not call.
+  const one = JSON.parse(archdiff(["postman", scapi, "--family", "ShopperOrders"]).stdout) as { item: { name: string }[] };
+  assert.deepEqual(one.item.map((folder) => folder.name), ["ShopperOrders"]);
+  assert.deepEqual((JSON.parse(archdiff(["postman", scapi, "--family", "Nope"]).stdout) as { item: unknown[] }).item, []);
+});
+
 test("a sequence frames an if with its else, a try with its catch and a loop as alt and loop fragments, with the operations of an API on their family's lifeline", () => {
   const scapi = join(root, "tests/fixtures/scapi");
   const sequence = archdiff(["diagram", "sequence:src/routes/cart.tsx#action", scapi]).stdout;

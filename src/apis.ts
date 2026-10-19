@@ -137,3 +137,41 @@ export function participantLabel(id: string): string {
 
   return api ? `${api.family} (${API_SHORT[api.api]})` : id;
 }
+
+/** A family's base path and operations (method, path template) as the storefront-next runtime declares them. */
+export interface ScapiFamilySpec {
+  basePath: string;
+  operations: Record<string, { method: string; path: string }>;
+}
+
+export type ScapiTable = Record<string, ScapiFamilySpec>;
+
+/**
+ * The SCAPI table read from the runtime's `scapi.d.ts` (openapi-typescript output): `BUILT_IN_CLIENT_DEFAULTS` gives each
+ * client key its base path, the clients record binds a family's `endpoints` to its `operations$N` table, and each table
+ * lists an operation's method, base and suffix. Empty when the text holds none of these.
+ */
+export function scapiTableFromDts(text: string): ScapiTable {
+  const defaults = /declare const BUILT_IN_CLIENT_DEFAULTS: \{([\s\S]*?)\n\};/.exec(text)?.[1] ?? "";
+  const bases = new Map<string, string>();
+
+  for (const match of defaults.matchAll(/readonly (\w+): \{\s*readonly basePath: "([^"]+)";/g)) bases.set(match[1]!, match[2]!);
+  const tables = new Map<string, string>();
+
+  for (const match of text.matchAll(/declare const (operations\$\d+): \{([\s\S]*?)\n\};/g)) tables.set(match[1]!, match[2]!);
+  const families: ScapiTable = {};
+
+  for (const match of text.matchAll(/(\w+): ProxyClient<Client<(\w+)\.endpoints>, typeof (operations\$\d+)>;/g)) {
+    const [, key, family, table] = match;
+    const basePath = bases.get(key!);
+    const body = tables.get(table!);
+
+    if (!basePath || body === undefined) continue;
+    const operations: ScapiFamilySpec["operations"] = {};
+
+    for (const op of body.matchAll(/readonly (\w+): \{\s*readonly m: "(\w+)";\s*readonly b: "([^"]*)";\s*readonly s: "([^"]*)";/g)) operations[op[1]!] = { method: op[2]!, path: op[3]! + op[4]! };
+    families[family!] = { basePath, operations };
+  }
+
+  return families;
+}

@@ -10,6 +10,7 @@
 // Entry points: `main` (bin/archdiff.js runs it), `helpText`.
 
 import { contractsMarkdown, contractsOf } from "./contracts.ts";
+import { postmanCollection } from "./postman.ts";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { analyze } from "./analyze.ts";
@@ -412,6 +413,19 @@ const COMMANDS: readonly Command[] = [
       const analysis = await analyze(call.dir(0));
 
       return writeOut(call.has("json") ? `${JSON.stringify([...contractsOf(analysis).values()], null, 2)}\n` : contractsMarkdown(analysis), call.text("out"));
+    },
+  },
+  {
+    name: "postman",
+    usage: "[dir] [--family NAME] [--out FILE]",
+    help: ["A Postman collection (v2.1) of the SCAPI operations the code calls: a", "folder per family, a request per operation with the path the runtime", "declares, the parameters and the body the code sends; --family keeps one"],
+    arity: 1,
+    flags: [flag("family", true), flag("out", true)],
+    async run(call) {
+      const analysis = await analyze(call.dir(0));
+      const collection = postmanCollection(analysis, `${analysis.root.split(/[\\/]/).pop() ?? "archdiff"} — SCAPI`, call.text("family"));
+
+      return writeOut(`${JSON.stringify(collection, null, 2)}\n`, call.text("out"));
     },
   },
   {

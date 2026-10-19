@@ -10,6 +10,7 @@
 // Entry point: `routes`, by `METHOD /path` (server.ts dispatches through
 // it).
 
+import { postmanCollection } from "../postman.ts";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import type { Analysis } from "../analyze.ts";
@@ -250,6 +251,19 @@ export async function getCoverage(ctx: RouteContext, { url, response }: RouteReq
   if (analysis) json(response, coverageReport(analysis));
 }
 
+/** The Postman collection of the SCAPI operations the code calls (`family` keeps one family's), as a download. */
+export async function getPostman(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
+  const analysis = await codeOf(ctx, url.searchParams, response);
+
+  if (!analysis) return;
+  const family = url.searchParams.get("family");
+  const collection = postmanCollection(analysis, `${analysis.root.split(/[\\/]/).pop() ?? "archdiff"} — SCAPI${family ? ` ${family}` : ""}`, family);
+  const name = `scapi${family ? `-${family.replace(/[^A-Za-z0-9._-]+/g, "_")}` : ""}.postman_collection.json`;
+  response.writeHead(200, { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="${name}"` });
+
+  return void response.end(`${JSON.stringify(collection, null, 2)}\n`);
+}
+
 export async function getChanges(ctx: RouteContext, { response, request }: RouteRequest): Promise<void> {
   // Server-sent events: one per change of a source file, debounced; the page reloads its view. The first says whether any will come.
   response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
@@ -312,6 +326,7 @@ export const routes: Record<string, (ctx: RouteContext, request: RouteRequest) =
   "GET /api/line": getLine,
   "GET /api/file": getFile,
   "GET /api/coverage": getCoverage,
+  "GET /api/postman": getPostman,
   "GET /api/changes": getChanges,
   "GET /api/tags": getTags,
   "GET /api/export": getExport,

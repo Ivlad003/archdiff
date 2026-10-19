@@ -98,6 +98,12 @@ test("a drawing saved by the editor places the shapes of the live diagram and me
   // The export follows the drawing too.
   const drawio = await (await fetch(`${base}/api/export?view=${encodeURIComponent(view)}&format=drawio`)).text();
   assert.ok(drawio.includes('archdiff_id="src/db/store.ts"'));
+  // The Postman collection of the operations the code calls downloads as a file: the sample calls none, so it is empty but well-formed.
+  const postman = await fetch(`${base}/api/postman`);
+  assert.equal(postman.status, 200);
+  assert.match(postman.headers.get("content-disposition") ?? "", /^attachment; filename="scapi\.postman_collection\.json"$/);
+  const emptyCollection = (await postman.json()) as { info: { schema: string }; item: unknown[] };
+  assert.ok(emptyCollection.info.schema.endsWith("/v2.1.0/collection.json") && emptyCollection.item.length === 0, JSON.stringify(emptyCollection).slice(0, 200));
   // A wrong body is refused and nothing changes.
   const bad = await fetch(`${base}/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", body: JSON.stringify({ elements: "no" }) });
   assert.equal(bad.status, 400);

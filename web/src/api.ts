@@ -232,6 +232,8 @@ export const api = {
     return response.text();
   },
   coverage: (head: string | null = null) => get<{ markdown: string; ratio: number; gaps: number; calls: number }>(`/api/coverage${headQuery("?", head)}`),
+  /** The download of the Postman collection of the SCAPI operations the code calls, or of one family's. */
+  postmanUrl: (family: string | null, head: string | null = null) => `/api/postman${family ? `?family=${encodeURIComponent(family)}` : ""}${headQuery(family ? "&" : "?", head)}`,
   /** The download of a picture in `format`, with the link's options and refs (the Mermaid type among the options). */
   exportUrl: (view: string, format: string, options: PictureOptions, refs: Refs) => `/api/export?view=${encodeURIComponent(view)}&format=${format}${pictureQueryText(options)}${refsQuery(refs)}`,
 };

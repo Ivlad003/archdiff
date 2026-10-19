@@ -32,6 +32,10 @@ export function renderExports(state: Link): void {
   for (const format of FORMATS) links.append(h("a", { href: api.exportUrl(state.view, format, state, refs), title: `Download the diagram as ${format}` }, format === "mermaid" && state.mermaid !== "auto" ? `mermaid (${state.mermaid})` : format));
 
   for (const [style, label] of mermaidStylesOf(parseView(state.view)?.kind)) links.append(h("a", { href: api.exportUrl(state.view, "mermaid", { ...state, mermaid: style }, refs) }, label));
+  const view = parseView(state.view);
+
+  // An APIs picture downloads as a Postman collection too: every family's operations, or the one family the picture is of.
+  if (view?.kind === "apis") links.append(h("a", { href: api.postmanUrl(view.subject !== null && !view.subject.includes("/") ? view.subject : null, refs.head), title: "Download the operations as a Postman collection" }, "postman collection"));
 }
 
 // A pick in the menu downloads; the menu closes behind it.
