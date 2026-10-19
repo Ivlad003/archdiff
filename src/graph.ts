@@ -396,7 +396,7 @@ function bindImports(b: Building): void {
 
       if (fact.glob && target.kind === "file") scope.globs.push(target.path);
 
-      // The file itself, or a file that is no source (JSON, a stylesheet): no module to draw, nothing missing.
+      // The file itself, or a file that is no module (JSON, a stylesheet, a source left out): nothing to draw, nothing missing.
       if (target.kind === "self" || target.kind === "asset") continue;
       // `import type`, or `import { type A }` that the compiler erases (it keeps it under `verbatimModuleSyntax`).
       const typeOnly = fact.typeOnly === true || (fact.inlineTypeOnly === true && !b.keepsTypeImports(file.path));

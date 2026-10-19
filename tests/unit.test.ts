@@ -262,23 +262,32 @@ test("property: the layout keeps every shape in its lane, apart from the others,
   }
 });
 
-test("the resolver follows tsconfig paths, extensionless specifiers, index files and node built-ins", async () => {
+test("the resolver follows tsconfig paths, extensionless specifiers, index files and node built-ins; an asset, a file of public/ or of a hidden directory, a rootDirs twin is an asset", async () => {
   const { createResolver } = await import("../src/resolve.ts");
   const { mkdirSync, writeFileSync } = await import("node:fs");
   const { join } = await import("node:path");
 
   await withTempDir("archdiff-resolve-", (dir) => {
-    mkdirSync(join(dir, "src/lib"), { recursive: true });
-    writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@/*": ["src/*"] } } }));
-    writeFileSync(join(dir, "src/lib/a.ts"), "");
-    writeFileSync(join(dir, "src/lib/index.ts"), "");
-    writeFileSync(join(dir, "src/b.ts"), "");
-    const resolve = createResolver(dir, ["src/lib/a.ts", "src/lib/index.ts", "src/b.ts"]);
+    for (const sub of ["src/lib", "src/locales/en", "src/theme", "src/routes", "public/images", ".storybook", ".react-router/types/src/routes/+types"]) mkdirSync(join(dir, sub), { recursive: true });
+    writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { baseUrl: ".", rootDirs: [".", "./.react-router/types"], paths: { "@/*": ["src/*"], "@storybook/test-utils": ["./.storybook/test-utils"] } } }));
+    for (const file of ["src/lib/a.ts", "src/lib/index.ts", "src/b.ts", "src/routes/home.tsx", "src/locales/en/translations.json", "src/theme/index.css", "public/images/a.svg", ".storybook/test-utils.ts", ".react-router/types/src/routes/+types/home.ts"]) writeFileSync(join(dir, file), "");
+    const resolve = createResolver(dir, ["src/lib/a.ts", "src/lib/index.ts", "src/b.ts", "src/routes/home.tsx"]);
     assert.deepEqual(resolve("src/b.ts", "@/lib/a"), { kind: "file", path: "src/lib/a.ts" });
     assert.deepEqual(resolve("src/b.ts", "./lib"), { kind: "file", path: "src/lib/index.ts" });
     assert.deepEqual(resolve("src/b.ts", "./lib/a.ts"), { kind: "file", path: "src/lib/a.ts" });
     assert.deepEqual(resolve("src/b.ts", "node:fs"), { kind: "builtin", name: "fs" });
     assert.deepEqual(resolve("src/b.ts", "react-dom/client"), { kind: "package", name: "react-dom" });
     assert.equal(resolve("src/b.ts", "./nope").kind, "unresolved");
+    // An alias of a JSON or a stylesheet (with a bundler's `?url`), an absolute path public/ serves, a source under a hidden directory: assets, nothing missing.
+    assert.deepEqual(resolve("src/b.ts", "@/locales/en/translations.json"), { kind: "asset", path: "src/locales/en/translations.json" });
+    assert.deepEqual(resolve("src/b.ts", "@/theme/index.css?url"), { kind: "asset", path: "src/theme/index.css" });
+    assert.deepEqual(resolve("src/b.ts", "/images/a.svg"), { kind: "asset", path: "public/images/a.svg" });
+    assert.deepEqual(resolve("src/b.ts", "@storybook/test-utils"), { kind: "asset", path: ".storybook/test-utils.ts" });
+    assert.deepEqual(resolve("src/b.ts", "../.storybook/test-utils"), { kind: "asset", path: ".storybook/test-utils.ts" });
+    assert.deepEqual(resolve("src/b.ts", "@/nope"), { kind: "unresolved", reason: "no file for the tsconfig path @/*: @/nope" });
+    assert.deepEqual(resolve("src/b.ts", "/images/nope.svg"), { kind: "unresolved", reason: "no such file: /images/nope.svg" });
+    // `rootDirs` read as one directory: React Router's `./+types/home` is the generated twin; one not generated says so.
+    assert.deepEqual(resolve("src/routes/home.tsx", "./+types/home"), { kind: "asset", path: ".react-router/types/src/routes/+types/home.ts" });
+    assert.deepEqual(resolve("src/routes/home.tsx", "./+types/about"), { kind: "unresolved", reason: "no such file: ./+types/about, nor .react-router/types/src/routes/+types/about of the tsconfig rootDirs" });
   });
 });

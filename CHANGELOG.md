@@ -113,6 +113,11 @@ Comparing branches, tested on a repository whose main moved on after the branche
 - A review of a branch or a compared head was held to the checkout's `ARCHITECTURE.md`, not its own: a branch whose contract allowed its new layer dependency was failed against a checkout that had none, and the other way round. A revision's analysis reads its own contract now (`treeAt` carries it, `analyze` takes it from the overrides).
 - A line's label sat at the middle of its start and its end, which on an elbowed route is off the line: two heads' labels of a comparison read "featfeat-a" on each other, and in the flowcharts of a function's logic three labels in ten sat on a shape. A label now sits on its line — spots along each segment, the longest first, above or below, beside on the right or the left — clear of the shapes and of the labels placed before; where the gap is too narrow, the spot that covers the least. On a browser extension's 25 biggest flowcharts: 42 labels on another label and 196 on a shape before, 4 and 11 after. A click waits a third of a second for a second one. The `p` that opened the map was typed into its search box, which then faded every dot without a p.
 
+What the Salesforce storefront (2348 files) taught the analysis.
+
+- An alias of a tsconfig `paths` that names an asset — `@/locales/en-US/translations.json`, `@/theme/index.css?url` — was an unresolved import, 156 of the storefront's 296; so was an absolute `/images/x.svg` that `public/` holds (Vite, Next and CRA serve it at `/`), and a relative import of a source archdiff leaves out (`.storybook/test-wrapper`, a hidden directory). They are assets now, like a relative `./data.json`: nothing to draw, nothing missing.
+- A relative import under tsconfig `rootDirs` is looked for under the other ones too: React Router's `./+types/home` is `.react-router/types/src/routes/+types/home.ts` once `react-router typegen` ran; before it ran, the reason names that twin path.
+
 ## 0.5.0 — 2026-10-18
 
 A contract the code is checked against, the business logic and the state machines of the code as pictures, a real run of an entry with its storages mocked, and a page that selects shapes, asks the agent about them and walks the whole project.

@@ -10,7 +10,7 @@ An analysis of archdiff 0.1 on real repositories (keylang, 480 files; storefront
 
 **Routes and hooks as entry points depend on conventions.** React Router entries are the exports of files under a `routes/` directory; SFCC hooks come from `cartridges/*/hooks.json`. A project with routes elsewhere lists its files in `entries` of `archdiff.json`. *State:* documented.
 
-**Imports through `paths` of a tsconfig that `extends` a package** (`@tsconfig/node20`) or sits in a sub-package of a monorepo are read as packages, not files. Only the root `tsconfig.json` and one level of relative `extends` are read. *State:* known limit, documented; a per-directory tsconfig walk is a later step.
+**Imports through `paths` of a tsconfig that `extends` a package** (`@tsconfig/node20`) or sits in a sub-package of a monorepo are read as packages, not files. Only the root `tsconfig.json` and one level of relative `extends` are read. *State:* fixed since — the nearest `tsconfig.json` or `jsconfig.json` governs each file, `extends` is followed into node_modules, `paths`, `baseUrl` and `rootDirs` are read, and an alias or path of an asset (`@/locales/en.json`, `/images/x.svg` of `public/`) is an asset, not an unresolved import.
 
 **Files tree-sitter cannot parse** (97 test files of the storefront, over `importOriginal<typeof import('…')>()`) keep the declarations recovered around the error and are listed under syntax errors. *State:* reported, not hidden.
 

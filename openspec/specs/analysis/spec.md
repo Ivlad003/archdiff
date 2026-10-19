@@ -22,7 +22,7 @@ The system SHALL parse every TypeScript, JavaScript, Python, Rust and PHP source
 
 ### Requirement: Imports resolve per language
 
-The system SHALL resolve relative and aliased imports to files (TypeScript `paths` and `baseUrl` from the nearest `tsconfig.json` or `jsconfig.json` with its `extends` merged as the compiler merges them, the pattern with the longest prefix taken; `.js` to `.ts`, index files; a package of a monorepo imported by its name to its source; Python packages, from the repository's root, `src/` and a project directory with a pyproject.toml, setup.py, setup.cfg or manage.py; Rust modules and facade re-exports; PHP namespaces) and name packages and built-ins as externals. An import that resolves to nothing SHALL be listed as unresolved with its reason, never guessed: an alias whose file is missing is no package. A file of the repository that is no source (JSON, a stylesheet) SHALL be neither a module nor unresolved, nor an optional specifier that names no source. `import { type A }` SHALL be of types only unless the tsconfig sets `verbatimModuleSyntax`, and so SHALL a Python import under `if TYPE_CHECKING:`; a line of types only is drawn dashed.
+The system SHALL resolve relative and aliased imports to files (TypeScript `paths`, `baseUrl` and `rootDirs` from the nearest `tsconfig.json` or `jsconfig.json` with its `extends` merged as the compiler merges them, the pattern with the longest prefix taken; `.js` to `.ts`, index files; a package of a monorepo imported by its name to its source; Python packages, from the repository's root, `src/` and a project directory with a pyproject.toml, setup.py, setup.cfg or manage.py; Rust modules and facade re-exports; PHP namespaces) and name packages and built-ins as externals. An import that resolves to nothing SHALL be listed as unresolved with its reason, never guessed: an alias whose file is missing is no package. A file of the repository that is no source (JSON, a stylesheet) SHALL be neither a module nor unresolved, nor an optional specifier that names no source. `import { type A }` SHALL be of types only unless the tsconfig sets `verbatimModuleSyntax`, and so SHALL a Python import under `if TYPE_CHECKING:`; a line of types only is drawn dashed.
 
 #### Scenario: A tsconfig path alias
 
@@ -33,6 +33,16 @@ The system SHALL resolve relative and aliased imports to files (TypeScript `path
 
 - **WHEN** a file imports a module that is neither a file, a package nor a built-in
 - **THEN** the analysis lists it under unresolved imports with the file, the specifier and the reason
+
+#### Scenario: An alias or a path of an asset
+
+- **WHEN** a file imports `@/locales/en/translations.json` or `@/theme/index.css?url` through a tsconfig alias, `/images/logo.svg` that `public/` holds, or `../.storybook/test-wrapper` under a hidden directory
+- **THEN** the import is an asset: no module is drawn for it and it is not listed under unresolved imports
+
+#### Scenario: A relative import under tsconfig rootDirs
+
+- **WHEN** `src/routes/home.tsx` imports `./+types/home` and the tsconfig has `rootDirs: [".", "./.react-router/types"]`
+- **THEN** the import resolves to `.react-router/types/src/routes/+types/home.ts` when that file exists, and is otherwise listed as unresolved with a reason naming that twin path "of the tsconfig rootDirs"
 
 ### Requirement: Calls resolve through declarations, exports and types
 

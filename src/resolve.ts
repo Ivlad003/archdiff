@@ -1,11 +1,12 @@
 // Where an import points: a file of the repository, a package, a Node
 // built-in, or nowhere archdiff can see. Relative specifiers are probed
 // against the file list the way TypeScript and Node do (extensions, `.js`
-// written for a `.ts` file, `index` files); bare specifiers go through the
-// `paths` of the nearest tsconfig.json (a monorepo package has its own;
-// `extends` followed, into node_modules too) first, then are read as
-// packages. Nothing here reads a file but the tsconfigs; the file list is
-// the input.
+// written for a `.ts` file, `index` files, the other `rootDirs`); bare
+// specifiers go through the `paths` of the nearest tsconfig.json (a
+// monorepo package has its own; `extends` followed, into node_modules too)
+// first, then are read as packages. A file on disk that is in no file list
+// — an asset, a source archdiff leaves out — is an asset: nothing to draw,
+// nothing missing. Nothing else here reads the disk but the tsconfigs.
 //
 // Sits between extraction and the graph: ImportFact.source → Resolution.
 // Entry points: `createResolver`, `packageName`, `readTsconfigPaths`,
@@ -31,7 +32,7 @@ export type Resolution =
   | { kind: "builtin"; name: string; runtime?: "python" | "rust" | "php" }
   /** The importing file itself (Rust `use self::Kind::*`, a Python relative import of the package's own module): no dependency, nothing unresolved. */
   | { kind: "self" }
-  /** A file of the repository that is no source (JSON, a stylesheet, an image): no module to draw, nothing unresolved. */
+  /** A file of the repository that is no module: no source (JSON, a stylesheet, an image), or a source archdiff leaves out (a hidden directory's tooling, an excluded glob). Nothing to draw, nothing unresolved. */
   | { kind: "asset"; path: string }
   | { kind: "unresolved"; reason: string };
 
@@ -50,6 +51,8 @@ export interface TsconfigPaths {
   paths: { pattern: string; targets: string[] }[];
   /** `baseUrl`, as a path: a bare specifier is a file under it too (after `paths`, before the packages). */
   baseUrl: string | null;
+  /** `rootDirs`, as paths: directories the compiler reads as one, so a relative import under one may name a file under another (React Router's generated `.react-router/types`). */
+  rootDirs: string[];
   /** `verbatimModuleSyntax`: `import { type A } from` stays in the code as `import {} from`, a runtime import; else it is erased. */
   verbatimModuleSyntax: boolean;
 }
@@ -152,8 +155,10 @@ export function readTsconfigPaths(root: string, file = join(root, "tsconfig.json
   }
 
   const verbatim = nearest("verbatimModuleSyntax");
+  const rootDirsSet = nearest("rootDirs");
+  const rootDirs = rootDirsSet && Array.isArray(rootDirsSet.value) ? rootDirsSet.value.filter(isJsonString).map((dir) => posix.normalize(posix.join(rootDirsSet.directory, dir))) : [];
 
-  return { baseDir: baseUrl ?? pathsSet?.directory ?? chain[0]!.directory, paths, baseUrl, verbatimModuleSyntax: verbatim?.value === true };
+  return { baseDir: baseUrl ?? pathsSet?.directory ?? chain[0]!.directory, paths, baseUrl, rootDirs, verbatimModuleSyntax: verbatim?.value === true };
 }
 
 /**
@@ -354,29 +359,52 @@ export function createResolver(root: string, files: Iterable<string>, facts: rea
 function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsconfigOf: (from: string) => TsconfigPaths | null, workspaces: ReadonlyMap<string, Workspace>): (from: string, specifier: string) => Resolution {
   const rootPosix = root.split("\\").join("/");
 
-  // A repository-relative candidate, as written or with an extension or index file added.
-  const probe = (candidate: string): string | null => {
-    if (known.has(candidate)) return candidate;
+  // A repository-relative candidate, as written or with an extension or index file added: the first form `exists` finds —
+  // a file of the list by default, else a file on disk.
+  const probe = (candidate: string, exists: (path: string) => boolean = (path) => known.has(path)): string | null => {
+    if (exists(candidate)) return candidate;
     const extension = posix.extname(candidate);
 
     for (const rewritten of REWRITES[extension] ?? []) {
       const swapped = candidate.slice(0, -extension.length) + rewritten;
 
-      if (known.has(swapped)) return swapped;
+      if (exists(swapped)) return swapped;
     }
 
-    for (const added of EXTENSIONS) if (known.has(candidate + added)) return candidate + added;
+    for (const added of EXTENSIONS) if (exists(candidate + added)) return candidate + added;
 
-    for (const added of EXTENSIONS) if (known.has(posix.join(candidate, `index${added}`))) return posix.join(candidate, `index${added}`);
+    for (const added of EXTENSIONS) if (exists(posix.join(candidate, `index${added}`))) return posix.join(candidate, `index${added}`);
 
     return null;
   };
+
+  // A candidate that is a file on disk but in no file list: an asset (JSON, a stylesheet, an image a bundler imports), or a
+  // source archdiff leaves out (a hidden directory's tooling, an excluded glob). No module to draw, nothing missing.
+  const onDisk = (candidate: string): string | null => probe(candidate, (path) => isFileIn(rootPosix, path));
 
   // A tsconfig `paths` target directory, relative to the root.
   const relativeToRoot = (absolute: string): string => {
     const relative = posix.relative(rootPosix, absolute);
 
     return relative === "" ? "." : relative;
+  };
+
+  // The places a repository-relative candidate has under the other `rootDirs` of a tsconfig, which the compiler reads as one
+  // directory: `src/routes/+types/home` is `.react-router/types/src/routes/+types/home` too (React Router's typegen).
+  const underRootDirs = (tsconfig: TsconfigPaths | null, candidate: string): string[] => {
+    if (!tsconfig || tsconfig.rootDirs.length < 2) return [];
+    const absolute = posix.join(rootPosix, candidate);
+    const places: string[] = [];
+
+    for (const dir of tsconfig.rootDirs) {
+      const inside = posix.relative(dir, absolute);
+
+      if (inside.startsWith("..") || posix.isAbsolute(inside)) continue;
+
+      for (const other of tsconfig.rootDirs) if (other !== dir) places.push(posix.normalize(relativeToRoot(posix.join(other, inside))));
+    }
+
+    return places.filter((place) => place !== candidate);
   };
 
   return (from, specifier) => {
@@ -387,12 +415,23 @@ function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsco
       const candidate = clean.startsWith("/") ? clean.slice(1) : posix.normalize(posix.join(posix.dirname(from), clean));
 
       if (candidate.startsWith("..")) return { kind: "unresolved", reason: `outside the repository: ${specifier}` };
-      const found = probe(candidate);
+      // The candidate itself, then its places under the other `rootDirs`, which the compiler reads for a relative specifier only.
+      const mirrored = clean.startsWith(".") ? underRootDirs(tsconfigOf(from), candidate) : [];
 
-      if (found) return { kind: "file", path: found };
+      for (const place of [candidate, ...mirrored]) {
+        const found = probe(place);
 
-      // A file of the repository that is no source — JSON, a stylesheet, an image a bundler imports: nothing to draw, nothing missing.
-      return isFileIn(rootPosix, candidate) ? { kind: "asset", path: candidate } : { kind: "unresolved", reason: `no such file: ${specifier}` };
+        if (found) return { kind: "file", path: found };
+      }
+
+      // An absolute specifier may name a file of `public/`, which Vite, Next and CRA serve at `/`.
+      for (const place of [candidate, ...mirrored, ...(clean.startsWith("/") ? [posix.join("public", candidate)] : [])]) {
+        const asset = onDisk(place);
+
+        if (asset) return { kind: "asset", path: asset };
+      }
+
+      return { kind: "unresolved", reason: `no such file: ${specifier}${mirrored.length > 0 ? `, nor ${mirrored.join(" or ")} of the tsconfig rootDirs` : ""}` };
     }
 
     if (BUILTINS.has(clean)) return { kind: "builtin", name: clean.replace(/^node:/, "") };
@@ -403,16 +442,25 @@ function createEcmascriptResolver(root: string, known: ReadonlySet<string>, tsco
       const best = bestPattern(tsconfig.paths, clean);
 
       for (const target of best?.targets ?? []) {
-        const found = probe(posix.normalize(relativeToRoot(posix.join(tsconfig.baseDir, target.replace("*", best!.matched)))));
+        const candidate = posix.normalize(relativeToRoot(posix.join(tsconfig.baseDir, target.replace("*", best!.matched))));
+        const found = probe(candidate);
 
         if (found) return { kind: "file", path: found };
+        // `@/locales/en/translations.json`, `@/theme/index.css?url`: an alias names an asset as well as a module.
+        const asset = onDisk(candidate);
+
+        if (asset) return { kind: "asset", path: asset };
       }
 
-      // `baseUrl`: a bare specifier names a file under it too (`lib/util` → `src/lib/util.ts` with `baseUrl: "src"`).
+      // `baseUrl`: a bare specifier names a file under it too (`lib/util` → `src/lib/util.ts` with `baseUrl: "src"`). Every
+      // package import passes here, so the disk is asked only for the specifier as written (`locales/en.json`), not its forms.
       if (tsconfig.baseUrl !== null) {
-        const found = probe(posix.normalize(relativeToRoot(posix.join(tsconfig.baseUrl, clean))));
+        const candidate = posix.normalize(relativeToRoot(posix.join(tsconfig.baseUrl, clean)));
+        const found = probe(candidate);
 
         if (found) return { kind: "file", path: found };
+
+        if (isFileIn(rootPosix, candidate)) return { kind: "asset", path: candidate };
       }
 
       // An alias of the repository whose file is not there: no package is named `@/lib` or `~/x`.
