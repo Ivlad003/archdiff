@@ -84,6 +84,9 @@ export function crumbsOf(views: readonly ViewEntry[], key: string): { label: str
     if (view.kind === "sequence" || view.kind === "path" || ofFn) crumbs.push({ label: view.kind, key });
 
     if (view.kind === "type") crumbs.push({ label: `type ${subject.slice(hash + 1)}`, key });
+  } else if (view.kind === "apis") {
+    // The APIs overview, then the family (or the module) the picture is of.
+    crumbs.push({ label: "apis", key: "apis" }, { label: subject, key });
   } else crumbs.push({ label: view.kind, key });
 
   return crumbs;

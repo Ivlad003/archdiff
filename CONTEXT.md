@@ -48,6 +48,8 @@ _Avoid_: entry, handler
 A module that holds data: a database client, a store, a cache, the file system.
 _Avoid_: repository (overloaded), persistence
 
+**Operation**: a call out of the repository that names an operation of an external API archdiff knows — SCAPI's `ShopperBaskets.getBasket` (apis.ts). Named, not blind: a shape of its own on a call tree, a message to its family's lifeline, a storage the path ends at, the `apis` view's unit. A family is the API's client (`ShopperBaskets`); an OCAPI hook of a cartridge modifies the resource a family serves.
+
 **Hub**:
 A module most of a picture's modules import, drawn as a badge on its importers instead of as lines.
 _Avoid_: utility, common module

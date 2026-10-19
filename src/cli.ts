@@ -230,7 +230,7 @@ const COMMANDS: readonly Command[] = [
       "drawio, excalidraw, archimate. Views: layers | layer:<name> | dir:<path> |",
       "module:<path> | inside:<path> | usage:<path> | calls:<path>#<fn> |",
       "sequence:<path>#<fn> | path:<path>#<fn> | type:<path>#<Type> | cycles |",
-      "cycle:<path> | classes | classes:<path|dir> | matrix | matrix:<dir> | events | messages | messages:<path> | tests |",
+      "cycle:<path> | classes | classes:<path|dir> | matrix | matrix:<dir> | events | messages | messages:<path> | apis | apis:<family|path> | tests |",
       "hotspots | packages | timeline [--base --head] | coverage | intent | modules | metrics |",
       "metrics:<layer> | cycles:fns | machines | machine:<path>#<name> | focus:<path>[#<fn>] |",
       "logic | logic:<path>#<fn> (the function's body as a flowchart, with its paths as rules) |",

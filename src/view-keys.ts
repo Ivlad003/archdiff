@@ -56,6 +56,7 @@ export const VIEW_KINDS = {
   machine: { subject: "required", question: "which states a machine has, which transitions, and which function or event makes each" },
   events: { subject: "none", question: "which modules emit which events, and which listen" },
   messages: { subject: "optional", question: "what the parts say to each other: which module sends which typed message to which, as a sequence", path: true },
+  apis: { subject: "optional", question: "which operations of an external API (SCAPI) the code calls, by family and by module, and which hooks modify them" },
   tests: { subject: "none", question: "which modules the tests import, and which none does", modules: true },
   hotspots: { subject: "none", question: "which modules are big, and which are called from everywhere" },
   packages: { subject: "none", question: "which packages depend on which, declared or not" },

@@ -9,6 +9,7 @@
 // `metricsMarkdown`, `commitMarkdown`.
 
 import type { Analysis } from "./analyze.ts";
+import { parseApiId, participantLabel, API_LABELS, API_SHORT } from "./apis.ts";
 import type { CommitInfo } from "./git.ts";
 import type { Diagram, Line, Shape } from "./diagram.ts";
 import { farFromMainSequence, type Metrics } from "./diagram.ts";
@@ -110,10 +111,10 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
 
     for (const [i, message] of diagram.sequence.messages.entries()) {
       for (const fragment of fragments) if (fragment.first === i) lines.push(`- _${fragment.kind} [${fragment.label}]_ — messages ${fragment.first + 1}–${fragment.last + 1}`);
-      lines.push(`${i + 1}. \`${message.from}\` → \`${message.to}\`: **${message.label}${diagram.sequence.kind === "messages" ? "" : "()"}**${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""} — ${message.from}:${message.line}`);
+      lines.push(`${i + 1}. \`${message.from}\` → \`${participantLabel(message.to)}\`: **${message.label}${diagram.sequence.kind === "messages" ? "" : "()"}**${(message.times ?? 1) > 1 ? ` ×${message.times}` : ""} — ${message.from}:${message.line}`);
     }
 
-    lines.push("", "## Participants", "", ...diagram.sequence.participants.map((module) => `- ${module}`), "");
+    lines.push("", "## Participants", "", ...diagram.sequence.participants.map((module) => `- ${participantLabel(module)}`), "");
 
     return `${lines.join("\n").trimEnd()}\n`;
   }
@@ -122,7 +123,7 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
   for (const node of diagram.nodes) byGroup.set(node.group ?? "", [...(byGroup.get(node.group ?? "") ?? []), node]);
 
   for (const [group, nodes] of [...byGroup].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    if (group !== "") lines.push(`## ${group}`, "");
+    if (group !== "") lines.push(`## ${diagram.groups.find((lane) => lane.id === group)?.label ?? group}`, "");
 
     for (const node of nodes) {
       const where = position(node);
@@ -213,6 +214,8 @@ function callLines(id: string, analysis: Analysis): string[] {
 
   for (const call of calls) lines.push(`- ${call.kind === "ref" ? "passes " : "calls "}\`${call.to}\` — line ${call.line}`);
 
+  for (const api of graph.apiCalls) if (api.from === id) lines.push(`- calls ${API_SHORT[api.api]} \`${api.family}.${api.operation}\` — line ${api.line}`);
+
   for (const gap of gaps) lines.push(`- cannot follow \`${gap.callee}\` (${gap.reason}) — line ${gap.line}`);
 
   return lines;
@@ -256,12 +259,37 @@ export function nodeMarkdown(node: Shape, analysis: Analysis, readSource: (file:
       lines.push("");
     }
 
-    const gaps = graph.gaps.filter((gap) => gap.from === id);
+    const operations = graph.apiCalls.filter((call) => call.from === id);
+
+    if (operations.length > 0) {
+      lines.push("## Operations of external APIs", "");
+
+      for (const call of operations) lines.push(`- ${API_SHORT[call.api]} \`${call.family}.${call.operation}\` — line ${call.line}`);
+      lines.push("");
+    }
+
+    const gaps = graph.gaps.filter((gap) => gap.from === id && gap.reason !== "api");
 
     if (gaps.length > 0) {
       lines.push("## Not followed", "");
 
       for (const gap of gaps) lines.push(`- \`${gap.callee}\` — ${gap.reason} (line ${gap.line})`);
+      lines.push("");
+    }
+  }
+
+  // A family or an operation of an external API: what it is, and who calls it.
+  const api = node.kind === "external" ? parseApiId(node.id) : null;
+
+  if (api) {
+    const calls = graph.apiCalls.filter((call) => call.api === api.api && call.family === api.family && (api.operation === null || call.operation === api.operation));
+
+    lines.push(api.operation === null ? `Family ${api.family} of the ${API_LABELS[api.api]}: ${counted(new Set(calls.map((call) => call.operation)).size, "operation")} called.` : `Operation ${api.operation} of ${api.family}, ${API_LABELS[api.api]}.`, "");
+
+    if (calls.length > 0) {
+      lines.push("## Called by", "");
+
+      for (const call of calls) lines.push(`- ${call.from}${api.operation === null ? ` — ${call.operation}` : ""} — ${moduleOf(call.from)}:${call.line}`);
       lines.push("");
     }
   }

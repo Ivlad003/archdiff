@@ -40,6 +40,8 @@ export interface FlowStep {
   content?: string;
   /** Calls from this step archdiff could not follow. */
   gaps: number;
+  /** The operations of an external API the step calls (SCAPI's `ShopperBaskets.getBasket`), each once. */
+  apis?: string[];
 }
 
 export interface DataFlow {
@@ -217,6 +219,9 @@ export function dataFlow(analysis: Analysis, entry: string, mocks: readonly Mock
   const gapsFrom = new Map<string, number>();
 
   for (const gap of graph.gaps) if (isBlindSpot(gap)) gapsFrom.set(gap.from, (gapsFrom.get(gap.from) ?? 0) + 1);
+  const apiFrom = new Map<string, string[]>();
+
+  for (const api of graph.apiCalls) apiFrom.set(api.from, [...(apiFrom.get(api.from) ?? []), `${api.family}.${api.operation}`]);
   const seen = new Set<string>();
   const storageCache = new Map<string, string | null>();
   // The storage fields seen so far on the path: a parameter named like a field of a mocked storage reads it.
@@ -252,6 +257,9 @@ export function dataFlow(analysis: Analysis, entry: string, mocks: readonly Mock
     }
 
     const step: FlowStep = { id: node.id, name: node.parent ? `${node.parent}.${node.name}` : node.name, module, line: node.line, depth: level, caller, params, returns, gaps: gapsFrom.get(node.id) ?? 0 };
+    const apis = apiFrom.get(node.id);
+
+    if (apis) step.apis = [...new Set(apis)];
 
     if (storage) {
       step.storage = storage;
@@ -304,7 +312,7 @@ export function flowMarkdown(flow: DataFlow): string {
   for (const step of flow.steps) {
     const indent = "  ".repeat(step.depth);
     const params = step.params.map((param) => `${param.name}: ${param.type}${param.value !== undefined ? ` = ${param.value} (${param.from})` : ""}`).join(", ");
-    lines.push(`${indent}- **${step.name}**(${params})${step.returns ? ` → ${step.returns}` : ""} — ${step.module}:${step.line}${step.storage ? ` — storage: ${step.storage}${step.content !== undefined ? ` holds \`${step.content}\`` : ""}` : ""}${step.gaps > 0 ? ` — ${step.gaps} calls not followed` : ""}`);
+    lines.push(`${indent}- **${step.name}**(${params})${step.returns ? ` → ${step.returns}` : ""} — ${step.module}:${step.line}${step.apis ? ` — calls SCAPI: ${step.apis.join(", ")}` : ""}${step.storage ? ` — storage: ${step.storage}${step.content !== undefined ? ` holds \`${step.content}\`` : ""}` : ""}${step.gaps > 0 ? ` — ${step.gaps} calls not followed` : ""}`);
   }
 
   if (flow.storages.length > 0) {

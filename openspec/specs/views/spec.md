@@ -182,3 +182,17 @@ The system SHALL, when a saved drawing moved shapes out of the layout's columns,
 
 - **WHEN** 150 random placements of 6–22 shapes with random lines are routed
 - **THEN** no segment crosses a shape and every segment is horizontal or vertical
+
+### Requirement: The operations of an external API are shapes
+
+The system SHALL draw, as `apis`, the families of an external API the code calls (SCAPI: a call `clients.shopper<Family>.<operation>()`, a destructured `shopper<Family>.<operation>()`, or a call on a value typed `Shopper<Family>`) in the API's lane with their operations and calls counted, the modules calling them in their layers' lanes, and the cartridge hooks of `hooks.json` joined to the family serving the resource their name holds; as `apis:<Family>` the family's operations with the functions calling each and the hooks on the operations of the resource and method they name; as `apis:<path>` the operations a module calls. The same operations SHALL be external shapes on `calls:` trees, storages of `path:` and `flow`, messages to the family's lifeline in `sequence:`, and the reason `api` in the coverage report, never a blind spot.
+
+#### Scenario: A cart action over SCAPI
+
+- **WHEN** `addToCart` calls `clients.shopperBasketsV2.getBasket()` and `clients.shopperProducts.getProduct()`, and a cartridge's hooks.json names `dw.ocapi.shop.basket.modifyGETResponse`
+- **THEN** `apis` draws `ShopperBasketsV2` and `ShopperProducts` with the module calling them and the hook joined to `ShopperBasketsV2` with the label `modify GET response basket`; `apis:ShopperBasketsV2` draws `getBasket` with `addToCart` calling it and the hook on `getBasket`; `calls:` of `addToCart` ends at `ShopperBasketsV2.getBasket`; the coverage report counts the calls under `api` and not as blind
+
+#### Scenario: A basket read with an else, a loop and a catch
+
+- **WHEN** `addToCart` reads the basket, logs under `if (!basket)` and adds an item in the `else`, reads each product in a loop, and updates the basket in a `try` whose `catch` logs
+- **THEN** the sequence has `alt [!basket]` with an `else` arm, a `loop`, and `alt [try]` with a `catch (error)` arm, and the Mermaid reads `alt !basket … else … end`

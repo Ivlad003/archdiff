@@ -20,12 +20,14 @@ import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
 import { isBlindSpot, moduleOf, nodeId, type Graph, type Declaration } from "./graph.ts";
-import { classesView, usageView, eventsView, hotspotsView, matrixView, messageHandlers, messageSends, packagesView, pathView, testsView, typeView } from "./views-more.ts";
+import { familyId, operationId, parseApiId, participantLabel, API_SHORT } from "./apis.ts";
+import type { GuardFact } from "./extract/facts.ts";
+import { apiFamilies, apisView, classesView, usageView, eventsView, hotspotsView, matrixView, messageHandlers, messageSends, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
 import { logicList, logicView } from "./logic.ts";
-import { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
+import { apiLane, depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, operationNode, unplaced } from "./nodes.ts";
 import { defaultDepth, foldLimit, viewKey, type View } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
 import { branchesDiagram, timelineDiagram } from "./views-more.ts";
@@ -82,6 +84,8 @@ export interface EntryPoint {
   node: Declaration;
   /** `route cart.tsx: loader`, `hook …`, `bin`, `main`, `entries` (archdiff.json), `uncalled export`. */
   label: string;
+  /** An SFCC hook's name (`dw.ocapi.shop.basket.modifyGETResponse`): the APIs view joins it to the resource it modifies. */
+  hook?: string;
 }
 
 /**
@@ -109,14 +113,14 @@ export function entryPoints(analysis: Analysis): EntryPoint[] {
       for (const id of graph.resolvedExports.get(declared.module)?.values() ?? []) {
         const node = graph.nodes.get(id);
 
-        if (node && node.kind === "fn" && !entries.has(id)) entries.set(id, { node, label: declared.label });
+        if (node && node.kind === "fn" && !entries.has(id)) entries.set(id, declared.hook ? { node, label: declared.label, hook: declared.hook } : { node, label: declared.label });
       }
     } else {
       // A listener need not be exported: `local` names a declaration of the module.
       const local = declared.local ? graph.nodes.get(nodeId(declared.module, declared.exportName)) : undefined;
       const node = declared.local ? (local?.kind === "fn" ? local : null) : exportedNode(declared.module, declared.exportName);
 
-      if (node && !entries.has(node.id)) entries.set(node.id, { node, label: declared.label });
+      if (node && !entries.has(node.id)) entries.set(node.id, declared.hook ? { node, label: declared.label, hook: declared.hook } : { node, label: declared.label });
     }
   }
 
@@ -178,6 +182,13 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   for (const fn of logicList(analysis)) list.push({ key: `logic:${fn.id}`, title: `${fn.parent ? `${fn.parent}.` : ""}${fn.name} (${fn.module}) — ${fn.branches} ${fn.branches === 1 ? "branch" : "branches"}`, kind: "logic", layer: graph.modules.get(fn.module)!.layer });
   list.push({ key: "events", title: "Events: emitters and listeners", kind: "events" });
   list.push({ key: "messages", title: "Messages: who sends what to whom, by type", kind: "messages" });
+
+  // The operations of an external API the code calls (SCAPI), and each family of them.
+  if (graph.apiCalls.length > 0) {
+    list.push({ key: "apis", title: `APIs: ${counted(new Set(graph.apiCalls.map(operationId)).size, "operation")} of SCAPI the code calls, by family`, kind: "apis" });
+
+    for (const family of apiFamilies(graph)) list.push({ key: `apis:${family.family}`, title: `${family.family} (${API_SHORT[family.api]}) — ${counted(family.operations, "operation")}, ${counted(family.calls, "call")}`, kind: "apis" });
+  }
   list.push({ key: "tests", title: "Tests: which modules the tests cover", kind: "tests" });
   list.push({ key: "hotspots", title: "Hotspots: size and calls in", kind: "hotspots" });
 
@@ -285,7 +296,11 @@ function callsView(graph: Graph, id: string, depth: number): PictureContent {
   const gapsFrom = new Map<string, typeof graph.gaps>();
 
   for (const gap of graph.gaps) gapsFrom.set(gap.from, [...(gapsFrom.get(gap.from) ?? []), gap]);
+  const apiFrom = new Map<string, typeof graph.apiCalls>();
+
+  for (const api of graph.apiCalls) apiFrom.set(api.from, [...(apiFrom.get(api.from) ?? []), api]);
   const holes: Shape[] = [];
+  const operations = new Map<string, Shape>();
 
   for (let step = 0; step < depth && frontier.size > 0; step++) {
     const next = new Set<string>();
@@ -314,6 +329,18 @@ function callsView(graph: Graph, id: string, depth: number): PictureContent {
         holes.push({ id: holeId, kind: "hole", label: callee, reason, group: graph.modules.get(moduleOf(from))!.layer, ref: { file: moduleOf(from) }, x: 0, y: 0, w: 0, h: 0 });
         edges.push({ from, to: holeId, kind: "call" });
       }
+
+      // The operations of an external API the function calls: one external shape per operation, where the trail ends.
+      for (const api of apiFrom.get(from) ?? []) {
+        const apiId = operationId(api);
+        const key = `${from}\u0000${apiId}\u0000call`;
+
+        if (!operations.has(apiId)) operations.set(apiId, operationNode(api));
+
+        if (seenEdges.has(key)) continue;
+        seenEdges.add(key);
+        edges.push({ from, to: apiId, kind: "call" });
+      }
     }
 
     frontier = next;
@@ -321,6 +348,8 @@ function callsView(graph: Graph, id: string, depth: number): PictureContent {
 
   const nodes = [...members].map((member) => fnNode(graph, member));
   nodes[0] = { ...nodes[0]!, kind: "fn" };
+  // The operations before the holes: a big tree folds its tail, and where the trail ends matters more than where it is blind.
+  holes.unshift(...operations.values());
   const name = `${start.parent ? `${start.parent}.` : ""}${start.name}`;
   // A tree of the function alone: it calls no function of the repository (no hole either), only what lies outside it —
   // or the depth is 0, which draws it alone whatever it calls.
@@ -329,7 +358,7 @@ function callsView(graph: Graph, id: string, depth: number): PictureContent {
   const lone = depth === 0 && callees > 0 ? `depth 0 draws ${name} alone, without the ${counted(callees, "function")} it calls (--depth 1 draws them)` : `${name} calls no function of the repository${outside > 0 ? `; its ${outside === 1 ? "call goes" : `${outside} calls go`} to packages, the language or values archdiff does not track` : ""}`;
   const alone = members.size === 1 && holes.length === 0 ? { reason: lone } : {};
 
-  return unplaced(`Calls from ${name}`, [...nodes, ...holes], edges, lanesOf(graph, [...nodes, ...holes]), alone);
+  return unplaced(`Calls from ${name}`, [...nodes, ...holes], edges, [...lanesOf(graph, [...nodes, ...holes]), ...(operations.size > 0 ? [apiLane("scapi")] : [])], alone);
 }
 
 /** The modules with calls into the repository archdiff could not follow (blind spots) or imports it could not resolve, by layer, labelled with the counts. */
@@ -534,20 +563,34 @@ function sequenceMessages(graph: Graph, id: string, depth: number, limit: number
   const callsFrom = new Map<string, typeof graph.calls>();
 
   for (const call of graph.calls) if (call.kind === "call") callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call]);
+  const apiFrom = new Map<string, typeof graph.apiCalls>();
+
+  for (const api of graph.apiCalls) apiFrom.set(api.from, [...(apiFrom.get(api.from) ?? []), api]);
   const messages: SequenceMessage[] = [];
   const active = new Set<string>();
+  // A guard's id is made unique per function it sits in; its label is the condition, the case, the kind.
+  const guardsOf = (from: string, guards: readonly GuardFact[] | undefined): SequenceGuard[] => (guards ?? []).map((guard) => ({ id: `${from}:${guard.id}`, kind: guard.kind === "loop" ? "loop" : "opt", label: guard.kind === "loop" || guard.kind === "if" || guard.kind === "else" ? guard.text : guard.text === "" || guard.text === guard.kind ? guard.kind : `${guard.kind} ${guard.text}` }));
 
   const walk = (from: string, level: number, inherited: SequenceGuard[]): void => {
     if (level >= depth || messages.length >= limit) return;
     active.add(from);
+    // The calls into the repository and the operations of an API, in the order the code makes them.
+    const steps = [...(callsFrom.get(from) ?? []).map((call) => ({ line: call.line, call })), ...(apiFrom.get(from) ?? []).map((api) => ({ line: api.line, api }))].sort((a, b) => a.line - b.line);
 
-    for (const call of [...(callsFrom.get(from) ?? [])].sort((a, b) => a.line - b.line)) {
+    for (const step of steps) {
       if (messages.length >= limit) break;
+
+      // An operation of an API: a message to its family's lifeline, not followed further.
+      if ("api" in step) {
+        messages.push({ from: moduleOf(from), to: familyId(step.api.api, step.api.family), label: step.api.operation, line: step.line, depth: level, times: 1, chain: [...inherited, ...guardsOf(from, step.api.guards)] });
+        continue;
+      }
+
+      const { call } = step;
       const target = graph.nodes.get(call.to);
 
       if (!target) continue;
-      const own = (call.guards ?? []).map((guard): SequenceGuard => ({ id: `${from}:${guard.id}`, kind: guard.kind === "loop" ? "loop" : "opt", label: guard.kind === "loop" || guard.kind === "if" || guard.kind === "else" ? guard.text : guard.text === "" || guard.text === guard.kind ? guard.kind : `${guard.kind} ${guard.text}` }));
-      const chain = [...inherited, ...own];
+      const chain = [...inherited, ...guardsOf(from, call.guards)];
       messages.push({ from: moduleOf(from), to: moduleOf(call.to), label: target.parent ? `${target.parent}.${target.name}` : target.name, line: call.line, depth: level, times: 1, chain });
 
       if (!active.has(call.to)) walk(call.to, level + 1, chain);
@@ -648,7 +691,9 @@ function drawSequence(participants: readonly string[], messages: readonly Sequen
 
   for (const module of participants) {
     const x = column.get(module)!;
-    nodes.push({ id: module, kind: "participant", label: module, ref: { id: module, file: module, line: 1 }, x, y: SEQ_TOP, w: SIZE.participant.w, h: SIZE.participant.h });
+    // A family of an external API (SCAPI's ShopperBaskets) has a lifeline like a module, drawn as an external box that opens its view.
+    const api = parseApiId(module);
+    nodes.push(api ? { id: module, kind: "external", label: participantLabel(module), opens: `apis:${api.family}`, x, y: SEQ_TOP, w: SIZE.participant.w, h: SIZE.participant.h } : { id: module, kind: "participant", label: module, ref: { id: module, file: module, line: 1 }, x, y: SEQ_TOP, w: SIZE.participant.w, h: SIZE.participant.h });
     nodes.push({ id: `foot:${module}`, kind: "anchor", label: "", x: centre(module) - 1, y: bottom, w: 2, h: 2 });
     edges.push({ from: module, to: `foot:${module}`, kind: "lifeline", route: [{ x: centre(module), y: SEQ_TOP + SIZE.participant.h }, { x: centre(module), y: bottom }] });
   }
@@ -805,6 +850,8 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
         return eventsView(analysis);
       case "messages":
         return messagesView(analysis, view.subject);
+      case "apis":
+        return apisView(analysis, view.subject, entryPoints(analysis).filter((entry): entry is EntryPoint & { hook: string } => entry.hook !== undefined));
       case "tests":
         return testsView(graph);
       case "hotspots":

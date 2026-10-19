@@ -9,6 +9,7 @@
 // Entry points: `toMermaid`, `mermaidStyleFor`, `mermaidMismatch`,
 // `MERMAID_STYLES`.
 
+import { participantLabel } from "../apis.ts";
 import type { Diagram, Line, Shape } from "../diagram.ts";
 
 /** A Mermaid-safe node ID: letters, digits and underscores, unique per diagram. */
@@ -90,7 +91,7 @@ function sequenceMermaid(diagram: Diagram): string {
   if (diagram.reason) lines.push(`%% ${diagram.reason}`);
   lines.push("sequenceDiagram");
 
-  for (const module of sequence.participants) lines.push(`  participant ${ids.get(module)} as ${module.replace(/[:;]/g, " ")}`);
+  for (const module of sequence.participants) lines.push(`  participant ${ids.get(module)} as ${participantLabel(module).replace(/[:;]/g, " ")}`);
 
   const fragments = sequence.fragments ?? [];
 

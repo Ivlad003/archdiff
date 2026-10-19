@@ -28,6 +28,8 @@ export interface DeclaredEntry {
   local?: true;
   /** `route cart.tsx: loader`, `hook dw.ocapi.shop.category.modifyGETResponse`, `listener chrome.runtime.onConnect of the background`. */
   label: string;
+  /** An SFCC hook: its name as hooks.json writes it (`dw.ocapi.shop.basket.modifyGETResponse`), for the APIs view. */
+  hook?: string;
 }
 
 const ROUTE_EXPORTS = ["default", "loader", "action", "clientLoader", "clientAction", "ErrorBoundary"];
@@ -60,7 +62,8 @@ function cartridgeHooks(root: string, files: ReadonlySet<string>, manifests: rea
       const base = posix.normalize(posix.join(directory, hook["script"]));
       const script = [base, `${base}.js`, `${base}.ts`, `${base}/index.js`, `${base}/index.ts`].find((candidate) => files.has(candidate));
 
-      if (script) entries.push({ module: script, exportName: "*", label: `hook ${hook["name"]}` });
+      // The platform calls the export named by the hook's last segment: `dw.ocapi.shop.basket.modifyGETResponse` runs `exports.modifyGETResponse`.
+      if (script) entries.push({ module: script, exportName: hook["name"].slice(hook["name"].lastIndexOf(".") + 1), label: `hook ${hook["name"]}`, hook: hook["name"] });
     }
   }
 

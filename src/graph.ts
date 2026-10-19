@@ -26,6 +26,7 @@
 
 import type { Config } from "./config.ts";
 import { layerOf } from "./config.ts";
+import { operationOf, type ApiOperation } from "./apis.ts";
 import { dottedForm, type Callee, type CallFact, type DeclFact, type FileFacts, type GuardFact, type ValueOfFact } from "./extract/facts.ts";
 import type { Resolution } from "./resolve.ts";
 
@@ -110,10 +111,19 @@ export const GAP_REASONS = {
   global: { blind: false, text: "a bare name the file neither declares nor imports (setTimeout, JSON.parse): a global" },
   local: { blind: false, text: "a function of the caller's own body (a nested function, a local arrow): its calls are the caller's already" },
   external: { blind: false, text: "a package or a Node built-in" },
+  api: { blind: false, text: "an operation of an external API the code names (SCAPI's shopperBaskets.getBasket): drawn as its own shape, a storage of the path" },
   "parse-error": { blind: false, text: "a syntax error in the file" },
 } as const satisfies Record<string, { blind: boolean; text: string }>;
 
 export type GapReason = keyof typeof GAP_REASONS;
+
+/** A call of an operation of an external API (apis.ts), from a node or a module's top level: a gap of reason `api` with what it names. */
+export interface ApiCall extends ApiOperation {
+  from: string;
+  line: number;
+  /** The branches, loops and handlers the call sits under, outermost first (a sequence draws them as fragments). */
+  guards?: GuardFact[];
+}
 
 /** A package or built-in the code imports. */
 export interface External {
@@ -131,6 +141,8 @@ export interface Graph {
   readonly calls: readonly CallEdge[];
   readonly externals: ReadonlyMap<string, External>;
   readonly gaps: readonly Gap[];
+  /** The calls of operations of external APIs the code names (SCAPI): each is a gap of reason `api` too. */
+  readonly apiCalls: readonly ApiCall[];
   /** Imports that resolve to no file, package or built-in, with the reason. */
   readonly unresolvedImports: readonly { from: string; specifier: string; reason: string; line: number }[];
   /** Per module, every exported name → the node it stands for, re-exports followed (`module.exports = require("./x")`, `export * from`). */
@@ -336,6 +348,7 @@ interface Building {
   calls: CallEdge[];
   externals: Map<string, External>;
   gaps: Gap[];
+  apiCalls: ApiCall[];
   unresolvedImports: { from: string; specifier: string; reason: string; line: number }[];
   scopes: Map<string, Scope>;
 }
@@ -827,7 +840,13 @@ function resolveCalls(b: Building, resolver: CallResolver): void {
 
       if ("id" in target) b.calls.push(edge(target.id));
       else if ("ids" in target) for (const to of target.ids) b.calls.push(edge(to));
-      else b.gaps.push({ from, callee: call.callee, reason: target.gap, line: call.line });
+      else {
+        // A call out of the repository that names an operation of an API archdiff knows (SCAPI's `clients.shopperBaskets.getBasket`): recorded, and a gap of its own reason.
+        const operation = target.gap === "parse-error" || target.gap === "local" ? null : operationOf(call);
+
+        if (operation) b.apiCalls.push(call.guards ? { ...operation, from, line: call.line, guards: call.guards } : { ...operation, from, line: call.line });
+        b.gaps.push({ from, callee: call.callee, reason: operation ? "api" : target.gap, line: call.line });
+      }
 
       // A function the call is handed (`list.forEach(save)`, `setTimeout(this.tick)`, `{ onDone: finish }`): whoever
       // holds it may call it — a `ref` of the function passing it, as a function read at the top level is the module's.
@@ -878,7 +897,7 @@ function classOf(b: Building, id: string): string | null {
 
 /** Builds the graph of the repository from the facts of every file: three passes over the files in path order. */
 export function buildGraph(facts: readonly FileFacts[], config: Config, resolve: (from: string, specifier: string) => Resolution, keepsTypeImports: (file: string) => boolean = () => false): Graph {
-  const b: Building = { facts: [...facts].sort((a, c) => (a.path < c.path ? -1 : a.path > c.path ? 1 : 0)), config, resolve, keepsTypeImports, modules: new Map(), nodes: new Map(), deps: [], calls: [], externals: new Map(), gaps: [], unresolvedImports: [], scopes: new Map() };
+  const b: Building = { facts: [...facts].sort((a, c) => (a.path < c.path ? -1 : a.path > c.path ? 1 : 0)), config, resolve, keepsTypeImports, modules: new Map(), nodes: new Map(), deps: [], calls: [], externals: new Map(), gaps: [], apiCalls: [], unresolvedImports: [], scopes: new Map() };
   declareModules(b);
   bindImports(b);
   const exports = new ExportTable(b.facts, b.nodes, resolve);
@@ -888,5 +907,5 @@ export function buildGraph(facts: readonly FileFacts[], config: Config, resolve:
   resolveCalls(b, new CallResolver(b, exports));
   const layers = [...new Set([...b.modules.values()].map((module) => module.layer))].sort();
 
-  return { layers, modules: b.modules, nodes: b.nodes, deps: b.deps, calls: b.calls, externals: b.externals, gaps: b.gaps, unresolvedImports: b.unresolvedImports, resolvedExports };
+  return { layers, modules: b.modules, nodes: b.nodes, deps: b.deps, calls: b.calls, externals: b.externals, gaps: b.gaps, apiCalls: b.apiCalls, unresolvedImports: b.unresolvedImports, resolvedExports };
 }

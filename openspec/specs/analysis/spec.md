@@ -110,6 +110,15 @@ The system SHALL treat as entry points exported functions under `bin/`, the func
 - **WHEN** `src/routes/checkout.tsx` exports `action`
 - **THEN** `archdiff views` lists `calls:src/routes/checkout.tsx#action` labelled "route checkout.tsx: action"
 
+### Requirement: A call of a known API's operation is named
+
+The system SHALL record a call it cannot follow into the repository that names an operation of an API it knows — SCAPI's `clients.shopperBaskets.getBasket()`, a destructured `shopperProducts.getProducts()`, a client typed `ShopperOrders` — as an API call with its family and operation (a gap of reason `api`, not a blind spot), leaving a call it can follow to a class of the repository as that class's; and SHALL read an OCAPI hook's name (`dw.ocapi.shop.basket.modifyGETResponse`) as the resource, the method and the stage it names, served by the SCAPI families of that resource.
+
+#### Scenario: A client of the runtime
+
+- **WHEN** a function calls `clients.shopperBasketsV2.addItemToBasket(…)` and `this.clients.shopperCustomers.getCustomer(…)`
+- **THEN** the analysis records the operations `ShopperBasketsV2.addItemToBasket` and `ShopperCustomers.getCustomer` from that function, and the coverage report counts them under `api`
+
 ### Requirement: The coverage report names the blind spots
 
 The system SHALL report, by module, the calls it could not follow with their reasons, the unresolved imports and the syntax errors, and list the constructs a frontend read but does not follow (an `eval`, a computed import, a decorator that may replace a function), as the map of what the diagrams cannot show.

@@ -1477,6 +1477,36 @@ test("an import type expression does not make a file a syntax error; a dynamic i
     assert.equal(inside.nodes.find((node) => node.id === "src/page.ts#load")?.ref?.line, 5);
   }));
 
+test("APIs: the SCAPI operations the code calls are shapes, storages, messages and a view of their own; an OCAPI hook joins the resource it modifies", () => {
+  const scapi = join(root, "tests/fixtures/scapi");
+  const views = archdiff(["views", scapi]).stdout;
+  assert.ok(views.includes("apis\tAPIs: 5 operations of SCAPI the code calls, by family") && views.includes("apis:ShopperBasketsV2\tShopperBasketsV2 (SCAPI) — 3 operations, 3 calls"), views);
+  // A hook's entry is the export its name ends with: modifyGETResponse for one hook, beforePOST for the other.
+  assert.ok(views.includes("basket.js#modifyGETResponse\tmodifyGETResponse (cartridges/app/cartridge/scripts/hooks/basket.js) — hook dw.ocapi.shop.basket.modifyGETResponse") && views.includes("basket.js#beforePOST\tbeforePOST (cartridges/app/cartridge/scripts/hooks/basket.js) — hook dw.ocapi.shop.basket.beforePOST"), views);
+  const overview = archdiff(["diagram", "apis", scapi, "--format", "mermaid"]).stdout;
+  assert.ok(overview.includes('subgraph "Salesforce Commerce API (SCAPI)"') && overview.includes('api_scapi_ShopperBasketsV2[("ShopperBasketsV2<br/>3 operations · 3 calls")]'), overview);
+  assert.ok(overview.includes("src_lib_cart_ts ==> api_scapi_ShopperBasketsV2") && overview.includes('hooks_basket_js_modifyGETResponse ==>|"modify GET response basket"| api_scapi_ShopperBasketsV2'), overview);
+  // A family: its operations with their calls, the functions calling them; a GET hook on the get… operations, a POST one on add…, never the other way.
+  const family = archdiff(["diagram", "apis:ShopperBasketsV2", scapi, "--format", "mermaid"]).stdout;
+  assert.ok(family.includes('api_scapi_ShopperBasketsV2_getBasket[("getBasket<br/>1 call")]') && family.includes("src_lib_cart_ts_addToCart ==> api_scapi_ShopperBasketsV2_getBasket"), family);
+  assert.ok(family.includes('modifyGETResponse ==>|"modify GET response"| api_scapi_ShopperBasketsV2_getBasket') && family.includes('beforePOST ==>|"before POST"| api_scapi_ShopperBasketsV2_addItemToBasket') && !family.includes('beforePOST ==>|"before POST"| api_scapi_ShopperBasketsV2_getBasket'), family);
+  // A client typed with the SDK's class (`orders: ShopperOrders`) names an operation too; a module has the view of its own operations.
+  const module = archdiff(["diagram", "apis:src/lib/orders.ts", scapi, "--format", "mermaid"]).stdout;
+  assert.ok(module.includes("src_lib_orders_ts_findOrder ==> api_scapi_ShopperOrders_getOrder"), module);
+  assert.equal(archdiff(["diagram", "apis:Nope", scapi]).status, 2);
+  // The call tree, the path to the storages and the flow end at the operations: no hole, a storage, a step's operations.
+  const calls = archdiff(["diagram", "calls:src/lib/cart.ts#addToCart", scapi, "--format", "mermaid"]).stdout;
+  assert.ok(calls.includes("src_lib_cart_ts_addToCart ==> api_scapi_ShopperProducts_getProduct") && !calls.includes("hole_"), calls);
+  const path = archdiff(["diagram", "path:src/routes/cart.tsx#action", scapi, "--format", "mermaid"]).stdout;
+  assert.ok(path.includes("src_routes_cart_tsx_action ==> src_lib_cart_ts_addToCart") && path.includes("src_lib_cart_ts_addToCart ==> api_scapi_ShopperBasketsV2_updateBasket"), path);
+  const flow = archdiff(["flow", "calls:src/routes/cart.tsx#action", scapi]).stdout;
+  assert.ok(flow.includes("— calls SCAPI: ShopperBasketsV2.getBasket, ShopperBasketsV2.addItemToBasket, ShopperProducts.getProduct, ShopperBasketsV2.updateBasket"), flow);
+  // Coverage counts them as operations of an API, not as blind spots.
+  const coverage = JSON.parse(archdiff(["coverage", scapi, "--json"]).stdout) as { byReason: Record<string, number>; blind: number };
+  assert.equal(coverage.byReason["api"], 5);
+  assert.equal(coverage.blind, 0);
+});
+
 test("hotspots of a big repository keeps a screen's shape: 400 modules draw wider than tall, not a column", () =>
   withTempDir("archdiff-hotspots-big-", (dir) => {
     mkdirSync(join(dir, "src"), { recursive: true });
