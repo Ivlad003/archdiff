@@ -1477,6 +1477,18 @@ test("an import type expression does not make a file a syntax error; a dynamic i
     assert.equal(inside.nodes.find((node) => node.id === "src/page.ts#load")?.ref?.line, 5);
   }));
 
+test("hotspots of a big repository keeps a screen's shape: 400 modules draw wider than tall, not a column", () =>
+  withTempDir("archdiff-hotspots-big-", (dir) => {
+    mkdirSync(join(dir, "src"), { recursive: true });
+
+    for (let i = 0; i < 400; i++) writeFileSync(join(dir, `src/m${i}.ts`), `export function f${i}(): number {\n  return ${i};\n}\n`);
+    const picture = JSON.parse(archdiff(["diagram", "hotspots", dir, "--format", "json"]).stdout) as { nodes: { x: number; y: number; w: number; h: number }[] };
+    assert.equal(picture.nodes.length, 400);
+    const right = Math.max(...picture.nodes.map((node) => node.x + node.w));
+    const bottom = Math.max(...picture.nodes.map((node) => node.y + node.h));
+    assert.ok(right > bottom, `${right} wide, ${bottom} tall`);
+  }));
+
 test("run accepts a CommonJS export (`exports.f = f`, an SFCC hook with its `public` flag): the function is exported, not refused", () =>
   withTempDir("archdiff-run-cjs-", (dir) => {
     mkdirSync(join(dir, "src"), { recursive: true });

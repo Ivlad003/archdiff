@@ -520,7 +520,10 @@ export function testsView(graph: Graph): PictureContent {
 /**
  * Hotspots: every module as a box sized by its lines and shaded by the
  * calls into it from other modules, packed row by row in its layer's lane.
- * The big dark boxes are where change is costly.
+ * The big dark boxes are where change is costly. The rows are as wide as
+ * keeps the whole a 16:10 picture, and the boxes shrink when even that is
+ * bigger than a canvas at the smallest zoom: 2348 modules in rows of
+ * 1100 px were a column 5 boxes wide that no zoom could show.
  */
 export function hotspotsView(graph: Graph): PictureContent {
   const callsIn = new Map<string, number>();
@@ -533,41 +536,57 @@ export function hotspotsView(graph: Graph): PictureContent {
   }
 
   const maxIn = Math.max(1, ...callsIn.values());
-  const nodes: Shape[] = [];
-  const groups: Diagram["groups"] = [];
-  const width = 1100;
   const gap = 10;
-  let y = 0;
+  const sideOf = (lines: number, scale: number): number => Math.round(scale * Math.max(44, Math.min(220, 36 + Math.sqrt(lines) * 7)));
 
-  for (const layer of graph.layers) {
-    const members = [...graph.modules.values()].filter((module) => module.layer === layer).sort((a, b) => b.lines - a.lines || (a.id < b.id ? -1 : 1));
+  // The boxes in rows of `width`, layer by layer; the height they take.
+  const layoutAt = (width: number, scale: number): { nodes: Shape[]; groups: Diagram["groups"]; height: number } => {
+    const nodes: Shape[] = [];
+    const groups: Diagram["groups"] = [];
+    let y = 0;
 
-    if (members.length === 0) continue;
-    const top = y;
-    let x = 20;
-    let rowHeight = 0;
-    y += 30;
+    for (const layer of graph.layers) {
+      const members = [...graph.modules.values()].filter((module) => module.layer === layer).sort((a, b) => b.lines - a.lines || (a.id < b.id ? -1 : 1));
 
-    for (const module of members) {
-      const side = Math.round(Math.max(44, Math.min(220, 36 + Math.sqrt(module.lines) * 7)));
+      if (members.length === 0) continue;
+      const top = y;
+      let x = 20;
+      let rowHeight = 0;
+      y += 30;
 
-      if (x + side > width && x > 20) {
-        x = 20;
-        y += rowHeight + gap;
-        rowHeight = 0;
+      for (const module of members) {
+        const side = sideOf(module.lines, scale);
+
+        if (x + side > width && x > 20) {
+          x = 20;
+          y += rowHeight + gap;
+          rowHeight = 0;
+        }
+
+        const calls = callsIn.get(module.id) ?? 0;
+        nodes.push({ id: module.id, kind: "module", label: `${module.id.slice(module.id.lastIndexOf("/") + 1)}\n${module.lines} lines · ${calls} in`, ref: { id: module.id, file: module.id, line: 1 }, group: layer, heat: calls / maxIn, count: calls, x, y, w: side, h: side });
+        x += side + gap;
+        rowHeight = Math.max(rowHeight, side);
       }
 
-      const calls = callsIn.get(module.id) ?? 0;
-      nodes.push({ id: module.id, kind: "module", label: `${module.id.slice(module.id.lastIndexOf("/") + 1)}\n${module.lines} lines · ${calls} in`, ref: { id: module.id, file: module.id, line: 1 }, group: layer, heat: calls / maxIn, count: calls, x, y, w: side, h: side });
-      x += side + gap;
-      rowHeight = Math.max(rowHeight, side);
+      y += rowHeight + 20;
+      groups.push({ id: layer, label: layer, kind: "lane", x: 0, y: top, w: width + 20, h: y - top });
     }
 
-    y += rowHeight + 20;
-    groups.push({ id: layer, label: layer, kind: "lane", x: 0, y: top, w: width + 20, h: y - top });
-  }
+    return { nodes, groups, height: y };
+  };
 
-  return unplaced("Hotspots: size by lines, shade by calls in", nodes, [], groups, { placed: true });
+  // The width a 16:10 picture of the boxes' area takes, never under the 1100 px a small repository reads well at; laid
+  // out twice, since the lanes' own rows and headings add to the first estimate.
+  const area = [...graph.modules.values()].reduce((sum, module) => sum + (sideOf(module.lines, 1) + gap) ** 2, 0);
+  const first = layoutAt(Math.max(1100, Math.round(Math.sqrt(area * 1.6))), 1);
+  const width = Math.max(1100, Math.round(Math.sqrt((first.groups[0]?.w ?? 1100) * first.height * 1.6)));
+  const second = layoutAt(width, 1);
+  // Bigger than a canvas shows at the smallest zoom (0.1 of 9000 × 5600): the boxes shrink to fit.
+  const scale = Math.min(1, 9000 / (width + 20), 5600 / second.height);
+  const laid = scale < 1 ? layoutAt(Math.round(width * scale), scale) : second;
+
+  return unplaced("Hotspots: size by lines, shade by calls in", laid.nodes, [], laid.groups, { placed: true });
 }
 
 /** The packages of the repository as a system: what each declares as a dependency on another, and what its modules import from another's. */

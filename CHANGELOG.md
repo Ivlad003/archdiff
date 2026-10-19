@@ -119,6 +119,7 @@ What the Salesforce storefront (2348 files) taught the analysis.
 - A relative import under tsconfig `rootDirs` is looked for under the other ones too: React Router's `./+types/home` is `.react-router/types/src/routes/+types/home.ts` once `react-router typegen` ran; before it ran, the reason names that twin path.
 - A bare `&` in JSX text (`<h3>Cart & Checkout</h3>`) made its file a syntax error, the facts opaque: tree-sitter wants `&amp;`, React does not. Such an `&` is blanked in place and the file parsed again, as `export type *` already was.
 - `run` refused an SFCC hook — `exports.modifyGETResponse = modifyGETResponse; exports.modifyGETResponse.public = true` — as "not exported": the flag was read as an export `public`, the function was not marked exported, and the runner loaded every `.js` as an ES module. A CommonJS export marks its function exported, a property set on the export is no export, and a `.js` under a package without `"type": "module"` runs as CommonJS (its `require` calls load the real packages: the storage mocks reach ES modules only).
+- `hotspots` of 2348 modules was a column five boxes wide — rows of 1100 px — bigger than the canvas at the smallest zoom. The rows take the width of a 16:10 picture of the boxes (laid out twice, as the lanes' own rows add height), and the boxes shrink when even that is more than a canvas shows at zoom 0.1: the storefront's hotspots fit the screen now.
 
 ## 0.5.0 — 2026-10-18
 
