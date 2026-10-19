@@ -89,7 +89,8 @@ test("the page lists the views, draws the layers and walks to a module and its c
   assert.ok(items.some((item) => item.startsWith("Entry points")), items.join(", "));
   // The canvas is Excalidraw: its own class names say it mounted and drew.
   await page!.waitForSelector(".excalidraw canvas");
-  assert.ok((await page!.textContent("#title-text"))?.includes("Layers"));
+  // The title comes with the picture, after the canvas mounted: waited for, not read at once.
+  await page!.waitForFunction(`(document.querySelector("#title-text")?.textContent ?? "").includes("Layers")`);
   // The Markdown panel renders the diagram's page.
   await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "Layers"`);
   // Open a module view from the list and tap its shape: the code tab shows the file.
