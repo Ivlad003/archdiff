@@ -7,36 +7,16 @@
 // table archdiff ships (scapi-table.ts); an operation neither knows gets a
 // placeholder URL that says so.
 //
-// Sits over the contracts; the CLI (`archdiff postman`) and the page's export
-// menu write it.
+// Sits over the contracts and the analysis's SCAPI table; the CLI
+// (`archdiff postman`) and the page's export menu write it. The other way —
+// a collection read against the code — is collections.ts and the `postman`
+// view.
 //
-// Entry points: `postmanCollection`, `scapiTable`.
+// Entry points: `postmanCollection`.
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
-import { scapiTableFromDts, API_LABELS, type ScapiTable } from "./apis.ts";
+import { API_LABELS, type ScapiTable } from "./apis.ts";
 import { contractsOf, sendsLines, type ContractField, type ContractShape, type OperationContract } from "./contracts.ts";
-import { SCAPI_TABLE, SCAPI_TABLE_VERSION } from "./scapi-table.ts";
-
-/** Where the runtime a repository installed keeps its SCAPI declarations. */
-const RUNTIME_DTS = "node_modules/@salesforce/storefront-next-runtime/dist/scapi.d.ts";
-
-/**
- * The SCAPI table of the runtime the repository installed (its `scapi.d.ts` read in place, so a newer runtime brings its
- * own operations), else the table archdiff ships, with where it came from for the collection's description.
- */
-export function scapiTable(root: string): { table: ScapiTable; source: string } {
-  const file = join(root, RUNTIME_DTS);
-
-  if (existsSync(file)) {
-    const table = scapiTableFromDts(readFileSync(file, "utf8"));
-
-    if (Object.keys(table).length > 0) return { table, source: `the runtime installed in node_modules (${RUNTIME_DTS})` };
-  }
-
-  return { table: SCAPI_TABLE, source: `archdiff's table of @salesforce/storefront-next-runtime ${SCAPI_TABLE_VERSION}` };
-}
 
 /** A Postman collection as its v2.1 schema writes it, as far as archdiff fills it. */
 export interface PostmanCollection {
@@ -66,7 +46,7 @@ const SCHEMA = "https://schema.getpostman.com/json/collection/v2.1.0/collection.
 
 /** The collection of every operation the code calls, or of one family's. */
 export function postmanCollection(analysis: Analysis, name: string, family: string | null = null): PostmanCollection {
-  const { table, source } = scapiTable(analysis.root);
+  const { table, source } = analysis.scapi;
   const contracts = [...contractsOf(analysis).values()].filter((contract) => family === null || contract.operation.family === family);
   const variables = new Map<string, string>([["baseUrl", "https://{{shortCode}}.api.commercecloud.salesforce.com"], ["shortCode", ""], ["organizationId", ""], ["siteId", ""], ["token", ""]]);
   const folders: PostmanFolder[] = [];

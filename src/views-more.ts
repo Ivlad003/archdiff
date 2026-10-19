@@ -19,8 +19,10 @@
 
 import type { Analysis } from "./analyze.ts";
 import { hookOf, isApiId, operationFromId, operationId, familyId, parseApiId, API_SHORT, type ApiHook, type ApiOperation } from "./apis.ts";
+import { COLLECTION_SUFFIX, pathSegments, routeMatch } from "./collections.ts";
+import { operationPath } from "./scapi-runtime.ts";
 import type { CallFact, DeclFact, FileFacts } from "./extract/facts.ts";
-import { SIZE, type Diagram, type Line, type PictureContent, type Shape } from "./diagram.ts";
+import { SIZE, type Diagram, type Lane, type Line, type PictureContent, type Shape } from "./diagram.ts";
 import type { HistoryRow } from "./diff.ts";
 import type { BranchGraph, Commit } from "./git.ts";
 import { storageOf } from "./flow.ts";
@@ -1172,4 +1174,115 @@ export function apisView(analysis: Analysis, scope: string | null, hooks: readon
   }
 
   return unplaced(`APIs of ${scope}`, [], [], [], { reason: `no family of an API the code calls, no module "${scope}"`, missing: true });
+}
+
+/** An operation the code calls with its route: the method and the path's segments, a parameter as `*`. */
+interface Route {
+  operation: ApiOperation;
+  method: string;
+  segments: string[];
+}
+
+/**
+ * A Postman collection against the code: every request of the collection as a box in its folder's lane, joined to the
+ * modules calling the operation it names — matched by method and path, a variable of either (`{{basketId}}`,
+ * `{basketId}`) standing for any value; a request the code never calls is marked removed, an operation the code calls
+ * that the collection lacks is marked added in the API's lane. Without a scope every collection of the repository;
+ * with a file, that one.
+ */
+export function postmanView(analysis: Analysis, scope: string | null): PictureContent {
+  const { graph, collections, scapi } = analysis;
+
+  if (collections.length === 0) return unplaced("Postman", [], [], [], { reason: `no Postman collection: a *${COLLECTION_SUFFIX} the repository lists, or archdiff.json "postman": [paths]` });
+  const chosen = scope === null ? collections : collections.filter((collection) => collection.file === scope);
+
+  if (chosen.length === 0) return unplaced(`Postman: ${scope}`, [], [], [], { reason: `no collection "${scope}" (the files: ${collections.map((collection) => collection.file).join(", ")})`, missing: true });
+  // The operations the code calls: each with its route when the table knows it, and the modules calling it.
+  const routes = new Map<string, Route | null>();
+  const callers = new Map<string, Set<string>>();
+
+  for (const call of graph.apiCalls) {
+    const id = operationId(call);
+
+    if (!routes.has(id)) {
+      const known = operationPath(scapi.table, call);
+      routes.set(id, known ? { operation: call, method: known.method, segments: pathSegments(known.path) } : null);
+    }
+
+    callers.set(id, new Set([...(callers.get(id) ?? []), moduleOf(call.from)]));
+  }
+
+  const nodes: Shape[] = [];
+  const edges: Line[] = [];
+  const lanes: Lane[] = [];
+  const modules = new Set<string>();
+  const matchedOperations = new Set<string>();
+  const unmatched: string[] = [];
+  let matched = 0;
+  let total = 0;
+
+  for (const collection of chosen) {
+    for (const [i, request] of collection.requests.entries()) {
+      total++;
+      const laneId = `postman:${collection.file}:${request.folder.join("/") || "(root)"}`;
+
+      if (!lanes.some((candidate) => candidate.id === laneId)) lanes.push({ ...lane(laneId), label: request.folder.length > 0 ? `${collection.name} / ${request.folder.join(" / ")}` : collection.name });
+      const id = `postman:${collection.file}#${i}`;
+      // The route that agrees with the request most: a literal against a literal, a variable against a variable.
+      let hit: [string, Route] | null = null;
+      let best = -1;
+
+      for (const [id, route] of routes) {
+        const score = route === null ? null : routeMatch(request.method, request.segments, route.method, route.segments);
+
+        if (route !== null && score !== null && score > best) {
+          best = score;
+          hit = [id, route];
+        }
+      }
+
+      const shape: Shape = { id, kind: "external", label: `${request.method} ${request.name}\n/${request.segments.join("/")}`, group: laneId, ref: { file: collection.file }, x: 0, y: 0, w: 0, h: 0 };
+
+      if (hit) {
+        matched++;
+        matchedOperations.add(hit[0]);
+        shape.opens = `apis:${hit[1]!.operation.family}`;
+
+        for (const module of [...(callers.get(hit[0]) ?? [])].sort()) {
+          edges.push({ from: module, to: id, kind: "call" });
+          modules.add(module);
+        }
+      } else {
+        shape.diff = "removed";
+        shape.label += "\nnot called by the code";
+        unmatched.push(`${request.method} ${request.name}`);
+      }
+
+      nodes.push(shape);
+    }
+  }
+
+  for (const module of [...modules].sort()) nodes.push(moduleNode(graph, module));
+  // The operations the code calls that no chosen collection has: added, in the API's lane.
+  const missing: Shape[] = [];
+
+  for (const [id, route] of routes) {
+    if (matchedOperations.has(id)) continue;
+    const operation = route?.operation ?? operationFromId(id);
+
+    if (!operation) continue;
+    missing.push({ ...operationNode(operation), diff: "added", label: `${operation.family}.${operation.operation}\n${route ? "not in the collection" : "path unknown to the table"}` });
+  }
+
+  const name = chosen.length === 1 ? chosen[0]!.name : `${chosen.length} collections`;
+  const title = `Postman: ${name} against the code — ${matched} of ${total} requests called, ${missing.length} ${missing.length === 1 ? "operation" : "operations"} not in it`;
+  const notes = [unmatched.length > 0 ? `${counted(unmatched.length, "request")} the code never calls (red): ${unmatched.slice(0, 6).join(", ")}${unmatched.length > 6 ? ", …" : ""}` : "", missing.length > 0 ? `${counted(missing.length, "operation")} the code calls that the collection lacks (green): ${missing.slice(0, 6).map((shape) => shape.label.split("\n")[0]).join(", ")}${missing.length > 6 ? ", …" : ""}` : ""].filter(Boolean);
+  // The requests and the missing operations first: a big picture folds its tail, and the callers fold by directory.
+  const callerShapes = nodes.filter((shape) => shape.kind === "module");
+  const requestShapes = nodes.filter((shape) => shape.kind !== "module");
+  const picture = unplaced(title, [...requestShapes, ...missing, ...callerShapes], edges, [...lanes, ...lanesOf(graph, nodes), ...(missing.length > 0 ? [apiLane("scapi")] : [])]);
+
+  if (notes.length > 0) picture.reason = notes.join("; ");
+
+  return picture;
 }

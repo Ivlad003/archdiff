@@ -18,7 +18,9 @@ import type { FileFacts } from "./extract/facts.ts";
 import { INTENT_FILE, parseIntent, readIntent, withIntentLayers, type Intent } from "./intent.ts";
 import { extractAll } from "./extract/pool.ts";
 import { isSourceFile, listAllFiles, listSourceFiles, type SkippedFile } from "./files.ts";
+import { readCollections, type ImportedCollection } from "./collections.ts";
 import { extensionEntries, frameworkEntries, repositoryPackages, type DeclaredEntry, type RepositoryPackage } from "./frameworks.ts";
+import { scapiTable, type ScapiSource } from "./scapi-runtime.ts";
 import { buildGraph, type Graph } from "./graph.ts";
 import { createResolver, tsconfigResolver } from "./resolve.ts";
 
@@ -52,6 +54,10 @@ export interface Analysis {
   packages: RepositoryPackage[];
   /** The intended architecture (ARCHITECTURE.md), null without the file. */
   intent: Intent | null;
+  /** The Postman collections of the repository, for the `postman` view against the code. */
+  collections: ImportedCollection[];
+  /** The SCAPI table the repository works against: the runtime in node_modules, else archdiff's. */
+  scapi: ScapiSource;
   stats: AnalysisStats;
 }
 
@@ -128,6 +134,8 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
   const tsconfigOf = tsconfigResolver(root, [...facts.keys()]);
   const graph = buildGraph([...facts.values()], config, createResolver(root, [...facts.keys()], [...facts.values()], tsconfigOf, packages), (file) => tsconfigOf(file)?.verbatimModuleSyntax === true);
   const declaredEntries = [...frameworkEntries(root, files, allFiles), ...extensionEntries(root, allFiles, facts)];
+  const collections = readCollections(root, allFiles, config.postman);
+  const scapi = scapiTable(root);
   const built = performance.now();
   const kinds = [...graph.nodes.values()].reduce((counts, node) => ({ ...counts, [node.kind]: (counts[node.kind] ?? 0) + 1 }), {} as Record<string, number>);
   const stats: AnalysisStats = {
@@ -145,5 +153,5 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
     ms: { list: Math.round(listed - started), extract: Math.round(extracted - listed), graph: Math.round(built - extracted), total: Math.round(built - started) },
   };
 
-  return { root, config, files, skipped: listed0.skipped, facts, graph, declaredEntries, packages, intent, stats };
+  return { root, config, files, skipped: listed0.skipped, facts, graph, declaredEntries, packages, intent, collections, scapi, stats };
 }

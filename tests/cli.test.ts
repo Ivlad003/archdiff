@@ -1547,6 +1547,30 @@ test("postman: a collection of the operations the code calls, a folder per famil
   assert.deepEqual((JSON.parse(archdiff(["postman", scapi, "--family", "Nope"]).stdout) as { item: unknown[] }).item, []);
 });
 
+test("postman view: a collection read against the code — the requests the code calls joined to their callers, the ones it never calls red, the operations it calls that the collection lacks green; a collection archdiff wrote matches whole", () =>
+  withTempDir("archdiff-postman-view-", (dir) => {
+    cpSync(join(root, "tests/fixtures/scapi"), dir, { recursive: true });
+    const views = archdiff(["views", dir]).stdout;
+    assert.ok(views.includes("postman\tPostman: 1 collection against the code") && views.includes("postman:postman/cart.postman_collection.json\tCart (postman/cart.postman_collection.json) — 4 requests"), views);
+    const picture = JSON.parse(archdiff(["diagram", "postman", dir, "--format", "json"]).stdout) as { title: string; reason?: string; nodes: { id: string; label: string; diff?: string; group?: string }[]; edges: { from: string; to: string }[] };
+    assert.equal(picture.title, "Postman: Cart against the code — 2 of 4 requests called, 3 operations not in it");
+    // `{{organizationId}}`, `:basketId` and `{basketId}` are one route: Get basket and Add item are called from cart.ts.
+    const byLabel = (start: string) => picture.nodes.find((node) => node.label.startsWith(start))!;
+    assert.deepEqual(picture.edges.map((edge) => [edge.from, picture.nodes.find((node) => node.id === edge.to)?.label.split("\n")[0]]), [["src/lib/cart.ts", "GET Get basket"], ["src/lib/cart.ts", "POST Add item"]]);
+    assert.equal(byLabel("GET Get basket").diff, undefined);
+    assert.equal(byLabel("DELETE Delete basket").diff, "removed");
+    assert.equal(byLabel("GET Loyalty points").diff, "removed");
+    assert.deepEqual(picture.nodes.filter((node) => node.diff === "added").map((node) => node.label.split("\n")[0]).sort(), ["ShopperBasketsV2.updateBasket", "ShopperOrders.getOrder", "ShopperProducts.getProduct"]);
+    assert.ok(picture.reason?.startsWith("2 requests the code never calls (red): DELETE Delete basket, GET Loyalty points; 3 operations the code calls that the collection lacks (green): "), picture.reason);
+    // The collection archdiff writes, read back: every request called, nothing missing.
+    mkdirSync(join(dir, "postman"), { recursive: true });
+    writeFileSync(join(dir, "postman/all.postman_collection.json"), archdiff(["postman", dir]).stdout);
+    const own = JSON.parse(archdiff(["diagram", "postman:postman/all.postman_collection.json", dir, "--format", "json"]).stdout) as { title: string; nodes: { diff?: string }[] };
+    assert.ok(own.title.endsWith(" — SCAPI against the code — 5 of 5 requests called, 0 operations not in it"), own.title);
+    assert.ok(own.nodes.every((node) => node.diff === undefined), JSON.stringify(own.nodes.filter((node) => node.diff)));
+    assert.equal(archdiff(["diagram", "postman:nope.json", dir]).status, 2);
+  }));
+
 test("a sequence frames an if with its else, a try with its catch and a loop as alt and loop fragments, with the operations of an API on their family's lifeline", () => {
   const scapi = join(root, "tests/fixtures/scapi");
   const sequence = archdiff(["diagram", "sequence:src/routes/cart.tsx#action", scapi]).stdout;

@@ -67,6 +67,8 @@ flowchart LR
     n_src_apis_ts["src/apis.ts<br>the operations of an external API a call names (SCAPI), the OCAPI hooks, the reader of the runtime's declarations"]
     n_src_contracts_ts["src/contracts.ts<br>the contract of an operation as the code uses it: what it sends, what it reads of the result"]
     n_src_scapi_table_ts["src/scapi-table.ts<br>the SCAPI families and operations of the storefront-next runtime, generated"]
+    n_src_scapi_runtime_ts["src/scapi-runtime.ts<br>the SCAPI table a repository works against: its runtime in node_modules, else the shipped one"]
+    n_src_collections_ts["src/collections.ts<br>the Postman collections of the repository as requests with routes, read against the code"]
   end
   subgraph n_extract["extract — the language frontends on tree-sitter"]
     n_src_extract_ts_ts["src/extract/ts.ts<br>TypeScript and JavaScript facts"]

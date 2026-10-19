@@ -23,7 +23,7 @@ import { intentView } from "./intent-view.ts";
 import { isBlindSpot, moduleOf, nodeId, type Graph, type Declaration } from "./graph.ts";
 import { familyId, operationId, parseApiId, participantLabel, API_SHORT } from "./apis.ts";
 import type { GuardFact } from "./extract/facts.ts";
-import { apiFamilies, apisView, classesView, usageView, eventsView, hotspotsView, matrixView, messageHandlers, messageSends, packagesView, pathView, testsView, typeView } from "./views-more.ts";
+import { apiFamilies, apisView, postmanView, classesView, usageView, eventsView, hotspotsView, matrixView, messageHandlers, messageSends, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
 import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
@@ -189,6 +189,13 @@ export function viewList(analysis: Analysis): ViewEntry[] {
     list.push({ key: "apis", title: `APIs: ${counted(new Set(graph.apiCalls.map(operationId)).size, "operation")} of SCAPI the code calls, by family`, kind: "apis" });
 
     for (const family of apiFamilies(graph)) list.push({ key: `apis:${family.family}`, title: `${family.family} (${API_SHORT[family.api]}) — ${counted(family.operations, "operation")}, ${counted(family.calls, "call")}`, kind: "apis" });
+  }
+
+  // The Postman collections of the repository, each against the code.
+  if (analysis.collections.length > 0) {
+    list.push({ key: "postman", title: `Postman: ${counted(analysis.collections.length, "collection")} against the code`, kind: "postman" });
+
+    for (const collection of analysis.collections) list.push({ key: `postman:${collection.file}`, title: `${collection.name} (${collection.file}) — ${counted(collection.requests.length, "request")}`, kind: "postman" });
   }
   list.push({ key: "tests", title: "Tests: which modules the tests cover", kind: "tests" });
   list.push({ key: "hotspots", title: "Hotspots: size and calls in", kind: "hotspots" });
@@ -955,6 +962,8 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
         return messagesView(analysis, view.subject);
       case "apis":
         return apisView(analysis, view.subject, entryPoints(analysis).filter((entry): entry is EntryPoint & { hook: string } => entry.hook !== undefined));
+      case "postman":
+        return postmanView(analysis, view.subject);
       case "tests":
         return testsView(graph);
       case "hotspots":

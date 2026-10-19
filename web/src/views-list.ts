@@ -19,8 +19,9 @@ const search = element<HTMLInputElement>("search");
 
 /** The groups of the list: the overviews by key (`cycles:fns` is a key of the cycles kind), the rest by kind. */
 const GROUPS: [label: string, overview: boolean, members: string[]][] = [
-  ["Overview", true, ["layers", "coverage", "classes", "matrix", "metrics", "cycles", "cycles:fns", "machines", "events", "messages", "apis", "tests", "hotspots", "packages", "timeline"]],
+  ["Overview", true, ["layers", "coverage", "classes", "matrix", "metrics", "cycles", "cycles:fns", "machines", "events", "messages", "tests", "hotspots", "packages", "timeline"]],
   ["APIs (operations by family)", false, ["apis"]],
+  ["Postman collections (against the code)", false, ["postman"]],
   ["State machines", false, ["machine"]],
   ["Layers", false, ["layer"]],
   ["Directories", false, ["dir"]],

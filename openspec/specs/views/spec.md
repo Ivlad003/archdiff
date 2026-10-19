@@ -200,3 +200,17 @@ The system SHALL frame, in a sequence, the messages under an `if` and its `else`
 
 - **WHEN** `addToCart` reads the basket, logs under `if (!basket)` and adds an item in the `else`, reads each product in a loop, and updates the basket in a `try` whose `catch` logs
 - **THEN** the sequence has `alt [!basket]` with an `else` arm, a `loop`, and `alt [try]` with a `catch (error)` arm, and the Mermaid reads `alt !basket … else … end`
+
+### Requirement: A Postman collection is drawn against the code
+
+The system SHALL read every `*.postman_collection.json` the repository lists and the files `archdiff.json`'s `postman` names (schema v2.0 or v2.1, folders nested) and draw, as `postman` (`postman:<file>` for one), each request in its folder's lane joined to the modules calling the operation it names: a request and an operation are one route when their methods agree and their paths have as many segments, each equal or a variable on either side (`{{x}}`, `:x`, `{x}`), the route agreeing on the most segments taken; a request the code never calls SHALL be marked removed, an operation the code calls that the collection lacks marked added in the API's lane, and the reason SHALL count both.
+
+#### Scenario: A cart collection of four requests
+
+- **WHEN** the collection has `GET …/baskets/{{basketId}}`, `POST …/baskets/:basketId/items`, `DELETE …/baskets/{{basketId}}` and `GET …/custom/loyalty/v1/organizations/{{organizationId}}/points`, and the code calls `getBasket`, `addItemToBasket`, `updateBasket`, `getProduct` and `getOrder`
+- **THEN** the first two requests are joined to the calling module, the other two are marked removed, and `updateBasket`, `getProduct` and `getOrder` are marked added, the title reading `2 of 4 requests called, 3 operations not in it`
+
+#### Scenario: The collection archdiff wrote
+
+- **WHEN** `archdiff postman` wrote the collection and it is read back as `postman:<file>`
+- **THEN** every request is called and no operation is missing
