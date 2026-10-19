@@ -385,14 +385,14 @@ function extractIndexed(path: string, root: Node, language: Language, g: Grammar
       }
 
       case "expression_statement":
-        commonJsExports(node, facts, callsOf(x));
+        commonJsExports(node, facts, callsOf(x), localExports);
         break;
       default:
         visitDeclaration(x, node, false);
     }
   }
 
-  // `export { a }` and `export default a` may come after `a`; mark those declarations exported now.
+  // `export { a }`, `export default a` and `exports.a = a` may come after `a`; mark those declarations exported now.
   for (const d of facts.decls) if (localExports.has(d.name)) d.exported = true;
 
   // Module-level calls: every call outside the bodies a declaration already claimed.
@@ -2794,9 +2794,11 @@ function superModuleSource(value: Node): { source: string; namespace: boolean } 
  * `module.exports = {…}`, `module.exports = f`, `exports.x = …`. A function
  * value assigned there is a fn of the module, like `export const x = () => …`:
  * `exports.run = function () {}` and `module.exports = { go() {} }` declare
- * `run` and `go`; `module.exports = function () {}` declares `default`.
+ * `run` and `go`; `module.exports = function () {}` declares `default`. A
+ * local a row names (`exports.run = run`) joins `localExports`, exported like
+ * one `export { run }` names.
  */
-function commonJsExports(stmt: Node, facts: FileFacts, declCalls: (n: Node) => CallFact[]): void {
+function commonJsExports(stmt: Node, facts: FileFacts, declCalls: (n: Node) => CallFact[], localExports: Set<string>): void {
   let expr = stmt.namedChildren[0];
 
   if (!expr || expr.type !== "assignment_expression") return;
@@ -2830,6 +2832,7 @@ function commonJsExports(stmt: Node, facts: FileFacts, declCalls: (n: Node) => C
     // `exports.run = run` exports the local `run`; a different name makes it an alias.
     if (target?.type === "identifier" || target?.type === "shorthand_property_identifier") {
       facts.exportRows.push({ name, kind: "value", local: target.text, ...(name === "default" ? form : target.text !== name ? { form: "alias" as const } : {}) });
+      localExports.add(target.text);
 
       return;
     }
@@ -2859,9 +2862,12 @@ function commonJsExports(stmt: Node, facts: FileFacts, declCalls: (n: Node) => C
       // `module.exports = handler`, `= function () {}`: the module's value, `default` to an ESM importer.
       row("default", right, expr);
     }
-  // `exports.x = …`, `module.exports.x = …`: the export is the last segment.
+  // `exports.x = …`, `module.exports.x = …`: the export is the one segment after the prefix. `exports.x.public = true`
+  // (an SFCC hook's flag) sets a property of the export `x`, not an export `public`.
   } else if (left.startsWith("exports.") || left.startsWith("module.exports.")) {
-    row(left.slice(left.lastIndexOf(".") + 1), right, expr);
+    const name = left.slice(left.startsWith("exports.") ? "exports.".length : "module.exports.".length);
+
+    if (!name.includes(".") && !name.includes("[")) row(name, right, expr);
   }
 }
 

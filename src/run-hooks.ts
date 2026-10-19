@@ -9,8 +9,9 @@
 //
 // Entry points: the hook exports `initialize`, `resolve`, `load`.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** What the parent computed for the run: see run.ts `RunPlan`. */
@@ -120,5 +121,55 @@ export async function load(url: string, context: LoadContext, next: (url: string
   // A TypeScript file runs with its types stripped (enums and parameter properties transformed); JavaScript as it is.
   const javascript = /\.[cm]?tsx?$/.test(path) ? stripTypeScriptTypes(traced, { mode: "transform", sourceUrl: url }) : traced;
 
-  return { format: path.endsWith(".cjs") ? "commonjs" : "module", source: javascript, shortCircuit: true };
+  return { format: formatOf(path, context.format, javascript), source: javascript, shortCircuit: true };
+}
+
+/** `"type"` of the nearest package.json at or above a directory, as Node reads a `.js` file's format; null when it has none. */
+const packageTypes = new Map<string, string | null>();
+
+function packageType(directory: string): string | null {
+  const known = packageTypes.get(directory);
+
+  if (known !== undefined) return known;
+  const file = join(directory, "package.json");
+  let type: string | null = null;
+
+  // The nearest package.json decides, with or without a `type`; the walk goes on only where there is none.
+  if (existsSync(file)) {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+
+      type = typeof parsed === "object" && parsed !== null && typeof (parsed as { type?: unknown }).type === "string" ? (parsed as { type: string }).type : null;
+    } catch {
+      type = null;
+    }
+  } else {
+    const parent = dirname(directory);
+    type = parent === directory ? null : packageType(parent);
+  }
+
+  packageTypes.set(directory, type);
+
+  return type;
+}
+
+/**
+ * The format a project file runs as, by Node's rules: what its resolver said when it got there first, else the
+ * extension (`.cjs`, `.mjs`), else the nearest package.json's `"type"`, else the syntax — a file that imports, exports
+ * or reads `import.meta` is an ES module, an SFCC cartridge's `exports.f = f` script is CommonJS. A CommonJS file's
+ * `require` calls load the real packages: the mocks reach ES modules only.
+ */
+function formatOf(path: string, resolved: string | null | undefined, javascript: string): string {
+  if (resolved === "commonjs" || resolved === "commonjs-typescript") return "commonjs";
+
+  if (resolved === "module" || resolved === "module-typescript") return "module";
+
+  if (/\.c[jt]s$/.test(path)) return "commonjs";
+
+  if (/\.m[jt]s$/.test(path)) return "module";
+  const type = packageType(dirname(path));
+
+  if (type === "module" || type === "commonjs") return type;
+
+  return /^[ \t]*(?:import\s+(?:[\w$]|\{|\*|["'])|export\s)/m.test(javascript) || javascript.includes("import.meta") ? "module" : "commonjs";
 }

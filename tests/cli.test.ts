@@ -1477,6 +1477,16 @@ test("an import type expression does not make a file a syntax error; a dynamic i
     assert.equal(inside.nodes.find((node) => node.id === "src/page.ts#load")?.ref?.line, 5);
   }));
 
+test("run accepts a CommonJS export (`exports.f = f`, an SFCC hook with its `public` flag): the function is exported, not refused", () =>
+  withTempDir("archdiff-run-cjs-", (dir) => {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/hook.js"), "function modifyGETResponse(doc) {\n  return { ...doc, seen: true };\n}\nexports.modifyGETResponse = modifyGETResponse;\nexports.modifyGETResponse.public = true;\n");
+    const ran = JSON.parse(archdiff(["run", "calls:src/hook.js#modifyGETResponse", dir, "--input", '{"doc":{"id":"c1"}}', "--json"]).stdout) as { steps: { id: string }[]; result: unknown; error: string | null };
+    assert.equal(ran.error, null);
+    assert.deepEqual(ran.steps.map((step) => step.id), ["src/hook.js#modifyGETResponse"]);
+    assert.deepEqual(ran.result, { id: "c1", seen: true });
+  }));
+
 test("a bare & in JSX text is no syntax error: the file is read whole; a real error still marks its file", () =>
   withTempDir("archdiff-jsx-amp-", (dir) => {
     mkdirSync(join(dir, "src"), { recursive: true });

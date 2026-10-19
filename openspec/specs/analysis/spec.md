@@ -73,6 +73,11 @@ The system SHALL resolve a call to the function it names through the file's loca
 - **WHEN** code calls `handlers[name]()`
 - **THEN** the call is a gap with the reason `dynamic`, and the coverage report counts it
 
+#### Scenario: A CommonJS export with a flag
+
+- **WHEN** a file declares `function f` and has `exports.f = f` and `exports.f.public = true`
+- **THEN** `f` is an exported function of the module (an entry `run` accepts) and `public` is no export of it
+
 ### Requirement: The analysis is cached by content
 
 The system SHALL cache the facts of every file in `.archdiff/facts.json.gz` keyed by the file's content hash and the extractor version, so a second run parses only what changed; a cache of another version SHALL be ignored and rewritten. The files of other revisions (a review's base, a history's commits, a comparison's heads) SHALL be cached apart, many versions of a file at once, the most recently read kept, in `.archdiff/revisions.json.gz`, read only when a revision is analysed.

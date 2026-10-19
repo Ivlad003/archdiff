@@ -15,6 +15,11 @@ The system SHALL run `archdiff run <calls:view>` (and `POST /api/flow/run`, the 
 - **WHEN** `archdiff run calls:src/lib/orders.ts#placeOrder --input '{"id":"o1","total":5}'` runs on the sample repository
 - **THEN** the steps are placeOrder, validate, saveOrder and log, in that order, the result is `{"id":"o1","total":5}`, and nothing was written to disk
 
+#### Scenario: A CommonJS module
+
+- **WHEN** the entry is in a `.js` file under a package without `"type": "module"`, or in a `.cjs` file
+- **THEN** it runs as CommonJS, traced like an ES module; its `require` calls load the real packages, so the storage mocks apply to ES modules only
+
 ### Requirement: The mocks come from the flags or the page
 
 The system SHALL take the entry's arguments from `--input` (by parameter name; a destructured parameter takes the keys it names) or from the mock input saved with the view's drawing, and each storage's content from `--storages` (by package, or by the module importing it) or from the storage mocks saved with the drawing.

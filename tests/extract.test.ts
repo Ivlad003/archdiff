@@ -217,3 +217,9 @@ final class Orders
   assert.deepEqual(placePhp.calls.map((call) => [call.callee, call.form.kind === "typed" ? call.form.type : null]), [["Order", null], ["this.store.save", "OrderStore"]]);
   assert.deepEqual(php.symbols?.map((symbol) => symbol.qualified), ["App\\Domain\\Orders"]);
 });
+
+test("JavaScript: `exports.f = f` exports the declared f; a flag set on the export (`exports.f.public = true`) is no export", async () => {
+  const facts = await extractAny("cartridges/app/cartridge/scripts/hooks/category.js", "var Logger = require('dw/system/Logger');\nfunction modifyGETResponse(category, doc) {\n  return doc;\n}\nexports.modifyGETResponse = modifyGETResponse;\nexports.modifyGETResponse.public = true;\nmodule.exports.helper = function () {};\nmodule.exports.helper.public = true;\n");
+  assert.deepEqual([...facts.exports].sort(), ["helper", "modifyGETResponse"]);
+  assert.deepEqual(facts.decls.map((decl) => [decl.name, decl.exported]), [["modifyGETResponse", true], ["helper", true]]);
+});
