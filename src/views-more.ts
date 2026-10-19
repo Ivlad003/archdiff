@@ -19,8 +19,7 @@
 
 import type { Analysis } from "./analyze.ts";
 import { hookOf, isApiId, operationFromId, operationId, operationLabel, familyId, API_SHORT, SCAPI, type ApiHook, type ApiOperation } from "./apis.ts";
-import { COLLECTION_SUFFIX, pathSegments, routeMatch } from "./collections.ts";
-import { operationPath } from "./scapi-runtime.ts";
+import { COLLECTION_SUFFIX, matchRequests, routesOf } from "./collections.ts";
 import type { CallFact, DeclFact, FileFacts } from "./extract/facts.ts";
 import { SIZE, type Diagram, type Lane, type Line, type PictureContent, type Shape } from "./diagram.ts";
 import type { HistoryRow } from "./diff.ts";
@@ -1156,13 +1155,6 @@ export function apisView(analysis: Analysis, scope: string | null, hooks: readon
   return unplaced(`APIs of ${scope}`, [], [], [], { reason: `no family of an API the code calls, no module "${scope}"`, missing: true });
 }
 
-/** An operation the code calls with its route: the method and the path's segments, a parameter as `*`. */
-interface Route {
-  operation: ApiOperation;
-  method: string;
-  segments: string[];
-}
-
 /**
  * A Postman collection against the code: every request of the collection as a box in its folder's lane, joined to the
  * modules calling the operation it names — matched by method and path, a variable of either (`{{basketId}}`,
@@ -1177,77 +1169,50 @@ export function postmanView(analysis: Analysis, scope: string | null): PictureCo
   const chosen = scope === null ? collections : collections.filter((collection) => collection.file === scope);
 
   if (chosen.length === 0) return unplaced(`Postman: ${scope}`, [], [], [], { reason: `no collection "${scope}" (the files: ${collections.map((collection) => collection.file).join(", ")})`, missing: true });
-  // The operations the code calls: each with its route when the table knows it, and the modules calling it.
-  const routes = new Map<string, Route | null>();
+  // The routes of the operations the code calls and the modules calling each; the requests matched to them (collections.ts).
+  const routes = routesOf(graph.apiCalls, scapi.table);
   const callers = new Map<string, Set<string>>();
 
-  for (const call of graph.apiCalls) {
-    const operation = operationId(call);
-
-    if (!routes.has(operation)) {
-      const known = operationPath(scapi.table, call);
-      routes.set(operation, known ? { operation: call, method: known.method, segments: pathSegments(known.path) } : null);
-    }
-
-    callers.set(operation, new Set([...(callers.get(operation) ?? []), moduleOf(call.from)]));
-  }
-
+  for (const call of graph.apiCalls) callers.set(operationId(call), new Set([...(callers.get(operationId(call)) ?? []), moduleOf(call.from)]));
+  const matches = matchRequests(chosen, routes);
   const requests: Shape[] = [];
   const edges: Line[] = [];
   const lanes: Lane[] = [];
   const modules = new Set<string>();
-  const matchedOperations = new Set<string>();
   const unmatched: string[] = [];
   let matched = 0;
-  let total = 0;
 
-  for (const collection of chosen) {
-    for (const [i, request] of collection.requests.entries()) {
-      total++;
-      const laneId = `postman:${collection.file}:${request.folder.join("/") || "(root)"}`;
+  for (const { collection, index, request, hit } of matches.requests) {
+    const laneId = `postman:${collection.file}:${request.folder.join("/") || "(root)"}`;
 
-      if (!lanes.some((candidate) => candidate.id === laneId)) lanes.push({ ...lane(laneId), label: request.folder.length > 0 ? `${collection.name} / ${request.folder.join(" / ")}` : collection.name });
-      const requestId = `postman:${collection.file}#${i}`;
-      // The route that agrees with the request most: a literal against a literal, a variable against a variable.
-      let hit: [string, Route] | null = null;
-      let best = -1;
+    if (!lanes.some((candidate) => candidate.id === laneId)) lanes.push({ ...lane(laneId), label: request.folder.length > 0 ? `${collection.name} / ${request.folder.join(" / ")}` : collection.name });
+    const requestId = `postman:${collection.file}#${index}`;
+    const shape: Shape = { id: requestId, kind: "external", label: `${request.method} ${request.name}\n/${request.segments.join("/")}`, group: laneId, ref: { file: collection.file }, x: 0, y: 0, w: 0, h: 0 };
 
-      for (const [operation, route] of routes) {
-        const score = route === null ? null : routeMatch(request.method, request.segments, route.method, route.segments);
+    if (hit) {
+      matched++;
+      shape.opens = `apis:${hit.route.operation.family}`;
 
-        if (route !== null && score !== null && score > best) {
-          best = score;
-          hit = [operation, route];
-        }
+      for (const module of [...(callers.get(hit.operation) ?? [])].sort()) {
+        edges.push({ from: module, to: requestId, kind: "call" });
+        modules.add(module);
       }
-
-      const shape: Shape = { id: requestId, kind: "external", label: `${request.method} ${request.name}\n/${request.segments.join("/")}`, group: laneId, ref: { file: collection.file }, x: 0, y: 0, w: 0, h: 0 };
-
-      if (hit) {
-        matched++;
-        matchedOperations.add(hit[0]);
-        shape.opens = `apis:${hit[1].operation.family}`;
-
-        for (const module of [...(callers.get(hit[0]) ?? [])].sort()) {
-          edges.push({ from: module, to: requestId, kind: "call" });
-          modules.add(module);
-        }
-      } else {
-        shape.diff = "removed";
-        shape.label += "\nnot called by the code";
-        unmatched.push(`${request.method} ${request.name}`);
-      }
-
-      requests.push(shape);
+    } else {
+      shape.diff = "removed";
+      shape.label += "\nnot called by the code";
+      unmatched.push(`${request.method} ${request.name}`);
     }
+
+    requests.push(shape);
   }
 
+  const total = matches.requests.length;
   const callerShapes = [...modules].sort().map((module) => moduleNode(graph, module));
   // The operations the code calls that no chosen collection has: added, in the API's lane.
   const missing: Shape[] = [];
 
-  for (const [operation, route] of routes) {
-    if (matchedOperations.has(operation)) continue;
+  for (const operation of matches.unmatched) {
+    const route = routes.get(operation) ?? null;
     const named = route?.operation ?? operationFromId(operation);
 
     if (!named) continue;

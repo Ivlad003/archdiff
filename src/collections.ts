@@ -1,19 +1,24 @@
-// Postman collections of the repository, read for the picture of one against
-// the code: every `*.postman_collection.json` git lists (and the files
-// archdiff.json's `postman` names), each request with its method and the
-// path as written, the variables of the path (`{{basketId}}`, `:id`, `{id}`)
-// read as wildcards so a request matches the operation the code calls by
-// method and path. A collection written by `archdiff postman` matches whole.
+// Postman collections of the repository against the code: every
+// `*.postman_collection.json` git lists (and the files archdiff.json's
+// `postman` names), each request with its method and the path as written,
+// the variables of the path (`{{basketId}}`, `:id`, `{id}`) read as
+// wildcards; the routes of the operations the code calls, from the SCAPI
+// table; and the match between them — which request the code calls, which
+// operation no request has. A collection written by `archdiff postman`
+// matches whole. The `postman` view only draws what `matchRequests` says.
 //
-// Sits in the core beside the analysis, which reads the collections once;
-// the `postman` view and its Markdown match them against the operations.
+// Sits in the core beside the analysis, which reads the collections once
+// per run (a file read before and unchanged is not parsed again).
 //
 // Entry points: `readCollections`, `collectionOf`, `requestSegments`,
-// `pathSegments`, `routeMatch`, `COLLECTION_SUFFIX`.
+// `pathSegments`, `routeMatch`, `routesOf`, `matchRequests`,
+// `COLLECTION_SUFFIX`.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { operationId, type ApiOperation, type ScapiTable } from "./apis.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
+import { operationPath } from "./scapi-runtime.ts";
 
 /** How a Postman export names a collection file. */
 export const COLLECTION_SUFFIX = ".postman_collection.json";
@@ -36,21 +41,38 @@ export interface ImportedCollection {
   requests: ImportedRequest[];
 }
 
+/** The files parsed so far, by path, with the size and time of the file they were read from: the page analyses after every change of the code, the collections rarely change. */
+const parsedFiles = new Map<string, { size: number; mtimeMs: number; collection: ImportedCollection | null }>();
+
 /** Every collection of the repository: the files named like a Postman export, and the ones configured; a file that is no collection is left out. */
 export function readCollections(root: string, allFiles: readonly string[], configured: readonly string[]): ImportedCollection[] {
   const files = [...new Set([...allFiles.filter((path) => path.endsWith(COLLECTION_SUFFIX) && !path.includes("node_modules/")), ...configured])].sort();
   const collections: ImportedCollection[] = [];
 
   for (const file of files) {
-    let parsed: JsonValue;
+    const full = join(root, file);
+    let size: number;
+    let mtimeMs: number;
 
     try {
-      parsed = parseJson(readFileSync(join(root, file), "utf8"));
+      ({ size, mtimeMs } = statSync(full));
     } catch {
       continue;
     }
 
-    const collection = collectionOf(parsed, file);
+    // A file read before, of the same size and time, is the collection it was (or no collection, as before).
+    const known = parsedFiles.get(full);
+    let collection = known && known.size === size && known.mtimeMs === mtimeMs ? known.collection : undefined;
+
+    if (collection === undefined) {
+      try {
+        collection = collectionOf(parseJson(readFileSync(full, "utf8")), file);
+      } catch {
+        collection = null;
+      }
+
+      parsedFiles.set(full, { size, mtimeMs, collection });
+    }
 
     if (collection) collections.push(collection);
   }
@@ -136,4 +158,67 @@ export function routeMatch(method: string, segments: readonly string[], otherMet
   }
 
   return score;
+}
+
+/** An operation the code calls with its route: the method and the path's segments, a parameter as `*`. */
+export interface Route {
+  operation: ApiOperation;
+  method: string;
+  segments: string[];
+}
+
+/** The routes of the operations the code calls, by operation id, in the order of the calls: null for an operation the table does not know. */
+export function routesOf(calls: readonly ApiOperation[], table: ScapiTable): Map<string, Route | null> {
+  const routes = new Map<string, Route | null>();
+
+  for (const call of calls) {
+    const operation = operationId(call);
+
+    if (routes.has(operation)) continue;
+    const known = operationPath(table, call);
+    routes.set(operation, known ? { operation: call, method: known.method, segments: pathSegments(known.path) } : null);
+  }
+
+  return routes;
+}
+
+/** A request of a collection against the routes: the route that agrees with it most, or null when the code calls nothing of its kind. */
+export interface RequestMatch {
+  collection: ImportedCollection;
+  /** The request's position in its collection, which names its shape. */
+  index: number;
+  request: ImportedRequest;
+  hit: { operation: string; route: Route } | null;
+}
+
+/**
+ * The requests of the collections matched to the routes the code calls, in the collections' order: each with the
+ * route that agrees with it most (`routeMatch`), and the operations no request matched — those the collection
+ * lacks, in the order of the routes.
+ */
+export function matchRequests(collections: readonly ImportedCollection[], routes: ReadonlyMap<string, Route | null>): { requests: RequestMatch[]; unmatched: string[] } {
+  const requests: RequestMatch[] = [];
+  const matched = new Set<string>();
+
+  for (const collection of collections) {
+    for (const [index, request] of collection.requests.entries()) {
+      // The route that agrees with the request most: a literal against a literal, a variable against a variable.
+      let hit: RequestMatch["hit"] = null;
+      let best = -1;
+
+      for (const [operation, route] of routes) {
+        const score = route === null ? null : routeMatch(request.method, request.segments, route.method, route.segments);
+
+        if (route !== null && score !== null && score > best) {
+          best = score;
+          hit = { operation, route };
+        }
+      }
+
+      if (hit) matched.add(hit.operation);
+      requests.push({ collection, index, request, hit });
+    }
+  }
+
+  return { requests, unmatched: [...routes.keys()].filter((operation) => !matched.has(operation)) };
 }

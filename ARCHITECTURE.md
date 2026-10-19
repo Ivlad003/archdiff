@@ -68,7 +68,7 @@ flowchart LR
     n_src_contracts_ts["src/contracts.ts<br>the contract of an operation as the code uses it: what it sends, what it reads of the result"]
     n_src_scapi_table_ts["src/scapi-table.ts<br>the SCAPI families and operations of the storefront-next runtime, generated"]
     n_src_scapi_runtime_ts["src/scapi-runtime.ts<br>the SCAPI table a repository works against: its runtime's declarations read in node_modules, else the shipped table"]
-    n_src_collections_ts["src/collections.ts<br>the Postman collections of the repository as requests with routes, read against the code"]
+    n_src_collections_ts["src/collections.ts<br>the Postman collections of the repository as requests, the routes of the operations the code calls, and the match between them"]
   end
   subgraph n_extract["extract — the language frontends on tree-sitter"]
     n_src_extract_ts_ts["src/extract/ts.ts<br>TypeScript and JavaScript facts"]

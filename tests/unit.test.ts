@@ -12,6 +12,8 @@ import { components, cycleThrough, stronglyConnected } from "../src/scc.ts";
 import { firstMatchingGlob, matchesGlob } from "../src/glob.ts";
 import { attempt, ok, wrong } from "../src/result.ts";
 import { OVERVIEW_GROUP, VIEW_KINDS, listGroup, listGroups, overviews, parseView, tagOf, type ViewKind } from "../src/view-keys.ts";
+import { collectionOf, matchRequests, pathSegments, routesOf, type Route } from "../src/collections.ts";
+import { SCAPI_TABLE } from "../src/scapi-table.ts";
 
 test("the picture options read the same from flags and from a query, and write back to the same query", () => {
   const flags = new Map<string, string | true>([["depth", "2"], ["limit", "30"], ["no-hubs", true], ["overlay", "tests,heat"], ["expand", "src/a.ts,src/b.ts"], ["changes", true], ["only-changes", true], ["mermaid", "c4"], ["lanes", "columns"]]);
@@ -325,4 +327,71 @@ test("the table of kinds registers every view once: the page lists what the serv
       assert.ok(view && listGroup(view) !== null, `${entry.key} is listed by the server and shown by the page`);
     }
   }
+});
+
+test("a Postman collection is matched to the routes the code calls by method and path, a variable standing for any value, the closest route winning", () => {
+  // A collection as Postman exports it: folders, a URL as a string, as an object of host and path, with `{{var}}`, `:var` and `{var}` variables.
+  const collection = collectionOf(
+    {
+      info: { name: "Cart" },
+      item: [
+        {
+          name: "Baskets",
+          item: [
+            { name: "Get basket", request: { method: "GET", url: "{{baseUrl}}/checkout/shopper-baskets/v1/organizations/{{org}}/baskets/{{basketId}}?siteId={{siteId}}" } },
+            { name: "Add item", request: { method: "POST", url: { host: ["{{baseUrl}}"], path: ["checkout", "shopper-baskets", "v1", "organizations", "{{org}}", "baskets", ":basketId", "items"] } } },
+            { name: "Delete basket", request: { method: "DELETE", url: "{{baseUrl}}/checkout/shopper-baskets/v1/organizations/{{org}}/baskets/{basketId}" } },
+          ],
+        },
+        { name: "Meta data", request: "https://api.example.com/checkout/shopper-orders/v1/organizations/f_ecom/orders/oms-meta-data" },
+        { name: "Get order", request: { method: "GET", url: "{{baseUrl}}/checkout/shopper-orders/v1/organizations/{{org}}/orders/{orderNo}" } },
+      ],
+    },
+    "postman/cart.postman_collection.json",
+  );
+  assert.ok(collection);
+  assert.equal(collection.name, "Cart");
+  assert.deepEqual(
+    collection.requests.map((request) => [request.folder.join("/"), request.method, request.segments.join("/")]),
+    [
+      ["Baskets", "GET", "checkout/shopper-baskets/v1/organizations/*/baskets/*"],
+      ["Baskets", "POST", "checkout/shopper-baskets/v1/organizations/*/baskets/*/items"],
+      ["Baskets", "DELETE", "checkout/shopper-baskets/v1/organizations/*/baskets/*"],
+      ["", "GET", "checkout/shopper-orders/v1/organizations/f_ecom/orders/oms-meta-data"],
+      ["", "GET", "checkout/shopper-orders/v1/organizations/*/orders/*"],
+    ],
+  );
+
+  // The routes of the operations the code calls: from the shipped table, and written by hand for the rest.
+  const operation = (family: string, name: string): Route["operation"] => ({ api: "scapi", family, operation: name });
+  const route = (family: string, name: string, method: string, path: string): [string, Route] => [`api:scapi:${family}.${name}`, { operation: operation(family, name), method, segments: pathSegments(path) }];
+  const fromTable = routesOf([operation("ShopperBasketsV1", "getBasket"), operation("ShopperBasketsV1", "getBasket"), operation("ShopperBasketsV1", "nope")], SCAPI_TABLE);
+  assert.deepEqual([...fromTable.keys()], ["api:scapi:ShopperBasketsV1.getBasket", "api:scapi:ShopperBasketsV1.nope"]);
+  assert.equal(fromTable.get("api:scapi:ShopperBasketsV1.getBasket")?.method, "GET");
+  assert.equal(fromTable.get("api:scapi:ShopperBasketsV1.getBasket")?.segments.join("/"), "checkout/shopper-baskets/v1/organizations/*/baskets/*");
+  assert.equal(fromTable.get("api:scapi:ShopperBasketsV1.nope"), null);
+  const routes = new Map<string, Route | null>([
+    ...fromTable,
+    route("ShopperBaskets", "addItemToBasket", "POST", "/checkout/shopper-baskets/v1/organizations/{organizationId}/baskets/{basketId}/items"),
+    route("ShopperBaskets", "createBasket", "POST", "/checkout/shopper-baskets/v1/organizations/{organizationId}/baskets"),
+    route("ShopperOrders", "getOrder", "GET", "/checkout/shopper-orders/v1/organizations/{organizationId}/orders/{orderNo}"),
+    route("ShopperOrders", "getOmsMetaData", "GET", "/checkout/shopper-orders/v1/organizations/{organizationId}/orders/oms-meta-data"),
+  ]);
+
+  // Each request takes the route agreeing with it most: `oms-meta-data` written out beats `{orderNo}`, a variable written beats a literal; a DELETE the code never calls matches nothing.
+  const { requests, unmatched } = matchRequests([collection], routes);
+  assert.deepEqual(
+    requests.map(({ request, hit, index }) => [index, request.name, hit?.operation ?? null]),
+    [
+      [0, "Get basket", "api:scapi:ShopperBasketsV1.getBasket"],
+      [1, "Add item", "api:scapi:ShopperBaskets.addItemToBasket"],
+      [2, "Delete basket", null],
+      [3, "Meta data", "api:scapi:ShopperOrders.getOmsMetaData"],
+      [4, "Get order", "api:scapi:ShopperOrders.getOrder"],
+    ],
+  );
+  // The operations the collection lacks, the one the table does not know among them, in the routes' order.
+  assert.deepEqual(unmatched, ["api:scapi:ShopperBasketsV1.nope", "api:scapi:ShopperBaskets.createBasket"]);
+  // JSON of another shape is no collection.
+  assert.equal(collectionOf({ info: { name: "x" } }, "x.json"), null);
 });
