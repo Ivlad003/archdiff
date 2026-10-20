@@ -133,7 +133,13 @@ function unfoldModules(target: HTMLElement): void {
       list.append(Object.assign(document.createElement("li"), { className: "muted", textContent: "loading…" }));
       item.append(list);
       caret.textContent = "▾";
-      void functionsOf(path).then((functions) => {
+      void functionsOf(path).catch(() => null).then((functions) => {
+        if (functions === null) {
+          list!.replaceChildren(Object.assign(document.createElement("li"), { className: "muted", textContent: "could not read its functions" }));
+
+          return;
+        }
+
         list!.replaceChildren(...functions.map((fn) => {
           const name = document.createElement("strong");
           name.className = "link";

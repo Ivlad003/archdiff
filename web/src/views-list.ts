@@ -13,8 +13,7 @@
 // navigation.
 //
 // Entry points: `loadViews`, `viewEntries`, `renderViews`,
-// `focusViewSearch`, `viewsStale`, `toggleTree`, `treeShown`,
-// `togglePictureOnly`.
+// `focusViewSearch`, `viewsStale`, `toggleTree`, `togglePictureOnly`.
 
 import { api, type ViewEntry } from "./api.ts";
 import { element, remember, remembered } from "./dom.ts";
@@ -36,10 +35,6 @@ let views: ViewEntry[] = [];
 let listed: string | undefined;
 /** The left panel shows the repository as a folder tree rather than the lists of views; remembered in this browser. */
 let tree = remembered("left-tree");
-
-export function treeShown(): boolean {
-  return tree;
-}
 
 /** The lists or the tree (`t`, or the switch at the top of the panel). */
 export function toggleTree(force?: boolean): void {
@@ -90,7 +85,8 @@ export function renderViews(): void {
   list.classList.toggle("tree", tree);
 
   if (tree) {
-    renderTree(list, views, needle, inPicture, pictureOnly);
+    // A list cut to the changed files opens its folders, as a filter does.
+    renderTree(list, views, needle, inPicture, pictureOnly, state.changed);
 
     return;
   }
