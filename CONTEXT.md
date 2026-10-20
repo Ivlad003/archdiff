@@ -130,6 +130,10 @@ _Avoid_: map, overview
 How the centre of the page shows a view: the canvas, the same picture in 3D (the lanes as terraces, the shapes as blocks), its Markdown page, or the code of its subject (the file the view names); the link's `as`. The picture is the same whichever is shown.
 _Avoid_: mode (the editor's), format (an export's), renderer
 
+**Folder tree**:
+The repository in the left panel as layers, their directories as folders, the modules as files and a module's functions, each entry opening its view; the alternative to the lists of views, with the folders it has open remembered.
+_Avoid_: explorer, outline
+
 **Link**:
 The address of what the page shows: the view, the picture's options and the revisions.
 _Avoid_: state, URL

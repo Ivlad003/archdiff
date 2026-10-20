@@ -1,18 +1,20 @@
 // The list of views on the left: every picture the repository has, in
 // the groups the table of kinds names (the overviews first, then the
 // subject views of each kind under its group), filtered as you type
-// (`v`); and the header's line with the repository's root and its
-// numbers. The list is of the code the page shows: the link's head (a
-// branch, a commit) or the working tree. `loadViews` asks the server
-// again after every change of the code and of the head.
+// (`v`) — or, at the reader's choice (`t`, remembered), the repository as
+// a folder tree (tree.ts); and the header's line with the repository's
+// root and its numbers. The list is of the code the page shows: the
+// link's head (a branch, a commit) or the working tree. `loadViews` asks
+// the server again after every change of the code and of the head.
 //
 // Entry points: `loadViews`, `viewEntries`, `renderViews`,
-// `focusViewSearch`, `listedHead`.
+// `focusViewSearch`, `listedHead`, `toggleTree`, `treeShown`.
 
 import { api, type ViewEntry } from "./api.ts";
-import { element } from "./dom.ts";
+import { element, remember, remembered } from "./dom.ts";
 import { codeHead, currentLink, setLink } from "./link.ts";
 import { togglePanel } from "./panel.ts";
+import { renderTree } from "./tree.ts";
 import { listGroup, listGroups, parseView } from "../../src/view-keys.ts";
 
 const list = element<HTMLUListElement>("views");
@@ -24,6 +26,19 @@ const SHOWN = { all: 60, filtered: 400 };
 let views: ViewEntry[] = [];
 /** The head whose views the list holds (null: the working tree's); undefined before the first load. */
 let listed: string | null | undefined;
+/** The left panel shows the repository as a folder tree rather than the lists of views; remembered in this browser. */
+let tree = remembered("left-tree");
+
+export function treeShown(): boolean {
+  return tree;
+}
+
+/** The lists or the tree (`t`, or the switch at the top of the panel). */
+export function toggleTree(force?: boolean): void {
+  tree = force ?? !tree;
+  remember("left-tree", tree);
+  renderViews();
+}
 
 export function listedHead(): string | null | undefined {
   return listed;
@@ -35,8 +50,18 @@ export function viewEntries(): ViewEntry[] {
 
 export function renderViews(): void {
   const state = currentLink();
-  list.replaceChildren();
   const needle = search.value.trim().toLowerCase();
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>("#left-mode button")) button.classList.toggle("active", (button.dataset["left"] === "tree") === tree);
+  list.classList.toggle("tree", tree);
+
+  if (tree) {
+    renderTree(list, views, needle);
+
+    return;
+  }
+
+  list.replaceChildren();
   const cap = needle === "" ? SHOWN.all : SHOWN.filtered;
   // Each view under the group its kind names (view-keys.ts): the overviews, then the groups in the table's order.
   const grouped = new Map<string, ViewEntry[]>(listGroups().map((label) => [label, []]));
@@ -99,3 +124,5 @@ export function focusViewSearch(): void {
 }
 
 search.addEventListener("input", () => renderViews());
+
+for (const button of document.querySelectorAll<HTMLButtonElement>("#left-mode button")) button.addEventListener("click", () => toggleTree(button.dataset["left"] === "tree"));

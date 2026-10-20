@@ -99,6 +99,15 @@ The system SHALL draw the picture of the link on one canvas, however fast the li
 - **WHEN** a reader opens the machines of a repository that has none, then the timeline outside git
 - **THEN** the canvas says "Nothing to draw here" with the reason, then "This picture could not be drawn" with git's answer, on an empty canvas
 
+### Requirement: The left panel shows the views as lists or as a folder tree
+
+The system SHALL show, at the reader's choice (a switch at the top of the panel, `t`; remembered in the browser), the lists of views or the repository as a folder tree — the layers, their directories as folders, the modules as files, and a module's functions once it is opened (read from its inside picture) — where a tap on an entry opens its view with the centre as it is, the entry of the current view is lit with the folders above it open, the folders a reader opened stay open across loads, and the filter shows a match with its folders open.
+
+#### Scenario: Down the tree to a function
+
+- **WHEN** the tree is shown, the layer `lib`, `src/` and `lib/` are opened, `orders.ts` is tapped, then its caret, then `placeOrder`
+- **THEN** the centre shows `module:src/lib/orders.ts` and then the function's view, each entry lit in turn, and after a reload the tree and its open folders are as they were
+
 ### Requirement: The centre shows the view as the link says
 
 The system SHALL show the view in the centre as the link's `as` says — the canvas (the default), the same picture in 3D (each lane a terrace raised by its order, each shape a block with its footprint and colours of the canvas, each line an arched tube with an arrowhead, every label above its block; the mouse orbits, zooms and pans; a tap on a block picks the shape, a double tap opens its view, `0` fits), its Markdown page, or the code of its subject (the file the view names, a function's lines marked; a view without one shows its page and says so) — with a select of the canvas toolbar; the canvas SHALL stay mounted beneath, and the tools that need it (drawing, mix, dim, split, the project map) SHALL be off meanwhile.

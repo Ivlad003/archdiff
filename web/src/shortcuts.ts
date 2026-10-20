@@ -21,7 +21,7 @@ import { fitPresentation } from "./presentation.ts";
 import { projectMapOpen, toggleProjectMap } from "./project-map.ts";
 import { flipLanes, focusFind, toggleSplit, toggleTool } from "./toolbar.ts";
 import { stepHead } from "./review.ts";
-import { focusViewSearch } from "./views-list.ts";
+import { focusViewSearch, toggleTree } from "./views-list.ts";
 
 const ARROWS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"] as const;
 
@@ -58,6 +58,7 @@ function readingKey(event: KeyboardEvent): void {
   else if (event.key === "m" && drawable) toggleTool("mix");
   else if (event.key === "d" && drawable) toggleTool("dim");
   else if (event.key === "l") flipLanes();
+  else if (event.key === "t") toggleTree();
   else if (event.key === "[" || event.key === "]") stepHead(event.key === "]" ? 1 : -1);
   else if (event.key === "b") setLink({ ...currentLink(), view: "branches", heads: [] });
   else if (event.key === "e" && drawable) setMode("edit");

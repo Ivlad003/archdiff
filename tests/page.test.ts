@@ -1005,3 +1005,43 @@ test("the centre shows the view as the link says: in 3D, as its Markdown page, a
   assert.ok((await page!.isHidden("#three")) && (await page!.isHidden("#reader")));
   assert.equal(await page!.isDisabled("#edit"), false);
 });
+
+test("the left panel shows the repository as a folder tree: layers, folders, modules and their functions, opened and remembered, filtered, navigating", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/#view=layers`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layers"`);
+  await page!.evaluate(`localStorage.removeItem("archdiff.tree.v1")`);
+  await page!.click("#left-mode [data-left='tree']");
+  const rows = (): Promise<string[]> => page!.evaluate(`[...document.querySelectorAll("#views .tree-row .label")].map((label) => label.textContent)`) as Promise<string[]>;
+  // The layers alone at first, folded.
+  assert.deepEqual(await rows(), ["cartridge", "db", "lib", "routes"]);
+  const caretOf = async (label: string): Promise<void> => {
+    await page!.click(`#views .tree-row:has(.label:text-is("${label}")) .caret`);
+  };
+  await caretOf("lib");
+  assert.ok((await rows()).includes("src/"), (await rows()).join(", "));
+  await caretOf("src/");
+  await caretOf("lib/");
+  assert.deepEqual((await rows()).slice(0, 6), ["cartridge", "db", "lib", "src/", "lib/", "log.ts"]);
+  // A tap on a module opens its view, with the centre as it is; the row lights.
+  await page!.click(`#views .tree-row:has(.label:text-is("orders.ts"))`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/orders.ts"`);
+  assert.equal(await page!.textContent("#views .tree-row.active .label"), "orders.ts");
+  // The module's caret lists its functions, read from its inside picture; a tap on one opens the function's view.
+  await caretOf("orders.ts");
+  await page!.waitForFunction(`[...document.querySelectorAll("#views .tree-row .label")].some((label) => label.textContent === "placeOrder")`);
+  await page!.click(`#views .tree-row:has(.label:text-is("placeOrder"))`);
+  await page!.waitForFunction(`/^(calls|logic|focus):src\\/lib\\/orders\\.ts#placeOrder$/.test(window.archdiff.drawn() ?? "")`);
+  assert.equal(await page!.textContent("#views .tree-row.active .label"), "placeOrder");
+  // The filter finds a module with its folders open; the open folders are remembered across a reload, and so is the tree.
+  await page!.fill("#search", "store");
+  assert.deepEqual(await rows(), ["db", "src/", "db/", "store.ts"]);
+  await page!.fill("#search", "");
+  await page!.reload();
+  await page!.waitForFunction(`document.querySelectorAll("#views .tree-row").length > 0`);
+  assert.ok((await rows()).includes("orders.ts"), (await rows()).join(", "));
+  assert.equal(await page!.getAttribute("#left-mode [data-left='tree']", "class"), "active");
+  // Back to the lists.
+  await page!.click("#left-mode [data-left='views']");
+  await page!.waitForSelector("#views li.group");
+  assert.equal(await page!.getAttribute("#left-mode [data-left='views']", "class"), "active");
+});
