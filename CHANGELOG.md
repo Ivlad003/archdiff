@@ -1,6 +1,28 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-10-20
+
+The centre of the page shown as you choose — the canvas, a 3D scene, the Markdown page or the code — with the repository as a folder tree and the changed files alone; the code of any branch and the branches as a picture; an API as the code uses it, with a Postman collection written from the code and drawn against it; the architecture of a browser extension; the coding agent picked on the page; and what four test passes, two reviews and a storefront of 2348 files found, fixed.
+
+**Highlights.**
+
+- *Show as* on the canvas toolbar (`as=` in the link) shows the same view as the canvas, in 3D (three.js, loaded when first asked; every kind of picture, a sequence keeping its time), as its Markdown page — which folds by its headings, opens the modules and functions it names and unfolds a module's functions — or as the code of its subject. The left panel shows the repository as a folder tree (`t`); in every navigation the files the picture is of carry a dot, and *● N in picture* cuts it to them.
+- The changed files alone: `--changed` (`changed=1` in the link, a box in the options) keeps the shapes of the files changed since the base, with the review's marks; `archdiff views --changed` lists their views; the header counts them.
+- Any revision without a checkout: the header's head field and `--head REF` draw every picture, page and code from a branch, a tag or a commit; `branches` (`b`) draws the branches with their commits, `commit:<sha>` one commit's change; `compare` and a review of a branch measure from where the branch left the base; the files of other revisions are cached, so a history that took 9 s takes 1.7 s and a comparison of four heads 0.5 s.
+- An API as the code uses it: a call of a Salesforce Commerce API operation is a shape on the call tree, a message in a sequence, a storage a flow ends at; `apis` and `apis:<Family>` draw the families and the operations with their callers; `archdiff apis` reports each operation's contract as the call sites send and read it; `archdiff postman` writes a Postman collection of them, and `postman` draws a collection against the code, request by request. A sequence frames its `if`, `switch`, `try` and loops as fragments and does not drown in a hub's steps.
+- A browser extension has entry points and messages: the functions handed to a browser event's `addListener` are entries, with the role `manifest.json` gives their script; a message sent with a `type` is an event, and `messages` draws them as a sequence between modules. A file loaded by URL (a worker, a child process) is a dashed `loads` line; `classes` joins its boxes with `has` and `uses` lines.
+- The coding agent is picked on the page: Claude Code, Cursor, Codex and OpenCode, whichever is installed (`GET /api/agents`; `archdiff web` needs no `--agent`), one run at a time, a follow-up on the agent that holds the session.
+- What the tests found, fixed: calls through interfaces, namespaces, glob imports, private methods and `super` are followed, and a parameter spelled like a function is not; tsconfig `paths`, `baseUrl`, `extends`, `rootDirs` and workspace packages resolve as the compiler does; a type-only import is dashed and no cycle; the logic of nested loops, labelled jumps and `finally`; every Mermaid block of three repositories parses; no line runs through a shape; the page keeps a view's zoom and place, says *Nothing to draw here* and why, counts what lies beyond the picture's depth under each shape, and peeks at a shape's lines with Alt.
+
+**Incompatible with 0.5.0.**
+
+- The API: a POST whose Origin is not the server's own is refused (403); a second agent run while one runs is refused (409); `/api/file` refuses a path whose links lead out of the repository, and a body over 8 MB gets a 413.
+- The CLI: `import` keeps a hand-written ARCHITECTURE.md unless `--force`, and `--out` writes over a file with archdiff's generated mark only (both wrote over anything before); a flag that needs a value no longer takes the next flag for it; `flow` and `spec --prompt` of a function or a module that does not exist no longer exit 0.
+- `history --json`: `fnsChanged` counts the changed functions alone, and `fnsAdded`, `fnsRemoved` and `externalsRemoved` are new; in the text, the functions column reads `+1 −0 ~0` and the packages go both ways.
+- `compare`, and a review of another branch, measure each head from where it left the base (their merge-base, named as *since*), not from the base's tip; an unknown ref is refused by name.
+- The pictures: a language's own library is named by the language (`py:os`, `rust:std`, `php:strlen`; `node:fs` stays); `modules` keeps every module up to 200 before folding (it folded above 40); an `import type` is a dashed line and no cycle; the marks of a review come before the hubs and the fold; two lines between one pair of shapes, and the `more` shapes of a big fold, have IDs of their own in the JSON, Excalidraw and ArchiMate.
+
+**Everything since 0.5.0**, by the work it came from:
 
 The coding agent is picked on the page.
 
