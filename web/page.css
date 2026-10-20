@@ -519,43 +519,24 @@ body.hide-right #right {
 }
 
 /* The canvas with its islands (the zoom, the menu) is out of sight while the centre shows something else; it keeps its size, and the picture on it. */
-body[data-as="3d"] #canvas,
-body[data-as="3d"] #canvas *,
-body[data-as="markdown"] #canvas,
-body[data-as="markdown"] #canvas *,
-body[data-as="code"] #canvas,
-body[data-as="code"] #canvas * {
+body:not([data-as="canvas"]) #canvas,
+body:not([data-as="canvas"]) #canvas * {
   visibility: hidden;
 }
 
-/* The tools of the canvas alone, the minimap and the legend of a picture go when the centre shows something else. */
-body[data-as="3d"] #minimap,
-body[data-as="markdown"] #minimap,
-body[data-as="code"] #minimap,
-body[data-as="3d"] #tool-mix,
-body[data-as="3d"] #tool-dim,
-body[data-as="3d"] #mix-clear,
-body[data-as="3d"] #lanes-menu,
-body[data-as="3d"] #find,
-body[data-as="3d"] #tool-minimap,
-body[data-as="3d"] #tool-lanes,
-body[data-as="markdown"] #tool-mix,
-body[data-as="markdown"] #tool-dim,
-body[data-as="markdown"] #mix-clear,
-body[data-as="markdown"] #lanes-menu,
-body[data-as="markdown"] #find,
-body[data-as="markdown"] #tool-minimap,
-body[data-as="markdown"] #tool-lanes,
-body[data-as="markdown"] #tool-project,
+/* Off the canvas (3D, the page, the code) the tools of the canvas alone go — mix, dim, the lanes, find, the minimap,
+   split, the project map — with the minimap; the legend of a picture stays for 3D and goes for the page and the code. */
+body:not([data-as="canvas"]) #minimap,
+body:not([data-as="canvas"]) #tool-mix,
+body:not([data-as="canvas"]) #tool-dim,
+body:not([data-as="canvas"]) #mix-clear,
+body:not([data-as="canvas"]) #lanes-menu,
+body:not([data-as="canvas"]) #find,
+body:not([data-as="canvas"]) #tool-minimap,
+body:not([data-as="canvas"]) #tool-lanes,
+body:not([data-as="canvas"]) #tool-split,
+body:not([data-as="canvas"]) #tool-project,
 body[data-as="markdown"] #legend,
-body[data-as="code"] #tool-mix,
-body[data-as="code"] #tool-dim,
-body[data-as="code"] #mix-clear,
-body[data-as="code"] #lanes-menu,
-body[data-as="code"] #find,
-body[data-as="code"] #tool-minimap,
-body[data-as="code"] #tool-lanes,
-body[data-as="code"] #tool-project,
 body[data-as="code"] #legend {
   display: none;
 }

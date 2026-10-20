@@ -11,7 +11,7 @@
 //
 // Entry points: `Link`, `currentLink`, `setLink`, `wrongInLink`, `refsOf`, `codeHead`,
 // `reviewing`, `readOnlyView`, `readDefaults`, `rememberDefaults`, `forgetDefaults`,
-// `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`, `PRESENTATIONS`, `Presentation`.
+// `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`, `PRESENTATIONS`, `Presentation`, `presentationOf`.
 
 import { DEFAULT_PICTURE_OPTIONS, readEachPictureOption, writePictureParams, type PictureOptionKey, type PictureOptions } from "../../src/options.ts";
 import { codeRevision, defaultDepth, overviews, parseView, usesDepth } from "../../src/view-keys.ts";
@@ -19,21 +19,36 @@ import type { Refs } from "./api.ts";
 
 export type { PictureOptions } from "../../src/options.ts";
 
+/** One way the centre shows a view: its name in the link, its label in the select, the hint under the title (null: the canvas's own), whether the canvas's tools apply. */
+interface PresentationSpec {
+  name: string;
+  label: string;
+  hint: string | null;
+  /** The canvas is what the reader sees: drawing, mix, dim, split and the project map apply. */
+  canvas: boolean;
+}
+
 /**
- * How the centre of the page shows a view: the canvas (Excalidraw, the default), the same picture in 3D (the lanes
- * as terraces, the shapes as blocks), the view's Markdown page, or the code of its subject — each with its label.
+ * How the centre of the page shows a view, one table: the canvas (Excalidraw, the default), the same picture in 3D
+ * (the lanes as terraces, the shapes as blocks), the view's Markdown page, or the code of its subject. What each
+ * hides, allows and says derives from its row (presentation.ts, the toolbar, the keys, page.css by `data-as`).
  */
 export const PRESENTATIONS = [
-  ["canvas", "canvas"],
-  ["3d", "3D"],
-  ["markdown", "markdown"],
-  ["code", "code"],
-] as const satisfies readonly (readonly [string, string])[];
+  { name: "canvas", label: "canvas", hint: null, canvas: true },
+  { name: "3d", label: "3D", hint: "drag to orbit · wheel to zoom · right-drag to pan · tap a block for its code · double-tap it to open its own view · 0 fits", canvas: false },
+  { name: "markdown", label: "markdown", hint: "the page of this view · a file:line in it opens the code on the right", canvas: false },
+  { name: "code", label: "code", hint: "the code of the view's subject · double-tap a shape on the canvas or in 3D for its own view, then its code · the picture's page is on the right", canvas: false },
+] as const satisfies readonly PresentationSpec[];
 
-export type Presentation = (typeof PRESENTATIONS)[number][0];
+export type Presentation = (typeof PRESENTATIONS)[number]["name"];
+
+/** The row of a presentation in the table. */
+export function presentationOf(name: Presentation): PresentationSpec {
+  return PRESENTATIONS.find((spec) => spec.name === name)!;
+}
 
 function isPresentation(value: string | null): value is Presentation {
-  return PRESENTATIONS.some(([name]) => name === value);
+  return PRESENTATIONS.some((spec) => spec.name === value);
 }
 
 export interface Link extends PictureOptions {

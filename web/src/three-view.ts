@@ -404,13 +404,14 @@ export function showThree(box: HTMLElement, view: string, diagram: Diagram, even
   fitThree();
 }
 
-/** The scene put away (the centre shows something else): what it held is freed; the renderer waits for the next picture. */
+/** The scene put away (the centre shows something else, or no picture came): what it held is freed and the frame cleared; the renderer waits for the next picture. */
 export function hideThree(): void {
   if (!mount) return;
   clearScene(mount);
   mount.view = null;
   mount.diagram = null;
   mount.events = null;
+  mount.renderer.clear();
 }
 
 /**

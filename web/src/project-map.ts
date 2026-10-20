@@ -17,7 +17,7 @@
 import { api, type ProjectMap } from "./api.ts";
 import { element, h } from "./dom.ts";
 import { page } from "./page.ts";
-import { codeHead, setLink, currentLink } from "./link.ts";
+import { codeHead, presentationOf, setLink, currentLink } from "./link.ts";
 
 interface Dot {
   id: string;
@@ -412,8 +412,9 @@ function openDot(id: string, kind: "open" | "focus" | "inside"): void {
   setLink({ ...currentLink(), view: viewOfDot(id, kind) });
 }
 
-/** Shows or hides the map; the data loads on the first opening and again when the code changed. */
+/** Shows or hides the map; the data loads on the first opening and again when the code changed. Needs the canvas. */
 export function toggleProjectMap(force?: boolean): void {
+  if (!presentationOf(currentLink().as).canvas && force !== false) return;
   const box = overlay();
   const show = force ?? box.hidden;
   box.hidden = !show;

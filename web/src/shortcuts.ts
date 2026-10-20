@@ -12,7 +12,7 @@
 // Entry point: the module itself, imported by app.ts.
 
 import { canvasMode, saveDrawing, setMode } from "./canvas.ts";
-import { currentLink, readOnlyView, setLink } from "./link.ts";
+import { currentLink, readOnlyView, setLink, presentationOf } from "./link.ts";
 import { closeMenu, menuOpen } from "./menu.ts";
 import { toggleOptions } from "./options-panel.ts";
 import { togglePanel } from "./panel.ts";
@@ -32,7 +32,7 @@ function isArrow(key: string): key is (typeof ARROWS)[number] {
 /** The keys of reading a picture: none while a field has the focus, none with Ctrl, Alt or Cmd held. */
 function readingKey(event: KeyboardEvent): void {
   // The tools of the canvas (mix, dim, split, the editor, the project map) need the canvas: not a scene, a page or code.
-  const drawable = !readOnlyView(currentLink().view) && currentLink().as === "canvas";
+  const drawable = !readOnlyView(currentLink().view) && presentationOf(currentLink().as).canvas;
   const picked = lastPicked();
 
   if (event.key === "/") {

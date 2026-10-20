@@ -12,7 +12,7 @@
 import { findShapes } from "./chains.ts";
 import { element } from "./dom.ts";
 import { clearNotice, notice } from "./title.ts";
-import { OVERVIEWS, PRESENTATIONS, currentLink, detailPresets, setLink, type Detail, type Link, type Presentation } from "./link.ts";
+import { OVERVIEWS, PRESENTATIONS, currentLink, detailPresets, presentationOf, setLink, type Detail, type Link, type Presentation } from "./link.ts";
 import { updateMinimap, toggleMinimap } from "./minimap.ts";
 import { siblingViews } from "./navigation.ts";
 import { applyOptions } from "./options-panel.ts";
@@ -108,7 +108,7 @@ function renderShowAs(state: Link): void {
   const showAs = element<HTMLSelectElement>("show-as");
 
   if (showAs.options.length === 0) {
-    for (const [name, label] of PRESENTATIONS) showAs.append(new Option(label, name));
+    for (const spec of PRESENTATIONS) showAs.append(new Option(spec.label, spec.name));
     showAs.addEventListener("change", () => setLink({ ...currentLink(), as: showAs.value as Presentation }));
   }
 
@@ -129,8 +129,9 @@ export function toggleTool(name: "mix" | "dim"): void {
   else notice(name === "mix" ? "mix: tap a module to open it in place; tap its rest shape to close it" : "dim: tap a shape to dim all but its neighbours; tap nothing to clear");
 }
 
-/** Opens or closes the second picture beside the canvas: the same page, embedded, starting from the current link. */
+/** Opens or closes the second picture beside the canvas: the same page, embedded, starting from the current link. Needs the canvas. */
 export function toggleSplit(force?: boolean): void {
+  if (!presentationOf(currentLink().as).canvas) return;
   const on = document.body.classList.toggle("split", force);
   const pane = element<HTMLDivElement>("split");
   const frame = element<HTMLIFrameElement>("split-frame");

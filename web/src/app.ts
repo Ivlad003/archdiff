@@ -26,7 +26,7 @@ import { loadAgents, loadTasks } from "./chat.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
 import { loadFlow } from "./flow-tab.ts";
-import { currentLink, refsOf, reviewing, readOnlyView, wrongInLink } from "./link.ts";
+import { currentLink, presentationOf, refsOf, reviewing, readOnlyView, wrongInLink } from "./link.ts";
 import { closeMenu, menuOpen, openMenu } from "./menu.ts";
 import { updateMinimap } from "./minimap.ts";
 import { showOptions } from "./options-panel.ts";
@@ -128,7 +128,7 @@ async function load(): Promise<void> {
   setReason(deep ? `⚠ ${deep}` : "");
   // A change (a review, a comparison, a commit) is read, not drawn on; the chat has nothing to build from it. Drawing
   // needs the canvas: not a scene, a page or code in the centre.
-  element<HTMLButtonElement>("edit").disabled = readOnlyView(state.view) || state.as !== "canvas";
+  element<HTMLButtonElement>("edit").disabled = readOnlyView(state.view) || !presentationOf(state.as).canvas;
   element("chat-tab").hidden = readOnlyView(state.view);
 
   /** The scene is on the canvas: a failure after it (the flow, the page) leaves the picture be. */

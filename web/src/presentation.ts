@@ -12,7 +12,7 @@
 
 import type { Diagram, Shape } from "./api.ts";
 import { element } from "./dom.ts";
-import { currentLink, type Link, type Presentation } from "./link.ts";
+import { currentLink, presentationOf, type Link, type Presentation } from "./link.ts";
 import { page } from "./page.ts";
 import { picturePageMarkdown, renderCode, renderMarkdown } from "./panel.ts";
 import { openShape, tap } from "./picking.ts";
@@ -20,17 +20,21 @@ import { parseView, subjectFile } from "../../src/view-keys.ts";
 
 type ThreeModule = typeof import("./three-view.ts");
 
-/** The 3D module, loading or loaded: a chunk of its own, fetched when the centre first shows a picture in 3D. */
-let threeLoading: Promise<ThreeModule> | null = null;
-/** The 3D module once it arrived, for the calls that cannot wait (the fit, the state). */
+/** The 3D module once it arrived: a chunk of its own, fetched when the centre first shows a picture in 3D. */
 let three: ThreeModule | null = null;
 
-/** What the hint under the title says for each presentation; the canvas's is the page's own. */
-const HINTS: Record<Exclude<Presentation, "canvas">, string> = {
-  "3d": "drag to orbit · wheel to zoom · right-drag to pan · tap a block for its code · double-tap it to open its own view · 0 fits",
-  markdown: "the page of this view · a file:line in it opens the code on the right",
-  code: "the code of the view's subject · double-tap a shape on the canvas or in 3D for its own view, then its code · the picture's page is on the right",
-};
+/** The 3D module, fetched on the first ask; null when the browser could not load the chunk (the box says so), asked again next time. */
+async function loadThree(box: HTMLElement): Promise<ThreeModule | null> {
+  if (three) return three;
+
+  try {
+    three = await import("./three-view.ts");
+  } catch (error) {
+    box.replaceChildren(Object.assign(document.createElement("div"), { className: "note", textContent: `3D could not be loaded: ${error instanceof Error ? error.message : String(error)}` }));
+  }
+
+  return three;
+}
 
 /** The hint of the canvas, as index.html writes it, to put back. */
 const canvasHint = element("hint").textContent ?? "";
@@ -49,28 +53,32 @@ export async function applyPresentation(state: Link, diagram: Diagram | null): P
   markPresentation(state);
   const box = element<HTMLDivElement>("three");
   const reader = element<HTMLDivElement>("reader");
-  element("hint").textContent = state.as === "canvas" ? canvasHint : HINTS[state.as];
+  element("hint").textContent = presentationOf(state.as).hint ?? canvasHint;
 
   if (state.as !== "3d") {
     box.hidden = true;
     three?.hideThree();
   }
 
-  if (state.as === "3d") {
+  // No picture (git refused, a wrong view): the canvas says why in its middle; nothing covers it.
+  if (!diagram || state.as === "canvas") {
     reader.hidden = true;
-    box.hidden = false;
-    threeLoading ??= import("./three-view.ts");
-    three = await threeLoading;
 
-    // A tap goes where the canvas's goes: the shape on the right; a double tap opens the shape's own view.
-    if (diagram) three.showThree(box, state.view, diagram, { pick: (id) => tap(id), open: (id) => openShape(id) });
-    else three.hideThree();
+    if (!diagram) {
+      box.hidden = true;
+      three?.hideThree();
+    }
 
     return;
   }
 
-  if (state.as === "canvas") {
+  if (state.as === "3d") {
     reader.hidden = true;
+    box.hidden = false;
+    const module = await loadThree(box);
+
+    // A tap goes where the canvas's goes: the shape on the right; a double tap opens the shape's own view.
+    if (module) module.showThree(box, state.view, diagram, { pick: (id) => tap(id), open: (id) => openShape(id) });
 
     return;
   }
@@ -85,20 +93,20 @@ export async function applyPresentation(state: Link, diagram: Diagram | null): P
 
   if (state.as === "markdown") {
     body.hidden = false;
-    renderMarkdown(body, diagram ? picturePageMarkdown() : "");
+    renderMarkdown(body, picturePageMarkdown());
     reader.scrollTop = 0;
 
     return;
   }
 
   // The code of the subject's file; a view without one (an overview, a layer, a directory) says so over its page.
-  const node = diagram ? codeSubject(state) : null;
+  const node = codeSubject(state);
 
   if (!node) {
     note.hidden = false;
     note.textContent = "This view has no file of its own, so its page is shown instead. Double-tap a shape on the canvas or in 3D for its own view, then show that as code.";
     body.hidden = false;
-    renderMarkdown(body, diagram ? picturePageMarkdown() : "");
+    renderMarkdown(body, picturePageMarkdown());
 
     return;
   }
