@@ -2,7 +2,10 @@
 // lane, the top one of the canvas, the highest), each shape a block on
 // its terrace with the footprint it has on the canvas, each line a tube
 // arched from block to block with an arrowhead, every label a sprite
-// above its block. Built with three.js from the laid-out diagram the
+// above its block. A sequence keeps its time: the participants stand at
+// the back, each message runs along its own route at its own depth, the
+// lifelines run from the participants to the front, and a fragment is a
+// frame on the ground. Built with three.js from the laid-out diagram the
 // server sends, in the colours the Excalidraw export draws with, so the
 // scene is the same picture as the canvas. The mouse orbits (drag turns,
 // wheel zooms, right-drag pans); a tap on a block is a tap on the shape,
@@ -27,7 +30,9 @@ export interface ThreeEvents {
 /** How high a lane rises over the one below it, and how thick a terrace is, in the canvas's pixels. */
 const RISE = 150;
 const TERRACE = 6;
-/** The height of a block by the kind of its shape; a kind not listed (a frame, an anchor) is not drawn. */
+/** How high over the ground a line drawn along its route runs (a message of a sequence), and how thick. */
+const ROUTED = { lift: 8, radius: 1.4, lifeline: 0.6 };
+/** The height of a block by the kind of its shape; a kind not listed (a frame, an anchor) is not drawn as a block. */
 const HEIGHTS: Partial<Record<Shape["kind"], number>> = { layer: 24, module: 18, fn: 14, external: 12, hole: 14, start: 12, more: 10, participant: 14, event: 12, cell: 8, package: 20, class: 20, state: 14, machine: 14, decision: 14, action: 12, end: 12 };
 /** Where the camera looks from when the scene is fitted: from the front, the right and above. */
 const VIEWPOINT = new THREE.Vector3(0.65, 0.75, 1).normalize();
@@ -271,6 +276,36 @@ function labelSprite(text: string, px: number, dark: boolean): THREE.Sprite {
   return sprite;
 }
 
+/** A line drawn along the route the picture gave it (a sequence's message, a lifeline), just over the ground, in the line's colour; a message ends in an arrowhead. */
+function routed(edge: Line, route: readonly { x: number; y: number }[], level: number): THREE.Object3D[] {
+  const points = route.map((point) => new THREE.Vector3(point.x, level + ROUTED.lift, point.y));
+
+  if (points.length < 2) return [];
+  const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0);
+  const colour = new THREE.Color(lineStroke(edge));
+  const radius = edge.kind === "lifeline" ? ROUTED.lifeline : ROUTED.radius + Math.min(edge.count ?? 1, 8) * 0.2;
+  const body = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, points.length * 6), radius, 6, false), new THREE.MeshBasicMaterial({ color: colour, transparent: edge.kind === "lifeline", opacity: edge.kind === "lifeline" ? 0.6 : 1 }));
+
+  if (edge.kind === "lifeline") return [body];
+  const end = points[points.length - 1]!;
+  const tangent = end.clone().sub(points[points.length - 2]!).normalize();
+  const head = new THREE.Mesh(new THREE.ConeGeometry(radius * 3 + 3, 14, 12), new THREE.MeshBasicMaterial({ color: colour }));
+  head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
+  head.position.copy(end).sub(tangent.clone().multiplyScalar(6));
+
+  return [body, head];
+}
+
+/** A frame (a fragment of a sequence): its rectangle drawn on the ground as an outline, its label at the corner. */
+function frame(node: Shape, level: number, dark: boolean): THREE.Object3D[] {
+  const outline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(node.w, 1, node.h)), new THREE.LineBasicMaterial({ color: lookOf(node).stroke }));
+  outline.position.set(node.x + node.w / 2, level + 1, node.y + node.h / 2);
+  const label = labelSprite(node.label, LABEL.block, dark);
+  label.position.set(node.x + label.scale.x / 2 + 6, level + label.scale.y / 2 + 4, node.y + 8);
+
+  return [outline, label];
+}
+
 /** A line as a tube arched from the top of one block to the top of the other, in the line's colour, with an arrowhead at the end. */
 function tube(edge: Line, from: THREE.Mesh, to: THREE.Mesh): THREE.Object3D[] {
   const start = new THREE.Vector3(from.position.x, from.position.y + from.scale.y / 2, from.position.z);
@@ -327,8 +362,18 @@ function build(m: Mount, diagram: Diagram): void {
     m.scene.add(label);
   }
 
-  // The lines between the blocks drawn; a lifeline of a sequence is the canvas's reading aid, not a line of the code.
+  // A sequence keeps its time: the messages run along their routes at their own depth, the lifelines to the front,
+  // the fragments as frames on the ground. Any other picture's lines arch from block to block.
+  const sequence = diagram.sequence !== undefined;
+
   for (const edge of diagram.edges) {
+    if (sequence && edge.route && (edge.kind === "message" || edge.kind === "lifeline")) {
+      m.scene.add(...routed(edge, edge.route, 0));
+
+      if (edge.kind === "message") m.lines++;
+      continue;
+    }
+
     const from = m.blocks.get(edge.from);
     const to = m.blocks.get(edge.to);
 
@@ -336,6 +381,8 @@ function build(m: Mount, diagram: Diagram): void {
     m.scene.add(...tube(edge, from, to));
     m.lines++;
   }
+
+  for (const node of diagram.nodes) if (node.kind === "fragment" && node.w > 0 && node.h > 0) m.scene.add(...frame(node, 0, dark));
 
   m.bounds = new THREE.Box3();
 
