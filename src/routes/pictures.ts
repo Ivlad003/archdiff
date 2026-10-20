@@ -24,7 +24,7 @@ import { commitFiles, commitInfo, fileAt } from "../git.ts";
 import { moduleChangeMarkdown, shortCommits } from "../diff.ts";
 import { commitMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
-import { review } from "../review.ts";
+import { reviewOf } from "../review.ts";
 import { parseView, viewList } from "../views.ts";
 import { viewsOfFiles } from "../view-keys.ts";
 import { codeRevision, tagOf } from "../view-keys.ts";
@@ -130,15 +130,19 @@ export async function getViews(ctx: RouteContext, { url, response }: RouteReques
   const analysis = await codeOf(ctx, url.searchParams, response);
 
   if (!analysis) return;
+  // The options of the query, read as every picture's are (`changed=1`, `changed=true`); a wrong value is the request's problem.
+  const options = optionsOf(url.searchParams);
+
+  if (!options.ok) return failed(response, options);
   let views = viewList(analysis);
   let changed: { files: number; since: string } | null = null;
   let note: string | null = null;
 
-  // `changed=1`: the views of the files changed since the base (`base`, else the merge-base) at the head; outside git
+  // `changed`: the views of the files changed since the base (`base`, else the merge-base) at the head; outside git
   // (or on a bad ref) the whole list, and the note says why.
-  if (url.searchParams.get("changed") === "1") {
+  if (options.value.changed) {
     try {
-      const result = await review(root, url.searchParams.get("base") || null, url.searchParams.get("head") || null, analysis);
+      const result = await reviewOf(analysis, url.searchParams.get("base") || null, url.searchParams.get("head") || null);
       views = viewsOfFiles(views, new Set(result.diff.changedFiles));
       changed = { files: result.diff.changedFiles.length, since: shortCommits(result.diff.base) };
     } catch (error) {

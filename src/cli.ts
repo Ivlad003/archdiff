@@ -24,7 +24,7 @@ import { metricsMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
 import { historyMarkdown, reviewFindings, shortCommits } from "./diff.ts";
 import { drawPicture, type Picture, type Refs } from "./picture.ts";
-import { analysisAt, history, review } from "./review.ts";
+import { analysisAt, history, reviewOf } from "./review.ts";
 import { defaultBase, isIgnored, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { CACHE_DIRECTORY } from "./cache.ts";
 import { serve } from "./server.ts";
@@ -230,18 +230,25 @@ const COMMANDS: readonly Command[] = [
   {
     name: "views",
     usage: "[dir] [--changed [--base REF] [--head REF]]",
-    help: ["List the views that can be drawn: layers, every module, every entry point.", "--changed: only the views of the files changed since the base (the merge-base without --base) at the head"],
+    help: ["List the views that can be drawn: layers, every module, every entry point. With the picture option", ...pictureOptionsHelp().filter((line) => line.startsWith("--changed")).map((line) => `  ${line}`)],
     arity: 1,
-    flags: [...REF_FLAGS, flag("changed")],
+    flags: [...REF_FLAGS, ...pictureFlags().filter((item) => item.name === "changed").map((item) => flag(item.name, item.value))],
     async run(call) {
       const analysis = await analyze(call.dir(0));
       let views = viewList(analysis);
+      const options = readPictureOptions((name) => call.flags.get(name), "flag");
 
-      if (call.has("changed")) {
+      if (options.ok && options.value.options.changed) {
         const refs = refsOf(call);
-        const result = await review(call.dir(0), refs.base, refs.head, analysis);
-        views = viewsOfFiles(views, new Set(result.diff.changedFiles));
-        process.stderr.write(`${counted(result.diff.changedFiles.length, "file")} changed since ${shortCommits(result.diff.base)}\n`);
+
+        try {
+          const result = await reviewOf(analysis, refs.base, refs.head);
+          views = viewsOfFiles(views, new Set(result.diff.changedFiles));
+          process.stderr.write(`${counted(result.diff.changedFiles.length, "file")} changed since ${shortCommits(result.diff.base)}\n`);
+        } catch (error) {
+          // Outside git, or a bad ref: every view, and why the changed files could not be told apart — as the page lists them.
+          process.stderr.write(`the changed files could not be told apart: ${error instanceof Error ? error.message : String(error)}; every view listed\n`);
+        }
       }
 
       for (const view of views) process.stdout.write(`${view.key}\t${view.title}\n`);

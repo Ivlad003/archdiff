@@ -45,9 +45,19 @@ export interface Step {
 /** More lanes than this on a map of modules (the whole map, a layer, a directory), and `auto` lays them as columns. */
 const COLUMNS_ABOVE = 6;
 
+/** The pictures the review's diff is laid over as marks: a picture of the code with a diff read for it — not a change (a timeline, a review, a comparison), which carries its own. */
+function overlaysMarks({ reads, view }: StepContext): boolean {
+  return reads.diff !== undefined && view.kind !== "timeline" && view.kind !== "review" && view.kind !== "compare";
+}
+
 /** The pictures whose shapes carry a review's marks: the review's own marks, or those `changes` laid over the picture. */
-function marked({ reads, view }: StepContext): boolean {
-  return (reads.diff !== undefined && view.kind !== "timeline") || view.kind === "review" || view.kind === "compare";
+function marked(ctx: StepContext): boolean {
+  return overlaysMarks(ctx) || ctx.view.kind === "review" || ctx.view.kind === "compare";
+}
+
+/** The pictures the changed files cannot be told apart in: a grid or a chart placed by its view, a flowchart, a change of several revisions. */
+function wholeUnderChanged(view: View, diagram: Diagram): boolean {
+  return diagram.placed === true || diagram.logic !== undefined || view.kind === "compare" || view.kind === "timeline";
 }
 
 export const STEPS: readonly Step[] = [
@@ -55,14 +65,23 @@ export const STEPS: readonly Step[] = [
   { name: "beyond", applies: ({ view }) => usesDepth(view.kind) && view.kind !== "sequence", run: (diagram, { graph }) => withBeyond(diagram, graph) },
   { name: "hide lanes", applies: ({ options }) => options.hideLanes.length > 0, run: (diagram, { options }) => hideLanes(diagram, options.hideLanes) },
   { name: "open in place", applies: ({ options, view }) => options.expand.length > 0 && isModuleView(view.kind), run: (diagram, { graph, options }) => expandInPlace(diagram, graph, options.expand) },
+  // The review's marks come before the hubs and the fold, which spare a marked shape: a changed hub stays a shape, a changed module stays out of the folded tail.
+  { name: "changes", applies: (ctx) => overlaysMarks(ctx), run: (diagram, { reads }) => overlayDiff(diagram, reads.diff!) },
+  { name: "only changes", applies: (ctx) => ctx.options.onlyChanges && marked(ctx), run: (diagram) => onlyChanged(diagram) },
+  // The shapes of the changed files alone, on a picture of the code or a review; where the cut does not apply, the picture says so and stays whole.
+  {
+    name: "changed files",
+    applies: (ctx, diagram) => ctx.options.changed && (wholeUnderChanged(ctx.view, diagram) || overlaysMarks(ctx) || (ctx.view.kind === "review" && ctx.reads.review !== undefined)),
+    run: (diagram, { reads, graph, view, subject }) => {
+      if (wholeUnderChanged(view, diagram)) return { ...diagram, reason: [diagram.reason, "the changed files alone do not apply here (a grid, a flowchart, a timeline, a comparison): drawn whole"].filter(Boolean).join("; ") };
+
+      return changedFilesOnly(diagram, view.kind === "review" ? reads.review!.diff : reads.diff!, graph, subject);
+    },
+  },
   { name: "hubs as badges", applies: ({ options, view }) => options.hubs && isModuleView(view.kind), run: (diagram, { subject, analysis }) => hubsAsBadges(diagram, subject, analysis.config.hubs) },
   { name: "question", applies: (_ctx, diagram) => !diagram.question, run: (diagram, { view }) => ({ ...diagram, question: questionOf(view.kind) }) },
   { name: "fold", applies: (_ctx, diagram) => !diagram.placed && !diagram.classes && !diagram.logic, run: (diagram, { options, view }) => fold(diagram, options.limit ?? foldLimit(view.kind)) },
   { name: "light lines", applies: ({ options }) => (options.weight ?? 1) > 1, run: (diagram, { options }) => dropLightLines(diagram, options.weight ?? 1) },
-  { name: "changes", applies: ({ reads, view }) => reads.diff !== undefined && view.kind !== "timeline" && view.kind !== "review" && view.kind !== "compare", run: (diagram, { reads }) => overlayDiff(diagram, reads.diff!) },
-  { name: "only changes", applies: (ctx) => ctx.options.onlyChanges && marked(ctx), run: (diagram) => onlyChanged(diagram) },
-  // The shapes of the changed files alone: on a picture of the code or a review; not on a grid, a flowchart or a change of several heads.
-  { name: "changed files", applies: ({ options, reads, view }, diagram) => options.changed && !diagram.placed && !diagram.logic && view.kind !== "timeline" && view.kind !== "compare" && (reads.diff !== undefined || (view.kind === "review" && reads.review !== undefined)), run: (diagram, { reads, graph, view }) => changedFilesOnly(diagram, view.kind === "review" ? reads.review!.diff : reads.diff!, graph) },
   { name: "overlays", applies: ({ options }) => options.overlays.length > 0, run: (diagram, { analysis, options }) => applyOverlays(diagram, analysis, options.overlays) },
   // Rows or columns, said once, here: `layout` lays the lanes as the picture says and writes back what it could do.
   { name: "lane mode", applies: () => true, run: (diagram, { options, view }) => ({ ...diagram, lanes: options.lanes !== "auto" ? options.lanes : isMapView(view.kind) && diagram.groups.length > COLUMNS_ABOVE ? "columns" : "rows" }) },

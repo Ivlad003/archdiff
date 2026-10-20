@@ -158,7 +158,7 @@ The system SHALL draw every strongly connected component of two or more modules 
 
 ### Requirement: The steps after a view are data
 
-The system SHALL apply, after a view, the steps of one list in order — hidden lanes, modules opened in place, hubs as badges, the question, the fold, the light lines, the review's marks, only the changed, the changed files alone, the overlays, the lane mode, and the warning of a depth past 12, put first — each a pure function of the picture that adds to its reason; the CLI, the server and the page SHALL run the same list with the same table of options. The changes laid over a picture (`changes`) SHALL be left out, with a note in the reason, when git cannot give them (outside a repository, a bad ref); the picture SHALL still be drawn.
+The system SHALL apply, after a view, the steps of one list in order — hidden lanes, modules opened in place, the review's marks, only the changed, the changed files alone, hubs as badges, the question, the fold, the light lines, the overlays, the lane mode, and the warning of a depth past 12, put first — each a pure function of the picture that adds to its reason; the CLI, the server and the page SHALL run the same list with the same table of options. The changes laid over a picture (`changes`) SHALL be left out, with a note in the reason, when git cannot give them (outside a repository, a bad ref); the picture SHALL still be drawn.
 
 #### Scenario: The same picture everywhere
 

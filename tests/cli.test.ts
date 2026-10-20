@@ -1281,12 +1281,31 @@ test("--changes lays the review's marks over any view", () =>
     assert.ok(changed.title.endsWith("— changes since HEAD") && changed.reason?.includes("only the 1 shape of the 1 file changed since HEAD; 3 others left out"), `${changed.title} / ${changed.reason}`);
     const modules = JSON.parse(archdiff(["diagram", "modules", dir, "--changed", "--base", "HEAD", "--format", "json"]).stdout) as { nodes: { id: string }[] };
     assert.deepEqual(modules.nodes.map((node) => node.id), ["src/lib/log.ts"]);
+    // The view's own subject stays, changed or not: a picture of orders.ts cut to the changed files still holds orders.ts.
+    const own = JSON.parse(archdiff(["diagram", "module:src/lib/orders.ts", dir, "--changed", "--base", "HEAD", "--format", "json"]).stdout) as { nodes: { id: string; diff?: string }[] };
+    assert.deepEqual(own.nodes.map((node) => [node.id, node.diff ?? null]).sort(), [["src/lib/log.ts", "changed"], ["src/lib/orders.ts", null]]);
+    // A grid stays whole, and says why the cut does not apply.
+    const grid = JSON.parse(archdiff(["diagram", "matrix", dir, "--changed", "--base", "HEAD", "--format", "json"]).stdout) as { nodes: unknown[]; reason?: string };
+    assert.ok(grid.nodes.length > 4 && grid.reason?.includes("the changed files alone do not apply here"), grid.reason);
     const views = archdiff(["views", dir, "--changed", "--base", "HEAD"]);
     assert.equal(views.status, 0, views.stderr);
     const keys = views.stdout.trim().split("\n").map((line) => line.split("\t")[0] ?? "");
     assert.ok(keys.includes("layers") && keys.includes("layer:lib") && keys.includes("dir:src/lib") && keys.includes("module:src/lib/log.ts"), keys.join(", "));
     assert.ok(!keys.includes("layer:db") && !keys.includes("module:src/lib/orders.ts") && !keys.some((key) => key.startsWith("calls:")), keys.join(", "));
     assert.match(views.stderr, /1 file changed since HEAD/);
+    assert.ok(keys.includes("cycles:fns"), "a listed scope stays among the views of the changed files");
+  }));
+
+test("--changed outside git lists every view and says the changed files could not be told apart; the picture says so too", () =>
+  withTempDir("archdiff-changed-nogit-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    const views = archdiff(["views", dir, "--changed"]);
+    assert.equal(views.status, 0, views.stderr);
+    assert.ok(views.stdout.includes("module:src/lib/orders.ts") && views.stdout.includes("module:src/db/store.ts"), views.stdout.slice(0, 200));
+    assert.match(views.stderr, /the changed files could not be told apart: .*not a git repository.*; every view listed/);
+    const picture = JSON.parse(archdiff(["diagram", "layer:lib", dir, "--changed", "--format", "json"]).stdout) as { nodes: unknown[]; reason?: string };
+    assert.ok(picture.nodes.length > 1, "drawn whole");
+    assert.match(picture.reason ?? "", /⚠ the changed files could not be told apart: .*not a git repository$/);
   }));
 
 test("--mermaid picks a Mermaid type that fits the view", () => {

@@ -24,7 +24,7 @@ import { branchGraph, commitInfo, defaultBase, mergeBase, revisionStamp, type Co
 import { positionsOf, readDrawing, type DrawingFile } from "./drawings.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import type { PictureOptions } from "./options.ts";
-import { compareBranches, history, review } from "./review.ts";
+import { compareBranches, history, reviewOf } from "./review.ts";
 import { codeRevision, viewKey, type View } from "./view-keys.ts";
 import { viewOf, type EdgeReads } from "./views.ts";
 
@@ -118,7 +118,7 @@ async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOpt
   }
 
   if (view.kind === "review") {
-    const result = await review(root, refs.base, refs.head, analysis);
+    const result = await reviewOf(analysis, refs.base, refs.head);
 
     return { reads: { review: { diff: result.diff, base: result.base.graph, head: result.head.graph } }, change: { kind: "review", diff: result.diff, contract: result.contract }, notes: [] };
   }
@@ -128,7 +128,7 @@ async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOpt
     const commit = commitInfo(root, view.subject ?? "");
 
     if (!commit) throw new Error(`no commit "${view.subject ?? ""}" (archdiff branches lists the branches)`);
-    const result = await review(root, commit.parent, commit.sha, analysis);
+    const result = await reviewOf(analysis, commit.parent, commit.sha);
 
     return { reads: { review: { diff: result.diff, base: result.base.graph, head: result.head.graph }, commit }, change: { kind: "review", diff: result.diff, contract: result.contract, commit }, notes: [] };
   }
@@ -149,9 +149,10 @@ async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOpt
 
   if (options.changes || options.changed) {
     try {
-      reads.diff = (await review(root, refs.base, refs.head, analysis)).diff;
+      reads.diff = (await reviewOf(analysis, refs.base, refs.head)).diff;
     } catch (error) {
-      notes.push(`⚠ the changes are not laid over: ${error instanceof Error ? error.message : String(error)}`);
+      // What was asked is what could not be done: the changed files told apart, or the marks laid over.
+      notes.push(`⚠ ${options.changed && !options.changes ? "the changed files could not be told apart" : "the changes are not laid over"}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

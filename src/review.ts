@@ -63,6 +63,29 @@ export interface ComparisonResult {
  * already made, so a review of the working tree does not read it twice.
  */
 export async function review(root: string, base: string | null, headRef: string | null = null, current: Analysis | null = null): Promise<ReviewResult> {
+  return reviewUncached(root, base, headRef, current);
+}
+
+/** The reviews made on one analysis, by base and head: one page load asks for the same review from the views list and from the picture. */
+const reviews = new WeakMap<Analysis, Map<string, Promise<ReviewResult>>>();
+
+/** The review of `headRef` against `base` on `current` (the working tree's analysis), made once per analysis and refs; a review that failed (no git, a bad ref) is not kept. */
+export function reviewOf(current: Analysis, base: string | null, headRef: string | null = null): Promise<ReviewResult> {
+  const key = `${base ?? ""}\u0000${headRef ?? ""}`;
+  const known = reviews.get(current) ?? new Map<string, Promise<ReviewResult>>();
+  reviews.set(current, known);
+  let result = known.get(key);
+
+  if (!result) {
+    result = reviewUncached(current.root, base, headRef, current);
+    result.catch(() => known.delete(key));
+    known.set(key, result);
+  }
+
+  return result;
+}
+
+async function reviewUncached(root: string, base: string | null, headRef: string | null, current: Analysis | null): Promise<ReviewResult> {
   const ref = base ?? mergeBase(root, headRef ?? "HEAD");
   const config = loadConfig(root);
   // The head's and the base's files are parsed in one batch; the working tree is the analysis already made.

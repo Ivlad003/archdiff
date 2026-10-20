@@ -569,14 +569,17 @@ export function overlayDiff(diagram: Diagram, diff: GraphDiff): Diagram {
  * Only the files that changed: of a diagram, the shapes of the files changed
  * since the base — a module by its id, a function or a class by the file it
  * is written in, a folded tail by the modules it stands for, a layer by the
- * modules in it, and a shape of no file (a package, an event, a gap, a
- * storage) when a line joins it to one kept — with the lines among them and
- * the lanes they sit in; the rest of the picture goes.
+ * modules in it — and the view's own subject, changed or not; a shape of no
+ * file (a package, an event, a gap, a storage) stays when a line joins it to
+ * one kept, through other such shapes too; with the lines among them and the
+ * lanes they sit in. The rest of the picture goes.
  */
-export function changedFilesOnly(diagram: Diagram, diff: GraphDiff, graph: Graph): Diagram {
+export function changedFilesOnly(diagram: Diagram, diff: GraphDiff, graph: Graph, subject: string | null): Diagram {
   const changed = new Set(diff.changedFiles);
   const layers = new Set([...changed].map((file) => graph.modules.get(file)?.layer).filter((layer): layer is string => layer !== undefined));
-  const ofFile = (node: Shape): boolean => {
+
+  /** Whether a shape is of a changed file; null for a shape of no file. */
+  const ofFile = (node: Shape): boolean | null => {
     if (node.ref?.file !== undefined) return changed.has(node.ref.file);
 
     switch (node.kind) {
@@ -588,17 +591,36 @@ export function changedFilesOnly(diagram: Diagram, diff: GraphDiff, graph: Graph
       case "participant":
         return changed.has(standsFor(node));
       default:
-        return false;
+        return null;
     }
   };
-  const keep = new Set(diagram.nodes.filter(ofFile).map((node) => node.id));
-  // A shape of no file stays when a line joins it to a kept one: the package a changed module imports, the event it emits.
-  const fileless = new Set(diagram.nodes.filter((node) => node.ref?.file === undefined && !["layer", "more", "module", "participant"].includes(node.kind)).map((node) => node.id));
 
-  for (const edge of diagram.edges) {
-    if (keep.has(edge.from) && fileless.has(edge.to)) keep.add(edge.to);
+  const keep = new Set<string>();
+  const fileless = new Set<string>();
 
-    if (keep.has(edge.to) && fileless.has(edge.from)) keep.add(edge.from);
+  for (const node of diagram.nodes) {
+    const own = ofFile(node);
+
+    // The view's own subject stays whatever changed: the picture is of it.
+    if (own === true || (subject !== null && (node.id === subject || standsFor(node) === subject))) keep.add(node.id);
+    else if (own === null) fileless.add(node.id);
+  }
+
+  // A shape of no file stays when a line joins it to a kept one, through other such shapes too: until no line adds one.
+  for (let added = true; added; ) {
+    added = false;
+
+    for (const edge of diagram.edges) {
+      if (keep.has(edge.from) && fileless.has(edge.to) && !keep.has(edge.to)) {
+        keep.add(edge.to);
+        added = true;
+      }
+
+      if (keep.has(edge.to) && fileless.has(edge.from) && !keep.has(edge.from)) {
+        keep.add(edge.from);
+        added = true;
+      }
+    }
   }
 
   const nodes = diagram.nodes.filter((node) => keep.has(node.id));
@@ -606,7 +628,7 @@ export function changedFilesOnly(diagram: Diagram, diff: GraphDiff, graph: Graph
   const groups = diagram.groups.filter((group) => nodes.some((node) => node.group === group.id));
   const gone = diagram.nodes.length - nodes.length;
   const since = shortCommits(diff.base);
-  const reason = nodes.length === 0 ? `none of the ${counted(changed.size, "file")} changed since ${since} is in this picture` : `only the ${counted(nodes.length, "shape")} of the ${counted(changed.size, "file")} changed since ${since}; ${gone} ${gone === 1 ? "other" : "others"} left out`;
+  const reason = nodes.length === 0 ? `none of the ${counted(changed.size, "file")} changed since ${since} is in this picture` : `only the ${counted(nodes.length, "shape")} of the ${counted(changed.size, "file")} changed since ${since}; ${counted(gone, "other")} left out`;
 
   return { ...diagram, nodes, edges, groups, reason: [diagram.reason, reason].filter(Boolean).join("; ") };
 }
