@@ -108,6 +108,15 @@ The system SHALL show, at the reader's choice (a switch at the top of the panel,
 - **WHEN** the tree is shown, the layer `lib`, `src/` and `lib/` are opened, `orders.ts` is tapped, then its caret, then `placeOrder`
 - **THEN** the centre shows `module:src/lib/orders.ts` and then the function's view, each entry lit in turn, and after a reload the tree and its open folders are as they were
 
+### Requirement: The navigation says where the diagram is
+
+The system SHALL mark, in the lists of views and in the folder tree, the entries of the files the picture shown now is of (a dot), SHALL cut the panel to those files on a press (remembered), and SHALL make a rendered page a navigation: its sections fold by their headings (a fold remembered across pages with that heading), a module or a function named in bold opens its view with the centre as it is, and a module's bullet unfolds its functions, each opening its view or its code.
+
+#### Scenario: The files of a module's picture
+
+- **WHEN** `module:src/lib/orders.ts` is shown and *in picture* is pressed
+- **THEN** the four modules of the picture carry the dot in the list and the tree, the panel lists them with their layers and directories alone, the page's `db` section folds and stays folded on the next page, and the bold `src/lib/log.ts` opens that module's view
+
 ### Requirement: The centre shows the view as the link says
 
 The system SHALL show the view in the centre as the link's `as` says — the canvas (the default), the same picture in 3D (each lane a terrace raised by its order, each shape a block with its footprint and colours of the canvas, each line an arched tube with an arrowhead, every label above its block; the mouse orbits, zooms and pans; a tap on a block picks the shape, a double tap opens its view, `0` fits), its Markdown page, or the code of its subject (the file the view names, a function's lines marked; a view without one shows its page and says so) — with a select of the canvas toolbar; the canvas SHALL stay mounted beneath, and the tools that need it (drawing, mix, dim, split, the project map) SHALL be off meanwhile.

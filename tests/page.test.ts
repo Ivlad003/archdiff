@@ -1049,3 +1049,47 @@ test("the left panel shows the repository as a folder tree: layers, folders, mod
   await page!.waitForSelector("#views li.group");
   assert.equal(await page!.getAttribute("#left-mode [data-left='views']", "class"), "active");
 });
+
+test("the navigation says where the diagram is: the picture's files carry a dot in the lists and the tree, cut to them on a press; the page folds, names open views, a module unfolds its functions", { skip: !CHROME && "no Chrome installed" }, async () => {
+  // The page first (the storage of a page not yet opened cannot be read), then a clean slate of the panel's choices.
+  await page!.goto(`${base}/?fresh=7#view=module:src/lib/orders.ts`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/orders.ts"`);
+  await page!.evaluate(`localStorage.removeItem("archdiff.folded.v1"); localStorage.removeItem("left-picture"); localStorage.setItem("left-tree", "0")`);
+  await page!.reload();
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/orders.ts"`);
+  // The module view holds four modules: their entries carry the dot (the entry points, logic and types of those files too), the others do not; the toggle counts the files.
+  const dotted = (): Promise<string[]> => page!.evaluate(`[...document.querySelectorAll("#views li.in-picture")].map((li) => li.title).sort()`) as Promise<string[]>;
+  assert.deepEqual((await dotted()).filter((key) => key.startsWith("module:")), ["module:src/db/store.ts", "module:src/lib/log.ts", "module:src/lib/orders.ts", "module:src/routes/checkout.tsx"]);
+  assert.ok((await dotted()).every((key) => /src\/(db|lib|routes)\//.test(key)), (await dotted()).join(", "));
+  assert.equal(await page!.textContent("#left-picture"), "● 4 in picture");
+  await page!.click("#left-picture");
+  const listed = (await page!.evaluate(`[...document.querySelectorAll("#views li:not(.group)")].map((li) => li.title)`)) as string[];
+  assert.ok(listed.includes("layers") && listed.includes("layer:lib") && listed.includes("dir:src/lib") && listed.includes("module:src/db/store.ts"), listed.join(", "));
+  assert.ok(!listed.includes("layer:cartridge") && !listed.some((key) => key.startsWith("module:cartridges")), listed.join(", "));
+  // The tree cut the same way: the layers of the picture's files, every one of them dotted.
+  await page!.click("#left-mode [data-left='tree']");
+  const rows = (await page!.evaluate(`[...document.querySelectorAll("#views .tree-row .label")].map((label) => label.textContent)`)) as string[];
+  assert.ok(rows.includes("store.ts") && rows.includes("checkout.tsx") && !rows.includes("cartridge"), rows.join(", "));
+  assert.equal(await page!.evaluate(`document.querySelectorAll("#views .tree-row.in-picture").length`), 4);
+  await page!.click("#left-picture");
+  await page!.click("#left-mode [data-left='views']");
+  // The page folds by its headings, and a fold is remembered; a module named in bold opens its view; its bullet unfolds its functions.
+  await page!.waitForSelector("#markdown details.section");
+  const sections = (await page!.evaluate(`[...document.querySelectorAll("#markdown details.section > summary")].map((summary) => summary.textContent.trim())`)) as string[];
+  assert.deepEqual(sections, ["db", "lib", "routes"]);
+  await page!.evaluate(`[...document.querySelectorAll("#markdown details.section > summary")].find((summary) => summary.textContent.trim() === "db").click()`);
+  assert.equal(await page!.evaluate(`document.querySelector("#markdown details.section").open`), false);
+  // The fold is remembered once the toggle event lands, a moment after the click.
+  await page!.waitForFunction(`localStorage.getItem("archdiff.folded.v1") === '["db"]'`);
+  // The caret of the bullet naming orders.ts (in the open lib section) unfolds its functions.
+  await page!.evaluate(`[...document.querySelectorAll("#markdown li")].find((item) => item.querySelector("strong")?.textContent === "src/lib/orders.ts").querySelector(".fold").click()`);
+  await page!.waitForFunction(`[...document.querySelectorAll("#markdown ul.fns strong.link")].some((name) => name.textContent === "placeOrder")`);
+  await page!.evaluate(`[...document.querySelectorAll("#markdown strong.link")].find((name) => name.textContent === "src/lib/log.ts").click()`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/log.ts"`);
+  // The fold of "db" stays folded on the next page that has it; lib is open.
+  await page!.goto(`${base}/?fresh=8#view=module:src/lib/orders.ts`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/orders.ts"`);
+  await page!.waitForSelector("#markdown details.section");
+  assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#markdown details.section")].map((d) => d.open)`), [false, true, true]);
+  await page!.evaluate(`localStorage.removeItem("archdiff.folded.v1")`);
+});

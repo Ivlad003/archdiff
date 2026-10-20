@@ -1,19 +1,21 @@
 // The folder tree of the repository, on the left in place of the views
 // list: the layers, their directories as folders, the modules as files,
 // and a module's functions once it is opened (read from its `inside`
-// picture then). A tap on an entry opens its view with the presentation
-// the link shows — in the Markdown presentation the pages read like a book
-// with this as its table of contents; the entry of the current view is lit
-// and the folders above it are opened. Which folders are open is
-// remembered in this browser. The filter of the views (`v`) finds entries
-// here too, and shows a match with the folders above it open.
+// picture then, modules.ts). A tap on an entry opens its view with the
+// presentation the link shows — in the Markdown presentation the pages
+// read like a book with this as its table of contents; the entry of the
+// current view is lit and the folders above it are opened; the files the
+// picture shown now is of carry a dot, and the list can be cut to them.
+// Which folders are open is remembered in this browser. The filter of the
+// views (`v`) finds entries here too, and shows a match with the folders
+// above it open.
 //
 // Entry points: `renderTree`, `treeState` (for the browser tests).
 
-import { api, type ViewEntry } from "./api.ts";
+import type { ViewEntry } from "./api.ts";
 import { h } from "./dom.ts";
-import { currentLink, refsOf, setLink } from "./link.ts";
-import { DEFAULT_PICTURE_OPTIONS } from "../../src/options.ts";
+import { currentLink, setLink } from "./link.ts";
+import { fnView, functionsOf, type Fn } from "./modules.ts";
 import { parseView } from "../../src/view-keys.ts";
 
 /** A folder of the tree: a layer, or a directory under it (its view when the repository has one of it). */
@@ -35,13 +37,6 @@ interface File {
 }
 
 type Entry = Folder | File;
-
-/** A function of an opened module. */
-interface Fn {
-  id: string;
-  name: string;
-  line: number;
-}
 
 /** Where this browser keeps the open folders and modules, by their keys. */
 const OPEN_KEY = "archdiff.tree.v1";
@@ -113,47 +108,35 @@ function current(): { module: string | null; fn: string | null } {
   return { module: hash === -1 ? subject : subject.slice(0, hash), fn: hash === -1 ? null : subject };
 }
 
-/** The view a function opens: its call tree when it is an entry point, its logic when it branches, else everything joined to it. */
-function fnView(id: string, keys: ReadonlySet<string>): string {
-  if (keys.has(`calls:${id}`)) return `calls:${id}`;
-
-  if (keys.has(`logic:${id}`)) return `logic:${id}`;
-
-  return `focus:${id}`;
-}
-
-/** The functions of a module, read from its `inside` picture once; the tree is drawn again when they arrive. */
+/** The functions of a module, read once (modules.ts); the tree is drawn again when they arrive. */
 function loadFunctions(path: string, redraw: () => void): void {
   if (functions.has(path)) return;
   functions.set(path, null);
-  const link = currentLink();
-  void api
-    .scene(`inside:${path}`, { ...DEFAULT_PICTURE_OPTIONS, limit: 2000 }, refsOf(link))
-    .then((result) => {
-      const own = result.diagram.nodes.filter((node) => node.kind === "fn" && node.ref?.file === path).map((node): Fn => ({ id: node.id, name: node.label.split("\n")[0] ?? node.id, line: node.ref?.line ?? 0 }));
-      functions.set(path, own.sort((a, b) => a.line - b.line));
-    })
-    .catch(() => functions.set(path, []))
-    .then(redraw);
+  void functionsOf(path).then((own) => {
+    functions.set(path, own);
+    redraw();
+  });
 }
 
-/** Whether an entry, or one under it, matches the filter. */
-function matches(entry: Entry, needle: string): boolean {
-  if (needle === "") return true;
+/** Whether an entry, or one under it, is shown: it matches the filter, and, with the picture's files alone asked for, is one of them. */
+function shown(entry: Entry, needle: string, picture: ReadonlySet<string> | null): boolean {
+  if (entry.kind === "module") return (needle === "" || entry.path.toLowerCase().includes(needle)) && (picture === null || picture.has(entry.path));
 
-  if (entry.kind === "module") return entry.path.toLowerCase().includes(needle);
+  if (picture !== null && !entry.children.some((child) => shown(child, "", picture))) return false;
 
-  return entry.label.toLowerCase().includes(needle) || entry.children.some((child) => matches(child, needle));
+  return needle === "" || entry.label.toLowerCase().includes(needle) || entry.children.some((child) => shown(child, needle, picture));
 }
 
 /**
  * The tree into `list`: the layers, their folders and files, the functions of the opened modules; filtered by
- * `needle` (a match shows with the folders above it open); the entry of the current view lit, its folders opened.
+ * `needle` (a match shows with the folders above it open) and, when `pictureOnly`, cut to the files of the picture
+ * shown now (`inPicture`), which carry a dot either way; the entry of the current view lit, its folders opened.
  */
-export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needle: string): void {
+export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needle: string, inPicture: ReadonlySet<string> = new Set(), pictureOnly = false): void {
   const keys = new Set(views.map((entry) => entry.key));
   const now = current();
-  const redraw = (): void => renderTree(list, views, needle);
+  const picture = pictureOnly ? inPicture : null;
+  const redraw = (): void => renderTree(list, views, needle, inPicture, pictureOnly);
   list.replaceChildren();
 
   // The folders above the current module open, so the lit entry is in sight.
@@ -171,8 +154,8 @@ export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needl
 
   if (now.module !== null) openTo(treeOf(views));
 
-  const row = (depth: number, caret: string | null, icon: string, label: string, active: boolean, onTap: (() => void) | null, onCaret: (() => void) | null, title: string): HTMLElement => {
-    const line = h("div", { class: `tree-row${active ? " active" : ""}${onTap ? "" : " plain"}`, style: `padding-left: ${8 + depth * 14}px`, title });
+  const row = (depth: number, caret: string | null, icon: string, label: string, active: boolean, onTap: (() => void) | null, onCaret: (() => void) | null, title: string, marked = false): HTMLElement => {
+    const line = h("div", { class: `tree-row${active ? " active" : ""}${onTap ? "" : " plain"}${marked ? " in-picture" : ""}`, style: `padding-left: ${8 + depth * 14}px`, title });
     const toggle = h("span", { class: "caret" }, caret ?? "");
 
     if (onCaret) {
@@ -202,23 +185,24 @@ export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needl
 
   const draw = (entries: readonly Entry[], depth: number): void => {
     for (const entry of entries) {
-      if (!matches(entry, needle)) continue;
+      if (!shown(entry, needle, picture)) continue;
       // With a filter every folder on the way to a match is open; without one, the ones the reader opened.
-      const isOpen = needle !== "" || open.has(entry.key);
+      const isOpen = needle !== "" || picture !== null || open.has(entry.key);
 
       if (entry.kind === "module") {
         const own = functions.get(entry.path);
-        const shown = isOpen && own !== undefined;
-        list.append(row(depth, isOpen ? "▾" : "▸", "▫", entry.label, now.module === entry.path && now.fn === null, () => openView(entry.view), () => {
+        const listed = isOpen && own !== undefined;
+        const marked = inPicture.has(entry.path);
+        list.append(row(depth, isOpen ? "▾" : "▸", marked ? "●" : "▫", entry.label, now.module === entry.path && now.fn === null, () => openView(entry.view), () => {
           if (!open.has(entry.key)) loadFunctions(entry.path, redraw);
           toggle(entry.key);
-        }, `${entry.path} — tap for the module's view, the caret for its functions`));
+        }, `${entry.path}${marked ? " — in the picture shown now" : ""} — tap for the module's view, the caret for its functions`, marked));
 
         if (isOpen && own === undefined) loadFunctions(entry.path, redraw);
 
-        if (shown && own === null) list.append(row(depth + 1, null, "…", "loading", false, null, null, ""));
+        if (listed && own === null) list.append(row(depth + 1, null, "…", "loading", false, null, null, ""));
 
-        if (shown && own) for (const fn of own) list.append(row(depth + 1, null, "ƒ", fn.name, now.fn === fn.id, () => openView(fnView(fn.id, keys)), null, `${fn.id}:${fn.line} — its call tree, its logic or everything joined to it`));
+        if (listed && own) for (const fn of own) list.append(row(depth + 1, null, "ƒ", fn.name, now.fn === fn.id, () => openView(fnView(fn.id, keys)), null, `${fn.id}:${fn.line} — its call tree, its logic or everything joined to it`));
         continue;
       }
 
@@ -231,7 +215,7 @@ export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needl
 
   draw(treeOf(views), 0);
 
-  if (list.childElementCount === 0) list.append(h("li", { class: "muted" }, needle === "" ? "no modules" : "nothing matches"));
+  if (list.childElementCount === 0) list.append(h("li", { class: "muted" }, picture !== null && picture.size === 0 ? "no file in the picture yet" : needle === "" ? "no modules" : "nothing matches"));
 }
 
 /** For the browser tests: the open keys, and the rows shown. */

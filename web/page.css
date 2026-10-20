@@ -255,6 +255,72 @@ body.hide-right #right {
   border-color: var(--accent);
 }
 
+/* The files of the picture shown now: a dot before their entries; the toggle cuts the panel to them. */
+#left-mode #left-picture {
+  flex: none;
+  color: var(--muted);
+}
+
+#left-mode #left-picture.active {
+  color: var(--accent);
+}
+
+#views li.in-picture::before {
+  content: "● ";
+  color: var(--accent);
+}
+
+#views .tree-row.in-picture .icon {
+  color: var(--accent);
+}
+
+/* A page's sections fold by their headings; a module's bullet unfolds its functions. */
+.prose details.section {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.prose details.section > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.prose details.section > summary > h2,
+.prose details.section > summary > h3 {
+  display: inline;
+  margin: 0;
+}
+
+.prose details.section > summary {
+  margin: 14px 0 6px;
+}
+
+.prose strong.link {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.prose strong.link:hover {
+  text-decoration: underline;
+}
+
+.prose .fold {
+  display: inline-block;
+  width: 12px;
+  margin-left: -14px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.prose ul.fns {
+  margin: 2px 0 4px;
+  padding-left: 14px;
+  list-style: none;
+}
+
 /* The folder tree: a row per layer, folder, module and function, indented by its depth (set on the row). */
 #views .tree-row {
   display: flex;
