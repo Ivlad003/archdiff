@@ -10,15 +10,15 @@
 // Node-free, importing only the table of kinds: bundled into the page
 // beside options.ts and view-keys.ts.
 //
-// Entry points: `standsFor`, `moduleOfShape`, `opensView`, `subjectView`,
-// `tagOf`, `tagsIn`, `tagView`, `TAG_PREFIXES`, `commitShapeId`,
-// `commitOfShape`, `lineElementId`.
+// Entry points: `standsFor`, `moduleOfId`, `moduleOfShape`, `opensView`,
+// `subjectView`, `tagOf`, `tagsIn`, `tagView`, `TAG_PREFIXES`,
+// `commitShapeId`, `commitOfShape`, `lineElementId`.
 
 import type { Line, Shape } from "./diagram.ts";
 import { VIEW_KINDS, tagOf as kindTagOf, type ViewKind } from "./view-keys.ts";
 
-/** The module part of a declaration's ID (`src/x.ts#f` → `src/x.ts`), or the ID itself. */
-function moduleOfId(id: string): string {
+/** The module part of a declaration's ID (`src/x.ts#f` → `src/x.ts`), or the ID itself: the one place the `#` is read. */
+export function moduleOfId(id: string): string {
   const at = id.indexOf("#");
 
   return at === -1 ? id : id.slice(0, at);

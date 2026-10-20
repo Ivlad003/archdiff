@@ -28,8 +28,8 @@ import { analysisAt, history, review } from "./review.ts";
 import { defaultBase, isIgnored, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { CACHE_DIRECTORY } from "./cache.ts";
 import { serve } from "./server.ts";
-import { drawnAtHead, usesDepth, viewSyntax } from "./view-keys.ts";
-import { changedViews, parseView, viewList, viewOf, type View } from "./views.ts";
+import { drawnAtHead, usesDepth, viewSyntax, viewsOfFiles } from "./view-keys.ts";
+import { parseView, viewList, viewOf, type View } from "./views.ts";
 import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
 import { listSpecs, specPrompt, specSubject, validateSpecs } from "./spec.ts";
@@ -240,7 +240,7 @@ const COMMANDS: readonly Command[] = [
       if (call.has("changed")) {
         const refs = refsOf(call);
         const result = await review(call.dir(0), refs.base, refs.head, analysis);
-        views = changedViews(analysis, views, result.diff.changedFiles);
+        views = viewsOfFiles(views, new Set(result.diff.changedFiles));
         process.stderr.write(`${counted(result.diff.changedFiles.length, "file")} changed since ${shortCommits(result.diff.base)}\n`);
       }
 

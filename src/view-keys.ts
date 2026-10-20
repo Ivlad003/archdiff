@@ -19,9 +19,13 @@
 // Entry points: `VIEW_KINDS`, `View`, `ViewKind`, `parseView`, `viewKey`,
 // `questionOf`, `defaultDepth`, `usesDepth`, `isModuleView`, `isMapView`,
 // `overviews`, `listGroup`, `listGroups`, `tagOf`, `crumbTemplate`,
-// `mermaidTypesOf`, `viewSyntax`.
+// `mermaidTypesOf`, `viewSyntax`, `ViewEntry`, `subjectFile`, `viewsOfFiles`.
 
+import { isSourceFile } from "./languages.ts";
 import type { MermaidStyle } from "./options.ts";
+
+/** Whether a path is a source file archdiff reads: what a key's subject must be to name a file, offered to the page here, which bundles no frontend. */
+export { isSourceFile } from "./languages.ts";
 
 /**
  * How the breadcrumbs above a subject view are laid: `layer` (layers › the layer), `dir` (every directory above),
@@ -139,6 +143,61 @@ export function parseView(key: string): View | null {
 /** The key of a view: the kind, and `:<subject>` when it has one. */
 export function viewKey(view: View): string {
   return view.subject === null ? view.kind : `${view.kind}:${view.subject}`;
+}
+
+/**
+ * The file a view's subject names, as the one codec reads it: `module:src/x.ts` → `src/x.ts`; `calls:src/x.ts#f` →
+ * `src/x.ts` with the declaration `f`; null for a subject that is no source file (a layer, a directory, an API
+ * family, a listed scope such as `fns`).
+ */
+export function subjectFile(view: View | null): { file: string; declaration: string | null } | null {
+  if (!view || view.subject === null) return null;
+  const at = view.subject.indexOf("#");
+  const file = at === -1 ? view.subject : view.subject.slice(0, at);
+
+  return isSourceFile(file) ? { file, declaration: at === -1 ? null : view.subject.slice(at + 1) } : null;
+}
+
+/** A view's entry in the lists the server gives and the page shows: its key, its title, its kind, the lane its subject sits in. */
+export interface ViewEntry {
+  key: string;
+  title: string;
+  kind: ViewKind;
+  /** The lane the subject sits in. */
+  layer?: string;
+}
+
+/**
+ * The views of some files, out of a list: an overview (no subject) stays; a view of a file, or of a declaration in
+ * one, stays when the file is among them; a layer's (and a scope's named like a layer, `metrics:<layer>`) when a
+ * file of that layer is, as the list's module entries say; a directory's, or a scope's written as a path, when a
+ * file under it is; a view of what is no file nor path — a listed subject (`cycles:fns`), an API family, a Postman
+ * collection — stays. The one rule of `--changed` and of the page's "in picture".
+ */
+export function viewsOfFiles(list: readonly ViewEntry[], files: ReadonlySet<string>): ViewEntry[] {
+  const layers = new Set<string>();
+
+  for (const entry of list) {
+    const file = entry.kind === "module" ? subjectFile(parseView(entry.key)) : null;
+
+    if (file && entry.layer !== undefined && files.has(file.file)) layers.add(entry.layer);
+  }
+
+  return list.filter((entry) => {
+    const view = parseView(entry.key);
+
+    if (!view || view.subject === null) return true;
+    const spec: KindSpec = VIEW_KINDS[view.kind];
+
+    if (spec.subjects !== undefined || view.kind === "apis" || view.kind === "postman") return true;
+    const file = subjectFile(view);
+
+    if (file) return files.has(file.file);
+
+    if (view.kind === "layer" || layers.has(view.subject)) return layers.has(view.subject);
+
+    return [...files].some((candidate) => candidate.startsWith(`${view.subject}/`));
+  });
 }
 
 /** The one question the pictures of a kind answer. */

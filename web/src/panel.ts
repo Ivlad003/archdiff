@@ -21,6 +21,7 @@ import { element, remember, remembered } from "./dom.ts";
 import { flowText } from "./flow-tab.ts";
 import { codeHead, currentLink, setLink } from "./link.ts";
 import { fnView, functionsOf, isFilePath } from "./modules.ts";
+import { isSourceFile } from "../../src/view-keys.ts";
 import { page } from "./page.ts";
 import { loadSpecs, specTextOf } from "./spec-tab.ts";
 
@@ -33,8 +34,8 @@ let rawMarkdown = false;
 /** The Markdown of the current picture, shown again when nothing is picked. */
 let picturePage = "";
 
-/** A `file:line` in a page's code spans, of a source file of the five languages: a click shows the code. */
-const CODE_REFERENCE = /^([\w./@-]+\.(?:[cm]?[jt]sx?|py|rs|php))(?::(\d+))?$/;
+/** A `file:line` in a page's code spans (`src/x.ts:12`), of a source file: a click shows the code. */
+const CODE_REFERENCE = /^([\w./@-]+)(?::(\d+))?$/;
 
 /** Where this browser keeps the headings the reader folded: a section folded on one page stays folded on the next with that heading. */
 const FOLDED_KEY = "archdiff.folded.v1";
@@ -259,7 +260,7 @@ export function renderMarkdown(target: HTMLElement, markdown: string): void {
     const text = code.textContent ?? "";
     const match = text.match(CODE_REFERENCE);
 
-    if (match && page.nodes().size > 0) {
+    if (match && isSourceFile(match[1]!) && page.nodes().size > 0) {
       code.classList.add("link");
       code.title = "Show the code";
       code.addEventListener("click", () => void showCode({ id: text, kind: "module", label: text, ref: { file: match[1]!, line: match[2] ? Number(match[2]) : 1 }, x: 0, y: 0, w: 0, h: 0 }));

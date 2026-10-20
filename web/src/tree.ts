@@ -16,7 +16,7 @@ import type { ViewEntry } from "./api.ts";
 import { h } from "./dom.ts";
 import { currentLink, setLink } from "./link.ts";
 import { fnView, functionsOf, type Fn } from "./modules.ts";
-import { parseView } from "../../src/view-keys.ts";
+import { parseView, subjectFile } from "../../src/view-keys.ts";
 
 /** A folder of the tree: a layer, or a directory under it (its view when the repository has one of it). */
 interface Folder {
@@ -100,12 +100,9 @@ function treeOf(views: readonly ViewEntry[]): Folder[] {
 /** The module the current view is of (the subject's file), and the function when the view is one function's. */
 function current(): { module: string | null; fn: string | null } {
   const view = parseView(currentLink().view);
-  const subject = view?.subject ?? null;
+  const file = subjectFile(view);
 
-  if (subject === null || !/\.[a-z0-9]+(#|$)/i.test(subject)) return { module: null, fn: null };
-  const hash = subject.indexOf("#");
-
-  return { module: hash === -1 ? subject : subject.slice(0, hash), fn: hash === -1 ? null : subject };
+  return { module: file?.file ?? null, fn: file && file.declaration !== null ? view!.subject : null };
 }
 
 /** The functions of a module, read once (modules.ts); the tree is drawn again when they arrive. */

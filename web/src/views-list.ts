@@ -19,11 +19,11 @@
 import { api, type ViewEntry } from "./api.ts";
 import { element, remember, remembered } from "./dom.ts";
 import { codeHead, currentLink, refsOf, setLink, type Link } from "./link.ts";
-import { filesInPicture, isFilePath } from "./modules.ts";
+import { filesInPicture } from "./modules.ts";
 import { page } from "./page.ts";
 import { togglePanel } from "./panel.ts";
 import { renderTree } from "./tree.ts";
-import { listGroup, listGroups, parseView } from "../../src/view-keys.ts";
+import { listGroup, listGroups, parseView, subjectFile, viewsOfFiles } from "../../src/view-keys.ts";
 
 const list = element<HTMLUListElement>("views");
 const search = element<HTMLInputElement>("search");
@@ -59,12 +59,7 @@ export function togglePictureOnly(force?: boolean): void {
 
 /** The file a view's entry is of (`module:src/x.ts`, `calls:src/x.ts#f`), or null for an overview, a layer, a directory. */
 function fileOf(entry: ViewEntry): string | null {
-  const subject = parseView(entry.key)?.subject ?? null;
-
-  if (subject === null || !isFilePath(subject)) return null;
-  const hash = subject.indexOf("#");
-
-  return hash === -1 ? subject : subject.slice(0, hash);
+  return subjectFile(parseView(entry.key))?.file ?? null;
 }
 
 /** What a link asks the views of: the head, and with `changed` the base the changed files are counted from. */
@@ -104,23 +99,11 @@ export function renderViews(): void {
   const cap = needle === "" ? SHOWN.all : SHOWN.filtered;
   // Each view under the group its kind names (view-keys.ts): the overviews, then the groups in the table's order.
   const grouped = new Map<string, ViewEntry[]>(listGroups().map((label) => [label, []]));
-  // With the picture's files alone: their entries, the overviews, and the layers and directories holding them.
-  const layersInPicture = new Set(views.filter((entry) => entry.kind === "module" && inPicture.has(entry.title)).map((entry) => entry.layer));
-  const inPictureEntry = (view: ViewEntry): boolean => {
-    const file = fileOf(view);
-
-    if (file !== null) return inPicture.has(file);
-    const subject = parseView(view.key)?.subject ?? null;
-
-    if (subject === null) return true;
-
-    if (view.kind === "layer") return layersInPicture.has(subject);
-
-    return view.kind === "dir" ? [...inPicture].some((candidate) => candidate.startsWith(`${subject}/`)) : true;
-  };
+  // With the picture's files alone: the views of those files, as `--changed` cuts the list on the server (one rule).
+  const shown = pictureOnly ? new Set(viewsOfFiles(views, inPicture).map((entry) => entry.key)) : null;
 
   for (const view of views) {
-    if (pictureOnly && !inPictureEntry(view)) continue;
+    if (shown !== null && !shown.has(view.key)) continue;
     const parsed = parseView(view.key);
     const group = parsed ? listGroup(parsed) : null;
 

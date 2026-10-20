@@ -16,7 +16,7 @@ import { currentLink, type Link, type Presentation } from "./link.ts";
 import { page } from "./page.ts";
 import { picturePageMarkdown, renderCode, renderMarkdown } from "./panel.ts";
 import { openShape, tap } from "./picking.ts";
-import { parseView } from "../../src/view-keys.ts";
+import { parseView, subjectFile } from "../../src/view-keys.ts";
 
 type ThreeModule = typeof import("./three-view.ts");
 
@@ -110,17 +110,14 @@ export async function applyPresentation(state: Link, diagram: Diagram | null): P
 
 /** The shape whose code the centre shows: the shape of the view's subject (a function's lines marked), else the file the subject names. */
 function codeSubject(state: Link): Shape | null {
-  const nodes = page.nodes();
-  const subject = parseView(state.view)?.subject ?? null;
+  const view = parseView(state.view);
+  const file = subjectFile(view);
 
-  if (subject === null) return null;
-  const own = nodes.get(subject);
+  if (!file) return null;
+  const own = page.nodes().get(view!.subject!);
 
-  if (own?.ref?.file) return own;
-  // A subject written as a file (`src/x.ts`, `src/x.ts#f`) whose shape the picture does not hold: the file itself, whole.
-  const file = subject.slice(0, subject.indexOf("#") === -1 ? subject.length : subject.indexOf("#"));
-
-  return /\.[a-z0-9]+$/i.test(file) ? { id: subject, kind: "module", label: subject, ref: { file }, x: 0, y: 0, w: 0, h: 0 } : null;
+  // The subject's shape when the picture holds it (its lines marked); else the file itself, whole.
+  return own?.ref?.file ? own : { id: view!.subject!, kind: "module", label: view!.subject!, ref: { file: file.file }, x: 0, y: 0, w: 0, h: 0 };
 }
 
 /** Fits what the centre shows: the 3D scene, or the canvas's picture. */

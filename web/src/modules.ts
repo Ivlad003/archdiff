@@ -10,7 +10,8 @@
 import { api, type Shape } from "./api.ts";
 import { currentLink, refsOf } from "./link.ts";
 import { DEFAULT_PICTURE_OPTIONS } from "../../src/options.ts";
-import { moduleOfShape } from "../../src/shape-keys.ts";
+import { moduleOfId, moduleOfShape } from "../../src/shape-keys.ts";
+import { isSourceFile } from "../../src/view-keys.ts";
 
 /** A function of a module, as its inside picture lists it. */
 export interface Fn {
@@ -46,9 +47,9 @@ export function fnView(id: string, keys: ReadonlySet<string>): string {
   return `focus:${id}`;
 }
 
-/** A path of a source file of the five languages, alone or with a declaration after `#`. */
+/** A path of a source file, alone or with a declaration after `#` (`src/x.ts`, `src/x.ts#f`): a name a page may link to its view. */
 export function isFilePath(text: string): boolean {
-  return /^[\w./@-]+\.(?:[cm]?[jt]sx?|py|rs|php)(?:#[\w.$]+)?$/.test(text);
+  return /^[\w./@-]+(?:#[\w.$]+)?$/.test(text) && isSourceFile(moduleOfId(text));
 }
 
 /** The files the shapes of a picture are of: a module's, a function's or a class's, a participant's, the folded tail's. */
@@ -60,7 +61,7 @@ export function filesInPicture(nodes: ReadonlyMap<string, Shape>): Set<string> {
 
     if (module !== null) files.add(module);
     else if (node.ref?.file) files.add(node.ref.file);
-    else if (node.kind === "more") for (const member of node.members ?? []) files.add(member.slice(0, member.indexOf("#") === -1 ? member.length : member.indexOf("#")));
+    else if (node.kind === "more") for (const member of node.members ?? []) files.add(moduleOfId(member));
   }
 
   return files;

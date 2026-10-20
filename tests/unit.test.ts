@@ -11,7 +11,7 @@ import { DEFAULT_PICTURE_OPTIONS, DEEP_DEPTH, depthWarning, pictureOptionsHelp, 
 import { components, cycleThrough, stronglyConnected } from "../src/scc.ts";
 import { firstMatchingGlob, matchesGlob } from "../src/glob.ts";
 import { attempt, ok, wrong } from "../src/result.ts";
-import { OVERVIEW_GROUP, VIEW_KINDS, listGroup, listGroups, overviews, parseView, tagOf, type ViewKind } from "../src/view-keys.ts";
+import { OVERVIEW_GROUP, VIEW_KINDS, listGroup, listGroups, overviews, parseView, subjectFile, tagOf, viewsOfFiles, type ViewEntry, type ViewKind } from "../src/view-keys.ts";
 import { collectionOf, matchRequests, pathSegments, routesOf, type Route } from "../src/collections.ts";
 import { SCAPI_TABLE } from "../src/scapi-table.ts";
 
@@ -394,4 +394,24 @@ test("a Postman collection is matched to the routes the code calls by method and
   assert.deepEqual(unmatched, ["api:scapi:ShopperBasketsV1.nope", "api:scapi:ShopperBaskets.createBasket"]);
   // JSON of another shape is no collection.
   assert.equal(collectionOf({ info: { name: "x" } }, "x.json"), null);
+});
+
+test("the file of a subject and the views of some files are read by one codec: files by extension, declarations after #, layers by the list, scopes and families kept", () => {
+  assert.deepEqual(subjectFile(parseView("module:src/lib/orders.ts")), { file: "src/lib/orders.ts", declaration: null });
+  assert.deepEqual(subjectFile(parseView("calls:src/lib/orders.ts#OrderService.place")), { file: "src/lib/orders.ts", declaration: "OrderService.place" });
+  assert.deepEqual(subjectFile(parseView("machine:src/door.py#state")), { file: "src/door.py", declaration: "state" });
+  // A layer, a directory, a scope, an API family, a collection: no file.
+  for (const key of ["layer:lib", "dir:src/lib", "cycles:fns", "apis:ShopperBasketsV1", "postman:postman/cart.postman_collection.json", "metrics:lib", "layers"]) assert.equal(subjectFile(parseView(key)), null, key);
+  const entry = (key: string, layer?: string): ViewEntry => ({ key, title: key, kind: parseView(key)!.kind, ...(layer === undefined ? {} : { layer }) });
+  const list = [
+    entry("layers"), entry("layer:lib"), entry("layer:db"), entry("dir:src/lib"), entry("dir:src/db"),
+    entry("module:src/lib/log.ts", "lib"), entry("module:src/lib/orders.ts", "lib"), entry("module:src/db/store.ts", "db"),
+    entry("calls:src/lib/orders.ts#findOrder", "lib"), entry("logic:src/db/store.ts#saveOrder", "db"), entry("type:src/lib/orders.ts#Order", "lib"),
+    entry("cycles"), entry("cycles:fns"), entry("classes"), entry("classes:src/db"), entry("metrics:lib"), entry("metrics:db"),
+    entry("apis:ShopperBasketsV1"), entry("postman:postman/cart.postman_collection.json"), entry("coverage"),
+  ];
+  const kept = viewsOfFiles(list, new Set(["src/lib/log.ts"])).map((item) => item.key);
+  assert.deepEqual(kept, ["layers", "layer:lib", "dir:src/lib", "module:src/lib/log.ts", "cycles", "cycles:fns", "classes", "metrics:lib", "apis:ShopperBasketsV1", "postman:postman/cart.postman_collection.json", "coverage"]);
+  // No file at all: the overviews, the scopes and the families alone.
+  assert.deepEqual(viewsOfFiles(list, new Set()).map((item) => item.key), ["layers", "cycles", "cycles:fns", "classes", "apis:ShopperBasketsV1", "postman:postman/cart.postman_collection.json", "coverage"]);
 });

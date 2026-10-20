@@ -29,7 +29,7 @@ import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
 import { logicList, logicView } from "./logic.ts";
 import { apiLanesOf, depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, operationNode, unplaced } from "./nodes.ts";
-import { defaultDepth, foldLimit, parseView, viewKey, type View } from "./view-keys.ts";
+import { defaultDepth, foldLimit, viewKey, type View, type ViewEntry } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
 import { branchesDiagram, timelineDiagram } from "./views-more.ts";
 import type { BranchGraph } from "./git.ts";
@@ -38,7 +38,7 @@ import type { LogicFact } from "./extract/logic.ts";
 import { DEFAULT_PICTURE_OPTIONS, type PictureOptions } from "./options.ts";
 import { counted } from "./words.ts";
 
-export { parseView, viewKey, type View } from "./view-keys.ts";
+export { parseView, viewKey, type View, type ViewEntry } from "./view-keys.ts";
 export { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplaced } from "./nodes.ts";
 
 /**
@@ -59,14 +59,6 @@ export interface EdgeReads {
   commit?: { sha: string; short: string; author: string; date: string; subject: string };
   /** The branches and their commits, for the branches' picture. */
   branches?: BranchGraph;
-}
-
-export interface ViewEntry {
-  key: string;
-  title: string;
-  kind: View["kind"];
-  /** The lane the subject sits in. */
-  layer?: string;
 }
 
 /** Modules whose public methods a framework calls: controllers, handlers, commands, jobs, listeners, middleware, routes. */
@@ -227,31 +219,6 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   list.push({ key: "branches", title: "Branches: where each branch left the base, commit by commit", kind: "branches" });
 
   return list;
-}
-
-/**
- * The views of the files changed since a base (`--changed`): an overview (no subject) stays; a view of a file, or
- * of a function, a type or a machine in one, stays when the file changed; a layer's, a directory's or a scope's
- * when a changed file is in it; a view of what is no source file (an API family, a Postman collection) stays.
- */
-export function changedViews(analysis: Analysis, list: readonly ViewEntry[], changedFiles: readonly string[]): ViewEntry[] {
-  const changed = new Set(changedFiles);
-  const layers = new Set([...changed].map((file) => analysis.graph.modules.get(file)?.layer).filter((layer): layer is string => layer !== undefined));
-
-  return list.filter((entry) => {
-    const subject = parseView(entry.key)?.subject ?? null;
-
-    if (subject === null || entry.kind === "postman" || entry.kind === "apis") return true;
-    const hash = subject.indexOf("#");
-    const head = hash === -1 ? subject : subject.slice(0, hash);
-
-    // A file (`src/x.ts`, `src/x.ts#f`), a layer, else a directory or a scope.
-    if (/\.[a-z0-9]+$/i.test(head)) return changed.has(head);
-
-    if (entry.kind === "layer" || layers.has(head)) return layers.has(head);
-
-    return [...changed].some((file) => file.startsWith(`${head}/`));
-  });
 }
 
 /** The layers and the imports between them, each line counted. */

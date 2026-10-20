@@ -25,7 +25,8 @@ import { moduleChangeMarkdown, shortCommits } from "../diff.ts";
 import { commitMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { review } from "../review.ts";
-import { changedViews, parseView, viewList } from "../views.ts";
+import { parseView, viewList } from "../views.ts";
+import { viewsOfFiles } from "../view-keys.ts";
 import { codeRevision, tagOf } from "../view-keys.ts";
 import { projectMap } from "../project-map.ts";
 import { commitOfShape, standsFor, tagView, tagsIn } from "../shape-keys.ts";
@@ -138,7 +139,7 @@ export async function getViews(ctx: RouteContext, { url, response }: RouteReques
   if (url.searchParams.get("changed") === "1") {
     try {
       const result = await review(root, url.searchParams.get("base") || null, url.searchParams.get("head") || null, analysis);
-      views = changedViews(analysis, views, result.diff.changedFiles);
+      views = viewsOfFiles(views, new Set(result.diff.changedFiles));
       changed = { files: result.diff.changedFiles.length, since: shortCommits(result.diff.base) };
     } catch (error) {
       note = `the changed files could not be read: ${error instanceof Error ? error.message : String(error)}`;

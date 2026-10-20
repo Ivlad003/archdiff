@@ -9,14 +9,8 @@ export type { ProjectMap, MapLine, MapDot } from "../../src/diagram.ts";
 import type { ProjectMap } from "../../src/diagram.ts";
 import type { Diagram } from "../../src/diagram.ts";
 import { pictureQueryText, type PictureOptions } from "../../src/options.ts";
-import type { View } from "../../src/view-keys.ts";
-
-export interface ViewEntry {
-  key: string;
-  title: string;
-  kind: View["kind"];
-  layer?: string;
-}
+export type { ViewEntry } from "../../src/view-keys.ts";
+import type { ViewEntry } from "../../src/view-keys.ts";
 
 export interface ViewsResponse {
   root: string;
