@@ -8,7 +8,7 @@
 
 import type { Diagram, Shape } from "../diagram.ts";
 import { routeEdges } from "./excalidraw.ts";
-import { heatColour } from "./colour.ts";
+import { heatColour } from "../looks.ts";
 import { escapeXmlAttribute } from "./xml.ts";
 
 

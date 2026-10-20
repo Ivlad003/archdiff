@@ -62,6 +62,7 @@ flowchart LR
     n_src_options_ts["src/options.ts<br>the options of a picture, described once for the CLI, the API and the page"]
     n_src_view_keys_ts["src/view-keys.ts<br>the table of the kinds of view — key, question, where each shows — and the codec of their keys for the CLI, the API and the page"]
     n_src_shape_keys_ts["src/shape-keys.ts<br>what a shape stands for and the view it opens, for the exports and the page"]
+    n_src_looks_ts["src/looks.ts<br>the look of every kind of shape and line, for the exports and the page"]
     n_src_run_hooks_ts["src/run-hooks.ts<br>the child process of a run: module hooks that trace and mock"]
     n_src_checks_ts["src/checks.ts<br>the contract check and the commands run after an agent"]
     n_src_apis_ts["src/apis.ts<br>the operations of an external API a call names (SCAPI), the OCAPI hooks, the ids and labels"]

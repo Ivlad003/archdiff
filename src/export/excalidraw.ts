@@ -9,7 +9,7 @@
 // Entry points: `toExcalidraw`, `routeEdges`, `Point`.
 
 import type { Diagram, Line, Shape } from "../diagram.ts";
-import { heatColour } from "./colour.ts";
+import { LOOKS, lineStroke, lookOf } from "../looks.ts";
 import { routeFree } from "./route-free.ts";
 import { lineElementId, opensView } from "../shape-keys.ts";
 
@@ -50,7 +50,7 @@ const LINE_HEIGHT = 1.25;
 const LABEL_INSET = 8;
 /** The label of a lane, and of a sequence's fragment: top left in the frame, at its offset, in a box of its size. */
 const LANE_LABEL = { dx: 8, dy: 4, w: 120, h: 20, fontSize: 14 } as const;
-const FRAGMENT_LABEL = { dx: 8, dy: 2, w: 200, h: 18, fontSize: 12 } as const;
+const FRAGMENT_LABEL = { dx: 8, dy: 2, w: 200, h: 18, fontSize: LOOKS.fragment.fontSize } as const;
 /** The label of a line: at most this wide, on the line (labelSpot); a message's sits above its line, a self-call's beside its loop. */
 const LINE_LABEL = { w: 120, h: 16, fontSize: 12, above: 18, selfDx: 80, selfDy: 4 } as const;
 /** The label of a step of a function's logic: up to four lines of 32 characters (24 for an exit), its start kept. */
@@ -162,8 +162,6 @@ function seed(text: string): number {
   return (hash >>> 0) % 2147483647 || 1;
 }
 
-const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00", planned: "#1565c0" } as const;
-
 function base(id: string, type: string, box: Box): ExcalidrawElement {
   return { id, type, x: box.x, y: box.y, width: box.w, height: box.h, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: seed(id), version: 1, versionNonce: seed(`${id}:v`), isDeleted: false, boundElements: null, updated: 1, link: null, locked: false };
 }
@@ -173,67 +171,6 @@ function text(id: string, container: string | null, box: Box, content: string, f
   const height = Math.max(box.h, textHeight(content.split("\n").length, fontSize));
 
   return { ...base(id, "text", { ...box, h: height }), text: content, originalText: content, fontSize, fontFamily: 1, textAlign: "center", verticalAlign: "middle", containerId: container, lineHeight: LINE_HEIGHT, autoResize: true };
-}
-
-/** How a kind of shape looks: its outline, the colours of its stroke and its fill, the line of its stroke, the size of its label. */
-interface Look {
-  type: "rectangle" | "ellipse" | "diamond";
-  stroke: string;
-  fill: string;
-  style: ExcalidrawElement["strokeStyle"];
-  fontSize: number;
-}
-
-/** The look of every kind of shape: an entry point, a package, an event and an exit are ellipses, a gap and a branch diamonds. */
-const LOOKS: Record<Shape["kind"], Look> = {
-  layer: { type: "rectangle", stroke: "#1e1e1e", fill: "#f5f5f5", style: "solid", fontSize: 15 },
-  module: { type: "rectangle", stroke: "#1e1e1e", fill: "#ffffff", style: "solid", fontSize: 12 },
-  fn: { type: "rectangle", stroke: "#1565c0", fill: "#e3f2fd", style: "solid", fontSize: 12 },
-  external: { type: "ellipse", stroke: "#757575", fill: "#ffffff", style: "solid", fontSize: 12 },
-  hole: { type: "diamond", stroke: "#ef6c00", fill: "#fff3e0", style: "dashed", fontSize: 12 },
-  start: { type: "ellipse", stroke: "#1e1e1e", fill: "#c8e6c9", style: "solid", fontSize: 12 },
-  more: { type: "rectangle", stroke: "#757575", fill: "#f5f5f5", style: "dotted", fontSize: 12 },
-  participant: { type: "rectangle", stroke: "#1e1e1e", fill: "#f5f5f5", style: "solid", fontSize: 12 },
-  // The foot of a lifeline is drawn invisible (toExcalidraw), whatever its look.
-  anchor: { type: "ellipse", stroke: "#1e1e1e", fill: "transparent", style: "solid", fontSize: 12 },
-  event: { type: "ellipse", stroke: "#f9a825", fill: "#fff8e1", style: "solid", fontSize: 12 },
-  cell: { type: "rectangle", stroke: "#757575", fill: "#f5f5f5", style: "solid", fontSize: 10 },
-  package: { type: "rectangle", stroke: "#3949ab", fill: "#e8eaf6", style: "solid", fontSize: 12 },
-  class: { type: "rectangle", stroke: "#4e342e", fill: "#fff8e1", style: "solid", fontSize: 11 },
-  state: { type: "rectangle", stroke: "#2e7d32", fill: "#e8f5e9", style: "solid", fontSize: 12 },
-  machine: { type: "rectangle", stroke: "#2e7d32", fill: "#e8f5e9", style: "solid", fontSize: 12 },
-  fragment: { type: "rectangle", stroke: "#9e9e9e", fill: "transparent", style: "dashed", fontSize: FRAGMENT_LABEL.fontSize },
-  decision: { type: "diamond", stroke: "#6a1b9a", fill: "#f3e5f5", style: "solid", fontSize: 11 },
-  action: { type: "rectangle", stroke: "#424242", fill: "#ffffff", style: "solid", fontSize: 11 },
-  end: { type: "ellipse", stroke: "#616161", fill: "#eeeeee", style: "solid", fontSize: 11 },
-};
-
-/** The look of a shape as drawn: its kind's, with a change's mark as the stroke (thicker; dashed when removed or planned) and its heat as the fill. */
-function lookOf(node: Shape): Look & { width: number } {
-  const look = LOOKS[node.kind];
-  // Heat darkens the fill; a diff mark is the stroke, so both show at once.
-  const fill = node.heat !== undefined && node.heat > 0 ? heatColour(node.heat) : look.fill;
-  const stroke = node.diff ? DIFF_STROKE[node.diff] : look.stroke;
-  const style = node.diff === "removed" || node.diff === "planned" ? "dashed" : look.style;
-
-  return { ...look, fill, stroke, style, width: node.diff ? 3 : 1 };
-}
-
-/** The stroke of a line by its kind, unless a change marks it: calls and messages blue, lifelines faint, a type-only import grey. */
-function lineStroke(edge: Line): string {
-  if (edge.diff) return DIFF_STROKE[edge.diff];
-
-  switch (edge.kind) {
-    case "call":
-    case "message":
-      return "#1565c0";
-    case "lifeline":
-      return "#b0bec5";
-    case "flow":
-      return "#424242";
-    default:
-      return edge.typeOnly ? "#9e9e9e" : "#616161";
-  }
 }
 
 /** The view a shape opens on the page (`customData.view`, read on a second tap): shape-keys.ts's, as a link; not an Excalidraw link, whose icon would clutter every shape. */
