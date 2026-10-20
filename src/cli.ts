@@ -22,14 +22,14 @@ import { mergePlan, planFromScene, taskMarkdown } from "./plan.ts";
 import { agentFromConfig, AGENTS, type AgentName } from "./agent.ts";
 import { metricsMarkdown } from "./markdown.ts";
 import { exportDiagram, EXPORT_FORMATS, type ExportFormat } from "./export/index.ts";
-import { historyMarkdown, reviewFindings } from "./diff.ts";
+import { historyMarkdown, reviewFindings, shortCommits } from "./diff.ts";
 import { drawPicture, type Picture, type Refs } from "./picture.ts";
-import { analysisAt, history } from "./review.ts";
+import { analysisAt, history, review } from "./review.ts";
 import { defaultBase, isIgnored, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { CACHE_DIRECTORY } from "./cache.ts";
 import { serve } from "./server.ts";
 import { drawnAtHead, usesDepth, viewSyntax } from "./view-keys.ts";
-import { parseView, viewList, viewOf, type View } from "./views.ts";
+import { changedViews, parseView, viewList, viewOf, type View } from "./views.ts";
 import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
 import { listSpecs, specPrompt, specSubject, validateSpecs } from "./spec.ts";
@@ -229,14 +229,22 @@ const COMMANDS: readonly Command[] = [
   },
   {
     name: "views",
-    usage: "[dir]",
-    help: ["List the views that can be drawn: layers, every module, every entry point"],
+    usage: "[dir] [--changed [--base REF] [--head REF]]",
+    help: ["List the views that can be drawn: layers, every module, every entry point.", "--changed: only the views of the files changed since the base (the merge-base without --base) at the head"],
     arity: 1,
-    flags: [],
+    flags: [...REF_FLAGS, flag("changed")],
     async run(call) {
       const analysis = await analyze(call.dir(0));
+      let views = viewList(analysis);
 
-      for (const view of viewList(analysis)) process.stdout.write(`${view.key}\t${view.title}\n`);
+      if (call.has("changed")) {
+        const refs = refsOf(call);
+        const result = await review(call.dir(0), refs.base, refs.head, analysis);
+        views = changedViews(analysis, views, result.diff.changedFiles);
+        process.stderr.write(`${counted(result.diff.changedFiles.length, "file")} changed since ${shortCommits(result.diff.base)}\n`);
+      }
+
+      for (const view of views) process.stdout.write(`${view.key}\t${view.title}\n`);
 
       return 0;
     },

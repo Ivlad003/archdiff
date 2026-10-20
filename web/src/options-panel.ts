@@ -21,6 +21,7 @@ const menu = element<HTMLDetailsElement>("options-menu");
 const depthInput = element<HTMLInputElement>("depth");
 const packagesInput = element<HTMLInputElement>("packages");
 const changesInput = element<HTMLInputElement>("changes");
+const changedInput = element<HTMLInputElement>("changed");
 const limitInput = element<HTMLInputElement>("limit");
 const weightInput = element<HTMLInputElement>("weight");
 const hubsInput = element<HTMLInputElement>("hubs");
@@ -57,6 +58,7 @@ export function showOptions(state: Link): void {
   weightInput.value = state.weight === null ? "" : String(state.weight);
   hubsInput.checked = state.hubs;
   element<HTMLInputElement>("only-changes").checked = state.onlyChanges;
+  changedInput.checked = state.changed;
 
   // A type that draws another kind of view (a state diagram of no machine, a gitGraph of no timeline) is greyed out.
   for (const option of mermaidSelect.options) {
@@ -99,6 +101,7 @@ depthInput.addEventListener("change", () => {
 });
 packagesInput.addEventListener("change", () => setOption({ ...currentLink(), packages: packagesInput.checked }));
 changesInput.addEventListener("change", () => setOption({ ...currentLink(), changes: changesInput.checked }));
+changedInput.addEventListener("change", () => setOption({ ...currentLink(), changed: changedInput.checked }));
 limitInput.addEventListener("change", () => {
   const typed = wholeNumber(limitInput);
   setOption({ ...currentLink(), limit: typed === null ? null : Math.max(1, typed) });

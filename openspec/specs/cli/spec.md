@@ -78,7 +78,7 @@ The system SHALL validate flags (`--depth` a whole number of 0 or more, `--limit
 
 ### Requirement: The options of a picture are one table
 
-The system SHALL describe the options of a picture once (`src/options.ts`: depth, limit, weight, hubs, packages, expand, hide-lanes, overlay, changes, only-changes, mermaid, lanes, types) and derive from it the CLI's flags, the API's query and the page's link, `--help`'s lines and the validation message that names a wrong option; the three readers SHALL give the same options for the same values.
+The system SHALL describe the options of a picture once (`src/options.ts`: depth, limit, weight, hubs, packages, expand, hide-lanes, overlay, changes, only-changes, changed, mermaid, lanes, types) and derive from it the CLI's flags, the API's query and the page's link, `--help`'s lines and the validation message that names a wrong option; the three readers SHALL give the same options for the same values.
 
 #### Scenario: A round trip
 

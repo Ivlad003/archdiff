@@ -514,7 +514,7 @@ export function comparisonMarkdown(base: string, heads: readonly Compared[], dia
 }
 
 /** A range or a ref as a reader reads it: every full commit hash in it cut to its first seven characters. */
-function shortCommits(text: string): string {
+export function shortCommits(text: string): string {
   return text.replace(/\b[0-9a-f]{40}\b/g, (sha) => sha.slice(0, 7));
 }
 
@@ -563,6 +563,52 @@ export function overlayDiff(diagram: Diagram, diff: GraphDiff): Diagram {
   const reason = `${marked} ${marked === 1 ? "shape" : "shapes"} changed since ${since}${removed > 0 ? `; ${removed} removed (not drawn)` : ""}${diagram.reason ? `; ${diagram.reason}` : ""}`;
 
   return { ...diagram, nodes, edges, reason, title: `${diagram.title} — changes since ${since}` };
+}
+
+/**
+ * Only the files that changed: of a diagram, the shapes of the files changed
+ * since the base — a module by its id, a function or a class by the file it
+ * is written in, a folded tail by the modules it stands for, a layer by the
+ * modules in it, and a shape of no file (a package, an event, a gap, a
+ * storage) when a line joins it to one kept — with the lines among them and
+ * the lanes they sit in; the rest of the picture goes.
+ */
+export function changedFilesOnly(diagram: Diagram, diff: GraphDiff, graph: Graph): Diagram {
+  const changed = new Set(diff.changedFiles);
+  const layers = new Set([...changed].map((file) => graph.modules.get(file)?.layer).filter((layer): layer is string => layer !== undefined));
+  const ofFile = (node: Shape): boolean => {
+    if (node.ref?.file !== undefined) return changed.has(node.ref.file);
+
+    switch (node.kind) {
+      case "layer":
+        return layers.has(standsFor(node));
+      case "more":
+        return (node.members ?? []).some((member) => changed.has(moduleOf(member)));
+      case "module":
+      case "participant":
+        return changed.has(standsFor(node));
+      default:
+        return false;
+    }
+  };
+  const keep = new Set(diagram.nodes.filter(ofFile).map((node) => node.id));
+  // A shape of no file stays when a line joins it to a kept one: the package a changed module imports, the event it emits.
+  const fileless = new Set(diagram.nodes.filter((node) => node.ref?.file === undefined && !["layer", "more", "module", "participant"].includes(node.kind)).map((node) => node.id));
+
+  for (const edge of diagram.edges) {
+    if (keep.has(edge.from) && fileless.has(edge.to)) keep.add(edge.to);
+
+    if (keep.has(edge.to) && fileless.has(edge.from)) keep.add(edge.from);
+  }
+
+  const nodes = diagram.nodes.filter((node) => keep.has(node.id));
+  const edges = diagram.edges.filter((edge) => keep.has(edge.from) && keep.has(edge.to));
+  const groups = diagram.groups.filter((group) => nodes.some((node) => node.group === group.id));
+  const gone = diagram.nodes.length - nodes.length;
+  const since = shortCommits(diff.base);
+  const reason = nodes.length === 0 ? `none of the ${counted(changed.size, "file")} changed since ${since} is in this picture` : `only the ${counted(nodes.length, "shape")} of the ${counted(changed.size, "file")} changed since ${since}; ${gone} ${gone === 1 ? "other" : "others"} left out`;
+
+  return { ...diagram, nodes, edges, groups, reason: [diagram.reason, reason].filter(Boolean).join("; ") };
 }
 
 /**

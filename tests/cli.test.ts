@@ -1274,6 +1274,19 @@ test("--changes lays the review's marks over any view", () =>
     const only = JSON.parse(archdiff(["diagram", "layer:lib", dir, "--changes", "--base", "HEAD", "--only-changes", "--format", "json"]).stdout) as { nodes: { id: string }[]; reason?: string };
     assert.deepEqual(only.nodes.map((node) => node.id).sort(), ["src/lib/log.ts", "src/lib/orders.ts"]);
     assert.ok(only.reason?.includes("only the 1 changed shape and their neighbours"), only.reason);
+    // --changed: the shapes of the changed files alone, with the marks (no --changes needed); the views list the same.
+    const changed = JSON.parse(archdiff(["diagram", "layer:lib", dir, "--changed", "--base", "HEAD", "--format", "json"]).stdout) as { title: string; nodes: { id: string; diff?: string }[]; reason?: string; groups: { id: string }[] };
+    assert.deepEqual(changed.nodes.map((node) => [node.id, node.diff]), [["src/lib/log.ts", "changed"]]);
+    assert.deepEqual(changed.groups.map((group) => group.id), ["lib"]);
+    assert.ok(changed.title.endsWith("— changes since HEAD") && changed.reason?.includes("only the 1 shape of the 1 file changed since HEAD; 3 others left out"), `${changed.title} / ${changed.reason}`);
+    const modules = JSON.parse(archdiff(["diagram", "modules", dir, "--changed", "--base", "HEAD", "--format", "json"]).stdout) as { nodes: { id: string }[] };
+    assert.deepEqual(modules.nodes.map((node) => node.id), ["src/lib/log.ts"]);
+    const views = archdiff(["views", dir, "--changed", "--base", "HEAD"]);
+    assert.equal(views.status, 0, views.stderr);
+    const keys = views.stdout.trim().split("\n").map((line) => line.split("\t")[0] ?? "");
+    assert.ok(keys.includes("layers") && keys.includes("layer:lib") && keys.includes("dir:src/lib") && keys.includes("module:src/lib/log.ts"), keys.join(", "));
+    assert.ok(!keys.includes("layer:db") && !keys.includes("module:src/lib/orders.ts") && !keys.some((key) => key.startsWith("calls:")), keys.join(", "));
+    assert.match(views.stderr, /1 file changed since HEAD/);
   }));
 
 test("--mermaid picks a Mermaid type that fits the view", () => {

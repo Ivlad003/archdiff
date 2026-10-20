@@ -176,6 +176,10 @@ test("the scene takes the options of the page: limit, overlays, the Mermaid type
   const unchanged = await getJson<{ diagram: { nodes: { diff?: string }[]; reason?: string } }>(`/api/scene?view=${encodeURIComponent(view)}&changes=1&overlay=heat`);
   assert.ok(unchanged.diagram.nodes.length > 0 && unchanged.diagram.nodes.every((node) => node.diff === undefined));
   assert.match(unchanged.diagram.reason ?? "", /⚠ the changes are not laid over: .* is not a git repository$/);
+  // The views of the changed files cannot be told outside git either: the whole list comes, with the note.
+  const whole = await getJson<{ views: unknown[]; changed: unknown; note: string | null }>("/api/views?changed=1");
+  assert.ok(whole.views.length > 5 && whole.changed === null, JSON.stringify(whole.changed));
+  assert.match(whole.note ?? "", /the changed files could not be read: .* is not a git repository$/);
   // The API reads its query strictly: a boolean is 1 or 0 (true/false, yes/no), anything else is refused.
   assert.equal((await fetch(`${base}/api/scene?view=layers&hubs=true`)).status, 200);
   const maybe = await fetch(`${base}/api/scene?view=layers&hubs=maybe`);

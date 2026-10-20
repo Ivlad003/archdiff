@@ -26,7 +26,7 @@ import { loadAgents, loadTasks } from "./chat.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
 import { loadFlow } from "./flow-tab.ts";
-import { codeHead, currentLink, refsOf, reviewing, readOnlyView, wrongInLink } from "./link.ts";
+import { currentLink, refsOf, reviewing, readOnlyView, wrongInLink } from "./link.ts";
 import { closeMenu, menuOpen, openMenu } from "./menu.ts";
 import { updateMinimap } from "./minimap.ts";
 import { showOptions } from "./options-panel.ts";
@@ -41,7 +41,7 @@ import "./shortcuts.ts";
 import "./theme.ts";
 import { notice, renderCrumbs, setReason, showEmpty, showNoTitle, showPendingNotice, showTitle } from "./title.ts";
 import { renderCanvasTools, setPictureLanes } from "./toolbar.ts";
-import { listedHead, loadViews, renderViews, viewEntries } from "./views-list.ts";
+import { loadViews, renderViews, viewEntries, viewsStale } from "./views-list.ts";
 import { depthWarning } from "../../src/options.ts";
 import { drawnAtHead, parseView, usesDepth } from "../../src/view-keys.ts";
 
@@ -103,8 +103,8 @@ async function load(): Promise<void> {
   const state = currentLink();
   const hash = location.hash;
 
-  // Another head (a branch, a commit picked in the header): the views, the coverage and the map of its code.
-  if (codeHead(state) !== listedHead()) {
+  // Another head (a branch, a commit picked in the header), or the changed files asked for: the views, the coverage and the map of its code.
+  if (viewsStale(state)) {
     try {
       await loadViews();
     } catch (error) {

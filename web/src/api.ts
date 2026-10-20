@@ -27,6 +27,10 @@ export interface ViewsResponse {
   stats: { files: number; modules: number; fns: number; classes: number; deps: number; calls: number; gaps: number; unresolvedImports: number; cacheHits: number; cacheMisses: number; ms: { total: number } };
   layers: string[];
   views: ViewEntry[];
+  /** With `changed=1`: how many files changed since which base, when git could say; null otherwise. */
+  changed: { files: number; since: string } | null;
+  /** Why the changed files could not be read (outside git, a bad ref): the list is whole then. */
+  note: string | null;
 }
 
 // The answers are read as their types, not validated: the server is archdiff's own, started with the page, and its
@@ -215,8 +219,19 @@ export const api = {
 
     return body;
   },
-  /** The views of the code at `head` (a branch, a tag, a commit; null: the working tree). */
-  views: (head: string | null = null) => get<ViewsResponse>(`/api/views${headQuery("?", head)}`),
+  /** The views of the code at `head` (a branch, a tag, a commit; null: the working tree); with `changed`, those of the files changed since `base`. */
+  views: (head: string | null = null, changed = false, base: string | null = null): Promise<ViewsResponse> => {
+    const query = new URLSearchParams();
+
+    if (head) query.set("head", head);
+
+    if (changed) query.set("changed", "1");
+
+    if (changed && base) query.set("base", base);
+    const text = query.toString();
+
+    return get<ViewsResponse>(`/api/views${text ? `?${text}` : ""}`);
+  },
   /** The whole repository at `head` for the project map: every module (or directory, folded) with its layer, every import between them. */
   graph: (head: string | null = null) => get<ProjectMap>(`/api/graph${headQuery("?", head)}`),
   /** The page of a line of the picture the link shows. */

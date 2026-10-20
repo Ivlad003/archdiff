@@ -21,10 +21,11 @@ import { toExcalidraw } from "../export/excalidraw.ts";
 import { planFromScene, taskMarkdown } from "../plan.ts";
 import { mergeScene, parseDrawing, readDrawing, writeDrawing, type SceneElement } from "../drawings.ts";
 import { commitFiles, commitInfo, fileAt } from "../git.ts";
-import { moduleChangeMarkdown } from "../diff.ts";
+import { moduleChangeMarkdown, shortCommits } from "../diff.ts";
 import { commitMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
-import { parseView, viewList } from "../views.ts";
+import { review } from "../review.ts";
+import { changedViews, parseView, viewList } from "../views.ts";
 import { codeRevision, tagOf } from "../view-keys.ts";
 import { projectMap } from "../project-map.ts";
 import { commitOfShape, standsFor, tagView, tagsIn } from "../shape-keys.ts";
@@ -127,7 +128,24 @@ export async function getViews(ctx: RouteContext, { url, response }: RouteReques
   // The views of the code at the page's head (a branch has its own modules and entry points).
   const analysis = await codeOf(ctx, url.searchParams, response);
 
-  if (analysis) json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views: viewList(analysis), agent: "spec" in agent ? agent.spec.name : null, watching: ctx.watching });
+  if (!analysis) return;
+  let views = viewList(analysis);
+  let changed: { files: number; since: string } | null = null;
+  let note: string | null = null;
+
+  // `changed=1`: the views of the files changed since the base (`base`, else the merge-base) at the head; outside git
+  // (or on a bad ref) the whole list, and the note says why.
+  if (url.searchParams.get("changed") === "1") {
+    try {
+      const result = await review(root, url.searchParams.get("base") || null, url.searchParams.get("head") || null, analysis);
+      views = changedViews(analysis, views, result.diff.changedFiles);
+      changed = { files: result.diff.changedFiles.length, since: shortCommits(result.diff.base) };
+    } catch (error) {
+      note = `the changed files could not be read: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  json(response, { root, stats: analysis.stats, layers: analysis.graph.layers, views, changed, note, agent: "spec" in agent ? agent.spec.name : null, watching: ctx.watching });
 }
 
 export async function getPlan(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {

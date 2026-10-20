@@ -16,7 +16,7 @@
 
 import type { Analysis } from "./analyze.ts";
 import type { Diagram } from "./diagram.ts";
-import { onlyChanged, overlayDiff } from "./diff.ts";
+import { changedFilesOnly, onlyChanged, overlayDiff } from "./diff.ts";
 import type { Graph } from "./graph.ts";
 import { applyOverlays } from "./overlays.ts";
 import { dropLightLines, expandInPlace, fold, hideLanes, hubsAsBadges, withBeyond } from "./shape.ts";
@@ -61,6 +61,8 @@ export const STEPS: readonly Step[] = [
   { name: "light lines", applies: ({ options }) => (options.weight ?? 1) > 1, run: (diagram, { options }) => dropLightLines(diagram, options.weight ?? 1) },
   { name: "changes", applies: ({ reads, view }) => reads.diff !== undefined && view.kind !== "timeline" && view.kind !== "review" && view.kind !== "compare", run: (diagram, { reads }) => overlayDiff(diagram, reads.diff!) },
   { name: "only changes", applies: (ctx) => ctx.options.onlyChanges && marked(ctx), run: (diagram) => onlyChanged(diagram) },
+  // The shapes of the changed files alone: on a picture of the code or a review; not on a grid, a flowchart or a change of several heads.
+  { name: "changed files", applies: ({ options, reads, view }, diagram) => options.changed && !diagram.placed && !diagram.logic && view.kind !== "timeline" && view.kind !== "compare" && (reads.diff !== undefined || (view.kind === "review" && reads.review !== undefined)), run: (diagram, { reads, graph, view }) => changedFilesOnly(diagram, view.kind === "review" ? reads.review!.diff : reads.diff!, graph) },
   { name: "overlays", applies: ({ options }) => options.overlays.length > 0, run: (diagram, { analysis, options }) => applyOverlays(diagram, analysis, options.overlays) },
   // Rows or columns, said once, here: `layout` lays the lanes as the picture says and writes back what it could do.
   { name: "lane mode", applies: () => true, run: (diagram, { options, view }) => ({ ...diagram, lanes: options.lanes !== "auto" ? options.lanes : isMapView(view.kind) && diagram.groups.length > COLUMNS_ABOVE ? "columns" : "rows" }) },

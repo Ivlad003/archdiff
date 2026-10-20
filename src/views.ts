@@ -29,7 +29,7 @@ import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
 import { logicList, logicView } from "./logic.ts";
 import { apiLanesOf, depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, operationNode, unplaced } from "./nodes.ts";
-import { defaultDepth, foldLimit, viewKey, type View } from "./view-keys.ts";
+import { defaultDepth, foldLimit, parseView, viewKey, type View } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
 import { branchesDiagram, timelineDiagram } from "./views-more.ts";
 import type { BranchGraph } from "./git.ts";
@@ -227,6 +227,31 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   list.push({ key: "branches", title: "Branches: where each branch left the base, commit by commit", kind: "branches" });
 
   return list;
+}
+
+/**
+ * The views of the files changed since a base (`--changed`): an overview (no subject) stays; a view of a file, or
+ * of a function, a type or a machine in one, stays when the file changed; a layer's, a directory's or a scope's
+ * when a changed file is in it; a view of what is no source file (an API family, a Postman collection) stays.
+ */
+export function changedViews(analysis: Analysis, list: readonly ViewEntry[], changedFiles: readonly string[]): ViewEntry[] {
+  const changed = new Set(changedFiles);
+  const layers = new Set([...changed].map((file) => analysis.graph.modules.get(file)?.layer).filter((layer): layer is string => layer !== undefined));
+
+  return list.filter((entry) => {
+    const subject = parseView(entry.key)?.subject ?? null;
+
+    if (subject === null || entry.kind === "postman" || entry.kind === "apis") return true;
+    const hash = subject.indexOf("#");
+    const head = hash === -1 ? subject : subject.slice(0, hash);
+
+    // A file (`src/x.ts`, `src/x.ts#f`), a layer, else a directory or a scope.
+    if (/\.[a-z0-9]+$/i.test(head)) return changed.has(head);
+
+    if (entry.kind === "layer" || layers.has(head)) return layers.has(head);
+
+    return [...changed].some((file) => file.startsWith(`${head}/`));
+  });
 }
 
 /** The layers and the imports between them, each line counted. */

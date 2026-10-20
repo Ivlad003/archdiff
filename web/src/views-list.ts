@@ -8,11 +8,11 @@
 // the server again after every change of the code and of the head.
 //
 // Entry points: `loadViews`, `viewEntries`, `renderViews`,
-// `focusViewSearch`, `listedHead`, `toggleTree`, `treeShown`.
+// `focusViewSearch`, `viewsStale`, `toggleTree`, `treeShown`.
 
 import { api, type ViewEntry } from "./api.ts";
 import { element, remember, remembered } from "./dom.ts";
-import { codeHead, currentLink, setLink } from "./link.ts";
+import { codeHead, currentLink, refsOf, setLink, type Link } from "./link.ts";
 import { togglePanel } from "./panel.ts";
 import { renderTree } from "./tree.ts";
 import { listGroup, listGroups, parseView } from "../../src/view-keys.ts";
@@ -24,8 +24,8 @@ const search = element<HTMLInputElement>("search");
 const SHOWN = { all: 60, filtered: 400 };
 
 let views: ViewEntry[] = [];
-/** The head whose views the list holds (null: the working tree's); undefined before the first load. */
-let listed: string | null | undefined;
+/** What the list holds the views of (`viewsKey`); undefined before the first load. */
+let listed: string | undefined;
 /** The left panel shows the repository as a folder tree rather than the lists of views; remembered in this browser. */
 let tree = remembered("left-tree");
 
@@ -40,8 +40,14 @@ export function toggleTree(force?: boolean): void {
   renderViews();
 }
 
-export function listedHead(): string | null | undefined {
-  return listed;
+/** What a link asks the views of: the head, and with `changed` the base the changed files are counted from. */
+function viewsKey(link: Link): string {
+  return JSON.stringify([codeHead(link), link.changed, link.changed ? refsOf(link).base : null]);
+}
+
+/** Whether the list holds the views the link asks for; a load fetches them again otherwise. */
+export function viewsStale(link: Link): boolean {
+  return listed !== viewsKey(link);
 }
 
 export function viewEntries(): ViewEntry[] {
@@ -102,16 +108,19 @@ export function renderViews(): void {
 
 /** The views and the numbers of the code the page shows (the link's head, or the working tree), the agent the server may run; the list drawn again. */
 export async function loadViews(): Promise<void> {
-  const head = codeHead(currentLink());
-  const response = await api.views(head);
-  listed = head;
+  const link = currentLink();
+  const head = codeHead(link);
+  const response = await api.views(head, link.changed, link.changed ? refsOf(link).base : null);
+  listed = viewsKey(link);
   views = response.views;
   element("root").textContent = response.root;
   element("root").title = response.root;
   const s = response.stats;
   // A server that cannot follow the code says so here: the pictures stay as they were until a reload.
   const notFollowing = response.watching.problem ? ` · ⚠ not following the code: ${response.watching.problem}` : "";
-  element("stats").textContent = `${head ? `at ${head} · ` : ""}${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms${notFollowing}`;
+  // With the changed files alone: how many since which base, or why they could not be read (the list is whole then).
+  const changed = response.changed ? `${response.changed.files} changed since ${response.changed.since} · ` : response.note ? `⚠ ${response.note} · ` : "";
+  element("stats").textContent = `${head ? `at ${head} · ` : ""}${changed}${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms${notFollowing}`;
   element("stats").title = element("stats").textContent;
   renderViews();
 }

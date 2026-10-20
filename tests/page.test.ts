@@ -696,7 +696,11 @@ test("the options keep every good value of a link, round what the fields need, s
   await page!.click("#options-default");
   await page!.waitForTimeout(800);
   assert.equal(await reason(), "options remembered as the defaults of this browser");
-  await open("view=modules&changes=1&only=changes&hide=db&types=1&expand=src%2Flib%2Forders.ts");
+  // Only the changed files: the box reads the link; outside git the header says the files could not be told, and the list stays whole.
+  await open("view=modules&changed=1");
+  assert.ok(await page!.isChecked("#changed"));
+  await page!.waitForFunction(`(document.querySelector("#stats")?.textContent ?? "").includes("the changed files could not be read")`);
+  await open("view=modules&changes=1&only=changes&changed=1&hide=db&types=1&expand=src%2Flib%2Forders.ts");
   await options();
   await page!.click("#options-reset");
   await page!.waitForFunction(`location.hash === "#view=modules"`);

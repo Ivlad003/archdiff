@@ -27,7 +27,12 @@ The system SHALL analyse the base (`--base`, default the merge-base of the head 
 
 ### Requirement: The marks lie over any view
 
-The system SHALL lay the review's marks over any view (`--changes`), keep only the marked shapes and their neighbours with `--only-changes`, and walk the commits of a range one by one on the page.
+The system SHALL lay the review's marks over any view (`--changes`), keep only the marked shapes and their neighbours with `--only-changes`, keep the shapes of the files changed since the base alone with `--changed` (`changed=1` on the page: a module by its id, a function by its file, a layer by the files in it, a folded tail by the files it stands for, a shape of no file when a line joins it to one kept; the marks laid over without `--changes`; not on a grid, a flowchart or a comparison) and list only the views of those files (`archdiff views --changed`, the page's views and tree), and walk the commits of a range one by one on the page.
+
+#### Scenario: The changed files alone
+
+- **WHEN** `archdiff diagram layer:lib --changed --base HEAD` and `archdiff views --changed --base HEAD` run after `log.ts` changed
+- **THEN** the picture holds `src/lib/log.ts` marked changed and nothing else, its reason says `only the 1 shape of the 1 file changed since HEAD; 3 others left out` (its importer and the modules of the other lanes went), and the views are the overviews, `layer:lib`, `dir:src/lib` and `module:src/lib/log.ts`, without `layer:db` or the entry points of other files
 
 #### Scenario: Changes over a layer
 

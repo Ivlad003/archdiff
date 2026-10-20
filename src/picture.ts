@@ -147,7 +147,7 @@ async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOpt
 
   if (view.kind === "logic" && view.subject !== null) reads.logic = await logicOf(analysis, view.subject);
 
-  if (options.changes) {
+  if (options.changes || options.changed) {
     try {
       reads.diff = (await review(root, refs.base, refs.head, analysis)).diff;
     } catch (error) {

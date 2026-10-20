@@ -52,7 +52,7 @@ test("a wrong option names itself: a word for a number, an unknown overlay, a ba
   assert.ok(!mermaid.ok && mermaid.problem.message.startsWith("--mermaid must be one of auto, flowchart"));
   // The help has one line per option, the flag first.
   assert.ok(pictureOptionsHelp().some((line) => line.startsWith("--no-hubs")));
-  assert.equal(pictureOptionsHelp().length, 13);
+  assert.equal(pictureOptionsHelp().length, 14);
   // A query's boolean is 1/0, true/false or yes/no; anything else names the option.
   const yes = readPictureOptions((name) => new URLSearchParams("packages=true&hubs=no&only=changes").get(name), "param");
   assert.ok(yes.ok && yes.value.options.packages && !yes.value.options.hubs && yes.value.options.onlyChanges);
