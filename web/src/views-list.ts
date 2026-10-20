@@ -9,7 +9,7 @@
 //
 // Every entry of a file the picture shown now is of carries a dot, and
 // the panel can be cut to those files (the toggle over the filter),
-// in the lists and in the tree alike: where the diagram is, in the
+// in the lists and in the tree alike: where the picture is, in the
 // navigation.
 //
 // Entry points: `loadViews`, `viewEntries`, `renderViews`,

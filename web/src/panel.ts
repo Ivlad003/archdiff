@@ -3,24 +3,27 @@
 // for, the coverage report, and the flow, the chat and the spec of their
 // own modules; the copy button takes the active tab's text. The Markdown
 // tab shows the picture's page until a shape, a line or a selection is
-// picked, and `showPicturePage` brings it back. A rendered page is a
+// picked, and `showPicturePage` brings it back. A picture's page is a
 // navigation too: its sections fold by their headings (which stay folded
 // across pages, remembered), a module or a function named in bold opens
-// its view, and a module's bullet unfolds its functions. Both side panels
-// fold away, remembered in this browser.
+// its view when the page has one, and a module's bullet unfolds its
+// functions; the Markdown of the chat, the spec and the flow is rendered
+// plain. Both side panels fold away, remembered in this browser.
 //
 // Entry points: `showTab`, `renderMarkdown`, `setMarkdown`, `showCode`,
-// `renderCode`, `copyText`, `setPicturePage`, `showPicturePage`,
-// `picturePageMarkdown`, `markdownPanel`, `loadCoverage`, `togglePanel`.
+// `showCodeAt`, `renderCode`, `CodeSpot`, `copyText`, `setPicturePage`,
+// `showPicturePage`, `picturePageMarkdown`, `markdownPanel`, `loadCoverage`,
+// `togglePanel`.
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { api, type Shape } from "./api.ts";
 import { transcript } from "./chat.ts";
-import { element, remember, remembered } from "./dom.ts";
+import { element, remember, rememberList, remembered, rememberedList } from "./dom.ts";
 import { flowText } from "./flow-tab.ts";
 import { codeHead, currentLink, setLink } from "./link.ts";
 import { fnView, functionsOf, isFilePath } from "./modules.ts";
+import { moduleOfId } from "../../src/shape-keys.ts";
 import { isSourceFile } from "../../src/view-keys.ts";
 import { page } from "./page.ts";
 import { loadSpecs, specTextOf } from "./spec-tab.ts";
@@ -40,25 +43,7 @@ const CODE_REFERENCE = /^([\w./@-]+)(?::(\d+))?$/;
 /** Where this browser keeps the headings the reader folded: a section folded on one page stays folded on the next with that heading. */
 const FOLDED_KEY = "archdiff.folded.v1";
 
-const folded = new Set<string>(readFolded());
-
-function readFolded(): string[] {
-  try {
-    const kept: unknown = JSON.parse(localStorage.getItem(FOLDED_KEY) ?? "[]");
-
-    return Array.isArray(kept) ? kept.filter((key): key is string => typeof key === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberFolded(): void {
-  try {
-    localStorage.setItem(FOLDED_KEY, JSON.stringify([...folded]));
-  } catch {
-    // No storage: the folds last the page.
-  }
-}
+const folded = new Set<string>(rememberedList(FOLDED_KEY));
 
 /**
  * Each heading of `tag` with what follows it, up to the next heading of its level or a higher one, becomes a folding
@@ -84,19 +69,19 @@ function foldSections(target: HTMLElement, tag: "h2" | "h3"): void {
     details.addEventListener("toggle", () => {
       if (details.open) folded.delete(title);
       else folded.add(title);
-      rememberFolded();
+      rememberList(FOLDED_KEY, folded);
     });
   }
 }
 
-/** A module or a function named in bold (`**src/x.ts**`, `**src/x.ts#f**`) opens its view with the centre as it is. */
+/** A module or a function named in bold (`**src/x.ts**`, `**src/x.ts#f**`) opens its view with the centre as it is — when the page lists the module. */
 function linkNames(target: HTMLElement): void {
   const keys = new Set(page.views().map((entry) => entry.key));
 
   for (const strong of target.querySelectorAll("strong")) {
     const name = (strong.textContent ?? "").trim();
 
-    if (!isFilePath(name)) continue;
+    if (!isFilePath(name) || !keys.has(`module:${moduleOfId(name)}`)) continue;
     strong.classList.add("link");
     strong.title = name.includes("#") ? "Open the function's view" : "Open the module's view";
     strong.addEventListener("click", () => setLink({ ...currentLink(), view: name.includes("#") ? fnView(name, keys) : `module:${name}` }));
@@ -113,7 +98,7 @@ function unfoldModules(target: HTMLElement): void {
     if (!(strong instanceof HTMLElement) || strong.tagName !== "STRONG") continue;
     const path = (strong.textContent ?? "").trim();
 
-    if (!isFilePath(path) || path.includes("#")) continue;
+    if (!isFilePath(path) || path.includes("#") || !keys.has(`module:${path}`)) continue;
     const caret = document.createElement("span");
     caret.className = "fold";
     caret.textContent = "▸";
@@ -150,7 +135,7 @@ function unfoldModules(target: HTMLElement): void {
           at.className = "link";
           at.textContent = `${path}:${fn.line}`;
           at.title = "Show the code";
-          at.addEventListener("click", () => void showCode({ id: fn.id, kind: "fn", label: fn.name, ref: { file: path, line: fn.line }, x: 0, y: 0, w: 0, h: 0 }));
+          at.addEventListener("click", () => void showCodeAt({ file: path, line: fn.line, mark: true }));
           const row = document.createElement("li");
           row.append(name, " — ", at);
 
@@ -232,8 +217,12 @@ element<HTMLButtonElement>("copy").addEventListener("click", () => {
 
 // ── Markdown ──────────────────────────────────────────────────────────────────
 
-/** Markdown as HTML (sanitised: a doc comment of the repository is not trusted), or as text when the raw toggle is on. */
-export function renderMarkdown(target: HTMLElement, markdown: string): void {
+/**
+ * Markdown as HTML (sanitised: a doc comment of the repository is not trusted), or as text when the raw toggle is on.
+ * A picture's page (`navigation`) folds by its headings, links the modules it names and unfolds a module's functions;
+ * other Markdown — the chat's, the spec's, the flow's, the coverage's — is rendered plain.
+ */
+export function renderMarkdown(target: HTMLElement, markdown: string, navigation = false): void {
   if (rawMarkdown) {
     target.replaceChildren(Object.assign(document.createElement("pre"), { textContent: markdown }));
 
@@ -255,11 +244,13 @@ export function renderMarkdown(target: HTMLElement, markdown: string): void {
     details.append(pre);
   }
 
-  // The page as a navigation: folding sections, names that open views, bullets that unfold a module's functions.
-  foldSections(target, "h2");
-  foldSections(target, "h3");
-  linkNames(target);
-  unfoldModules(target);
+  // A picture's page as a navigation: folding sections, names that open views, bullets that unfold a module's functions.
+  if (navigation) {
+    foldSections(target, "h2");
+    foldSections(target, "h3");
+    linkNames(target);
+    unfoldModules(target);
+  }
 
   // A `file:line` in the text opens the code (once a picture is shown, so the server has the repository read).
   for (const code of target.querySelectorAll("code")) {
@@ -277,14 +268,14 @@ export function renderMarkdown(target: HTMLElement, markdown: string): void {
 element<HTMLButtonElement>("raw").addEventListener("click", () => {
   rawMarkdown = !rawMarkdown;
   element("raw").classList.toggle("active", rawMarkdown);
-  renderMarkdown(markdownPanel, markdownPanel.dataset["markdown"] ?? "");
+  renderMarkdown(markdownPanel, markdownPanel.dataset["markdown"] ?? "", true);
   renderMarkdown(coveragePanel, coveragePanel.dataset["markdown"] ?? "");
 });
 
-/** Shows Markdown in a panel and keeps its source for the raw toggle and the copy button. */
+/** Shows Markdown in a panel and keeps its source for the raw toggle and the copy button; the Markdown tab's pages are a navigation. */
 export function setMarkdown(target: HTMLElement, markdown: string): void {
   target.dataset["markdown"] = markdown;
-  renderMarkdown(target, markdown);
+  renderMarkdown(target, markdown, target === markdownPanel);
 }
 
 /** The Markdown of a new picture, shown now and kept for when nothing is picked. */
@@ -308,24 +299,35 @@ export function picturePageMarkdown(): string {
 /** The files each code element has asked for: only the newest one is drawn in it. */
 const codeLoads = new WeakMap<HTMLElement, number>();
 
+/** A place in the code to show: the file, the lines of it to mark (`mark`: a declaration's lines; a module shows whole). */
+export interface CodeSpot {
+  file: string;
+  line?: number;
+  endLine?: number;
+  mark?: boolean;
+}
+
+/** The spot a shape stands for: its file and lines; null for a shape of no file. */
+function spotOf(node: Shape): CodeSpot | null {
+  if (!node.ref?.file) return null;
+  const spot: CodeSpot = { file: node.ref.file, mark: node.kind !== "module" };
+
+  if (node.ref.line !== undefined) spot.line = node.ref.line;
+
+  if (node.ref.endLine !== undefined) spot.endLine = node.ref.endLine;
+
+  return spot;
+}
+
 /**
- * The code of a shape in `target`: the file, line by line with its numbers, the shape's lines marked (a module's
- * are not: the whole file is the shape); the first marked line comes back, for the caller to scroll to. A file asked
- * for after this one draws instead: the code of the shape picked last, however slow the first was. Null when the
- * shape has no file, or the file could not be read: the element says so, or is empty.
+ * The code of a spot in `target`: the file, line by line with its numbers, the spot's lines marked when it says so;
+ * the first marked line comes back, for the caller to scroll to. A file asked for after this one draws instead: the
+ * code of the spot asked last, however slow the first was. Null when the file could not be read: the element says so.
  */
-export async function renderCode(target: HTMLElement, node: Shape): Promise<HTMLElement | null> {
-  const file = node.ref?.file;
+export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<HTMLElement | null> {
+  const { file } = spot;
   const mine = (codeLoads.get(target) ?? 0) + 1;
   codeLoads.set(target, mine);
-
-  if (!file) {
-    // Nothing to copy either: the last file's text would pass for this shape's.
-    target.textContent = "";
-    delete target.dataset["text"];
-
-    return null;
-  }
 
   let text: string;
 
@@ -341,9 +343,9 @@ export async function renderCode(target: HTMLElement, node: Shape): Promise<HTML
 
   if (mine !== codeLoads.get(target)) return null;
 
-  const from = node.ref?.line ?? 1;
-  const to = node.ref?.endLine ?? from;
-  const mark = node.kind !== "module";
+  const from = spot.line ?? 1;
+  const to = spot.endLine ?? from;
+  const mark = spot.mark === true;
   target.replaceChildren();
   target.dataset["text"] = text;
   const lines = text.split("\n");
@@ -366,9 +368,24 @@ export async function renderCode(target: HTMLElement, node: Shape): Promise<HTML
   return first;
 }
 
-/** The code of a shape on the Code tab: the file with the shape's lines marked and scrolled into view. */
+/** The code of a shape on the Code tab: the file with the shape's lines marked and scrolled into view; a shape of no file empties the tab. */
 export async function showCode(node: Shape): Promise<void> {
-  const first = await renderCode(codePanel, node);
+  const spot = spotOf(node);
+
+  if (!spot) {
+    // Nothing to copy either: the last file's text would pass for this shape's.
+    codePanel.textContent = "";
+    delete codePanel.dataset["text"];
+
+    return;
+  }
+
+  await showCodeAt(spot);
+}
+
+/** The code of a spot on the Code tab, scrolled to its first marked line. */
+export async function showCodeAt(spot: CodeSpot): Promise<void> {
+  const first = await renderCode(codePanel, spot);
 
   // No file, or one that could not be read: the panel says so where it is, without coming to the front.
   if (codePanel.dataset["text"] === undefined) return;

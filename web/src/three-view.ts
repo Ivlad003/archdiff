@@ -5,7 +5,7 @@
 // above its block. A sequence keeps its time: the participants stand at
 // the back, each message runs along its own route at its own depth, the
 // lifelines run from the participants to the front, and a fragment is a
-// frame on the ground. Built with three.js from the laid-out diagram the
+// frame on the ground. Built with three.js from the laid-out picture the
 // server sends, in the colours the Excalidraw export draws with, so the
 // scene is the same picture as the canvas. The mouse orbits (drag turns,
 // wheel zooms, right-drag pans); a tap on a block is a tap on the shape,
@@ -242,11 +242,26 @@ function block(node: Shape, height: number, level: number): THREE.Mesh<THREE.Buf
   mesh.scale.set(node.w, height, node.h);
   mesh.position.set(node.x + node.w / 2, level + height / 2, node.y + node.h / 2);
   mesh.userData["id"] = node.id;
-  // The outline in the stroke's colour: thicker (drawn twice) when a change marks the shape.
-  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: look.stroke }));
-  mesh.add(edges);
+  // The outline in the stroke's colour; a change's mark is a thicker stroke, drawn as a second outline a little outside the first.
+  const outline = new THREE.EdgesGeometry(geometry);
+  mesh.add(new THREE.LineSegments(outline, new THREE.LineBasicMaterial({ color: look.stroke })));
+
+  if (look.width > 1) {
+    const second = new THREE.LineSegments(outline, new THREE.LineBasicMaterial({ color: look.stroke }));
+    second.scale.set(1.03, 1.06, 1.03);
+    mesh.add(second);
+  }
 
   return mesh;
+}
+
+/** An arrowhead at the end of a line: a cone pointing along the tangent, sized by the line's radius. */
+function arrowhead(end: THREE.Vector3, tangent: THREE.Vector3, radius: number, colour: THREE.Color): THREE.Mesh {
+  const head = new THREE.Mesh(new THREE.ConeGeometry(radius * 3 + 4, 16, 12), new THREE.MeshBasicMaterial({ color: colour }));
+  head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
+  head.position.copy(end).sub(tangent.clone().multiplyScalar(7));
+
+  return head;
 }
 
 /** A label as a sprite, always facing the camera: the first line of the text, cut when long, in the theme's colour. */
@@ -288,12 +303,8 @@ function routed(edge: Line, route: readonly { x: number; y: number }[], level: n
 
   if (edge.kind === "lifeline") return [body];
   const end = points[points.length - 1]!;
-  const tangent = end.clone().sub(points[points.length - 2]!).normalize();
-  const head = new THREE.Mesh(new THREE.ConeGeometry(radius * 3 + 3, 14, 12), new THREE.MeshBasicMaterial({ color: colour }));
-  head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
-  head.position.copy(end).sub(tangent.clone().multiplyScalar(6));
 
-  return [body, head];
+  return [body, arrowhead(end, end.clone().sub(points[points.length - 2]!).normalize(), radius, colour)];
 }
 
 /** A frame (a fragment of a sequence): its rectangle drawn on the ground as an outline, its label at the corner. */
@@ -318,12 +329,8 @@ function tube(edge: Line, from: THREE.Mesh, to: THREE.Mesh): THREE.Object3D[] {
   const radius = 1.2 + Math.min(edge.count ?? 1, 8) * 0.25;
   const colour = new THREE.Color(lineStroke(edge));
   const body = new THREE.Mesh(new THREE.TubeGeometry(curve, 24, radius, 6, false), new THREE.MeshBasicMaterial({ color: colour }));
-  const tangent = curve.getTangent(1).normalize();
-  const head = new THREE.Mesh(new THREE.ConeGeometry(radius * 3 + 4, 18, 12), new THREE.MeshBasicMaterial({ color: colour }));
-  head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
-  head.position.copy(end).sub(tangent.clone().multiplyScalar(8));
 
-  return [body, head];
+  return [body, arrowhead(end, curve.getTangent(1).normalize(), radius, colour)];
 }
 
 /** The scene of a diagram: the terraces, the blocks with their labels, the tubes; then the camera fitted to it. */

@@ -17,7 +17,7 @@
 // Entry point: `renderTree`.
 
 import type { ViewEntry } from "./api.ts";
-import { h } from "./dom.ts";
+import { h, rememberList, rememberedList } from "./dom.ts";
 import { currentLink, setLink } from "./link.ts";
 import { fnView, functionsOf, knownFunctions } from "./modules.ts";
 import { parseView, subjectFile } from "../../src/view-keys.ts";
@@ -59,28 +59,10 @@ interface Row {
 /** Where this browser keeps the open folders and modules, by their keys. */
 const OPEN_KEY = "archdiff.tree.v1";
 
-const open = new Set<string>(readOpen());
+const open = new Set<string>(rememberedList(OPEN_KEY));
 /** The modules whose functions are being read, and the ones whose read failed (asked again when their caret is pressed). */
 const loading = new Set<string>();
 const failed = new Set<string>();
-
-function readOpen(): string[] {
-  try {
-    const kept: unknown = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]");
-
-    return Array.isArray(kept) ? kept.filter((key): key is string => typeof key === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberOpen(): void {
-  try {
-    localStorage.setItem(OPEN_KEY, JSON.stringify([...open]));
-  } catch {
-    // No storage: the folders close on the next load.
-  }
-}
 
 /** The tree of the views list: each layer, the directories of its modules as folders, the modules as files, sorted by path. */
 function treeOf(views: readonly ViewEntry[]): Folder[] {
@@ -198,7 +180,7 @@ export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needl
   const toggle = (key: string): void => {
     if (open.has(key)) open.delete(key);
     else open.add(key);
-    rememberOpen();
+    rememberList(OPEN_KEY, open);
     redraw();
   };
 

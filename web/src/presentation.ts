@@ -10,11 +10,11 @@
 // Entry points: `markPresentation`, `applyPresentation`, `fitPresentation`,
 // `presentationState` (for the browser tests).
 
-import type { Diagram, Shape } from "./api.ts";
+import type { Diagram } from "./api.ts";
 import { element } from "./dom.ts";
 import { currentLink, presentationOf, type Link, type Presentation } from "./link.ts";
 import { page } from "./page.ts";
-import { picturePageMarkdown, renderCode, renderMarkdown } from "./panel.ts";
+import { picturePageMarkdown, renderCode, renderMarkdown, type CodeSpot } from "./panel.ts";
 import { openShape, tap } from "./picking.ts";
 import { parseView, subjectFile } from "../../src/view-keys.ts";
 
@@ -93,7 +93,7 @@ export async function applyPresentation(state: Link, diagram: Diagram | null): P
 
   if (state.as === "markdown") {
     body.hidden = false;
-    renderMarkdown(body, picturePageMarkdown());
+    renderMarkdown(body, picturePageMarkdown(), true);
     reader.scrollTop = 0;
 
     return;
@@ -106,7 +106,7 @@ export async function applyPresentation(state: Link, diagram: Diagram | null): P
     note.hidden = false;
     note.textContent = "This view has no file of its own, so its page is shown instead. Double-tap a shape on the canvas or in 3D for its own view, then show that as code.";
     body.hidden = false;
-    renderMarkdown(body, picturePageMarkdown());
+    renderMarkdown(body, picturePageMarkdown(), true);
 
     return;
   }
@@ -116,16 +116,22 @@ export async function applyPresentation(state: Link, diagram: Diagram | null): P
   first?.scrollIntoView({ block: "center" });
 }
 
-/** The shape whose code the centre shows: the shape of the view's subject (a function's lines marked), else the file the subject names. */
-function codeSubject(state: Link): Shape | null {
+/** The code the centre shows: the view's subject with its lines marked when the picture holds its shape, else the file the subject names, whole. */
+function codeSubject(state: Link): CodeSpot | null {
   const view = parseView(state.view);
   const file = subjectFile(view);
 
   if (!file) return null;
   const own = page.nodes().get(view!.subject!);
 
-  // The subject's shape when the picture holds it (its lines marked); else the file itself, whole.
-  return own?.ref?.file ? own : { id: view!.subject!, kind: "module", label: view!.subject!, ref: { file: file.file }, x: 0, y: 0, w: 0, h: 0 };
+  if (!own?.ref?.file) return { file: file.file };
+  const spot: CodeSpot = { file: own.ref.file, mark: own.kind !== "module" };
+
+  if (own.ref.line !== undefined) spot.line = own.ref.line;
+
+  if (own.ref.endLine !== undefined) spot.endLine = own.ref.endLine;
+
+  return spot;
 }
 
 /** Fits what the centre shows: the 3D scene, or the canvas's picture. */

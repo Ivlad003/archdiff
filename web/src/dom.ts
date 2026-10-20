@@ -65,3 +65,23 @@ export function remember(key: string, value: boolean): void {
     // A private window: the choice lasts the page.
   }
 }
+
+/** A list of names this browser remembered under `key` (the open folders, the folded headings); empty when none, or when the storage is off. */
+export function rememberedList(key: string): string[] {
+  try {
+    const kept: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+
+    return Array.isArray(kept) ? kept.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Keeps a list of names under `key` in this browser. */
+export function rememberList(key: string, list: Iterable<string>): void {
+  try {
+    localStorage.setItem(key, JSON.stringify([...list]));
+  } catch {
+    // A private window: the list lasts the page.
+  }
+}
