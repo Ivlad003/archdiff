@@ -1,6 +1,7 @@
 // The look of every kind of shape and line, said once for every drawing of
 // a picture: the Excalidraw export, the draw.io export and the page's 3D
-// view draw the same picture in the same colours. A kind's outline (a
+// view draw the same picture in the same colours (draw.io adds its own
+// outlines and fonts to them). A kind's outline (a
 // box, an ellipse, a diamond), its stroke and fill, the line of its stroke
 // and the size of its label; a change's mark as the stroke and a shape's
 // heat as the fill (`lookOf`); the stroke of a line by its kind

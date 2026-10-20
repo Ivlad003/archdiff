@@ -8,41 +8,41 @@
 
 import type { Diagram, Shape } from "../diagram.ts";
 import { routeEdges } from "./excalidraw.ts";
-import { heatColour } from "../looks.ts";
+import { lineStroke, lookOf } from "../looks.ts";
 import { escapeXmlAttribute } from "./xml.ts";
 
+/** How draw.io draws each kind's outline and text; the colours and the line of the stroke are every drawing's (looks.ts). */
+const OUTLINES: Record<Shape["kind"], string> = {
+  layer: "rounded=0;whiteSpace=wrap;html=1;fontStyle=1;",
+  module: "rounded=1;whiteSpace=wrap;html=1;",
+  fn: "rounded=1;whiteSpace=wrap;html=1;arcSize=50;",
+  external: "shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;",
+  hole: "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;",
+  start: "ellipse;whiteSpace=wrap;html=1;",
+  more: "rounded=1;whiteSpace=wrap;html=1;fontColor=#616161;",
+  participant: "rounded=0;whiteSpace=wrap;html=1;fontStyle=1;",
+  anchor: "shape=ellipse;",
+  event: "ellipse;whiteSpace=wrap;html=1;",
+  cell: "rounded=0;whiteSpace=wrap;html=1;fontSize=10;",
+  package: "rounded=0;whiteSpace=wrap;html=1;fontStyle=1;",
+  class: "rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacingLeft=6;fontFamily=Courier New;fontSize=10;",
+  state: "rounded=1;whiteSpace=wrap;html=1;arcSize=30;",
+  machine: "rounded=1;whiteSpace=wrap;html=1;arcSize=15;fontStyle=1;",
+  fragment: "rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacingLeft=6;fontSize=11;",
+  decision: "rhombus;whiteSpace=wrap;html=1;fontSize=11;",
+  action: "rounded=0;whiteSpace=wrap;html=1;fontSize=11;",
+  end: "ellipse;whiteSpace=wrap;html=1;fontSize=11;",
+};
 
-const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00", planned: "#1565c0" } as const;
-
+/** A shape's style: its kind's outline, then its look — the fill (heat darkens it), the stroke (a change's mark colours and thickens it), dashed or dotted as the look says. */
 function style(node: Shape): string {
-  const base: Record<Shape["kind"], string> = {
-    layer: "rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;",
-    module: "rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1f1f1f;",
-    fn: "rounded=1;whiteSpace=wrap;html=1;arcSize=50;fillColor=#e3f2fd;strokeColor=#1565c0;",
-    external: "shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#fafafa;strokeColor=#9e9e9e;",
-    hole: "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;dashed=1;fillColor=#fff3e0;strokeColor=#ef6c00;",
-    start: "ellipse;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;",
-    more: "rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=1 3;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontColor=#616161;",
-    participant: "rounded=0;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#455a64;fontStyle=1;",
-    anchor: "shape=ellipse;fillColor=none;strokeColor=none;",
-    event: "ellipse;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#f9a825;",
-    cell: "rounded=0;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#9e9e9e;fontSize=10;",
-    package: "rounded=0;whiteSpace=wrap;html=1;fillColor=#e8eaf6;strokeColor=#3949ab;fontStyle=1;",
-    class: "rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacingLeft=6;fontFamily=Courier New;fontSize=10;fillColor=#fff8e1;strokeColor=#4e342e;",
-    state: "rounded=1;whiteSpace=wrap;html=1;arcSize=30;fillColor=#e8f5e9;strokeColor=#2e7d32;",
-    machine: "rounded=1;whiteSpace=wrap;html=1;arcSize=15;fillColor=#e8f5e9;strokeColor=#2e7d32;fontStyle=1;",
-    fragment: "rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#9e9e9e;align=left;verticalAlign=top;spacingLeft=6;fontSize=11;",
-    decision: "rhombus;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#6a1b9a;fontSize=11;",
-    action: "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#424242;fontSize=11;",
-    end: "ellipse;whiteSpace=wrap;html=1;fillColor=#eeeeee;strokeColor=#616161;fontSize=11;",
-  };
-  // The heat of a shape darkens its fill (a hotspot's calls in, a matrix cell's count).
-  const heat = node.heat !== undefined && node.heat > 0 ? `fillColor=${heatColour(node.heat)};` : "";
-  const mark = node.diff ? `strokeColor=${DIFF_STROKE[node.diff]};strokeWidth=3;${node.diff === "removed" || node.diff === "planned" ? "dashed=1;" : ""}` : "";
+  // The foot of a lifeline is drawn invisible, whatever its look.
+  if (node.kind === "anchor") return `${OUTLINES.anchor}fillColor=none;strokeColor=none;`;
+  const look = lookOf(node);
+  const line = look.style === "dashed" ? "dashed=1;" : look.style === "dotted" ? "dashed=1;dashPattern=1 3;" : "";
 
-  return base[node.kind] + heat + mark;
+  return `${OUTLINES[node.kind]}fillColor=${look.fill === "transparent" ? "none" : look.fill};strokeColor=${look.stroke};${line}${look.width > 1 ? `strokeWidth=${look.width};` : ""}`;
 }
-
 
 export function toDrawio(diagram: Diagram): string {
   const cells: string[] = ['<mxCell id="0"/>', '<mxCell id="1" parent="0"/>'];
@@ -84,7 +84,7 @@ export function toDrawio(diagram: Diagram): string {
     if (from === undefined || to === undefined) continue;
     const id = next++;
     const dashed = edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" || edge.typeOnly ? "dashed=1;" : "";
-    const colour = edge.diff === "added" ? "strokeColor=#2e7d32;strokeWidth=2;" : edge.diff === "removed" ? "strokeColor=#c62828;strokeWidth=2;" : edge.diff === "warning" || edge.diff === "changed" ? "strokeColor=#ef6c00;strokeWidth=2;" : edge.diff === "planned" ? "strokeColor=#1565c0;strokeWidth=2;" : edge.kind === "call" || edge.kind === "message" ? "strokeColor=#1565c0;" : edge.kind === "lifeline" ? "strokeColor=#b0bec5;endArrow=none;" : "strokeColor=#616161;";
+    const colour = `strokeColor=${lineStroke(edge)};${edge.diff ? "strokeWidth=2;" : ""}`;
     // The bends of the route (without its two ends, which the cells give) as waypoints, so draw.io draws the same path.
     const bends = (edge.route ?? routes.get(edge) ?? []).slice(1, -1);
     const points = bends.length > 0 ? `<Array as="points">${bends.map((point) => `<mxPoint x="${Math.round(point.x)}" y="${Math.round(point.y)}"/>`).join("")}</Array>` : "";
