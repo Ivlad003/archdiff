@@ -387,8 +387,11 @@ test("the branch bar compares two heads: the title, the table from where each le
   withOwnServer(
     "archdiff-page-compare-",
     (dir) => {
+      // One date for every commit: the branch bar lists the heads by their commit date, then by name, so `a` comes
+      // before `b` whichever second each commit lands in.
+      const dated = { ...process.env, GIT_AUTHOR_DATE: "2026-01-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-01-01T00:00:00Z" };
       const git = (...args: string[]): void => {
-        const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+        const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8", env: dated });
         assert.equal(result.status, 0, result.stderr);
       };
       git("init", "-q", "-b", "main");
