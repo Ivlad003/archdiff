@@ -9,7 +9,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # The whole history: the review of the push against its parent (the last step) needs HEAD~1, which a shallow clone lacks.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
