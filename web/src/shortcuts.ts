@@ -15,9 +15,9 @@ import { canvasMode, saveDrawing, setMode } from "./canvas.ts";
 import { currentLink, readOnlyView, setLink } from "./link.ts";
 import { closeMenu, menuOpen } from "./menu.ts";
 import { toggleOptions } from "./options-panel.ts";
-import { page } from "./page.ts";
 import { togglePanel } from "./panel.ts";
 import { lastPicked, openShape, select, walk } from "./picking.ts";
+import { fitPresentation } from "./presentation.ts";
 import { projectMapOpen, toggleProjectMap } from "./project-map.ts";
 import { flipLanes, focusFind, toggleSplit, toggleTool } from "./toolbar.ts";
 import { stepHead } from "./review.ts";
@@ -31,7 +31,8 @@ function isArrow(key: string): key is (typeof ARROWS)[number] {
 
 /** The keys of reading a picture: none while a field has the focus, none with Ctrl, Alt or Cmd held. */
 function readingKey(event: KeyboardEvent): void {
-  const drawable = !readOnlyView(currentLink().view);
+  // The tools of the canvas (mix, dim, split, the editor, the project map) need the canvas: not a scene, a page or code.
+  const drawable = !readOnlyView(currentLink().view) && currentLink().as === "canvas";
   const picked = lastPicked();
 
   if (event.key === "/") {
@@ -45,7 +46,7 @@ function readingKey(event: KeyboardEvent): void {
     // The map's search box takes the focus: the key is not typed into it as a search.
     event.preventDefault();
     toggleProjectMap();
-  } else if (event.key === "0") page.canvas()?.scrollToContent();
+  } else if (event.key === "0") fitPresentation();
   else if (event.key === "Backspace") history.back();
   else if (isArrow(event.key) && picked) {
     event.preventDefault();

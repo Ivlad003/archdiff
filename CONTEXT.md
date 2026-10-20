@@ -126,6 +126,10 @@ _Avoid_: graph, minimap
 The current picture in miniature, with the visible part marked.
 _Avoid_: map, overview
 
+**Presentation**:
+How the centre of the page shows a view: the canvas, the same picture in 3D (the lanes as terraces, the shapes as blocks), its Markdown page, or the code of its subject (the file the view names); the link's `as`. The picture is the same whichever is shown.
+_Avoid_: mode (the editor's), format (an export's), renderer
+
 **Link**:
 The address of what the page shows: the view, the picture's options and the revisions.
 _Avoid_: state, URL

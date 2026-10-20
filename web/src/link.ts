@@ -1,6 +1,7 @@
 // The link of the page: what the hash says — the view (a review and a
-// comparison are views too), the head and the heads, and the options of
-// the picture as options.ts names them (depth, limit, weight, hubs,
+// comparison are views too), the head and the heads, how the centre shows
+// the view (`as`: the canvas, 3D, its Markdown, its code), and the options
+// of the picture as options.ts names them (depth, limit, weight, hubs,
 // packages, opened modules, hidden lanes, overlays, the review's marks,
 // the Mermaid type, the lanes) — the defaults a browser remembers for
 // links that leave an option out (kept as the query the table reads), and
@@ -10,7 +11,7 @@
 //
 // Entry points: `Link`, `currentLink`, `setLink`, `wrongInLink`, `refsOf`, `codeHead`,
 // `reviewing`, `readOnlyView`, `readDefaults`, `rememberDefaults`, `forgetDefaults`,
-// `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`.
+// `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`, `PRESENTATIONS`, `Presentation`.
 
 import { DEFAULT_PICTURE_OPTIONS, readEachPictureOption, writePictureParams, type PictureOptionKey, type PictureOptions } from "../../src/options.ts";
 import { codeRevision, defaultDepth, overviews, parseView, usesDepth } from "../../src/view-keys.ts";
@@ -18,12 +19,31 @@ import type { Refs } from "./api.ts";
 
 export type { PictureOptions } from "../../src/options.ts";
 
+/**
+ * How the centre of the page shows a view: the canvas (Excalidraw, the default), the same picture in 3D (the lanes
+ * as terraces, the shapes as blocks), the view's Markdown page, or the code of its subject — each with its label.
+ */
+export const PRESENTATIONS = [
+  ["canvas", "canvas"],
+  ["3d", "3D"],
+  ["markdown", "markdown"],
+  ["code", "code"],
+] as const satisfies readonly (readonly [string, string])[];
+
+export type Presentation = (typeof PRESENTATIONS)[number][0];
+
+function isPresentation(value: string | null): value is Presentation {
+  return PRESENTATIONS.some(([name]) => name === value);
+}
+
 export interface Link extends PictureOptions {
   view: string;
   /** The head of a review: a ref, or null for the working tree. */
   head: string | null;
   /** The heads of a comparison (two or more branches, `WORKTREE` the working tree). */
   heads: string[];
+  /** How the centre shows the view (`as=3d`); the canvas when the link says nothing. */
+  as: Presentation;
 }
 
 /** A review of a change or a comparison of heads: the page shows the branch bar. */
@@ -120,7 +140,9 @@ export function currentLink(): Link {
   // A link of an older page said `review=1` beside another view: the review, or the comparison of its heads.
   const view = params.get("review") === "1" ? (heads.length > 1 ? "compare" : "review") : (params.get("view") ?? "layers");
 
-  return { ...options, view, head: params.get("head") || null, heads };
+  const as = params.get("as");
+
+  return { ...options, view, head: params.get("head") || null, heads, as: isPresentation(as) ? as : "canvas" };
 }
 
 /** The values of the link the options table refuses (`limit=1.5 (limit must be a whole number of at least 1)`), each left out of the picture. */
@@ -140,6 +162,8 @@ export function setLink(link: Link): void {
   if (link.head) params.set("head", link.head);
 
   if (link.heads.length > 0) params.set("heads", link.heads.join(","));
+
+  if (link.as !== "canvas") params.set("as", link.as);
   // The picture's options, written only when they differ from the remembered defaults, so a plain link stays short; an
   // explicit "none" when a default is turned off. "Only the changes" needs marks: the changes laid over, or a review.
   const picture = writePictureParams({ ...link, onlyChanges: link.onlyChanges && (link.changes || readOnlyView(link.view)) }, { ...DEFAULT_PICTURE_OPTIONS, ...readDefaults() });

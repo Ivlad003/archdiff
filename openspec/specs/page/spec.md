@@ -99,6 +99,20 @@ The system SHALL draw the picture of the link on one canvas, however fast the li
 - **WHEN** a reader opens the machines of a repository that has none, then the timeline outside git
 - **THEN** the canvas says "Nothing to draw here" with the reason, then "This picture could not be drawn" with git's answer, on an empty canvas
 
+### Requirement: The centre shows the view as the link says
+
+The system SHALL show the view in the centre as the link's `as` says — the canvas (the default), the same picture in 3D (each lane a terrace raised by its order, each shape a block with its footprint and colours of the canvas, each line an arched tube with an arrowhead, every label above its block; the mouse orbits, zooms and pans; a tap on a block picks the shape, a double tap opens its view, `0` fits), its Markdown page, or the code of its subject (the file the view names, a function's lines marked; a view without one shows its page and says so) — with a select of the canvas toolbar; the canvas SHALL stay mounted beneath, and the tools that need it (drawing, mix, dim, split, the project map) SHALL be off meanwhile.
+
+#### Scenario: The same picture in 3D
+
+- **WHEN** the link is `#view=module:src/lib/orders.ts&as=3d`
+- **THEN** the centre holds a 3D scene with a block per shape of the picture, a tube per line and a terrace per lane, the select reads 3D, and the edit button is off
+
+#### Scenario: The page and the code
+
+- **WHEN** the select is set to markdown, then to code, then to canvas
+- **THEN** the centre shows the view's page (the one the Markdown tab holds), then the module's file line by line, then the canvas alone again with the editor allowed
+
 ### Requirement: A picture is fitted where nothing covers it
 
 The system SHALL fit a picture whole into the canvas at a zoom of at most 1: below the toolbar, above the row of the zoom buttons and the reason, and beside the minimap or above it, whichever leaves the picture larger; and fit it again when the canvas changes size (the window, a folded panel) until the reader moves it. A picture bigger than the canvas even at the smallest zoom SHALL start from its beginning (its left and top edges), and the line under it SHALL say so.

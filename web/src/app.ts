@@ -12,10 +12,11 @@
 // canvas's taps to picking.ts. The parts live beside it: the title
 // (title.ts), the side panels (panel.ts), what a tap picks (picking.ts),
 // the right-click menu (shape-menu.ts), the canvas and the drawing
-// (canvas.ts), the toolbar (toolbar.ts), the minimap (minimap.ts), the
-// options (options-panel.ts), the views (views-list.ts), the exports
-// (export-menu.ts), the review (review.ts), the keys (shortcuts.ts), and
-// the tabs of the flow, the chat and the spec.
+// (canvas.ts), how the centre shows the view — the canvas, 3D, the page,
+// the code (presentation.ts) — the toolbar (toolbar.ts), the minimap
+// (minimap.ts), the options (options-panel.ts), the views
+// (views-list.ts), the exports (export-menu.ts), the review (review.ts),
+// the keys (shortcuts.ts), and the tabs of the flow, the chat and the spec.
 //
 // Entry point: the module itself, loaded by index.html.
 
@@ -32,6 +33,7 @@ import { showOptions } from "./options-panel.ts";
 import { bindPage } from "./page.ts";
 import { loadCoverage, markdownPanel, renderMarkdown, setMarkdown, setPicturePage, showCode, showTab } from "./panel.ts";
 import { openShape, resetSelection, select, selection, tap } from "./picking.ts";
+import { applyPresentation, markPresentation, presentationState } from "./presentation.ts";
 import { mapDots, mapSettled, refreshProjectMap } from "./project-map.ts";
 import { loadBranches, loadCommits, loadHeadRefs, showReviewBars } from "./review.ts";
 import { menuItems } from "./shape-menu.ts";
@@ -118,13 +120,15 @@ async function load(): Promise<void> {
   closeMenu();
   showOptions(state);
   renderCanvasTools(state);
+  markPresentation(state);
   renderViews();
   // While a deep picture is drawn, which may take a while, the line says why.
   const kind = parseView(state.view)?.kind;
   const deep = kind !== undefined && usesDepth(kind) ? depthWarning(state.depth) : null;
   setReason(deep ? `⚠ ${deep}` : "");
-  // A change (a review, a comparison, a commit) is read, not drawn on; the chat has nothing to build from it.
-  element<HTMLButtonElement>("edit").disabled = readOnlyView(state.view);
+  // A change (a review, a comparison, a commit) is read, not drawn on; the chat has nothing to build from it. Drawing
+  // needs the canvas: not a scene, a page or code in the centre.
+  element<HTMLButtonElement>("edit").disabled = readOnlyView(state.view) || state.as !== "canvas";
   element("chat-tab").hidden = readOnlyView(state.view);
 
   /** The scene is on the canvas: a failure after it (the flow, the page) leaves the picture be. */
@@ -159,6 +163,10 @@ async function load(): Promise<void> {
 
     if (reviewing(state.view)) void loadBranches(state);
     setPicturePage(result.markdown);
+    // The centre as the link says: the scene in 3D, the page or the code over the canvas, or the canvas alone.
+    await applyPresentation(state, result.diagram);
+
+    if (overtaken()) return;
     refreshProjectMap();
     await loadFlow();
   } catch (error) {
@@ -180,6 +188,7 @@ async function load(): Promise<void> {
       shownHash = hash;
       showEmpty({ head: "This picture could not be drawn", why: message });
       updateMinimap();
+      void applyPresentation(state, null);
     }
   }
 
@@ -210,7 +219,7 @@ if (new URLSearchParams(location.search).get("embed") === "1") document.body.cla
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 
 // A handle for the browser tests and for debugging in the console: the canvas and the state of the page.
-(window as unknown as { archdiff: unknown }).archdiff = { canvas: canvasHandle, state: currentLink, nodes: () => nodes, drawn: () => drawn, selected: selection, peeked: () => canvasHandle()?.peeked() ?? null, mapDots, mapSettled, menuOpen };
+(window as unknown as { archdiff: unknown }).archdiff = { canvas: canvasHandle, state: currentLink, nodes: () => nodes, drawn: () => drawn, selected: selection, peeked: () => canvasHandle()?.peeked() ?? null, presentation: presentationState, mapDots, mapSettled, menuOpen };
 
 void (async () => {
   // A repository the server cannot read (a broken archdiff.json) is said in the middle of the page, not a blank one.

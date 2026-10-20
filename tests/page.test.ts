@@ -969,3 +969,39 @@ test("Shift or Ctrl+tap selects several shapes; a right click opens the menu; th
   await page!.waitForFunction(`location.hash.includes("inside%3Asrc%2Flib%2Forders.ts")`);
   await page!.waitForFunction(`document.querySelector("#project-map").hidden`);
 });
+
+test("the centre shows the view as the link says: in 3D, as its Markdown page, as the code of its subject, and as the canvas again", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/#view=module:src/lib/orders.ts&as=3d`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/orders.ts"`);
+  // The 3D module is a chunk of its own: the scene is there once it loaded and drew this view (or said it has no WebGL).
+  await page!.waitForFunction(`window.archdiff.presentation().as === "3d" && (window.archdiff.presentation().three?.view === "module:src/lib/orders.ts" || window.archdiff.presentation().three?.webgl === false)`, undefined, { timeout: 15000 });
+  const three = (await page!.evaluate("window.archdiff.presentation().three")) as { webgl: boolean; shapes: number; lines: number; lanes: number };
+  const shapes = (await page!.evaluate("window.archdiff.nodes().size")) as number;
+  assert.equal(await page!.inputValue("#show-as"), "3d");
+  assert.equal(await page!.getAttribute("body", "data-as"), "3d");
+  assert.ok(await page!.isVisible("#three"), "the 3D box is shown over the canvas");
+  assert.ok(await page!.isDisabled("#edit"), "drawing needs the canvas");
+
+  // A block per shape of the picture, a tube per line, a terrace per lane; a browser without WebGL says so instead.
+  if (three.webgl) {
+    assert.equal(three.shapes, shapes, JSON.stringify(three));
+    assert.ok(three.lines >= 1 && three.lanes >= 1, JSON.stringify(three));
+  } else assert.ok((await page!.textContent("#three"))?.includes("WebGL"));
+
+  // The Markdown page in the centre: the same page the right panel shows.
+  await page!.selectOption("#show-as", "markdown");
+  await page!.waitForFunction(`window.archdiff.presentation().as === "markdown" && (document.querySelector("#reader-body h1")?.textContent ?? "").includes("orders")`);
+  assert.equal(await page!.textContent("#reader-body h1"), await page!.textContent("#markdown h1"));
+  assert.ok(await page!.isHidden("#three"));
+
+  // The code of the subject: the module's file, line by line.
+  await page!.selectOption("#show-as", "code");
+  await page!.waitForFunction(`window.archdiff.presentation().as === "code" && (document.querySelector("#reader-code")?.textContent ?? "").includes("export")`);
+  assert.ok((await page!.textContent("#reader-code"))?.startsWith("src/lib/orders.ts"));
+
+  // The canvas again: the overlays gone, the editor allowed.
+  await page!.selectOption("#show-as", "canvas");
+  await page!.waitForFunction(`window.archdiff.presentation().as === "canvas" && document.querySelector("#reader").hidden`);
+  assert.ok((await page!.isHidden("#three")) && (await page!.isHidden("#reader")));
+  assert.equal(await page!.isDisabled("#edit"), false);
+});

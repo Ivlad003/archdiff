@@ -17,6 +17,7 @@ import { copyText, showCode } from "./panel.ts";
 import { askSelected, deeperView, labelOf, select, selection, showEdge, toggleSelected } from "./picking.ts";
 import { toggleProjectMap } from "./project-map.ts";
 import { reviewBase } from "./review.ts";
+import { fitPresentation } from "./presentation.ts";
 import { commitOfShape, standsFor, subjectView, tagOf } from "../../src/shape-keys.ts";
 import { parseView } from "../../src/view-keys.ts";
 
@@ -88,7 +89,7 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
   return [
     { label: "Ask the agent about this picture", run: () => askSelected([]) },
     { label: "Project map", hint: "p", run: () => toggleProjectMap(true) },
-    { label: "Fit the picture", hint: "0", run: () => page.canvas()?.scrollToContent() },
+    { label: "Fit the picture", hint: "0", run: () => fitPresentation() },
     { label: "Clear the selection", hint: "Esc", disabled: selection().length === 0, run: () => select([]) },
     { label: "Edit the drawing", hint: "e", disabled: readOnlyView(now.view), run: () => setMode("edit") },
   ];

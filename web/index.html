@@ -106,9 +106,16 @@
         </div>
         <div id="canvas-wrap">
           <div id="canvas"></div>
+          <div id="three" hidden></div>
+          <div id="reader" hidden>
+            <div id="reader-note" class="muted" hidden></div>
+            <div id="reader-body" class="prose" hidden></div>
+            <pre id="reader-code" hidden></pre>
+          </div>
           <div id="empty" hidden></div>
           <div id="canvas-tools">
             <select id="picture" title="Which picture the canvas draws: another picture of this subject, or an overview"></select>
+            <select id="show-as" title="How the centre shows the view: the canvas, the same picture in 3D (the lanes as terraces), its Markdown page, or the code of its subject"></select>
             <span class="group" title="How much the picture shows at once: minimal (depth 1, 20 shapes, lines of weight 2+), normal (the defaults), full (one level deeper, 200 shapes, every line, hubs drawn)">
               <button data-detail="minimal">minimal</button><button data-detail="normal">normal</button><button data-detail="full">full</button>
             </span>

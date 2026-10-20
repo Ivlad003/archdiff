@@ -1,7 +1,8 @@
 // The toolbar over the canvas: the picture select (this subject's
-// pictures, then the overviews), the detail presets and depth −/+, the
-// tools mix and dim, close opened, split, the lanes (which show; rows or
-// columns), the minimap and the project map, only-changes, and find.
+// pictures, then the overviews), the show-as select (the canvas, 3D, the
+// Markdown, the code), the detail presets and depth −/+, the tools mix
+// and dim, close opened, split, the lanes (which show; rows or columns),
+// the minimap and the project map, only-changes, and find.
 // `renderCanvasTools` sets every button from the link on each load;
 // `setPictureLanes` takes the lanes of the picture once it is drawn.
 //
@@ -11,12 +12,13 @@
 import { findShapes } from "./chains.ts";
 import { element } from "./dom.ts";
 import { clearNotice, notice } from "./title.ts";
-import { OVERVIEWS, currentLink, detailPresets, setLink, type Detail, type Link } from "./link.ts";
+import { OVERVIEWS, PRESENTATIONS, currentLink, detailPresets, setLink, type Detail, type Link, type Presentation } from "./link.ts";
 import { updateMinimap, toggleMinimap } from "./minimap.ts";
 import { siblingViews } from "./navigation.ts";
 import { applyOptions } from "./options-panel.ts";
 import { page } from "./page.ts";
 import { select, selection, tools } from "./picking.ts";
+import { fitPresentation } from "./presentation.ts";
 import { projectMapOpen, toggleProjectMap } from "./project-map.ts";
 import { defaultDepth, parseView, usesDepth } from "../../src/view-keys.ts";
 
@@ -81,6 +83,7 @@ export function renderCanvasTools(state: Link): void {
 
   for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) button.classList.toggle("active", button.dataset["detail"] === detail);
   // A view that goes no depth from a subject (the layers, a matrix) has no depth to step.
+  renderShowAs(state);
   const kind = parseView(state.view)?.kind;
   const stepped = kind !== undefined && usesDepth(kind);
 
@@ -98,6 +101,18 @@ export function renderCanvasTools(state: Link): void {
   element<HTMLButtonElement>("tool-project").classList.toggle("active", projectMapOpen());
   renderLanes(state);
   updateMinimap();
+}
+
+/** The show-as select: how the centre shows the view, as the link says; a pick goes into the link. */
+function renderShowAs(state: Link): void {
+  const showAs = element<HTMLSelectElement>("show-as");
+
+  if (showAs.options.length === 0) {
+    for (const [name, label] of PRESENTATIONS) showAs.append(new Option(label, name));
+    showAs.addEventListener("change", () => setLink({ ...currentLink(), as: showAs.value as Presentation }));
+  }
+
+  showAs.value = state.as;
 }
 
 /** Turns a tool of the tap on or off (`m` mix, `d` dim); one at a time, and turning dim off clears the dimming. */
@@ -141,7 +156,7 @@ function stepDepth(step: -1 | 1): void {
   setLink({ ...now, depth: Math.max(0, current + step) });
 }
 
-element<HTMLButtonElement>("fit").addEventListener("click", () => page.canvas()?.scrollToContent());
+element<HTMLButtonElement>("fit").addEventListener("click", () => fitPresentation());
 element<HTMLSelectElement>("picture").addEventListener("change", () => setLink({ ...currentLink(), view: element<HTMLSelectElement>("picture").value, expand: [] }));
 
 for (const button of document.querySelectorAll<HTMLButtonElement>("#canvas-tools [data-detail]")) {

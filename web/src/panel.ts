@@ -7,8 +7,8 @@
 // away, remembered in this browser.
 //
 // Entry points: `showTab`, `renderMarkdown`, `setMarkdown`, `showCode`,
-// `copyText`, `setPicturePage`, `showPicturePage`, `markdownPanel`,
-// `loadCoverage`, `togglePanel`.
+// `renderCode`, `copyText`, `setPicturePage`, `showPicturePage`,
+// `picturePageMarkdown`, `markdownPanel`, `loadCoverage`, `togglePanel`.
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
@@ -161,23 +161,33 @@ export function showPicturePage(): void {
   setMarkdown(markdownPanel, picturePage);
 }
 
+/** The Markdown of the current picture, for the centre when it shows the page. */
+export function picturePageMarkdown(): string {
+  return picturePage;
+}
+
 // ── Code and coverage ────────────────────────────────────────────────────────
 
-/** The code of a shape: the file with the shape's lines marked and scrolled into view. */
-/** The files the Code tab has asked for: only the newest one is drawn. */
-let codeLoads = 0;
+/** The files each code element has asked for: only the newest one is drawn in it. */
+const codeLoads = new WeakMap<HTMLElement, number>();
 
-export async function showCode(node: Shape): Promise<void> {
+/**
+ * The code of a shape in `target`: the file, line by line with its numbers, the shape's lines marked (a module's
+ * are not: the whole file is the shape); the first marked line comes back, for the caller to scroll to. A file asked
+ * for after this one draws instead: the code of the shape picked last, however slow the first was. Null when the
+ * shape has no file, or the file could not be read: the element says so, or is empty.
+ */
+export async function renderCode(target: HTMLElement, node: Shape): Promise<HTMLElement | null> {
   const file = node.ref?.file;
-  // A file asked for after this one draws instead: the code of the shape picked last, however slow the first was.
-  const mine = ++codeLoads;
+  const mine = (codeLoads.get(target) ?? 0) + 1;
+  codeLoads.set(target, mine);
 
   if (!file) {
     // Nothing to copy either: the last file's text would pass for this shape's.
-    codePanel.textContent = "";
-    delete codePanel.dataset["text"];
+    target.textContent = "";
+    delete target.dataset["text"];
 
-    return;
+    return null;
   }
 
   let text: string;
@@ -185,20 +195,20 @@ export async function showCode(node: Shape): Promise<void> {
   try {
     text = await api.file(file, codeHead(currentLink()));
   } catch (error) {
-    if (mine !== codeLoads) return;
-    codePanel.textContent = error instanceof Error ? error.message : String(error);
-    delete codePanel.dataset["text"];
+    if (mine !== codeLoads.get(target)) return null;
+    target.textContent = error instanceof Error ? error.message : String(error);
+    delete target.dataset["text"];
 
-    return;
+    return null;
   }
 
-  if (mine !== codeLoads) return;
+  if (mine !== codeLoads.get(target)) return null;
 
   const from = node.ref?.line ?? 1;
   const to = node.ref?.endLine ?? from;
   const mark = node.kind !== "module";
-  codePanel.replaceChildren();
-  codePanel.dataset["text"] = text;
+  target.replaceChildren();
+  target.dataset["text"] = text;
   const lines = text.split("\n");
   let first: HTMLElement | null = null;
 
@@ -209,12 +219,22 @@ export async function showCode(node: Shape): Promise<void> {
     number.className = "n";
     number.textContent = String(i + 1);
     line.append(number, lines[i] ?? "");
-    codePanel.append(line);
+    target.append(line);
 
     if (i + 1 === from) first = line;
   }
 
-  codePanel.prepend(Object.assign(document.createElement("div"), { className: "muted", textContent: `${file}${from > 1 ? `:${from}` : ""}` }));
+  target.prepend(Object.assign(document.createElement("div"), { className: "muted", textContent: `${file}${from > 1 ? `:${from}` : ""}` }));
+
+  return first;
+}
+
+/** The code of a shape on the Code tab: the file with the shape's lines marked and scrolled into view. */
+export async function showCode(node: Shape): Promise<void> {
+  const first = await renderCode(codePanel, node);
+
+  // No file, or one that could not be read: the panel says so where it is, without coming to the front.
+  if (codePanel.dataset["text"] === undefined) return;
   showTab("code");
   first?.scrollIntoView({ block: "center" });
 }
