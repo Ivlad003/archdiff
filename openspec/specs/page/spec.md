@@ -261,9 +261,33 @@ The system SHALL keep the page's parts in modules of their own — the title and
 - **WHEN** the page opens on the sample repository
 - **THEN** the views list, the canvas and every tab work as before the split, and the page tests pass
 
+### Requirement: The panels give way to the canvas
+
+The system SHALL fold each side panel away and back from the header's button, the tab on the centre's edge beside it and its key (Ctrl+B, Ctrl+]), SHALL give it the width its edge is dragged to (folded away when dragged well past its narrowest, the page's own width on a double click), and SHALL remember both in the browser. Where the window has no room to dock a panel beside a centre of 730 pixels — the right panel first, the left one when it alone leaves less — the panel SHALL be a drawer: out of sight and out of the Tab key's way until asked for, then laid over the canvas, which keeps its width and the picture's place. The right drawer SHALL open for what a tap picks (a shape, a line, a selection, the code, a question for the agent) and go when nothing is picked any more, unless the reader opened it; a shape picked where the drawer opens SHALL be moved clear of it with its picture, which goes back where it was when the drawer goes, unless the reader moved it since; the left drawer SHALL go once a view is picked or the centre is pressed. The full canvas (`f`, the button at the end of the title; remembered) SHALL make both panels drawers whatever room the window has. A docked panel the reader folded away SHALL stay away on a pick, its tab marked until it is shown. The canvas toolbar SHALL fold to the picture, show as and find — on the reader's press (remembered), else by itself on a canvas under 860 pixels — keeping a tool that is on in sight; the legend SHALL list the kinds of shape and of line of the picture shown and the marks of a change on it, drawn by the looks the canvas draws them with, and hide on the reader's press (remembered); the menus of the page (options, export, lanes) SHALL close on a press outside them and on Escape, one open at a time; the note at the top of the Chat, the Flow and the Spec tab SHALL fold away (remembered).
+
+#### Scenario: A window with the room
+
+- **WHEN** the tab on the details' edge is pressed in a window 1900 pixels wide, a shape is tapped, and Ctrl+] is pressed
+- **THEN** the canvas is wider by the panel's 420 pixels and the browser remembers the fold; the tab is marked; the panel is back and the mark gone
+
+#### Scenario: A window without the room
+
+- **WHEN** the window is 1300 pixels wide and a shape is tapped, then Escape is pressed
+- **THEN** the details open over the canvas with the shape's page, the canvas as wide and the picture as large as before; then they are gone and nothing is selected
+
+#### Scenario: The full canvas
+
+- **WHEN** `f` is pressed in a window 1900 pixels wide, and again
+- **THEN** the canvas is 1900 pixels wide with both panels drawers; then both are docked as they were
+
+#### Scenario: The legend is of the picture
+
+- **WHEN** the whole map is shown, then a function's logic
+- **THEN** the legend reads module, the import and the import of types alone; then the step, the exit and the next step, and no module
+
 ### Requirement: The keys
 
-The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or Cmd held: `/` focuses find, `v` the filter of the views (showing the left panel), `o` opens the options, `p` the project map, `0` fits, Backspace goes back, the arrows walk from the picked shape, Enter goes into it, `s` splits, `m` and `d` turn mix and dim on and off, `l` flips the lanes, `[` and `]` step the head through the branches, `e` edits, Escape clears the selection (or closes the menu and the project map first); Ctrl+B and Ctrl+] SHALL fold the left and the right panel, Ctrl+S save a drawing. In a review or a comparison the keys of the tools (`p`, `s`, `m`, `d`, `e`) SHALL do nothing.
+The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or Cmd held: `/` focuses find, `v` the filter of the views (showing the left panel), `o` opens the options, `p` the project map, `0` fits, Backspace goes back, the arrows walk from the picked shape, Enter goes into it, `s` splits, `m` and `d` turn mix and dim on and off, `l` flips the lanes, `[` and `]` step the head through the branches, `e` edits, `f` turns the full canvas on and off, Escape clears the selection and closes an open drawer with it (a menu and the project map close first); Ctrl+B and Ctrl+] SHALL fold the left and the right panel, Ctrl+S save a drawing. In a review or a comparison the keys of the tools (`p`, `s`, `m`, `d`, `e`) SHALL do nothing.
 
 #### Scenario: Find and filter
 
@@ -277,9 +301,28 @@ The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or
 
 ### Requirement: The browser remembers the reader's choices
 
-The system SHALL remember in the browser, and only there, the zoom and place of every view the reader moved (a view left where the fit put it is fitted again, to the window it is shown in then; a place that no longer shows the picture gives way to the fit), the folded side panels, a hidden minimap, the theme (the system's at first) and the options kept with *remember as defaults*; the options menu SHALL offer the presets of who reads — reviewer (the changes and the tests overlay), newcomer (one step deep, thirty shapes) and architect (the heat, sixty shapes, lines of weight two) — and *reset*, which forgets the remembered defaults and sets every option of the picture back to the built-in one (opened modules, hidden lanes and type-only imports too). Both SHALL say what they did once the picture is drawn again. A private window without storage SHALL work the same, forgetting.
+The system SHALL remember in the browser, and only there, the zoom and place of every view the reader moved (a view left where the fit put it is fitted again, to the window it is shown in then; a place that no longer shows the picture gives way to the fit), the folded side panels and their widths, the full canvas, a folded toolbar, a hidden legend, a hidden minimap, the theme (the system's at first) and the options kept with *remember as defaults*; the options menu SHALL offer the presets of who reads — reviewer (the changes and the tests overlay), newcomer (one step deep, thirty shapes) and architect (the heat, sixty shapes, lines of weight two) — and *reset*, which forgets the remembered defaults and sets every option of the picture back to the built-in one (opened modules, hidden lanes and type-only imports too). Both SHALL say what they did once the picture is drawn again. A private window without storage SHALL work the same, forgetting.
 
 #### Scenario: Back to a view
 
 - **WHEN** a reader zooms into a view, opens another and comes back
 - **THEN** the view opens at the zoom and place it was left
+
+### Requirement: The settings window
+
+The system SHALL open, from *agents & keys…* beside the Chat tab's picker, a window over the page with the user's settings and the file they are kept in: every agent with the program started for it or why it cannot run; for a built-in agent a field for its program and one for its model, and for Claude Code a box *through OpenRouter*; an agent of the user's own added by a name, a command typed as one line (a word with spaces in double quotes), the protocol and the resume flag, and removed by a button; the keys by name with their last characters, a key set by its name and value and forgotten by a button. Every change SHALL be sent at once and the window drawn again from the answer, the field in use keeping the focus; what is refused SHALL be said in the window with nothing changed, and the picker SHALL read the agents again after a change. A key's value SHALL leave its field once it is kept and SHALL appear nowhere on the page. While the window is open the keys of the page SHALL not act; Escape, ✕ and a press beside the window SHALL close it.
+
+#### Scenario: An agent of the user's own
+
+- **WHEN** the reader adds an agent "mine" with the command `"C:\Program Files\nodejs\node.exe" agent.mjs`
+- **THEN** the settings file holds its command as two words, the window shows the program started for it, and the picker offers "mine"
+
+#### Scenario: A key typed once
+
+- **WHEN** the reader sets `OPENROUTER_API_KEY` to a value ending in "cdef"
+- **THEN** the window lists the key as "set …cdef", the value's field is empty, and the page holds the value nowhere
+
+#### Scenario: The keys of the page wait
+
+- **WHEN** the window is open and the reader presses "f"
+- **THEN** the panels stay as they are, and Escape closes the window

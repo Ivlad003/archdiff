@@ -4,7 +4,8 @@
 // renders — views, tasks, lanes, chips, questions — were each a block
 // of createElement calls), and a flag remembered in this browser.
 //
-// Entry points: `element`, `h`, `remembered`, `remember`.
+// Entry points: `element`, `h`, `remembered`, `remember`, `rememberedText`,
+// `rememberText`, `rememberedList`, `rememberList`.
 
 export function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -61,6 +62,25 @@ export function remembered(key: string): boolean {
 export function remember(key: string, value: boolean): void {
   try {
     localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    // A private window: the choice lasts the page.
+  }
+}
+
+/** A word this browser remembered under `key` (a width, a choice of three); null when none, or when the storage is off. */
+export function rememberedText(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps a word under `key` in this browser; null forgets it. */
+export function rememberText(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
   } catch {
     // A private window: the choice lasts the page.
   }

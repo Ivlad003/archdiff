@@ -14,6 +14,7 @@
 
 import { api } from "./api.ts";
 import { element, h } from "./dom.ts";
+import { revealDetails } from "./layout.ts";
 import { page } from "./page.ts";
 import { readOnlyView, setLink, currentLink } from "./link.ts";
 import { pictureQueryText } from "../../src/options.ts";
@@ -29,6 +30,8 @@ let agentName: string | null = null;
 let currentRun: { id: string; close: () => void; sessionId: string | null; stopped: boolean; agent: string } | null = null;
 /** Whether a run is going: a second one would write over the first's work (the server refuses it too), and the transcript follows one. */
 let running = false;
+/** An answer to the agent's question given while its turn still ran: sent when the run ends. */
+let queuedAnswer: string | null = null;
 
 /** The turn being written: the question's row, its steps folded under a summary, and the answer. */
 let turn: { steps: HTMLDetailsElement; summary: HTMLElement; count: number; answer: HTMLDivElement; lastText: string; answered: boolean } | null = null;
@@ -154,6 +157,7 @@ export function askAbout(subjects: { tag: string; label: string }[]): void {
   askSubjects = subjects.filter((subject) => !seen.has(subject.tag) && seen.add(subject.tag));
   renderAskAbout();
   page.showTab("chat");
+  revealDetails();
   askInput.focus();
 }
 
@@ -166,7 +170,8 @@ export function askAbout(subjects: { tag: string; label: string }[]): void {
 function askQuestion(): void {
   const question = askInput.value.trim();
 
-  if (question === "") return;
+  // A turn still going takes no second task: the question stays in its field, to be asked when the run's line says it ended.
+  if (question === "" || (agentName !== null && busy())) return;
   const state = currentLink();
   const picture = element<HTMLInputElement>("ask-picture").checked && !readOnlyView(state.view);
   const about = askSubjects.length > 0 ? `\n\nIt is about: ${askSubjects.map((subject) => `${subject.label} (${subject.tag})`).join(", ")}.` : "";
@@ -315,6 +320,16 @@ function showQuestion(text: string, run: { sessionId: string | null }): boolean 
 
   const answer = (reply: string): void => {
     box.hidden = true;
+
+    // The agent asks in the middle of its turn, and the turn goes on for a moment (its result, the checks): an answer
+    // given meanwhile is kept and sent when the turn ends, to the session it has then — not refused and lost.
+    if (running) {
+      queuedAnswer = reply;
+      runState.textContent = `the answer goes to ${currentRun ? labelOf(currentRun.agent) : "the agent"} as soon as this turn ends`;
+
+      return;
+    }
+
     runTask(reply, run.sessionId);
   };
 
@@ -423,6 +438,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
   if (!resume) {
     transcript.replaceChildren();
     turn = null;
+    queuedAnswer = null;
   }
 
   appendEvent("you", `▸ ${shown.length > 300 ? `${shown.slice(0, 300)}…` : shown}`);
@@ -466,11 +482,17 @@ export function runTask(written: string, resume: string | null, shown: string = 
           // The agent changed the code: the live diagram and the page.views() follow.
           void page.loadViews().then(() => page.load());
           void loadTasks();
+          // The answer the reader gave while the turn ran: on with it, in the session the turn left (a stopped run takes none).
+          const kept = queuedAnswer;
+          queuedAnswer = null;
+
+          if (kept !== null && !run.stopped && run.sessionId !== null) runTask(kept, run.sessionId);
         },
       );
     })
     .catch((error: unknown) => {
       showRunError(error);
+      queuedAnswer = null;
       setRunning(false);
     });
 }
@@ -547,7 +569,7 @@ function labelOf(name: string | null): string {
 export function setAgentName(name: string | null): void {
   agentName = name;
   runButton.disabled = !name;
-  element("agent-name").textContent = name ? "" : anyInstalled ? "no agent picked: the tasks are only written" : "no agent installed: Claude Code, Cursor, Codex or OpenCode on the PATH runs the tasks";
+  element("agent-name").textContent = name ? "" : anyInstalled ? "no agent picked: the tasks are only written" : "no agent found: Claude Code, Cursor, Codex or OpenCode runs the tasks — place one in the settings";
 }
 
 const agentSelect = element<HTMLSelectElement>("agent-select");
@@ -573,7 +595,7 @@ export async function loadAgents(): Promise<void> {
     ...offered.agents.map((agent) => {
       agentLabels.set(agent.name, agent.label);
 
-      return h("option", { value: agent.name, disabled: !agent.installed, title: agent.installed ? "" : "not installed on this computer" }, agent.installed ? agent.label : `${agent.label} — not installed`);
+      return h("option", { value: agent.name, disabled: !agent.installed, title: agent.installed ? "" : "not found on this computer: the settings say why, and place it" }, agent.installed ? agent.label : `${agent.label} — not installed`);
     }),
     h("option", { value: "" }, "none: write the tasks only"),
   );

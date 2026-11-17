@@ -8,7 +8,7 @@ A drawn change becomes a task a coding agent builds, in this repository, from th
 
 ### Requirement: The agent is picked on the page, never implied
 
-The system SHALL offer, in the Chat tab, the coding agents installed on this computer — Claude Code (`claude -p --output-format stream-json --verbose --permission-mode acceptEdits`), Cursor's CLI (`cursor-agent -p --output-format stream-json --trust`), Codex (`codex exec --json` in its workspace-write sandbox, resumed by `codex exec resume <id>`), OpenCode (`opencode run --format json --auto`, resumed by `--session <id>`) and a custom command of `archdiff.json` (`agent.command`, with the `protocol` it prints: `stream-json`, `codex` or `opencode`) — the ones not installed greyed out, and "none" (the tasks only written). `GET /api/agents` SHALL list them with whether each is installed, and the one picked first: `--agent` or `archdiff.json`'s `agent`, else the first installed; the page SHALL remember the pick in the browser. Every run SHALL name its agent, a follow-up the one that holds the session; an agent unknown or not installed SHALL be refused (400) by name. Every run SHALL start from a button or a command with the prompt as shown, and every prompt sent to an agent — a run, a document to become the contract, the mocks of a flow — SHALL be saved under `.archdiff/tasks/` (`GET /api/tasks` lists them, newest first). A POST whose Origin is not the server's own SHALL be refused (403): a page of another site cannot start an agent.
+The system SHALL offer, in the Chat tab, the coding agents installed on this computer — Claude Code (`claude -p --output-format stream-json --verbose --permission-mode acceptEdits`), Cursor's CLI (`cursor-agent -p --output-format stream-json --trust`), Codex (`codex exec --json` in its workspace-write sandbox, resumed by `codex exec resume <id>`), OpenCode (`opencode run --format json --auto`, resumed by `--session <id>`) and a custom command of `archdiff.json` (`agent.command`, with the `protocol` it prints: `stream-json`, `codex` or `opencode`) or of the user's settings — the ones not installed greyed out, and "none" (the tasks only written). `GET /api/agents` SHALL list them with whether each is installed, and the one picked first: `--agent` or `archdiff.json`'s `agent`, else the first installed; the page SHALL remember the pick in the browser. Every run SHALL name its agent, a follow-up the one that holds the session; an agent unknown or not installed SHALL be refused (400) by name. Every run SHALL start from a button or a command with the prompt as shown, and every prompt sent to an agent — a run, a document to become the contract, the mocks of a flow — SHALL be saved under `.archdiff/tasks/` (`GET /api/tasks` lists them, newest first). A POST whose Origin is not the server's own SHALL be refused (403): a page of another site cannot start an agent.
 
 #### Scenario: No agent picked
 
@@ -42,6 +42,11 @@ The system SHALL append to every new run the archdiff protocol: `ARCHITECTURE.md
 
 - **WHEN** the agent's text holds an `archdiff-question` block with three options
 - **THEN** the Chat tab shows the question with three buttons and a field for another answer, and the chosen answer resumes the agent's session
+
+#### Scenario: An answer given before the turn ends
+
+- **WHEN** the reader picks an option while the agent's turn still runs (its result, the checks after it)
+- **THEN** the answer is kept and sent to the agent's session as soon as the turn ends, and the run's line says so; a question typed in the ask row meanwhile stays in its field
 
 ### Requirement: The Chat tab's commands
 
@@ -96,3 +101,51 @@ The system SHALL read Cursor's stream-json (`chat_id` as the session, `--resume 
 
 - **WHEN** a Cursor-format agent answers with an archdiff-question block and the user picks an option
 - **THEN** the next run resumes the chat with the answer
+
+### Requirement: An agent is found where it is installed, and started as what it is
+
+The system SHALL look for an agent's command in the directories of the PATH and then where the agents' installers put them for the user — `~/.local/bin`, `~/.opencode/bin`, and npm's directory on Windows — and SHALL take a command given as a path for that file or nothing. On Windows, where a command installed by npm is a batch file, the system SHALL start what the file runs — the program it names, or the script it names with node (the one beside the shim, else the one the server runs on) — with the task as one argument exactly as it was written, and SHALL refuse a batch file that is no such shim, saying that it cannot take a task of several lines. An agent that cannot be started SHALL be offered as not installed, with the reason; stopping a run on Windows SHALL end the processes the agent started with it.
+
+#### Scenario: Codex installed by npm on Windows
+
+- **WHEN** `codex` is the shim `codex.cmd` and the reader runs a task of several lines with quotes, `&` and `%PATH%` in it
+- **THEN** node runs the script the shim names, and the task reaches it whole as its last argument
+
+#### Scenario: Claude Code off the server's PATH
+
+- **WHEN** the server's PATH lacks `~/.local/bin` and `claude` is installed there
+- **THEN** the Chat tab offers Claude Code, and the settings show the program started for it
+
+#### Scenario: A batch file that is no shim
+
+- **WHEN** an agent's command is a batch file that names no file beside itself
+- **THEN** the agent is offered as not installed, and the reason names the file and says to name the program it runs
+
+### Requirement: The agents and the keys are the user's settings
+
+The system SHALL keep the user's settings in `<home>/.archdiff/settings.json` (`ARCHDIFF_HOME` names another home), written for the user alone and never in the repository: for a built-in agent the program to start when it is not found by its name, the model it is told to use (`--model` for Claude Code and Cursor, `-m` for OpenCode, the `model` configuration value for Codex) and, for Claude Code, whether it goes through OpenRouter; agents of the user's own (a name, a command, the protocol, the resume flag); and the keys — environment variables named `…_KEY` or `…_TOKEN`, each one line. Every agent run SHALL get the keys in its environment over the server's own, and no event of a run SHALL show a key's value. `GET /api/settings` SHALL list every agent with the program started for it or why it cannot run, and each key by its name and last four characters, never its value; `POST /api/settings` SHALL replace `agents` and `custom` when given and set (a string) or forget (null) each key of `keys`, refusing a wrong change whole with the field named, and a change to a file that does not read as settings. Both SHALL answer the computer archdiff runs on and refuse any other address with 403. Claude Code set to go through OpenRouter SHALL run with `ANTHROPIC_BASE_URL=https://openrouter.ai/api`, OpenRouter's key (`OPENROUTER_API_KEY` of the settings, else of the server's environment) as `ANTHROPIC_AUTH_TOKEN` and an empty `ANTHROPIC_API_KEY`, and SHALL not be offered, saying why, while there is no key.
+
+#### Scenario: A key is set
+
+- **WHEN** the reader sets `OPENROUTER_API_KEY` in the settings and runs an agent that prints its environment
+- **THEN** the settings list the key as set with its last four characters, the agent has it, and the run's events show `•••` in its place
+
+#### Scenario: A model for OpenCode
+
+- **WHEN** the settings give OpenCode the model `openrouter/anthropic/claude-sonnet-4.5`
+- **THEN** every run of OpenCode ends its arguments with `-m openrouter/anthropic/claude-sonnet-4.5` before the task
+
+#### Scenario: Claude Code through OpenRouter without a key
+
+- **WHEN** Claude Code is set to go through OpenRouter and no `OPENROUTER_API_KEY` is set
+- **THEN** Claude Code is offered as not installed, and the reason says the key is missing
+
+#### Scenario: What is no key is refused
+
+- **WHEN** a change sets `NODE_OPTIONS` among the keys
+- **THEN** the change is refused with 400, the message says a key is named `…_KEY` or `…_TOKEN`, and nothing is written
+
+#### Scenario: A request from another computer
+
+- **WHEN** the server is bound to every address and the settings are asked for through another address than this computer's own
+- **THEN** the answer is 403 and says the settings are read and changed on the computer archdiff runs on

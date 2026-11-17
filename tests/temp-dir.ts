@@ -2,9 +2,9 @@
 // whether the test passed or threw: the tests write only into copies,
 // never into the fixtures or the repository.
 //
-// Entry point: `withTempDir`.
+// Entry points: `withTempDir`, `canLink`.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,6 +14,21 @@ export async function withTempDir(prefix: string, body: (dir: string) => void | 
 
   try {
     await body(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Whether this computer lets a test make a symbolic link (Windows asks for a privilege): the tests of links skip without it. */
+export function canLink(): boolean {
+  const dir = mkdtempSync(join(tmpdir(), "archdiff-link-probe-"));
+
+  try {
+    symlinkSync(dir, join(dir, "probe"), "dir");
+
+    return true;
+  } catch {
+    return false;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -72,6 +72,8 @@ An analysis of archdiff 0.1 on real repositories (keylang, 480 files; storefront
 
 **Cost and time.** A run is an agent session: minutes and tokens, outside archdiff's control. *State:* `stop` kills the process; the task file survives.
 
+**Keys, and programs named from a page.** The user's settings hold API keys and name the program each agent is, so a page that could write them could start any program and read any key. *State:* they are kept in the user's own file (`~/.archdiff/settings.json`, written for the user alone), outside every repository, and their routes answer only the computer the server runs on, whatever `--host` says, on top of the Host and Origin checks. A key's value is never sent back to the page and is blotted out of what an agent prints; only variables named `…_KEY` or `…_TOKEN` can be set, so the settings cannot set `PATH` or `NODE_OPTIONS`. The keys are plain text in that file, as the agents' own CLIs keep theirs on Linux and Windows; the system's keychain is not used. On Windows `stop` ends the agent's whole process tree.
+
 **Stream formats drift.** The events are read with a tolerant parser: known shapes become text, tool and result events, anything else is shown raw. *State:* verified against Claude Code 2.1 and Cursor's CLI; a change in their stream-json shows as raw lines, not as a failure.
 
 **The plan is a guess from geometry.** A drawn function goes into the nearest module shape; a module into the lane it sits in. *State:* the task says why each place was chosen ("drawn next to …") so the reader can correct it before running.

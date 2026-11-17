@@ -7,7 +7,7 @@
 // returns no file outside the repository.
 //
 // The routes live in routes/*.ts by `METHOD /path` — the pictures, the
-// agent and the contract, git's bars, the specs — over one context; every
+// agent and the contract, git's bars, the specs, the user's settings — over one context; every
 // picture is the one picture.ts draws for the query. Entry points:
 // `serve`, `ServeOptions`, `DEFAULT_PORT`.
 
@@ -17,7 +17,7 @@ import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
-import { AgentRunner, installedAgents, type AgentSpec } from "./agent.ts";
+import { AgentRunner, installedAgents, type AgentSpec, type OfferedAgent } from "./agent.ts";
 import { allowedToolsFor, checkEvents, runChecks } from "./checks.ts";
 import type { Config } from "./config.ts";
 import { isSourceFile } from "./files.ts";
@@ -31,6 +31,8 @@ import { routes as pictureRoutes } from "./routes/pictures.ts";
 import { routes as agentRoutes } from "./routes/agent.ts";
 import { routes as gitRoutes } from "./routes/git.ts";
 import { routes as specRoutes } from "./routes/spec.ts";
+import { routes as settingsRoutes } from "./routes/settings.ts";
+import { agentSpecs, NO_SETTINGS, readSettings } from "./settings.ts";
 
 export interface ServeOptions {
   /** The port to bind; null: the first free port from DEFAULT_PORT up. */
@@ -220,15 +222,15 @@ function withAllowedTools(spec: AgentSpec, config: Config): AgentSpec {
 }
 
 /** The agent a run names among those offered, or the default (the one given, else the first installed); why not, else. */
-function agentFor(offered: readonly { spec: AgentSpec; installed: boolean }[], given: AgentSpec | null, name: string | null): { spec: AgentSpec } | { problem: string } {
+function agentFor(offered: readonly OfferedAgent[], given: AgentSpec | null, name: string | null): { spec: AgentSpec } | { problem: string } {
   const named = name ?? given?.name ?? offered.find((choice) => choice.installed)?.spec.name ?? null;
 
-  if (named === null) return { problem: `no agent installed here: ${offered.map((choice) => choice.spec.label).join(", ")} (any of them, on the PATH)` };
+  if (named === null) return { problem: `no agent installed here: ${offered.map((choice) => choice.spec.label).join(", ")} (any of them, on the PATH or placed in the settings)` };
   const choice = offered.find((candidate) => candidate.spec.name === named);
 
   if (!choice) return { problem: `no agent "${named}" (${offered.map((candidate) => candidate.spec.name).join(", ")})` };
 
-  return choice.installed ? { spec: choice.spec } : { problem: `${choice.spec.label} is not installed here (\`${choice.spec.command[0]}\` is not on the PATH)` };
+  return choice.installed ? { spec: choice.spec } : { problem: `${choice.spec.label} cannot run here: ${choice.problem}` };
 }
 
 /** The picture a query names, drawn on the code it is of; git's refusal (outside a repository, a bad ref) is the request's problem. */
@@ -245,7 +247,7 @@ async function pictureOf(query: URLSearchParams, defaultBase: string | null, ana
 }
 
 /** Every route of the API by `METHOD /path`. */
-const ROUTES = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes };
+const ROUTES = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes, ...settingsRoutes };
 
 /** Answers one request: an API route by its method and path, else a static file of the page. */
 async function handle(ctx: RouteContext, web: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -350,7 +352,12 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   const config = (await analyze(root)).config;
   // The agent given (--agent, archdiff.json): the default of the page, which offers every agent installed here.
   const given = options.agent ?? config.agent;
-  const agents = (): { spec: AgentSpec; installed: boolean }[] => installedAgents(given).map(({ spec, installed }) => ({ spec: withAllowedTools(spec, config), installed }));
+  // The user's settings are read anew for every request: a change of theirs (in the page, by hand) holds from the next run on.
+  const agents = (): OfferedAgent[] => {
+    const settings = readSettings();
+
+    return installedAgents(agentSpecs(settings.ok ? settings.value : NO_SETTINGS, given)).map((offered) => ({ ...offered, spec: withAllowedTools(offered.spec, config) }));
+  };
   // The runner is made once the first run is asked for; every run ends with archdiff running the checks.
   let runner: AgentRunner | null = null;
   const ctx: RouteContext = {

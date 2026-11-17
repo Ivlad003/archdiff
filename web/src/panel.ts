@@ -8,12 +8,13 @@
 // across pages, remembered), a module or a function named in bold opens
 // its view when the page has one, and a module's bullet unfolds its
 // functions; the Markdown of the chat, the spec and the flow is rendered
-// plain. Both side panels fold away, remembered in this browser.
+// plain. The note at the top of a tab (what the chat, the flow and the
+// spec are for) folds away, remembered. How the panels themselves fold,
+// widen and give way to the canvas is layout.ts's.
 //
 // Entry points: `showTab`, `renderMarkdown`, `setMarkdown`, `showCode`,
 // `showCodeAt`, `renderCode`, `CodeSpot`, `copyText`, `setPicturePage`,
-// `showPicturePage`, `picturePageMarkdown`, `markdownPanel`, `loadCoverage`,
-// `togglePanel`.
+// `showPicturePage`, `picturePageMarkdown`, `markdownPanel`, `loadCoverage`.
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
@@ -21,6 +22,7 @@ import { api, type Shape } from "./api.ts";
 import { transcript } from "./chat.ts";
 import { element, remember, rememberList, remembered, rememberedList } from "./dom.ts";
 import { flowText } from "./flow-tab.ts";
+import { revealDetails } from "./layout.ts";
 import { codeHead, currentLink, setLink } from "./link.ts";
 import { fnView, functionsOf, isFilePath } from "./modules.ts";
 import { moduleOfId } from "../../src/shape-keys.ts";
@@ -390,6 +392,7 @@ export async function showCodeAt(spot: CodeSpot): Promise<void> {
   // No file, or one that could not be read: the panel says so where it is, without coming to the front.
   if (codePanel.dataset["text"] === undefined) return;
   showTab("code");
+  revealDetails();
   first?.scrollIntoView({ block: "center" });
 }
 
@@ -403,17 +406,11 @@ export async function loadCoverage(): Promise<void> {
   }
 }
 
-// ── Folding the side panels ──────────────────────────────────────────────────
+// ── The notes over a tab ─────────────────────────────────────────────────────
 
-/** Folds a side panel away or back (Ctrl+B the left, Ctrl+] the right); the choice is remembered in this browser. */
-export function togglePanel(side: "left" | "right", force?: boolean): void {
-  const hidden = document.body.classList.toggle(`hide-${side}`, force);
-  remember(`archdiff.hide-${side}`, hidden);
+// What a tab is for, said once at its top: folded away by the reader, it stays folded (remembered), and the tab's room is its work's.
+for (const help of document.querySelectorAll<HTMLDetailsElement>("details.help")) {
+  const key = `archdiff.help.${help.id}.folded`;
+  help.open = !remembered(key);
+  help.addEventListener("toggle", () => remember(key, !help.open));
 }
-
-element<HTMLButtonElement>("toggle-left").addEventListener("click", () => togglePanel("left"));
-element<HTMLButtonElement>("toggle-right").addEventListener("click", () => togglePanel("right"));
-
-if (remembered("archdiff.hide-left")) document.body.classList.add("hide-left");
-
-if (remembered("archdiff.hide-right")) document.body.classList.add("hide-right");

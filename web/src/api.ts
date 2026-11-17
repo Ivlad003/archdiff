@@ -125,6 +125,38 @@ export interface Branch {
   current: boolean;
 }
 
+/** An agent as the settings window shows it: whose it is, whether it can run here, and what the settings place for it. */
+export interface SettingsAgent {
+  name: string;
+  label: string;
+  /** A built-in agent, one of the user's own (the settings hold it whole), or the one given to the server (archdiff.json, --agent). */
+  from: "built-in" | "settings" | "server";
+  installed: boolean;
+  /** The program started for it; null when its command is nowhere. */
+  path: string | null;
+  problem: string | null;
+  /** A built-in agent: the name it is looked for by. */
+  program: string | null;
+  /** A built-in agent: the program the settings place (null: found by its name); another: its whole command. */
+  command: string | string[] | null;
+  model: string | null;
+  /** Claude Code: whether it goes through OpenRouter; null for every other agent. */
+  openrouter: boolean | null;
+  protocol: string;
+  resume: string | null;
+}
+
+/** The user's settings as the server shows them: never a key's value, only that it is set and its last characters. */
+export interface SettingsView {
+  file: string;
+  /** Why the file does not read as settings (written by hand, broken); null when it does. */
+  problem: string | null;
+  agents: SettingsAgent[];
+  keys: { name: string; hint: string; empty: boolean }[];
+  /** The names suggested, each with whether the server's own environment holds it. */
+  known: { name: string; environment: boolean }[];
+}
+
 export const api = {
   tags: (q: string) => get<{ tags: { tag: string; title: string }[] }>(`/api/tags?q=${encodeURIComponent(q)}`),
   /** The context of the tags in `text`; `query` is the picture's options, for `@view:` (the picture as the page shows it). */
@@ -166,6 +198,10 @@ export const api = {
   code: (view: string) => post<{ markdown: string; intent: string; planned: number }>("/api/code", { view }),
   intent: () => get<{ exists: boolean; markdown: string; file: string }>("/api/intent"),
   intentFromDocument: (text: string, agent: string | null) => post<{ file: string; source: string; layers: number; modules: number; edges: number; markdown: string }>("/api/intent/document", { text, agent }),
+  /** The user's settings: the agents of this computer and the keys; refused when asked from another computer. */
+  settings: () => get<SettingsView>("/api/settings"),
+  /** Changes the settings: `agents` and `custom` replace what was there, each of `keys` is set (a string) or forgotten (null); the settings after it. */
+  changeSettings: (change: { agents?: Record<string, { command: string; model: string; openrouter: boolean }>; custom?: { name: string; command: string[]; protocol: string; resume: string | null }[]; keys?: Record<string, string | null> }) => post<SettingsView>("/api/settings", change),
   /** The agents the Chat tab may offer, whether each is installed here, and the one picked first. */
   agents: () => get<{ agents: { name: string; label: string; installed: boolean }[]; default: string | null }>("/api/agents"),
   check: () => get<{ exists: boolean; ok: boolean; markdown: string }>("/api/check"),

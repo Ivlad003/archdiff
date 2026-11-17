@@ -11,7 +11,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { hostname, networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { startWeb, TEST_PATH, withOwnServer } from "./web-server.ts";
+import { canLink } from "./temp-dir.ts";
+import { fakeCommand, startWeb, TEST_BIN, withOwnServer } from "./web-server.ts";
 
 const root = join(import.meta.dirname, "..");
 
@@ -213,10 +214,15 @@ test("the server refuses what would hang or leak it: a body over the limit, a br
 
   try {
     writeFileSync(join(outside, "secret.txt"), "not yours\n");
-    symlinkSync(join(outside, "secret.txt"), join(dir, "notes-link.txt"));
-    symlinkSync(outside, join(dir, "up"));
-    assert.equal((await fetch(`${base}/api/file?path=notes-link.txt`)).status, 404);
-    assert.equal((await fetch(`${base}/api/file?path=${encodeURIComponent("up/secret.txt")}`)).status, 404);
+
+    // Without the privilege to make a link (Windows) there is no link to refuse.
+    if (canLink()) {
+      symlinkSync(join(outside, "secret.txt"), join(dir, "notes-link.txt"));
+      symlinkSync(outside, join(dir, "up"));
+      assert.equal((await fetch(`${base}/api/file?path=notes-link.txt`)).status, 404);
+      assert.equal((await fetch(`${base}/api/file?path=${encodeURIComponent("up/secret.txt")}`)).status, 404);
+    }
+
     assert.equal((await fetch(`${base}/api/file?path=tsconfig.json`)).status, 200);
   } finally {
     rmSync(join(dir, "notes-link.txt"), { force: true });
@@ -533,10 +539,10 @@ test("after a run the contract and the configured checks run, their results in t
   ));
 
 test("Claude Code with checks still gets its task: the allowed tools end before the prompt", async () => {
-  // A `claude` on the test PATH that is the fake agent, reading its arguments as Claude Code does: `--allowedTools`
-  // takes everything up to `--`, and a prompt swallowed by it ends the run with an error and no text.
-  const wrapper = join(TEST_PATH, "claude");
-  writeFileSync(wrapper, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(root, "tests/fixtures/fake-agent.mjs"))} "$@"\n`, { mode: 0o755 });
+  // A `claude` on the test PATH that is the fake agent — a shell script, or on Windows the shim npm would write —
+  // reading its arguments as Claude Code does: `--allowedTools` takes everything up to `--`, and a prompt swallowed
+  // by it ends the run with an error and no text.
+  const wrapper = fakeCommand(TEST_BIN, "claude", join(root, "tests/fixtures/fake-agent.mjs"));
 
   try {
     await withOwnServer(
@@ -555,7 +561,7 @@ test("Claude Code with checks still gets its task: the allowed tools end before 
       },
     );
   } finally {
-    rmSync(wrapper, { force: true });
+    for (const left of [wrapper, `${wrapper}.cmd`, join(TEST_BIN, "node_modules")]) rmSync(left, { recursive: true, force: true });
   }
 });
 

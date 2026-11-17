@@ -9,7 +9,7 @@
 // `testSkeleton`, `writeTestSkeletons`.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { FEATURES_DIRECTORY } from "./spec.ts";
 
 export interface Scenario {
@@ -93,8 +93,11 @@ export function writeTestSkeletons(root: string, outDir = "tests"): { written: s
 
   for (const name of readdirSync(directory).filter((file) => file.endsWith(".feature")).sort()) {
     const feature = parseFeature(readFileSync(join(directory, name), "utf8"));
-    const target = join(outDir, `${name.replace(/\.feature$/, "")}.test.ts`);
-    const full = join(out, `${name.replace(/\.feature$/, "")}.test.ts`);
+    const file = `${name.replace(/\.feature$/, "")}.test.ts`;
+    // A path in the repository is named with a slash on every system, as every path archdiff prints (`join` would write
+    // Windows' separator); an absolute directory is the system's own path.
+    const target = isAbsolute(outDir) ? join(outDir, file) : `${outDir.replace(/[\\/]+$/, "")}/${file}`;
+    const full = join(out, file);
 
     if (existsSync(full) && !readFileSync(full, "utf8").startsWith("// archdiff:generated")) {
       skipped.push(target);

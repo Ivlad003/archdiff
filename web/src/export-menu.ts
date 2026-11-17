@@ -37,3 +37,14 @@ export function renderExports(state: Link): void {
 
 // A pick in the menu downloads; the menu closes behind it.
 element<HTMLDivElement>("export").addEventListener("click", () => element<HTMLDetailsElement>("export-menu").removeAttribute("open"));
+
+// The list is fixed, as the options are: the header clips what overflows it, and the list hung under its button was cut
+// to nothing. Placed under the button when it opens, its right edge at the button's, kept inside the window.
+const menu = element<HTMLDetailsElement>("export-menu");
+menu.addEventListener("toggle", () => {
+  if (!menu.open) return;
+  const summary = menu.querySelector("summary")!.getBoundingClientRect();
+  const list = element<HTMLDivElement>("export");
+  list.style.top = `${summary.bottom + 4}px`;
+  list.style.left = `${Math.max(8, Math.min(summary.right - list.offsetWidth, window.innerWidth - list.offsetWidth - 8))}px`;
+});

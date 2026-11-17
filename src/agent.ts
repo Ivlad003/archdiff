@@ -9,20 +9,28 @@
 // agents installed here and says which one each run takes; nothing starts
 // without a button.
 //
+// What is started for an agent's command — the program found for its
+// name, or what its shim runs on Windows — is agent-command.ts's; the
+// model an agent is told to use and the keys it runs with are the user's
+// settings (settings.ts), carried here on the spec. A key never reaches
+// the page: what an agent prints is shown with every key blotted out.
+//
 // Sits at the I/O edge beside the server: Plan Markdown → process →
 // AgentEvent[]. Entry points: `agentFromConfig`, `AgentRunner`,
-// `parseAgentLine`, `eventReader`, `installedAgents`, `AGENTS`.
+// `parseAgentLine`, `eventReader`, `installedAgents`, `AGENTS`,
+// `isAgentName`, `PROTOCOLS`.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
 import { createInterface } from "node:readline";
+import { commandStart } from "./agent-command.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonObject, type JsonValue } from "./json.ts";
 
 export type AgentName = "claude" | "cursor" | "codex" | "opencode";
 
 /** The JSON an agent writes on stdout: Claude Code's and Cursor's stream-json, Codex's events, OpenCode's events. */
 export type AgentProtocol = "stream-json" | "codex" | "opencode";
+
+export const PROTOCOLS: readonly AgentProtocol[] = ["stream-json", "codex", "opencode"];
 
 /** How to run one agent: the command, how to resume a session, and how to read what it writes. */
 export interface AgentSpec {
@@ -40,6 +48,16 @@ export interface AgentSpec {
   quiet?: RegExp;
   /** Claude Code: the tools it may use without asking, appended as `--allowedTools` (the checks of archdiff.json, archdiff itself). */
   allowedTools?: string[];
+  /** The arguments that name the model, `{model}` standing for it; none for an agent whose command names its own. */
+  modelArgs?: string[];
+  /** The model the user's settings name; none: the agent's own. */
+  model?: string;
+  /** What the run gets in its environment over the server's own: the keys of the user's settings. */
+  env?: Record<string, string>;
+  /** The values no event may show (the keys): each is blotted out of what the agent prints. */
+  secrets?: string[];
+  /** Why the agent cannot run as the settings have it (a key it needs is not set); it is then not offered. */
+  blocked?: string;
 }
 
 /** Codex's sandbox for a task: it writes in the repository and nowhere else, and asks nothing (print mode cannot answer). */
@@ -47,17 +65,18 @@ const CODEX_SANDBOX = ["-c", 'sandbox_mode="workspace-write"', "--skip-git-repo-
 
 /** The built-in agents: print mode, streamed JSON, edits in the repository allowed without a prompt (shell commands follow each agent's own rules). */
 export const AGENTS: Record<AgentName, AgentSpec> = {
-  claude: { name: "claude", label: "Claude Code", command: ["claude", "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"], resumeFlag: "--resume", protocol: "stream-json" },
+  claude: { name: "claude", label: "Claude Code", command: ["claude", "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"], resumeFlag: "--resume", protocol: "stream-json", modelArgs: ["--model", "{model}"] },
   // `--trust`: the CLI otherwise stops to ask whether the directory is trusted, which print mode cannot answer; it does not force shell commands (that is `-f`).
-  cursor: { name: "cursor", label: "Cursor", command: ["cursor-agent", "-p", "--output-format", "stream-json", "--trust"], resumeFlag: "--resume", protocol: "stream-json" },
-  codex: { name: "codex", label: "Codex", command: ["codex", "exec", "--json", ...CODEX_SANDBOX], resumeFlag: null, resumeCommand: ["codex", "exec", "resume", "{session}", "--json", ...CODEX_SANDBOX], protocol: "codex", quiet: /^Reading additional input from stdin/ },
+  cursor: { name: "cursor", label: "Cursor", command: ["cursor-agent", "-p", "--output-format", "stream-json", "--trust"], resumeFlag: "--resume", protocol: "stream-json", modelArgs: ["--model", "{model}"] },
+  // The model as a configuration value: `codex exec resume` takes `-c` and no `-m`.
+  codex: { name: "codex", label: "Codex", command: ["codex", "exec", "--json", ...CODEX_SANDBOX], resumeFlag: null, resumeCommand: ["codex", "exec", "resume", "{session}", "--json", ...CODEX_SANDBOX], protocol: "codex", quiet: /^Reading additional input from stdin/, modelArgs: ["-c", 'model="{model}"'] },
   // `--auto`: the permissions it would ask for are granted, unless the project's OpenCode config denies them.
-  opencode: { name: "opencode", label: "OpenCode", command: ["opencode", "run", "--format", "json", "--auto"], resumeFlag: "--session", protocol: "opencode" },
+  opencode: { name: "opencode", label: "OpenCode", command: ["opencode", "run", "--format", "json", "--auto"], resumeFlag: "--session", protocol: "opencode", modelArgs: ["-m", "{model}"] },
 };
 
 const NAMES = Object.keys(AGENTS) as AgentName[];
 
-function isAgentName(value: string): value is AgentName {
+export function isAgentName(value: string): value is AgentName {
   return (NAMES as string[]).includes(value);
 }
 
@@ -76,25 +95,35 @@ export function agentFromConfig(value: JsonValue | undefined): AgentSpec | null 
   if (resume !== undefined && !isJsonString(resume)) throw new Error('agent: "resume" must be a string');
   const protocol = value["protocol"];
 
-  if (protocol !== undefined && protocol !== "stream-json" && protocol !== "codex" && protocol !== "opencode") throw new Error('agent: "protocol" must be "stream-json", "codex" or "opencode"');
+  if (protocol !== undefined && !(isJsonString(protocol) && (PROTOCOLS as readonly string[]).includes(protocol))) throw new Error('agent: "protocol" must be "stream-json", "codex" or "opencode"');
   const name = isJsonString(value["name"]) ? value["name"] : "custom";
 
-  return { name, label: name, command: value["command"], resumeFlag: resume ?? null, protocol: protocol ?? "stream-json" };
+  return { name, label: name, command: value["command"], resumeFlag: resume ?? null, protocol: (protocol as AgentProtocol | undefined) ?? "stream-json" };
 }
 
-/** Whether a command can be started: a path that exists, or a name found in a directory of PATH. */
-function onPath(command: string): boolean {
-  if (command.includes("/") || command.includes("\\")) return existsSync(command);
-  const extensions = process.platform === "win32" ? ["", ...(process.env["PATHEXT"] ?? ".EXE;.CMD;.BAT").split(";")] : [""];
-
-  return (process.env["PATH"] ?? "").split(delimiter).some((directory) => directory !== "" && extensions.some((extension) => existsSync(join(directory, command + extension))));
+/** An agent the page may offer: whether it can run here, what is started for it when it can, and why not when it cannot. */
+export interface OfferedAgent {
+  spec: AgentSpec;
+  installed: boolean;
+  /** The program started for it (what its shim runs, on Windows); null when its command is nowhere. */
+  path: string | null;
+  /** Why it cannot run: its command is nowhere, its shim names nothing to start, a key it needs is not set. */
+  problem: string | null;
 }
 
-/** The agents the page may offer: the built-in ones, then the configured one when it is no built-in, each with whether it is installed here. */
-export function installedAgents(configured: AgentSpec | null): { spec: AgentSpec; installed: boolean }[] {
-  const specs = [...NAMES.map((name) => AGENTS[name]), ...(configured && !isAgentName(configured.name) ? [configured] : [])];
+/** The agents of `specs`, each with whether it can be started on this computer. */
+export function installedAgents(specs: readonly AgentSpec[], env: NodeJS.ProcessEnv = process.env): OfferedAgent[] {
+  return specs.map((spec) => {
+    const start = commandStart(spec.command[0]!, env);
+    const problem = start.ok ? (spec.blocked ?? null) : start.problem.message;
 
-  return specs.map((spec) => ({ spec, installed: onPath(spec.command[0]!) }));
+    return { spec, installed: problem === null, path: start.ok ? [start.value.file, ...start.value.args].at(-1)! : null, problem };
+  });
+}
+
+/** `text` with every secret blotted out; a secret too short to tell from ordinary text is left. */
+function blotted(text: string, secrets: readonly string[]): string {
+  return secrets.reduce((shown, secret) => (secret.length >= 8 ? shown.split(secret).join("•••") : shown), text);
 }
 
 /** One event of a run, as the page shows it. */
@@ -317,12 +346,14 @@ export class AgentRun {
   exitCode: number | null = null;
   private readonly listeners = new Set<(event: AgentEvent) => void>();
   private readonly child: ChildProcess;
+  private readonly secrets: readonly string[];
 
-  constructor(id: string, child: ChildProcess, sessionId: string | null, afterRun: (() => Promise<Omit<AgentEvent, "seq">[]>) | null = null, reader: EventReader = eventReader("stream-json"), agent = "", quiet: RegExp | null = null) {
+  constructor(id: string, child: ChildProcess, sessionId: string | null, afterRun: (() => Promise<Omit<AgentEvent, "seq">[]>) | null = null, reader: EventReader = eventReader("stream-json"), agent = "", quiet: RegExp | null = null, secrets: readonly string[] = []) {
     this.id = id;
     this.child = child;
     this.sessionId = sessionId;
     this.agent = agent;
+    this.secrets = secrets;
     const out = createInterface({ input: child.stdout! });
     out.on("line", (line) => {
       if (line.trim() === "") return;
@@ -354,7 +385,7 @@ export class AgentRun {
   }
 
   private push(event: Omit<AgentEvent, "seq">): void {
-    const full: AgentEvent = { ...event, seq: this.events.length };
+    const full: AgentEvent = { ...event, text: blotted(event.text, this.secrets), seq: this.events.length };
     this.events.push(full);
 
     for (const listener of this.listeners) listener(full);
@@ -369,8 +400,15 @@ export class AgentRun {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Ends the run. On Windows a signal ends the one process and leaves what it started — an agent behind npm's shim
+   * is node running the agent's own program, which would work on with nobody reading it — so the whole tree is ended.
+   */
   stop(): void {
-    if (!this.done) this.child.kill();
+    if (this.done) return;
+
+    if (process.platform === "win32" && this.child.pid !== undefined) spawn("taskkill", ["/pid", String(this.child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).on("error", () => this.child.kill());
+    else this.child.kill();
   }
 }
 
@@ -387,19 +425,27 @@ export class AgentRunner {
     this.afterRun = afterRun;
   }
 
-  /** Starts `spec` on `prompt`; `resume` continues that session — by the agent's flag, or its own resume command. */
+  /**
+   * Starts `spec` on `prompt`; `resume` continues that session — by the agent's flag, or its own resume command.
+   * Throws when the command cannot be started here (`installedAgents` says so beforehand, and why).
+   */
   start(spec: AgentSpec, prompt: string, resume: string | null, checks = true): AgentRun {
     const command = resume && spec.resumeCommand ? spec.resumeCommand.map((part) => (part === "{session}" ? resume : part)) : spec.command;
-    const args = [...command.slice(1)];
+    const started = commandStart(command[0]!);
+
+    if (!started.ok) throw new Error(`${spec.label} cannot start: ${started.problem.message}`);
+    const args = [...started.value.args, ...command.slice(1)];
+
+    if (spec.model && spec.modelArgs) args.push(...spec.modelArgs.map((part) => part.replace("{model}", spec.model!)));
 
     if (resume && !spec.resumeCommand && spec.resumeFlag) args.push(spec.resumeFlag, resume);
 
     // `--allowedTools` takes every argument after it: `--` ends the list, or the prompt would be read as a tool and the agent start with none.
     if (spec.allowedTools && spec.allowedTools.length > 0) args.push("--allowedTools", ...spec.allowedTools, "--");
     args.push(prompt);
-    const child = spawn(command[0]!, args, { cwd: this.root, stdio: ["ignore", "pipe", "pipe"], env: process.env });
+    const child = spawn(started.value.file, args, { cwd: this.root, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...spec.env }, windowsHide: true });
     const id = `run-${this.next++}`;
-    const run = new AgentRun(id, child, resume, checks ? this.afterRun : null, eventReader(spec.protocol), spec.name, spec.quiet ?? null);
+    const run = new AgentRun(id, child, resume, checks ? this.afterRun : null, eventReader(spec.protocol), spec.name, spec.quiet ?? null, spec.secrets ?? []);
     this.runs.set(id, run);
 
     return run;

@@ -2,7 +2,7 @@
 // options, the analysis cache, the agent, the live-reload listeners, the
 // picture of a request) and the request (URL, body, response, request),
 // plus the ways to answer and to read a picture's request from a query. The handlers live in pictures.ts,
-// agent.ts and git.ts; server.ts builds the context and dispatches by
+// agent.ts, git.ts, spec.ts and settings.ts; server.ts builds the context and dispatches by
 // `METHOD /path`.
 //
 // Entry points: `RouteContext`, `RouteRequest`, `requestOf`, `optionsOf`,
@@ -10,7 +10,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Analysis } from "../analyze.ts";
-import type { AgentRunner, AgentSpec } from "../agent.ts";
+import type { AgentRunner, AgentSpec, OfferedAgent } from "../agent.ts";
 import { readPictureOptions, type PictureOptions } from "../options.ts";
 import type { Picture, PictureRequest } from "../picture.ts";
 import { ok, wrong, type Result } from "../result.ts";
@@ -24,8 +24,8 @@ export interface RouteContext {
   options: ServeOptions;
   /** The names the Host header of a request may give (server.ts's `allowedHosts`): any other is refused. */
   hosts: ReadonlySet<string>;
-  /** The agents the page may offer (the built-in ones and the configured one), each with whether it is installed here. */
-  agents(): { spec: AgentSpec; installed: boolean }[];
+  /** The agents the page may offer (the built-in ones, the configured one, the user's own), as the user's settings place them, each with whether it can run here. */
+  agents(): OfferedAgent[];
   /**
    * The agent a request names (its name), or the default one when it names none — the one given (`--agent`,
    * archdiff.json's `agent`), else the first installed; the problem when it is unknown or not installed.
