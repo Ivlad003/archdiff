@@ -88,9 +88,9 @@ test("an output that is no report is a problem, said", () => {
 });
 
 test("the findings are shown file by file, in the order found", () => {
-  const first = { file: "src/a.ts", line: 4, message: "one" };
-  const second = { file: "src/b.ts", line: 1, message: "two" };
-  const third = { file: "src/a.ts", line: 9, message: "three" };
+  const first = { file: "src/a.ts", line: 4, message: "one", known: false };
+  const second = { file: "src/b.ts", line: 1, message: "two", known: false };
+  const third = { file: "src/a.ts", line: 9, message: "three", known: false };
 
   assert.deepEqual([...byFile([first, second, third])], [["src/a.ts", [first, third]], ["src/b.ts", [second]]]);
   assert.deepEqual([...byFile([])], []);
