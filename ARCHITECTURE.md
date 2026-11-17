@@ -2,7 +2,7 @@
 
 archdiff's own contract, kept by archdiff: `archdiff check` fails when an import crosses the layers against the arrows below, `archdiff diagram intent` draws this file against the code. A subgraph is a layer, a node is a module (its path, then what it does), an arrow is an import. The modules named here are the ones that stand for their layer; `archdiff.json` places every other file in its layer by path.
 
-The direction of the arrows is the direction of the pipeline: the entry points (bin, cli, server, page) go through the edge (git, the files and the processes a command reads or runs: the picture of a view with its saved drawing, a review's revisions, a run, the specs, a scaffold, the stdin and stdout of the MCP server with the tools it serves an agent) to the products (views, exports), which read the placed picture (diagram), which reads the analysis (core), which reads the language frontends (extract). The views are pure: what they need from git or a file the edge reads for them. Nothing below imports anything above it except types.
+The direction of the arrows is the direction of the pipeline: the entry points (bin, cli, server, page) go through the edge (git, the files and the processes a command reads or runs: the picture of a view with its saved drawing, a review's revisions, a run, the specs, a scaffold, the stdin and stdout of the MCP server with the tools it serves an agent, the checks after an agent's run) to the products (views, exports), which read the placed picture (diagram), which reads the analysis (core), which reads the language frontends (extract). The views are pure: what they need from git or a file the edge reads for them. Nothing below imports anything above it except types. Two rules of `archdiff.json` hold what the arrows cannot say: the code has no import cycle, and the views import nothing of Node.
 
 ```mermaid
 flowchart LR
@@ -30,6 +30,7 @@ flowchart LR
     n_src_gherkin_ts["src/gherkin.ts<br>Gherkin features as data, and test skeletons written from them"]
     n_src_mcp_ts["src/mcp.ts<br>the Model Context Protocol over stdio: the handshake, the list of tools, a call; knows nothing of archdiff"]
     n_src_mcp_tools_ts["src/mcp-tools.ts<br>the tools an agent asks: views, diagram, check, may_import, impact, review, each from the code as it is now"]
+    n_src_checks_ts["src/checks.ts<br>the checks after an agent's run: the contract check held against the baseline it reads, the commands it runs, and the run's report against the violations before it"]
   end
   subgraph n_views["views — one picture per question, and the reports; pure functions of the analysis"]
     n_src_views_ts["src/views.ts<br>the structural views and viewOf: the chain of pure steps after a view"]
@@ -45,6 +46,7 @@ flowchart LR
     n_src_logic_ts["src/logic.ts<br>a function's body as a flowchart with its paths as rules, and the list of branching functions"]
     n_src_project_map_ts["src/project-map.ts<br>the whole repository as dots and lines for the page's project map"]
     n_src_impact_ts["src/impact.ts<br>what a change to a module or a function reaches: importers and callers by distance, the tests to run"]
+    n_src_violations_ts["src/violations.ts<br>what check finds — imports against the layers, violations of the rules — held against the baseline: the new, the known, the fixed; the report as Markdown, text and JSON"]
   end
   subgraph n_exports["exports — the picture as text and files"]
     n_src_export_index_ts["src/export/index.ts<br>Mermaid, draw.io, Excalidraw, ArchiMate, JSON"]
@@ -67,7 +69,8 @@ flowchart LR
     n_src_shape_keys_ts["src/shape-keys.ts<br>what a shape stands for and the view it opens, for the exports and the page"]
     n_src_looks_ts["src/looks.ts<br>the look of every kind of shape and line, for the exports and the page's 3D view"]
     n_src_run_hooks_ts["src/run-hooks.ts<br>the child process of a run: module hooks that trace and mock"]
-    n_src_checks_ts["src/checks.ts<br>the contract check and the commands run after an agent"]
+    n_src_baseline_ts["src/baseline.ts<br>the baseline of known violations: a violation by what it is, the file that is committed, the violations held against it"]
+    n_src_rules_ts["src/rules.ts<br>the rules of archdiff.json beside the contract: naming, thresholds, cycles, a module to go through, what is not imported; read and validated"]
     n_src_apis_ts["src/apis.ts<br>the operations of an external API a call names (SCAPI), the OCAPI hooks, the ids and labels"]
     n_src_contracts_ts["src/contracts.ts<br>the contract of an operation as the code uses it: what it sends, what it reads of the result"]
     n_src_scapi_table_ts["src/scapi-table.ts<br>the SCAPI families and operations of the storefront-next runtime, generated"]
@@ -145,6 +148,16 @@ flowchart LR
   n_src_routes_pictures_ts --> n_src_project_map_ts
   n_src_extract_logic_ts --> n_src_extract_control_ts
   n_src_server_ts --> n_src_checks_ts
+  n_src_routes_agent_ts --> n_src_checks_ts
+  n_src_checks_ts --> n_src_violations_ts
+  n_src_checks_ts --> n_src_baseline_ts
+  n_src_cli_ts --> n_src_violations_ts
+  n_src_routes_agent_ts --> n_src_violations_ts
+  n_src_violations_ts --> n_src_intent_ts
+  n_src_violations_ts --> n_src_baseline_ts
+  n_src_violations_ts --> n_src_metrics_ts
+  n_src_violations_ts --> n_src_cycles_ts
+  n_src_violations_ts --> n_src_rules_ts
   n_src_extract_ts_ts --> n_src_extract_control_ts
   n_src_pipeline_ts --> n_src_shape_ts
   n_src_views_ts --> n_src_shape_ts

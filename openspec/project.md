@@ -23,7 +23,7 @@ Live architecture diagrams of a TypeScript, JavaScript, Python, Rust or PHP repo
 - `analysis`: files to facts to graph, the cache, the gaps.
 - `views`: which picture answers which question, and the steps after a view (hubs, fold, weight, expand, hidden lanes).
 - `page`: the web page — the canvas, the taps, the tools, the panels, the options, the link.
-- `intent`: `ARCHITECTURE.md` as the contract, the intent view, `check`, `import`, `new`.
+- `intent`: `ARCHITECTURE.md` as the contract, the intent view, `check` with its baseline and the rules of `archdiff.json`, `import`, `new`.
 - `agent`: handing a task to Claude Code or Cursor, the protocol, the questions, the Chat tab.
 - `exports`: Markdown, Mermaid, draw.io, Excalidraw, ArchiMate, JSON.
 - `review`: the architectural diff of a change, branches, history, the GitHub Action.

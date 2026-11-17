@@ -18,7 +18,7 @@ inputs:
     required: false
     default: ""
   fail-on-check:
-    description: Fail the job when archdiff check finds an import between layers that ARCHITECTURE.md does not allow
+    description: Fail the job when archdiff check finds an import between layers that ARCHITECTURE.md does not allow, or what breaks a rule of archdiff.json (a violation the repository's baseline lists fails nothing)
     required: false
     default: "true"
   comment:

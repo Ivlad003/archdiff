@@ -1149,14 +1149,21 @@ body.editing #empty {
   margin-top: 8px;
 }
 
-#transcript .ev.check {
+#transcript .ev.check,
+#transcript .ev.report {
   white-space: pre-wrap;
   font-family: ui-monospace, monospace;
   font-size: 12px;
+}
+
+/* A check that passed and what a run fixed are green; a failed check and what a run added, red; what survives a run stays plain. */
+#transcript .ev.check,
+#transcript .ev.report.passed {
   color: var(--ok, #2e7d32);
 }
 
-#transcript .ev.check.failed {
+#transcript .ev.check.failed,
+#transcript .ev.report.failed {
   color: #c62828;
 }
 
@@ -1993,12 +2000,14 @@ details.help > p {
 
 /* The dark page: what the transcript and the flow say in colour stays readable on it. */
 html.dark #transcript .ev.result,
-html.dark #transcript .ev.check {
+html.dark #transcript .ev.check,
+html.dark #transcript .ev.report.passed {
   color: #81c784;
 }
 
 html.dark #transcript .ev.stderr,
-html.dark #transcript .ev.check.failed {
+html.dark #transcript .ev.check.failed,
+html.dark #transcript .ev.report.failed {
   color: #ef9a9a;
 }
 

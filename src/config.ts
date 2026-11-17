@@ -1,6 +1,8 @@
 // The optional `archdiff.json` of a repository and the defaults without
 // one: which files to skip, which layers the modules fall into, which
-// functions are entry points, and which coding agent the page may run. Layers are globs; without any, a module's
+// functions are entry points, which coding agent the page may run, the
+// rules `check` holds the code to, and where the baseline of known
+// violations is kept. Layers are globs; without any, a module's
 // layer is its top directory (`src/<dir>` when under `src/`). Validated on
 // read: a wrong field names the file and the field.
 //
@@ -11,8 +13,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { firstMatchingGlob } from "./glob.ts";
 import { agentFromConfig, type AgentSpec } from "./agent.ts";
+import { BASELINE_FILE } from "./baseline.ts";
 import { collectionOf } from "./collections.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
+import { rulesFromConfig, type Rule } from "./rules.ts";
 
 export const CONFIG_FILE = "archdiff.json";
 
@@ -47,6 +51,10 @@ export interface Config {
   checks: string[];
   /** Postman collections to read against the code, besides every `*.postman_collection.json` of the repository: paths from the root. */
   postman: string[];
+  /** The file of the known violations `check` does not fail on (baseline.ts): a path from the root. */
+  baseline: string;
+  /** What `check` holds the code to beside the contract's arrows (rules.ts): naming, thresholds, cycles, a module to go through, what is not imported. */
+  rules: Rule[];
 }
 
 export interface HubThresholds {
@@ -63,7 +71,7 @@ export function hubThreshold(modules: number, thresholds: HubThresholds): number
 /** A quarter of a picture marks the logger and the shared types, not a busy neighbour; at least 6 importers, and 40 on a big map whatever its size. */
 export const DEFAULT_HUBS: HubThresholds = { min: 6, share: 0.25, max: 40 };
 
-export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null, hubs: DEFAULT_HUBS, storages: {}, storagePackages: {}, checks: [], postman: [] };
+export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null, hubs: DEFAULT_HUBS, storages: {}, storagePackages: {}, checks: [], postman: [], baseline: BASELINE_FILE, rules: [] };
 
 /** `"storages": { "<glob>": "<what it holds>" }`: an object of strings. */
 function stringMap(value: JsonValue | undefined, file: string, field: string): Record<string, string> {
@@ -113,8 +121,11 @@ export function loadConfig(root: string): Config {
   const other = parsed["other"];
 
   if (other !== undefined && !isJsonString(other)) throw new Error(`${CONFIG_FILE}: "other" must be a string`);
+  const baseline = parsed["baseline"];
 
-  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: named(() => agentFromConfig(parsed["agent"])), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages"), checks: stringList(parsed["checks"], CONFIG_FILE, "checks"), postman: collectionPaths(root, stringList(parsed["postman"], CONFIG_FILE, "postman")) };
+  if (baseline !== undefined && (!isJsonString(baseline) || baseline.trim() === "")) throw new Error(`${CONFIG_FILE}: "baseline" must be the path of the baseline's file from the root (default ${BASELINE_FILE})`);
+
+  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: named(() => agentFromConfig(parsed["agent"])), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages"), checks: stringList(parsed["checks"], CONFIG_FILE, "checks"), postman: collectionPaths(root, stringList(parsed["postman"], CONFIG_FILE, "postman")), baseline: baseline ?? BASELINE_FILE, rules: named(() => rulesFromConfig(parsed["rules"])) };
 }
 
 /** The configured Postman collections, each a file that is there and reads as a collection; a wrong one names the field and the file. */

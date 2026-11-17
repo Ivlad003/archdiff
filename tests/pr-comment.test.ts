@@ -97,6 +97,19 @@ test("a failing check: the count of the imports against the contract, and each w
   assert.ok(!body.includes("- `src/lib/log.ts`") && !body.includes("beyond"));
 });
 
+test("a check with a baseline and rules: what the baseline lists fails nothing and is counted, and what breaks a rule is said in the check's words", () => {
+  // `check --json` since the baseline: every violation, each with its rule, what is wrong and whether the baseline knows it.
+  const layer = { rule: "layers", from: "src/routes/checkout.tsx", to: "src/db/report.ts", fromLayer: "routes", toLayer: "db", line: 4, problem: "layer routes → db is not in the intent" };
+  const report = { ...FOLLOWS, ok: false, stale: [], baseline: "archdiff-baseline.json", violations: [{ ...layer, known: true }, { rule: "no-cycles", from: "src/lib/a.ts", line: 1, problem: "is in an import cycle of 2 modules", known: false }, { ...layer, from: "src/routes/cart.tsx", line: 2, known: false }] };
+  const body = commentBody(CHANGE_MARKDOWN, JSON.stringify(report));
+  assert.ok(body.includes("**✘ 2 violations of ARCHITECTURE.md and the rules of archdiff.json.**\n\n- `src/lib/a.ts:1`: is in an import cycle of 2 modules (rule `no-cycles`)\n- `src/routes/cart.tsx:2` imports `src/db/report.ts`: layer **routes** → **db** is not in ARCHITECTURE.md\n\n_1 known violation in the baseline does not fail the check._\n"), body);
+  // The layers alone are still counted as imports.
+  assert.ok(commentBody(CHANGE_MARKDOWN, JSON.stringify({ ...report, violations: report.violations.filter((violation) => violation.rule === "layers") })).includes("**✘ 1 import goes against ARCHITECTURE.md.**"));
+  // Every violation known: the check passes, and the comment says what the baseline holds.
+  const passing = commentBody(CHANGE_MARKDOWN, JSON.stringify({ ...report, ok: true, violations: [{ ...layer, known: true }] }));
+  assert.ok(passing.includes("**✔ No import between layers goes against ARCHITECTURE.md.**\n\n_1 known violation in the baseline does not fail the check._\n"), passing);
+});
+
 test("no contract, or an output that is no report: the body says which, and the review is whole", () => {
   // `check` prints nothing when there is no ARCHITECTURE.md that names layers.
   const none = commentBody(CHANGE_MARKDOWN, "");

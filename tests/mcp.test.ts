@@ -11,7 +11,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { withTempDir } from "./temp-dir.ts";
 
 const root = join(import.meta.dirname, "..");
@@ -43,9 +43,14 @@ interface Client {
   close(): Promise<{ code: number | null; stderr: string }>;
 }
 
+/** The servers the tests started: a test that fails before it closes its own would leave one waiting on its input, and the run with it. */
+const servers: ReturnType<typeof spawn>[] = [];
+after(() => servers.forEach((server) => server.kill()));
+
 /** A client of a real `archdiff mcp` on `dir`; every line the server writes to stdout must be one JSON-RPC message. */
 function connect(dir: string): Client {
   const child = spawn(process.execPath, [bin, "mcp", dir], { cwd: root, stdio: ["pipe", "pipe", "pipe"] });
+  servers.push(child);
   const waiting = new Map<number, (response: Response) => void>();
   const stray: unknown[] = [];
   let stderr = "";
@@ -295,11 +300,11 @@ test("with a contract, a test file and a commit: an import asked about is allowe
     assert.ok(impact.includes("… 3 more further than 1 step away"), impact);
     assert.ok(impact.includes("## Tests that reach it (2)\n\n- `tests/store.test.ts` — imports its module, 1 step away\n- `tests/orders.test.ts` — calls it, 2 steps away\n"), impact);
     assert.ok((await client.ask("impact", { target: "src/lib/orders.ts#placeOrder" })).includes("- `tests/orders.test.ts` (its top level) calls it — tests/orders.test.ts:5\n"));
-    assert.ok((await client.ask("check")).includes("**No import between layers goes against the intent.**"));
+    assert.ok((await client.ask("check")).includes("**The code follows the intent.**"));
     // The agent's edit: the route reads the store directly. The next answers are of the code as it is now.
     writeFileSync(join(dir, "src/routes/checkout.tsx"), `import { readOrder } from "@/db/store";\n\nexport function loader() {\n  return readOrder("y");\n}\n`);
     const broken = await client.ask("check");
-    assert.ok(broken.includes("**1 import goes against the intent.**"), broken);
+    assert.ok(broken.includes("**1 violation of the intent.**"), broken);
     assert.ok(broken.includes("- `src/routes/checkout.tsx:1` imports `src/db/store.ts`: layer **routes** → **db** is not in the intent."), broken);
     const review = await client.ask("review", { base: "HEAD" });
     assert.ok(review.includes("## ⚠ New dependencies between layers") && review.includes("- **routes → db** — against ARCHITECTURE.md"), review);

@@ -38,6 +38,69 @@ The system SHALL, with `archdiff check`, exit 1 when the code imports between tw
 - **WHEN** `src/routes/health.ts` imports `src/db/store.ts` and the contract has no arrow from `routes` to `db`
 - **THEN** `archdiff check` exits 1 and says "`src/routes/health.ts:2` imports `src/db/store.ts`: layer **routes** → **db** is not in the intent"
 
+### Requirement: A baseline keeps the known violations from failing the check
+
+The system SHALL, with `archdiff check --baseline [FILE]`, write the violations the check finds now — each as its rule, the module it is in and the module or package it imports, without a line, sorted, one per line — to `archdiff-baseline.json` at the root (the path `archdiff.json` names in `baseline`, or FILE), exit 0, and never write over a file that is not archdiff's. With that file present `archdiff check` SHALL exit 1 only when a violation is not listed in it, list the known violations apart with their count, and name the entries of the file that no longer occur; `--no-baseline` SHALL hold the code to no baseline. `--json` SHALL give every violation with its `rule` and `known`, the entries that no longer occur as `stale`, the baseline's file, and `ok`. A baseline that is not valid, or an entry of it without a rule and a module, SHALL exit 2 naming the file and the entry. The page's check and the contract check after an agent's run SHALL hold the code to the same baseline.
+
+#### Scenario: An old repository adopts the contract
+
+- **WHEN** the code has two imports against the contract and `archdiff check --baseline` runs
+- **THEN** `archdiff-baseline.json` lists both as `{ "rule": "layers", "from": …, "to": … }`, and `archdiff check` exits 0 saying "the code follows the intent; 2 known violations in archdiff-baseline.json"
+
+#### Scenario: A new violation beside the known ones
+
+- **WHEN** a third import against the contract is written
+- **THEN** `archdiff check` exits 1, lists it under "New violations (1)" and the other two under "Known violations (2)"
+
+#### Scenario: The line of a known violation moves
+
+- **WHEN** lines are added above a known import
+- **THEN** it is still known: `archdiff check` exits 0
+
+#### Scenario: The baseline shrinks
+
+- **WHEN** one of the known imports is removed from the code
+- **THEN** `archdiff check` exits 0 and names the entry under "Fixed since the baseline (1)", and `archdiff check --baseline` writes the file without it
+
+### Requirement: Rules beside the contract's arrows
+
+The system SHALL read `rules` in `archdiff.json` — a list of `{ "kind", "name"? }` with the fields of the kind — and, with `archdiff check`, hold the code to them with or without `ARCHITECTURE.md`, reporting every violation with its file and line and its rule's name, exit 1: `naming` (every file of `layer` matches `pattern`, a glob of the file's name or of its path when it has a slash, or `regex`, a regular expression of the name); `threshold` (`metric`, one of `fanIn`, `fanOut`, `instability`, `abstractness`, `distance`, `cohesion`, `lines` as `metrics` measures them, stays at or under `max` and at or over `min` for every module, or for those of `layer`); `cycles` (no more than `max` import cycles, 0 by default; with more, every import inside a cycle, once per pair of modules); `through` (an import from layer `from`, or from any other layer without it, into layer `to` has the module `through` names at one of its ends); `forbidden` (no module of layer `from`, or no module at all without it, imports what `imports` names: a module's path, a glob, a package or a built-in by its ID or its name). A type-only import SHALL break no rule. A rule's name SHALL be its `name`, else its kind and what it is of, and SHALL be what the baseline knows its violations by; two rules of one name, and the name `layers`, SHALL be refused. A rule written wrong SHALL exit 2 naming its field (`"rules[1].metric" must be one of …`), as SHALL a field its kind does not take and, at `check`, a rule of a layer the repository does not have. The page's check and the contract check after an agent's run SHALL hold the code to the same rules.
+
+#### Scenario: A file named against its layer
+
+- **WHEN** `rules` holds `{ "kind": "naming", "layer": "lib", "pattern": "*.service.ts" }` and `src/lib/log.ts` is in `lib`
+- **THEN** `archdiff check` exits 1 and says "`src/lib/log.ts:1`: the files of layer **lib** are named `*.service.ts` (rule `naming:lib`)"
+
+#### Scenario: A module over a threshold
+
+- **WHEN** `rules` holds `{ "kind": "threshold", "metric": "instability", "max": 0.5, "layer": "lib" }` and `src/lib/orders.ts` has instability 0.67
+- **THEN** `archdiff check` exits 1 and says "`src/lib/orders.ts:1`: its instability is 0.67, over the 0.5 allowed (rule `instability:lib`)"
+
+#### Scenario: An import cycle
+
+- **WHEN** `rules` holds `{ "kind": "cycles" }` and `src/lib/log.ts` and `src/lib/orders.ts` import each other
+- **THEN** `archdiff check` exits 1 and lists both imports as "inside an import cycle of 2 modules (rule `cycles`)"; with `"max": 1` it exits 0
+
+#### Scenario: A layer reached past its module
+
+- **WHEN** `rules` holds `{ "kind": "through", "to": "db", "through": "src/lib/orders.ts" }` and `src/routes/peek.ts` imports `src/db/store.ts`
+- **THEN** `archdiff check` exits 1 and says "`src/routes/peek.ts:1` imports `src/db/store.ts`: layer **routes** reaches **db** only through `src/lib/orders.ts`"
+
+#### Scenario: A forbidden import
+
+- **WHEN** `rules` holds `{ "kind": "forbidden", "from": "db", "imports": ["node:fs"] }` and `src/db/store.ts` imports `node:fs`
+- **THEN** `archdiff check` exits 1 and says "`src/db/store.ts:1` imports `node:fs`: layer **db** is not to import `node:fs` (rule `forbidden:db`)"
+
+#### Scenario: Rules without a contract
+
+- **WHEN** a repository has `rules` in `archdiff.json`, no `ARCHITECTURE.md`, and code that follows them
+- **THEN** `archdiff check` exits 0 and stderr says "the code follows the rules of archdiff.json"
+
+#### Scenario: A rule written wrong
+
+- **WHEN** `rules` holds `{ "kind": "forbidden", "from": "db", "import": ["node:fs"] }`
+- **THEN** every command exits 2 saying `archdiff.json: "rules[0].import" is no field of a forbidden rule (it takes name, from, imports)`
+
 ### Requirement: The contract follows the drawing and the configuration follows the contract
 
 The system SHALL fold a drawing's planned modules, functions, layers, arrows and removals into the contract (`archdiff intent --view <view>`, "code this" on the page), naming the ends of drawn arrows with the layers the code gives them, and write `archdiff.json` `layers` from the contract's layers (a directory as the glob, the files themselves where another layer lives below the directory; the contract's layers first).

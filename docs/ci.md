@@ -49,3 +49,11 @@ npx @ivlad003/archdiff history --base origin/main --head HEAD              # the
 ```
 
 Persist `.archdiff/facts.json.gz` and `.archdiff/revisions.json.gz` between runs (a cache keyed by the lockfile is enough) and the review is sub-second after the first run; the second file holds the base's and the history's files.
+
+## The contract check
+
+```bash
+npx @ivlad003/archdiff check   # 0 the code follows the contract, 1 a violation the baseline does not list, 2 error
+```
+
+`check` holds the working tree to `ARCHITECTURE.md` and to the `"rules"` of `archdiff.json` (a naming pattern, a threshold on a metric, no import cycle, a module a layer is reached through, what is not imported), so it needs no history (`fetch-depth: 0` is `review`'s). A repository that already breaks its contract adopts it without a red job: run `npx @ivlad003/archdiff check --baseline` once and commit `archdiff-baseline.json`. From then on the job fails only on a violation that is not in the file; the report lists the known ones apart and names the entries that no longer occur, to be removed (or `check --baseline` again). The file is reviewed like the contract: a pull request that adds a line to it adds a known violation, in sight.

@@ -1,7 +1,8 @@
 // The routes of the agent and the contract: running the agent and
-// streaming its events, the saved tasks, "code this", ARCHITECTURE.md
-// (read, write, from a document), the check against it, the data flow
-// and its mocks.
+// streaming its events — the checks after it, and what the run did to
+// the violations it started with — the saved tasks, "code this",
+// ARCHITECTURE.md (read, write, from a document), the check against it,
+// the data flow and its mocks.
 //
 // Entry points: `routes`, by `METHOD /path` (server.ts dispatches through
 // it), and `TASKS_DIRECTORY`.
@@ -13,12 +14,14 @@ import { mergePlan, planFromScene, taskMarkdown } from "../plan.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { CACHE_DIRECTORY } from "../cache.ts";
 import { drawingSlug } from "../drawings.ts";
-import { AGENT_PROTOCOL, checkIntent, checkMarkdown, documentPrompt, INTENT_FILE, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "../intent.ts";
+import { AGENT_PROTOCOL, checkIntent, documentPrompt, INTENT_FILE, intentMarkdown, parseIntent, writeIntent } from "../intent.ts";
+import { readBaseline, type Violation } from "../baseline.ts";
+import { checkCode, checkJson, checkMarkdown } from "../violations.ts";
 import { readDrawing } from "../drawings.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "../json.ts";
 import type { AgentSpec } from "../agent.ts";
 import { parseView } from "../views.ts";
-import { checkEvents, runChecks } from "../checks.ts";
+import { checkEvents, reportEvents, runChecks, violationsNow } from "../checks.ts";
 import { runFlow, runMarkdown } from "../run.ts";
 import { failed, json, problem, type RouteContext, type RouteRequest } from "./context.ts";
 
@@ -48,6 +51,17 @@ export async function getAgents(ctx: RouteContext, { response }: RouteRequest): 
   json(response, { agents: agents.map(({ spec, installed }) => ({ name: spec.name, label: spec.label, installed })), default: "spec" in chosen ? chosen.spec.name : null });
 }
 
+/** The violations of the code as it is now, read afresh; null when they cannot be told (a configuration that does not read), and the run goes on without a report. */
+async function violationsBefore(ctx: RouteContext): Promise<Violation[] | null> {
+  try {
+    ctx.invalidate();
+
+    return violationsNow(await ctx.fresh());
+  } catch {
+    return null;
+  }
+}
+
 export async function postAgentRun(ctx: RouteContext, { body, response, request }: RouteRequest): Promise<void> {
   const { root } = ctx;
   // An explicit request from the page: the prompt as the user saw it, the agent picked; `resume` continues the agent's session.
@@ -66,12 +80,21 @@ export async function postAgentRun(ctx: RouteContext, { body, response, request 
   const spec = agent.spec;
   const resume = isJsonString(parsed["resume"]) ? parsed["resume"] : null;
   const runner = ctx.runner();
+  // What the contract check finds now, before the agent touches a file: the run's report is measured against it.
+  const before = runner.running() ? null : await violationsBefore(ctx);
   // One run at a time: two agents editing one repository would write over each other, and the page follows one.
   const running = runner.running();
 
   if (running) return problem(response, 409, `the agent is still running (${running.id}): stop it first`);
   // Every run carries the protocol: the contract file, how to ask the user; a resumed session already has it.
-  const run = runner.start(spec, resume ? parsed["prompt"] : `${parsed["prompt"].trimEnd()}\n\n${AGENT_PROTOCOL}\n`, resume);
+  const run = runner.start(spec, resume ? parsed["prompt"] : `${parsed["prompt"].trimEnd()}\n\n${AGENT_PROTOCOL}\n`, resume, async () => {
+    // After the run the repository has changed: a fresh analysis, then the contract and the configured checks, then
+    // what the run did to the violations it started with.
+    ctx.invalidate();
+    const analysis = await ctx.fresh();
+
+    return [...checkEvents(await runChecks(analysis)), ...reportEvents(before, analysis)];
+  });
   // The agent edits the repository: the next request analyses afresh, however soon it comes.
   run.subscribe(0, (event) => {
     if (event.kind === "exit") ctx.invalidate();
@@ -248,13 +271,14 @@ export async function getIntent(ctx: RouteContext, { response }: RouteRequest): 
 export async function getCheck(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
   const { root } = ctx;
   const analysis = await ctx.fresh();
+  // As `archdiff check` holds it: the contract's layers and the rules, against the baseline of known violations when the repository keeps one.
+  const check = checkCode(analysis, readBaseline(root, analysis.config.baseline));
+
+  if (check !== null) return json(response, { exists: analysis.intent !== null, ok: check.ok, report: checkJson(check), markdown: checkMarkdown(check, root) });
 
   if (!analysis.intent) return json(response, { exists: false, markdown: `# Check\n\nNo ${INTENT_FILE}: draw on the intent view and run "code this", import a document, or \`archdiff intent --init\`.\n`, ok: true });
 
-  if (!judgesLayers(analysis.intent)) return json(response, { exists: true, markdown: `# Check\n\n${INTENT_FILE} names no layer — no Mermaid flowchart with a subgraph, or a module in one — so nothing is checked against it.\n`, ok: true });
-  const report = checkIntent(analysis, analysis.intent);
-
-  return json(response, { exists: true, ok: report.ok, report, markdown: checkMarkdown(report, root) });
+  return json(response, { exists: true, markdown: `# Check\n\n${INTENT_FILE} names no layer — no Mermaid flowchart with a subgraph, or a module in one — so nothing is checked against it.\n`, ok: true });
 }
 
 export async function getAgentEvents(ctx: RouteContext, { url, response, request }: RouteRequest): Promise<void> {

@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, type Analysis } from "./analyze.ts";
 import { AgentRunner, installedAgents, type AgentSpec, type OfferedAgent } from "./agent.ts";
-import { allowedToolsFor, checkEvents, runChecks } from "./checks.ts";
+import { allowedToolsFor } from "./checks.ts";
 import type { Config } from "./config.ts";
 import { isSourceFile } from "./files.ts";
 import { drawPicture, type Picture } from "./picture.ts";
@@ -358,7 +358,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
 
     return installedAgents(agentSpecs(settings.ok ? settings.value : NO_SETTINGS, given)).map((offered) => ({ ...offered, spec: withAllowedTools(offered.spec, config) }));
   };
-  // The runner is made once the first run is asked for; every run ends with archdiff running the checks.
+  // The runner is made once the first run is asked for; what follows a run (the checks, its report) is the route's that starts it.
   let runner: AgentRunner | null = null;
   const ctx: RouteContext = {
     root,
@@ -367,13 +367,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
     agentFor: (name) => agentFor(agents(), given, name),
     fresh: analyses.fresh,
     invalidate: analyses.invalidate,
-    runner: () =>
-      // After a run: the repository changed, so a fresh analysis, then the contract and the configured checks.
-      (runner ??= new AgentRunner(root, async () => {
-        analyses.invalidate();
-
-        return checkEvents(await runChecks(await analyses.fresh()));
-      })),
+    runner: () => (runner ??= new AgentRunner(root)),
     activeRunner: () => runner,
     changeListeners: changes.listeners,
     watching: { on: options.watch && watching === null, problem: watching },

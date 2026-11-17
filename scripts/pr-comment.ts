@@ -45,8 +45,12 @@ interface Review {
   lists: Section[];
 }
 
-/** The verdict of the check: no contract to check against, the code follows it, imports go against it, or an output that is no report. */
-type Verdict = { kind: "none" | "ok" | "unread" } | { kind: "against"; violations: string[] };
+/**
+ * The verdict of the check: no contract to check against, the code follows it, violations go against it, or an
+ * output that is no report. `known` counts the violations the repository's baseline lists, which fail nothing;
+ * `ruled` says a rule of archdiff.json is among the violations, not the layers alone.
+ */
+type Verdict = { kind: "none" | "unread" } | { kind: "ok"; known: number } | { kind: "against"; violations: string[]; known: number; ruled: boolean };
 
 /** How much of a body is drawn: the items of each list, the violations, and whether the picture is. */
 interface Cut {
@@ -110,24 +114,44 @@ function readCheck(json: string): Verdict {
 
   if (report === null || typeof report !== "object" || !("ok" in report) || typeof report.ok !== "boolean") return { kind: "unread" };
 
-  if (report.ok) return { kind: "ok" };
   const violations: unknown[] = "violations" in report && Array.isArray(report.violations) ? report.violations : [];
+  // A check with a baseline lists every violation and marks the ones the baseline knows: those fail nothing. A CLI from before the baseline marks none.
+  const fresh = violations.filter((violation) => field(violation, "known") !== true);
+  const known = violations.length - fresh.length;
 
-  return { kind: "against", violations: violations.map(violationLine) };
+  if (report.ok) return { kind: "ok", known };
+
+  return { kind: "against", violations: fresh.map(violationLine), known, ruled: fresh.some((violation) => typeof field(violation, "rule") === "string" && field(violation, "rule") !== "layers") };
 }
 
-/** One violation as a line: the import, where it is written, and the pair of layers the contract lacks. */
+/** A field of a value read from JSON; undefined when the value is no object. */
+function field(value: unknown, key: string): unknown {
+  return value !== null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+/**
+ * One violation as a line: an import between layers with where it is written and the pair of layers the contract
+ * lacks; what breaks a rule of archdiff.json in the check's own words, with the rule's name.
+ */
 function violationLine(violation: unknown): string {
   const text = (key: string): string | null => {
-    const value = violation !== null && typeof violation === "object" ? (violation as Record<string, unknown>)[key] : undefined;
+    const value = field(violation, key);
 
     return typeof value === "string" || typeof value === "number" ? String(value) : null;
   };
-  const [from, to, fromLayer, toLayer, line] = [text("from"), text("to"), text("fromLayer"), text("toLayer"), text("line")];
+  const [from, to, fromLayer, toLayer, line, problem, rule] = [text("from"), text("to"), text("fromLayer"), text("toLayer"), text("line"), text("problem"), text("rule")];
+  const place = from === null ? null : `\`${from}${line === null ? "" : `:${line}`}\`${to === null ? "" : ` imports \`${to}\``}`;
 
-  if (from === null || to === null || fromLayer === null || toLayer === null) return `\`${JSON.stringify(violation)}\``;
+  if (place !== null && to !== null && fromLayer !== null && toLayer !== null) return `${place}: layer **${fromLayer}** → **${toLayer}** is not in ARCHITECTURE.md`;
 
-  return `\`${from}${line === null ? "" : `:${line}`}\` imports \`${to}\`: layer **${fromLayer}** → **${toLayer}** is not in ARCHITECTURE.md`;
+  if (place !== null && problem !== null) return `${place}: ${problem}${rule === null || rule === "layers" ? "" : ` (rule \`${rule}\`)`}`;
+
+  return `\`${JSON.stringify(violation)}\``;
+}
+
+/** The violations the baseline lists, in a line of their own: they are in the code and fail nothing. */
+function knownLines(known: number): string[] {
+  return known === 0 ? [] : ["", `_${spaced(known)} known ${known === 1 ? "violation" : "violations"} in the baseline ${known === 1 ? "does" : "do"} not fail the check._`];
 }
 
 /** A count as a reader reads it: 65 536. */
@@ -150,11 +174,12 @@ function verdictLines(verdict: Verdict, keep: number): string[] {
     case "unread":
       return ["_The output of `archdiff check` could not be read: no verdict._"];
     case "ok":
-      return ["**✔ No import between layers goes against ARCHITECTURE.md.**"];
+      return ["**✔ No import between layers goes against ARCHITECTURE.md.**", ...knownLines(verdict.known)];
     case "against": {
       const count = verdict.violations.length;
+      const headline = verdict.ruled ? `${spaced(count)} ${count === 1 ? "violation" : "violations"} of ARCHITECTURE.md and the rules of archdiff.json` : `${spaced(count)} ${count === 1 ? "import goes" : "imports go"} against ARCHITECTURE.md`;
 
-      return [`**✘ ${spaced(count)} ${count === 1 ? "import goes" : "imports go"} against ARCHITECTURE.md.**`, "", ...listed(verdict.violations, keep)];
+      return [`**✘ ${headline}.**`, "", ...listed(verdict.violations, keep), ...knownLines(verdict.known)];
     }
   }
 }

@@ -902,6 +902,41 @@ test("the agent's question shows its options; an answer resumes the session", { 
     },
   ));
 
+test("under a run's checks the transcript says what the run did to the violations: fixed, surviving, added", { skip: !CHROME && "no Chrome installed" }, () =>
+  // A server of its own: a contract the code breaks twice, and an agent that edits as its task says (fake-edit.mjs).
+  withOwnServer(
+    "archdiff-page-report-",
+    (reportDir) => {
+      writeFileSync(join(reportDir, "ARCHITECTURE.md"), "# Architecture\n\n```mermaid\nflowchart LR\n  subgraph routes\n    r[src/routes/checkout.tsx]\n  end\n  subgraph lib\n    o[src/lib/orders.ts]\n  end\n  subgraph db\n    s[src/db/store.ts]\n  end\n  r --> o\n  o --> s\n```\n");
+      writeFileSync(join(reportDir, "src/db/report.ts"), 'import { action } from "../routes/checkout.tsx";\nimport { log } from "../lib/log.ts";\n\nexport function report(): unknown {\n  log("r");\n  return action({ total: 1 });\n}\n');
+      writeFileSync(join(reportDir, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"] }, agent: { name: "editor", command: [process.execPath, join(root, "tests/fixtures/fake-edit.mjs")] } }));
+    },
+    async (reportBase) => {
+      await page!.goto(`${reportBase}/#view=layer%3Alib`);
+      await page!.waitForSelector(".excalidraw canvas");
+      await page!.click("#tabs button[data-tab='chat']");
+      await page!.waitForFunction(`document.querySelector("#agent-select")?.value === "editor"`);
+      // The task drops report.ts's import of the log (db → lib, fixed) and writes a route that reads the store (routes → db, added).
+      const files = { "src/db/report.ts": 'import { action } from "../routes/checkout.tsx";\n\nexport function report(): unknown {\n  return action({ total: 1 });\n}\n', "src/routes/peek.ts": 'import { readOrder } from "../db/store.ts";\n\nexport function peek(): unknown {\n  return readOrder("x");\n}\n' };
+      await page!.fill("#task", ["Tidy the imports.", ...Object.entries(files).map(([path, content]) => `write: ${path} ${JSON.stringify(content)}`)].join("\n"));
+      await page!.click("#run");
+      await page!.waitForFunction(`document.querySelector("#transcript .ev.exit")`, undefined, { timeout: 20_000 });
+      // Under the answer: the check, then the report in the checks' colours (fixed as a pass, added as a failure), then the exit.
+      const rows = (await page!.evaluate(`[...document.querySelectorAll("#transcript > .ev.check, #transcript > .ev.report, #transcript > .ev.exit")].map((row) => [row.className, row.textContent.split("\\n")[0], row.textContent.split("\\n").length - 1])`)) as [string, string, number][];
+      assert.deepEqual(rows, [
+        ["ev check failed", "✘ archdiff check", 3],
+        ["ev report passed", "✔ the run fixed 1 violation", 1],
+        ["ev report", "• 1 violation survives the run", 1],
+        ["ev report failed", "✘ the run added 1 violation", 1],
+        ["ev exit", "exited with 0", 0],
+      ]);
+      assert.equal(await page!.textContent("#transcript > .ev.report.failed"), "✘ the run added 1 violation\n  src/routes/peek.ts:1 imports src/db/store.ts: layer routes → db is not in the intent");
+      // The report is not folded with the agent's steps, and the fixed line is the checks' green.
+      assert.equal(await page!.evaluate(`document.querySelectorAll("#transcript details.steps .ev.report").length`), 0);
+      assert.equal(await page!.evaluate(`getComputedStyle(document.querySelector("#transcript > .ev.report.passed")).color === getComputedStyle(document.querySelector("#transcript > .ev.report.failed")).color`), false);
+    },
+  ));
+
 test("copy takes the active tab's text; the Spec tab lists the repository's specs", { skip: !CHROME && "no Chrome installed" }, async () => {
   await page!.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await page!.goto(`${base}/#view=layer%3Alib`);

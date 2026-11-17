@@ -24,13 +24,15 @@ import { analyze, type Analysis } from "./analyze.ts";
 import { shortCommits } from "./diff.ts";
 import { commitOf } from "./git.ts";
 import { DEFAULT_IMPACT_DEPTH, impactMarkdown, impactOf } from "./impact.ts";
-import { checkIntent, checkMarkdown, importVerdict, importVerdictText, INTENT_FILE, judgesLayers, nothingToCheck } from "./intent.ts";
+import { readBaseline } from "./baseline.ts";
+import { importVerdict, importVerdictText, INTENT_FILE, judgesLayers, nothingToCheck } from "./intent.ts";
 import type { McpTool } from "./mcp.ts";
 import { DEFAULT_PICTURE_OPTIONS, PICTURE_OPTIONS, readPictureOptions, type PictureOptions } from "./options.ts";
 import { drawPicture, type Refs } from "./picture.ts";
 import { ok, wrong, type Result } from "./result.ts";
 import { analysisAt, reviewOf } from "./review.ts";
 import { drawnAtHead, parseView, VIEW_KINDS, viewSyntax, viewsOfFiles } from "./view-keys.ts";
+import { checkCode, checkMarkdown } from "./violations.ts";
 import { viewList } from "./views.ts";
 import { counted } from "./words.ts";
 
@@ -263,13 +265,16 @@ export function archdiffTools(root: string): McpTool[] {
     tool(
       "check",
       "Check the code against the contract",
-      `Hold the code as it is now to the contract in ${INTENT_FILE}: the imports between layers the contract does not allow (the violations, each with its file and line), what is planned and not built, what is built beyond it. Ask it after adding a module or an import.`,
+      `Hold the code as it is now to the contract in ${INTENT_FILE} and to the rules of archdiff.json, as \`archdiff check\` does: the imports between layers the contract does not allow and what breaks a rule (the violations, each with its file and line; the ones the repository's baseline lists are named apart and do not fail the check), what is planned and not built, what is built beyond it. Ask it after adding a module or an import.`,
       {},
       [],
       async () => {
         const analysis = await fresh();
 
-        return ok(judgesLayers(analysis.intent) ? checkMarkdown(checkIntent(analysis, analysis.intent), analysis.root) : `${nothingToCheck(analysis.intent)}\n`);
+        // The check `archdiff check` makes: the layers of the contract and the rules of archdiff.json, held against the repository's baseline.
+        const check = checkCode(analysis, readBaseline(analysis.root, analysis.config.baseline));
+
+        return ok(check === null ? `${nothingToCheck(analysis.intent)}\n` : checkMarkdown(check, analysis.root));
       },
     ),
     tool(

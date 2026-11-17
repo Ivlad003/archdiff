@@ -4,8 +4,9 @@
 // (an archdiff-question block becomes option buttons, an answer resumes
 // the session), the @tags expanded into context, a question about the
 // picture or the selected shapes (answered without edits), the slash
-// commands, the checks after a run, the document that becomes the
-// contract, and the previous tasks. Takes the page as its context
+// commands, the checks after a run and what the run did to the violations
+// of the contract (fixed, surviving, added), the document that becomes
+// the contract, and the previous tasks. Takes the page as its context
 // (page.ts).
 //
 // Entry points: `askAbout`, `runTask`, `setAgentName`, `agentNameOf`, `loadAgents`,
@@ -36,8 +37,11 @@ let queuedAnswer: string | null = null;
 /** The turn being written: the question's row, its steps folded under a summary, and the answer. */
 let turn: { steps: HTMLDetailsElement; summary: HTMLElement; count: number; answer: HTMLDivElement; lastText: string; answered: boolean } | null = null;
 
+/** A row of the transcript; a check and a line of the run's report say by their mark whether they passed (✔) or failed (✘). */
 function row(kind: string, text: string): HTMLDivElement {
-  return h("div", { class: `ev ${kind}${kind === "check" && text.startsWith("✘") ? " failed" : ""}` }, text);
+  const judged = kind === "check" || kind === "report";
+
+  return h("div", { class: `ev ${kind}${judged && text.startsWith("✘") ? " failed" : judged && text.startsWith("✔") ? " passed" : ""}` }, text);
 }
 
 /** The answer of the turn, rendered as Markdown under its folded steps. */
@@ -52,8 +56,9 @@ function showAnswer(text: string): void {
 /**
  * One event of a run in the transcript: the question opens a turn; tool
  * calls, thoughts and noise go under its folded summary (which names the
- * latest); the result is the answer, shown; the checks and the exit stand
- * below it. The text is kept in `.ev` rows for the copy button.
+ * latest); the result is the answer, shown; the checks, the run's report
+ * (the violations it fixed, the ones that survive, the ones it added) and
+ * the exit stand below it. The text is kept in `.ev` rows for the copy button.
  */
 function appendEvent(kind: string, text: string): void {
   if (kind === "you") {
@@ -65,7 +70,7 @@ function appendEvent(kind: string, text: string): void {
   } else if (turn && kind === "result") {
     // The result is the answer, shown in full; an empty one leaves the last text as the answer at the exit.
     if (text.trim() !== "") showAnswer(text);
-  } else if (turn && kind !== "check" && kind !== "exit") {
+  } else if (turn && kind !== "check" && kind !== "report" && kind !== "exit") {
     turn.steps.append(row(kind, text));
     turn.count++;
     const line = text.split("\n")[0] ?? "";

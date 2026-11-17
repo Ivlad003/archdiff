@@ -24,7 +24,8 @@
       "src/run.ts",
       "src/gherkin.ts",
       "src/mcp.ts",
-      "src/mcp-tools.ts"
+      "src/mcp-tools.ts",
+      "src/checks.ts"
     ],
     "views": [
       "src/views.ts",
@@ -43,7 +44,8 @@
       "src/machines.ts",
       "src/logic.ts",
       "src/project-map.ts",
-      "src/impact.ts"
+      "src/impact.ts",
+      "src/violations.ts"
     ],
     "exports": [
       "src/export/**",
@@ -68,5 +70,9 @@
     "scripts": [
       "scripts/**"
     ]
-  }
+  },
+  "rules": [
+    { "kind": "cycles", "name": "no import cycle" },
+    { "kind": "forbidden", "name": "the views are pure", "from": "views", "imports": ["node:**"] }
+  ]
 }

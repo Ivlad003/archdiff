@@ -107,7 +107,12 @@ The system SHALL offer `action.yml`, a composite action with the inputs `base` (
 
 ### Requirement: The comment's body fits a comment
 
-The system SHALL build the body from the two outputs and nothing else (`scripts/pr-comment.ts`: the review's Markdown, the check's JSON), so it is tested without GitHub: the review's title and counts, the verdict of the check with its violations, the dependencies between layers that appeared and went, the Mermaid picture, and every change by kind, folded. A pull request that changed no module, function, import or call SHALL say so in one line instead of an empty picture, and without a contract the body SHALL say there is nothing to check against. The body SHALL be at most 65 536 characters, GitHub's limit for a comment: past it the picture stays and the lists are cut, each to the same number of its first items, with a count of what was left out; then the violations; a picture longer than the limit by itself gives way to a line.
+The system SHALL build the body from the two outputs and nothing else (`scripts/pr-comment.ts`: the review's Markdown, the check's JSON), so it is tested without GitHub: the review's title and counts, the verdict of the check with the violations that fail it — an import between layers, or what breaks a rule of `archdiff.json` in the check's own words with the rule's name — and a count of the ones the baseline lists, which fail nothing (a check from a CLI without the baseline reads as it did), the dependencies between layers that appeared and went, the Mermaid picture, and every change by kind, folded. A pull request that changed no module, function, import or call SHALL say so in one line instead of an empty picture, and without a contract the body SHALL say there is nothing to check against. The body SHALL be at most 65 536 characters, GitHub's limit for a comment: past it the picture stays and the lists are cut, each to the same number of its first items, with a count of what was left out; then the violations; a picture longer than the limit by itself gives way to a line.
+
+#### Scenario: A check with a baseline and rules
+
+- **WHEN** the check's JSON lists one violation the baseline knows and two it does not, one of them of the rule `no-cycles`
+- **THEN** the verdict counts 2 violations of ARCHITECTURE.md and the rules of archdiff.json, lists those two, and says 1 known violation in the baseline does not fail the check
 
 #### Scenario: No architectural change
 

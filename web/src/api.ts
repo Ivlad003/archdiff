@@ -101,7 +101,7 @@ export interface FlowResponse {
 
 export interface AgentEvent {
   seq: number;
-  kind: "text" | "tool" | "result" | "init" | "raw" | "stderr" | "exit" | "check";
+  kind: "text" | "tool" | "result" | "init" | "raw" | "stderr" | "exit" | "check" | "report";
   text: string;
   sessionId?: string;
   /** The files a tool event touched: the page lights their shapes. */
