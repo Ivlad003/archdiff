@@ -4,3 +4,5 @@ dist/
 tests/fixtures/sample/.archdiff/
 tests/fixtures/polyglot/.archdiff/
 *.tgz
+*.vsix
+.vscode-test/

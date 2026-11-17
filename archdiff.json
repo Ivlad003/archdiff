@@ -64,6 +64,9 @@
     ],
     "scripts": [
       "scripts/**"
+    ],
+    "vscode": [
+      "vscode/**"
     ]
   }
 }

@@ -92,6 +92,14 @@ flowchart LR
     n_scripts_copy_wasm_mjs["scripts/copy-wasm.mjs<br>copies the grammar WASM files into dist"]
     n_scripts_scapi_table_mjs["scripts/scapi-table.mjs<br>regenerates src/scapi-table.ts from a runtime's declarations, with core's reader"]
   end
+  subgraph n_vscode["vscode — the VS Code extension: archdiff beside the editor, through its command line and its page alone"]
+    n_vscode_src_extension_ts["vscode/src/extension.ts<br>the wiring to the editor: the panel on archdiff web, the views of a file and of a function, the place of the code opened, the check as problems"]
+    n_vscode_src_command_ts["vscode/src/command.ts<br>which archdiff runs: the workspace's, the PATH's, npx's; a Windows shim read for what it runs"]
+    n_vscode_src_runner_ts["vscode/src/runner.ts<br>archdiff web and archdiff check --json as processes, stopped with their tree"]
+    n_vscode_src_views_ts["vscode/src/views.ts<br>the view of a file and of the function at a cursor, and the page's address on it"]
+    n_vscode_src_diagnostics_ts["vscode/src/diagnostics.ts<br>the check's JSON as findings on lines"]
+    n_vscode_src_panel_ts["vscode/src/panel.ts<br>the panel's document: the page in a frame, its messages passed on"]
+  end
   n_bin_archdiff_js --> n_src_cli_ts
   n_scripts_scapi_table_mjs --> n_src_scapi_runtime_ts
   n_src_cli_ts --> n_src_server_ts
@@ -154,6 +162,14 @@ flowchart LR
   n_tests_routing_test_ts --> n_src_diagram_ts
   n_tests_routing_test_ts --> n_src_analyze_ts
   n_scripts_copy_wasm_mjs --> n_src_extract_grammars_ts
+  n_vscode_src_extension_ts --> n_vscode_src_command_ts
+  n_vscode_src_extension_ts --> n_vscode_src_runner_ts
+  n_vscode_src_extension_ts --> n_vscode_src_views_ts
+  n_vscode_src_extension_ts --> n_vscode_src_diagnostics_ts
+  n_vscode_src_extension_ts --> n_vscode_src_panel_ts
+  n_vscode_src_runner_ts --> n_vscode_src_command_ts
 ```
 
 The page (`web/src`) imports the Node-free vocabularies of the core, bundled into it — the table of picture options (`src/options.ts`), the kinds of view with their keys (`src/view-keys.ts`) and what a shape stands for and opens (`src/shape-keys.ts`, which the Excalidraw export shares), the looks of the shapes and lines (`src/looks.ts`, which the exports draw by too), and through `view-keys.ts` whether a path is a source file (`src/languages.ts`) — and only types from `src/diagram.ts` and `src/scene.ts`, which erase at build time. Tests import whatever they test. `src/routes/context.ts` imports the `ServeOptions` type back from `server.ts`: a type, inside one layer.
+
+The VS Code extension (`vscode/`, a package of its own that is no part of the npm package) has no arrow to any other layer, and none may appear: it runs whichever archdiff the workspace has, as a process (`archdiff web`, `archdiff check --json`), and reads what that prints and serves — never this repository's modules. What it relies on is the command line, the answer of `GET /api/diagram` and the page's message to its host (`web/src/host.ts`), which its tests run against the archdiff around them.
