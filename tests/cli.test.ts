@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { withTempDir } from "./temp-dir.ts";
+import { canLink, withTempDir } from "./temp-dir.ts";
 
 const root = join(import.meta.dirname, "..");
 
@@ -1816,7 +1816,7 @@ test("Rust integration tests are crates of their own: `mod util;` and `use <crat
   assert.ok(calls.includes("crate_tests_integration_rs_setup ==> crate_tests_util_rs_sample_order"), calls);
 });
 
-test("a symbolic link to a file or a directory inside the root is read, once, under its own path", () =>
+test("a symbolic link to a file or a directory inside the root is read, once, under its own path", { skip: !canLink() && "this computer does not let the tests make a symbolic link" }, () =>
   withTempDir("archdiff-links-", (dir) => {
     mkdirSync(join(dir, "src/real"), { recursive: true });
     writeFileSync(join(dir, "src/real/a.ts"), "export function a(): number { return 1; }\n");

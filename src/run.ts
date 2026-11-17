@@ -16,7 +16,7 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Analysis } from "./analyze.ts";
 import { CACHE_DIRECTORY } from "./cache.ts";
 import { functionBodies } from "./extract/bodies.ts";
@@ -215,7 +215,7 @@ export async function runFlow(analysis: Analysis, entry: string, options: RunOpt
     return ok(
       await new Promise<RunResult>((resolveRun) => {
         // The permission model: read anywhere, no writes, no child processes; the hooks thread is a worker and is allowed.
-        const child = spawn(process.execPath, ["--permission", "--allow-fs-read=*", "--allow-worker", "--no-warnings", "--import", register, harness], { cwd: root, env: { ...process.env, ARCHDIFF_RUN: planFile }, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(process.execPath, ["--permission", "--allow-fs-read=*", "--allow-worker", "--no-warnings", "--import", pathToFileURL(register).href, harness], { cwd: root, env: { ...process.env, ARCHDIFF_RUN: planFile }, stdio: ["ignore", "pipe", "pipe"] });
         let stdout = "";
         let stderr = "";
         child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));

@@ -10,13 +10,15 @@
 // binds the context the other modules read it through (page.ts), loads
 // the picture whenever the link or the code changes, and hands the
 // canvas's taps to picking.ts. The parts live beside it: the title
-// (title.ts), the side panels (panel.ts), what a tap picks (picking.ts),
+// (title.ts), the side panels (panel.ts) and the room they give the
+// canvas (layout.ts), the legend (legend.ts), what a tap picks (picking.ts),
 // the right-click menu (shape-menu.ts), the canvas and the drawing
 // (canvas.ts), how the centre shows the view — the canvas, 3D, the page,
 // the code (presentation.ts) — the toolbar (toolbar.ts), the minimap
 // (minimap.ts), the options (options-panel.ts), the views
 // (views-list.ts), the exports (export-menu.ts), the review (review.ts),
-// the keys (shortcuts.ts), and the tabs of the flow, the chat and the spec.
+// the keys (shortcuts.ts), the tabs of the flow, the chat and the spec, and
+// the window of the user's settings (settings.ts).
 //
 // Entry point: the module itself, loaded by index.html.
 
@@ -26,17 +28,20 @@ import { loadAgents, loadTasks } from "./chat.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
 import { loadFlow } from "./flow-tab.ts";
+import { closeDrawers } from "./layout.ts";
+import { renderLegend } from "./legend.ts";
 import { currentLink, presentationOf, refsOf, reviewing, readOnlyView, wrongInLink } from "./link.ts";
 import { closeMenu, menuOpen, openMenu } from "./menu.ts";
 import { updateMinimap } from "./minimap.ts";
 import { showOptions } from "./options-panel.ts";
 import { bindPage } from "./page.ts";
 import { loadCoverage, markdownPanel, renderMarkdown, setMarkdown, setPicturePage, showCode, showTab } from "./panel.ts";
-import { openShape, resetSelection, select, selection, tap } from "./picking.ts";
+import { givePlaceBack, openShape, resetSelection, select, selection, tap } from "./picking.ts";
 import { applyPresentation, markPresentation, presentationState } from "./presentation.ts";
 import { mapDots, mapSettled, refreshProjectMap } from "./project-map.ts";
 import { loadBranches, loadCommits, loadHeadRefs, showReviewBars } from "./review.ts";
 import { menuItems } from "./shape-menu.ts";
+import "./settings.ts";
 import "./shortcuts.ts";
 import "./theme.ts";
 import { notice, renderCrumbs, setReason, showEmpty, showNoTitle, showPendingNotice, showTitle } from "./title.ts";
@@ -115,9 +120,12 @@ async function load(): Promise<void> {
     void loadCoverage();
   }
 
-  // A new picture: nothing selected in it yet.
+  // A new picture: the one on the canvas goes back where it was before a pick moved it clear of a drawer (its place is
+  // remembered as it leaves); nothing is selected in the new one yet, and the drawers that led to it go.
+  givePlaceBack();
   resetSelection();
   closeMenu();
+  closeDrawers();
   showOptions(state);
   renderCanvasTools(state);
   markPresentation(state);
@@ -144,6 +152,7 @@ async function load(): Promise<void> {
     nodes = new Map(result.diagram.nodes.map((node) => [node.id, node]));
     edges = result.diagram.edges;
     mocks = result.mocks;
+    renderLegend(nodes.values(), edges);
     setPictureLanes(state, result.diagram.groups, result.diagram.lanes ?? "rows");
     // The navigation marks the files of this picture now that its shapes are known.
     renderViews();
@@ -183,6 +192,7 @@ async function load(): Promise<void> {
       nodes = new Map();
       edges = [];
       mocks = [];
+      renderLegend([], []);
       await showScene(state.view, [], CANVAS_EVENTS);
 
       if (overtaken()) return;

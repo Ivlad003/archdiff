@@ -20,7 +20,7 @@ import { element, remember, remembered } from "./dom.ts";
 import { codeHead, currentLink, refsOf, setLink, type Link } from "./link.ts";
 import { filesInPicture } from "./modules.ts";
 import { page } from "./page.ts";
-import { togglePanel } from "./panel.ts";
+import { showPanel } from "./layout.ts";
 import { renderTree } from "./tree.ts";
 import { listGroup, listGroups, parseView, subjectFile, viewsOfFiles } from "../../src/view-keys.ts";
 
@@ -157,7 +157,7 @@ export async function loadViews(): Promise<void> {
 
 /** The filter of the views focused, the left panel shown (the `v` key). */
 export function focusViewSearch(): void {
-  togglePanel("left", false);
+  showPanel("left", true);
   search.focus();
   search.select();
 }

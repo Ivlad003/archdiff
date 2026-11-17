@@ -7,18 +7,18 @@
 
 import assert from "node:assert/strict";
 import { spawnSync, type ChildProcess } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { startWeb, withOwnServer } from "./web-server.ts";
+import { homeOf, startWeb, withOwnServer } from "./web-server.ts";
 
 const root = join(import.meta.dirname, "..");
 
 const fixture = join(root, "tests/fixtures/sample");
 
-const CHROME = ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((path) => existsSync(path));
+const CHROME = ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "C:/Program Files/Google/Chrome/Application/chrome.exe", "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"].find((path) => existsSync(path));
 
 let dir = "";
 let server: ChildProcess | null = null;
@@ -569,9 +569,9 @@ test("the editor opens and closes, and the Chat tab reads the task from the draw
   await page!.click("#plan");
   await page!.waitForFunction(`(document.querySelector("#task")?.value ?? "").includes("# Task from the drawing")`);
   assert.ok((await page!.inputValue("#task")).includes("adds nothing to the code"));
-  // "none" picked (the tests' server finds no agent installed either): the task is only written, and the run button is off.
+  // "none" picked (the tests' server finds no agent either): the task is only written, and the run button is off.
   await page!.selectOption("#agent-select", "");
-  assert.match((await page!.textContent("#agent-name")) ?? "", /^no agent (picked|installed)/);
+  assert.match((await page!.textContent("#agent-name")) ?? "", /^no agent (picked|found)/);
   assert.ok(await page!.evaluate(`document.querySelector("#run").disabled`));
 });
 
@@ -892,6 +892,8 @@ test("the agent's question shows its options; an answer resumes the session", { 
       assert.equal(await page!.evaluate("document.querySelector('#transcript details.steps').open"), false);
       assert.ok(((await page!.textContent("#transcript details.steps summary")) ?? "").includes("step"));
       // A question about the picture: a new run (the transcript starts afresh), the picture goes along as a tag, the row shows the question.
+      // The answer is on the page before the agent's process is gone (slower on Windows): a question asked meanwhile stays in its field.
+      await page!.waitForFunction(`!document.querySelector("#run").disabled`, undefined, { timeout: 15_000 });
       await page!.fill("#ask", "What does this layer do?");
       await page!.press("#ask", "Enter");
       await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev.you")].some((row) => (row.textContent ?? "").includes("What does this layer do? (with the picture)"))`, undefined, { timeout: 15_000 });
@@ -1106,3 +1108,223 @@ test("a module named in bold on a picture's page opens its view, and the caret o
   await page!.evaluate(`[...document.querySelectorAll("#markdown strong.link")].find((name) => name.textContent === "src/lib/log.ts").click()`);
   await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/log.ts"`);
 });
+
+/** The room of the page: the classes layout.ts sets on the body, and how wide the panels and the canvas are. */
+async function roomOfPage(): Promise<{ body: string[]; left: number; right: number; canvas: number }> {
+  return (await page!.evaluate(`(() => {
+    const width = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().width);
+    return { body: [...document.body.classList], left: width("#left"), right: width("#right"), canvas: width("#canvas") };
+  })()`)) as { body: string[]; left: number; right: number; canvas: number };
+}
+
+/** The classes of the room among the body's: a folded panel, a drawer and whether it is open, the tab's mark, the full canvas. */
+function roomClasses(body: readonly string[]): string[] {
+  return body.filter((name) => /^(hide|drawer|open|news|full)-/.test(name)).sort();
+}
+
+test("the panels give way to the canvas: folded from their tabs and dragged to a width, both remembered; drawers where the window has no room — opened by a pick, gone with it — and under the full canvas", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.setViewportSize({ width: 1900, height: 1000 });
+  await page!.goto(`${base}/?fresh=room0#view=layers`);
+  await page!.evaluate("localStorage.clear()");
+  await page!.goto(`${base}/?fresh=room#view=modules`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "modules"`);
+  await page!.waitForTimeout(600);
+  // The window has the room: both panels docked beside the canvas.
+  let room = await roomOfPage();
+  assert.deepEqual([room.left, room.right, room.canvas, roomClasses(room.body)], [280, 420, 1200, []], JSON.stringify(room));
+  // The tab on the details' edge folds them away: the canvas has their room, and the browser remembers.
+  await page!.click("#edge-right");
+  room = await roomOfPage();
+  assert.deepEqual([room.canvas, roomClasses(room.body)], [1620, ["hide-right"]], JSON.stringify(room));
+  assert.equal(await page!.evaluate(`localStorage.getItem("archdiff.hide-right")`), "1");
+  assert.equal(await page!.getAttribute("#toggle-right", "aria-pressed"), "false");
+  // A shape picked while they are away: their tab says there is something to read; Ctrl+] brings them back, the mark gone.
+  // The picture is fitted again to the wider canvas first: the shape is where it will stay.
+  await page!.waitForTimeout(600);
+  const store = await screenPointOf("src/db/store.ts");
+  await page!.mouse.click(store.x, store.y);
+  await page!.waitForFunction(`document.body.classList.contains("news-right")`);
+  await page!.keyboard.press("Control+]");
+  room = await roomOfPage();
+  assert.deepEqual([room.right, roomClasses(room.body)], [420, []], JSON.stringify(room));
+  assert.equal(await page!.evaluate(`localStorage.getItem("archdiff.hide-right")`), "0");
+  await page!.keyboard.press("Escape");
+  // The details' edge dragged 150 px into the canvas: wider by that, remembered; a double click gives the width they came with.
+  const edge = (await page!.evaluate(`(() => { const box = document.querySelector("#resize-right").getBoundingClientRect(); return { x: box.left + 3, y: box.top + 300 }; })()`)) as { x: number; y: number };
+  await page!.mouse.move(edge.x, edge.y);
+  await page!.mouse.down();
+  await page!.mouse.move(edge.x - 150, edge.y, { steps: 4 });
+  await page!.mouse.up();
+  room = await roomOfPage();
+  assert.deepEqual([room.right, room.canvas], [570, 1050], JSON.stringify(room));
+  assert.equal(await page!.evaluate(`localStorage.getItem("archdiff.width-right")`), "570");
+  await page!.dblclick("#resize-right");
+  assert.equal((await roomOfPage()).right, 420);
+  assert.equal(await page!.evaluate(`localStorage.getItem("archdiff.width-right")`), null);
+  // A window without the room for both panels: the details are a drawer — away, the canvas as wide as the centre.
+  await page!.setViewportSize({ width: 1300, height: 900 });
+  await page!.waitForFunction(`document.body.classList.contains("drawer-right")`);
+  await page!.waitForTimeout(600);
+  room = await roomOfPage();
+  assert.deepEqual([room.canvas, roomClasses(room.body)], [1020, ["drawer-right"]], JSON.stringify(room));
+  assert.equal(await page!.evaluate(`getComputedStyle(document.querySelector("#right")).visibility`), "hidden");
+  // A pick opens the drawer over the canvas, which keeps its width and its zoom; Escape, with the pick, sends it away.
+  // The picture is first moved 200 pixels to the right, so its shape farthest right sits where the drawer opens:
+  // picked, it is moved clear of the drawer with its picture, which goes back where it was once the drawer is gone.
+  await page!.evaluate(`(() => { const canvas = window.archdiff.canvas(); const at = canvas.viewport(); canvas.setViewport({ ...at, scrollX: at.scrollX + 200 / at.zoom }); })()`);
+  const zoom = await page!.evaluate("window.archdiff.canvas().viewport().zoom");
+  const place = (await page!.evaluate("window.archdiff.canvas().viewport().scrollX")) as number;
+  const far = (await page!.evaluate(`window.archdiff.canvas().scene().filter((each) => !each.isDeleted && each.customData?.archdiff === "node").sort((a, b) => b.x + b.width - (a.x + a.width))[0].id`)) as string;
+  const rightEdge = async (): Promise<number> => (await page!.evaluate(`(() => { const canvas = window.archdiff.canvas(); const shape = canvas.scene().find((each) => each.id === ${JSON.stringify(far)}); const at = canvas.viewport(); return document.querySelector("#canvas").getBoundingClientRect().left + (shape.x + shape.width + at.scrollX) * at.zoom; })()`)) as number;
+  assert.ok((await rightEdge()) > 1300 - 420, `${far} is not where the drawer opens: its right edge at ${await rightEdge()}`);
+  const farPoint = await screenPointOf(far);
+  await page!.mouse.click(farPoint.x, farPoint.y);
+  await page!.waitForFunction(`document.body.classList.contains("open-right") && window.archdiff.selected()[0] === ${JSON.stringify(far)}`);
+  await page!.waitForFunction(`(document.querySelector("#markdown h1")?.textContent ?? "") !== ""`);
+  room = await roomOfPage();
+  assert.deepEqual([room.right, room.canvas, await page!.evaluate("window.archdiff.canvas().viewport().zoom")], [420, 1020, zoom], JSON.stringify(room));
+  assert.equal(await page!.evaluate(`getComputedStyle(document.querySelector("#right")).visibility`), "visible");
+  assert.ok((await rightEdge()) <= 1300 - 420, `${far} is under the drawer: its right edge at ${await rightEdge()}`);
+  await page!.keyboard.press("Escape");
+  await page!.waitForFunction(`!document.body.classList.contains("open-right") && window.archdiff.selected().length === 0`);
+  assert.ok(Math.abs(((await page!.evaluate("window.archdiff.canvas().viewport().scrollX")) as number) - place) < 1, "the picture is not back where it was");
+  // Opened by the reader (the tab), the drawer is the reader's to close: a tap on nothing beside the picture leaves it.
+  await page!.click("#edge-right");
+  const beside = await pictureBoxes();
+  await page!.mouse.click(beside.picture.left - 15, (beside.picture.top + beside.picture.bottom) / 2);
+  await page!.waitForTimeout(300);
+  assert.deepEqual(roomClasses((await roomOfPage()).body), ["drawer-right", "open-right"]);
+  await page!.click("#edge-right");
+  assert.deepEqual(roomClasses((await roomOfPage()).body), ["drawer-right"]);
+  // Narrower still, the views are a drawer too: v opens them on their filter, and a view picked sends them away.
+  await page!.setViewportSize({ width: 960, height: 800 });
+  await page!.waitForFunction(`document.body.classList.contains("drawer-left")`);
+  assert.equal((await roomOfPage()).canvas, 960);
+  await page!.keyboard.press("v");
+  await page!.waitForFunction(`document.body.classList.contains("open-left") && document.activeElement?.id === "search"`);
+  await page!.click("#views li[title='layers']");
+  await page!.waitForFunction(`window.archdiff.drawn() === "layers" && !document.body.classList.contains("open-left")`);
+  // The full canvas, whatever room the window has: f makes both panels drawers, f again docks them as they were.
+  await page!.setViewportSize({ width: 1900, height: 1000 });
+  await page!.waitForFunction(`!document.body.classList.contains("drawer-left") && !document.body.classList.contains("drawer-right")`);
+  await page!.mouse.click(1000, 900);
+  await page!.keyboard.press("f");
+  await page!.waitForFunction(`document.body.classList.contains("full-canvas")`);
+  room = await roomOfPage();
+  assert.deepEqual([room.canvas, roomClasses(room.body)], [1900, ["drawer-left", "drawer-right", "full-canvas"]], JSON.stringify(room));
+  assert.equal(await page!.evaluate(`localStorage.getItem("archdiff.full-canvas")`), "1");
+  await page!.keyboard.press("f");
+  room = await roomOfPage();
+  assert.deepEqual([room.left, room.right, room.canvas, roomClasses(room.body)], [280, 420, 1200, []], JSON.stringify(room));
+  await page!.evaluate("localStorage.clear()");
+});
+
+test("the toolbar folds to its first controls, the legend is of the picture shown and hides, and a menu of the page closes on a press outside it and on Escape", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.setViewportSize({ width: 1900, height: 1000 });
+  await page!.goto(`${base}/?fresh=tools0#view=layers`);
+  await page!.evaluate("localStorage.clear()");
+  await page!.goto(`${base}/?fresh=tools#view=modules`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "modules"`);
+  const legend = async (): Promise<string[]> => (await page!.evaluate(`[...document.querySelectorAll("#legend span")].map((entry) => entry.textContent)`)) as string[];
+  // The legend names what this picture has: modules, their imports and the one of types alone — not the branches of a function's logic.
+  assert.deepEqual(await legend(), ["module", "A → B: A imports B", "types only"]);
+  await page!.goto(`${base}/?fresh=tools1#view=${encodeURIComponent("logic:src/lib/orders.ts#placeOrder")}`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "logic:src/lib/orders.ts#placeOrder"`);
+  const logic = await legend();
+  assert.ok(["step", "exit", "next step"].every((entry) => logic.includes(entry)) && !logic.includes("module"), JSON.stringify(logic));
+  // It hides and comes back from the title's button; hidden, it stays hidden on the next page.
+  await page!.click("#legend-toggle");
+  assert.equal(await page!.isVisible("#legend"), false);
+  assert.equal(await page!.evaluate(`localStorage.getItem("archdiff.legend.off")`), "1");
+  await page!.goto(`${base}/?fresh=tools2#view=modules`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "modules"`);
+  assert.equal(await page!.isVisible("#legend"), false);
+  await page!.click("#legend-toggle");
+  assert.equal(await page!.isVisible("#legend"), true);
+  // The toolbar folded: the picture, show as and find stay; a tool that is on stays in sight; unfolded, every tool is back.
+  assert.equal(await page!.isVisible("#canvas-tools [data-detail='full']"), true);
+  await page!.click("#tools-fold");
+  assert.deepEqual(await Promise.all(["#picture", "#show-as", "#find", "#canvas-tools [data-detail='full']", "#depth-more", "#tool-dim", "#tool-minimap"].map((selector) => page!.isVisible(selector))), [true, true, true, false, false, false, false]);
+  assert.equal(await page!.evaluate(`localStorage.getItem("archdiff.tools")`), "folded");
+  await page!.mouse.click(1000, 900);
+  await page!.keyboard.press("d");
+  assert.equal(await page!.isVisible("#tool-dim"), true);
+  await page!.keyboard.press("d");
+  assert.equal(await page!.isVisible("#tool-dim"), false);
+  await page!.click("#tools-fold");
+  assert.equal(await page!.isVisible("#canvas-tools [data-detail='full']"), true);
+  // The menus: one open at a time; Escape closes the open one, and so does a press outside it.
+  const open = async (): Promise<string[]> => (await page!.evaluate(`[...document.querySelectorAll("details.popover")].filter((menu) => menu.open).map((menu) => menu.id)`)) as string[];
+  await page!.click("#export-menu summary");
+  assert.deepEqual(await open(), ["export-menu"]);
+  // Its list is on the page under the button — the header, which clips what overflows it, does not cut it away.
+  assert.equal(await page!.evaluate(`(() => { const first = document.querySelector("#export a"); const at = first.getBoundingClientRect(); return document.elementFromPoint(at.left + 10, at.top + 5) === first; })()`), true);
+  await page!.click("#options-menu summary");
+  assert.deepEqual(await open(), ["options-menu"]);
+  await page!.keyboard.press("Escape");
+  assert.deepEqual(await open(), []);
+  await page!.click("#lanes-menu summary");
+  assert.deepEqual(await open(), ["lanes-menu"]);
+  await page!.mouse.click(1000, 900);
+  assert.deepEqual(await open(), []);
+  await page!.evaluate("localStorage.clear()");
+});
+
+test("the settings window places the agents and keeps the keys: an agent of the user's own joins the picker and runs; a key is typed once and never shown again", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-settings-",
+    () => undefined,
+    async (settingsBase, own) => {
+      const file = join(homeOf(own), ".archdiff", "settings.json");
+      await page!.goto(`${settingsBase}/#view=layers`);
+      await page!.waitForSelector(".excalidraw canvas");
+      await page!.click("#tabs button[data-tab='chat']");
+      // No agent on this server's PATH nor in its home: the picker says where one is placed.
+      await page!.waitForFunction(`(document.querySelector("#agent-name")?.textContent ?? "").includes("place one in the settings")`);
+      await page!.click("#settings-open");
+      await page!.waitForFunction(`document.querySelector("#settings").open && document.querySelectorAll("#settings .agent").length === 4`);
+      assert.equal(await page!.textContent("#settings-file"), file);
+      assert.equal(await page!.evaluate(`document.querySelectorAll("#settings .agent .missing").length`), 4);
+
+      // An agent of the user's own: its command typed as one line, a word with spaces in quotes.
+      await page!.fill("#own-name", "mine");
+      await page!.fill("#own-command", `"${process.execPath}" "${join(root, "tests/fixtures/fake-agent.mjs")}"`);
+      await page!.fill("#own-resume", "--resume");
+      await page!.press("#own-command", "Enter");
+      await page!.waitForFunction(`document.querySelector("#settings .agent[data-agent='mine'] .found") !== null`);
+      assert.deepEqual((JSON.parse(readFileSync(file, "utf8")) as { custom: unknown[] }).custom, [{ name: "mine", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], protocol: "stream-json", resume: "--resume" }]);
+      // The picker has it at once, and picks it: the first that can run.
+      await page!.waitForFunction(`document.querySelector("#agent-select").value === "mine"`);
+
+      // A key: set by its name, shown by its last characters, its value nowhere on the page.
+      await page!.fill("#key-name", "OPENROUTER_API_KEY");
+      await page!.fill("#key-value", "sk-or-test-1234567890abcdef");
+      await page!.press("#key-value", "Enter");
+      await page!.waitForFunction(`document.querySelector("#settings-keys .key[data-key='OPENROUTER_API_KEY']")?.textContent?.includes("…cdef")`);
+      assert.equal(await page!.inputValue("#key-value"), "");
+      assert.ok(!(await page!.content()).includes("1234567890abcdef"), "the key's value is not on the page");
+
+      // A model of a built-in agent is kept when its field is left; what is refused is said, and nothing changes.
+      await page!.fill(".agent[data-agent='opencode'] .agent-model", "openrouter/anthropic/claude-x");
+      await page!.press(".agent[data-agent='opencode'] .agent-model", "Tab");
+      await page!.waitForFunction(`document.querySelector("#settings-note").textContent === "OpenCode: kept"`);
+      assert.deepEqual((JSON.parse(readFileSync(file, "utf8")) as { agents: unknown }).agents, { opencode: { model: "openrouter/anthropic/claude-x" } });
+      await page!.fill("#key-name", "NODE_OPTIONS");
+      await page!.fill("#key-value", "--require ./x.js");
+      await page!.click("#key-set");
+      await page!.waitForFunction(`document.querySelector("#settings-note").classList.contains("wrong") && document.querySelector("#settings-note").textContent.includes("_KEY or …_TOKEN")`);
+      assert.equal(await page!.evaluate(`document.querySelectorAll("#settings-keys .key").length`), 1);
+
+      // The keys are the window's while it is open — f does not fold the panels under it — and Escape closes it.
+      await page!.click("#settings-title");
+      await page!.keyboard.press("f");
+      assert.equal(await page!.evaluate(`document.body.classList.contains("full-canvas")`), false);
+      await page!.keyboard.press("Escape");
+      await page!.waitForFunction(`!document.querySelector("#settings").open`);
+
+      // The agent added runs the task.
+      await page!.fill("#task", "Say done.");
+      await page!.click("#run");
+      await page!.waitForFunction(`document.querySelector("#transcript .answer")?.textContent?.includes("Done.")`, undefined, { timeout: 15_000 });
+    },
+  ));

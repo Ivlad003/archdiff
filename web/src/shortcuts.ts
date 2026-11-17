@@ -4,18 +4,19 @@
 // `p` the project map, `0` fits, Backspace goes back, the arrows walk
 // from the picked shape and Enter goes into it, `s` splits, `m` mix, `d`
 // dim, `l` flips the lanes, `[` and `]` step the head through the
-// branches, `b` shows the branches, `e` edits, Escape clears (or closes
-// the menu and the project map first). A picture read from git (a review,
+// branches, `b` shows the branches, `e` edits, `f` gives the canvas the
+// whole page, Escape clears (or first closes what is open over the page:
+// a menu, the project map, a drawer). A picture read from git (a review,
 // a comparison, a commit, the branches) is not drawn on: the keys of the
 // tools are off there.
 //
 // Entry point: the module itself, imported by app.ts.
 
 import { canvasMode, saveDrawing, setMode } from "./canvas.ts";
+import { closeOpenDrawers, closePopovers, drawerOpen, popoverOpen, showPanel, toggleFullCanvas } from "./layout.ts";
 import { currentLink, readOnlyView, setLink, presentationOf } from "./link.ts";
 import { closeMenu, menuOpen } from "./menu.ts";
 import { toggleOptions } from "./options-panel.ts";
-import { togglePanel } from "./panel.ts";
 import { lastPicked, openShape, select, walk } from "./picking.ts";
 import { fitPresentation } from "./presentation.ts";
 import { projectMapOpen, toggleProjectMap } from "./project-map.ts";
@@ -59,6 +60,7 @@ function readingKey(event: KeyboardEvent): void {
   else if (event.key === "d" && drawable) toggleTool("dim");
   else if (event.key === "l") flipLanes();
   else if (event.key === "t") toggleTree();
+  else if (event.key === "f") toggleFullCanvas();
   else if (event.key === "[" || event.key === "]") stepHead(event.key === "]" ? 1 : -1);
   else if (event.key === "b") setLink({ ...currentLink(), view: "branches", heads: [] });
   else if (event.key === "e" && drawable) setMode("edit");
@@ -66,23 +68,29 @@ function readingKey(event: KeyboardEvent): void {
 }
 
 window.addEventListener("keydown", (event) => {
+  // A window over the page (the settings) has the keys to itself: Escape closes it, and no key reaches the picture under it.
+  if (document.querySelector("dialog[open]")) return;
   const target = event.target;
   const typing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
 
-  // The menu and the project map take Escape first.
-  if (event.key === "Escape" && (menuOpen() || projectMapOpen())) {
+  // What is open over the page takes Escape first: a menu of the page, the project map.
+  if (event.key === "Escape" && (menuOpen() || projectMapOpen() || popoverOpen())) {
     closeMenu();
+    closePopovers();
     toggleProjectMap(false);
 
     return;
   }
 
+  // A drawer goes with the selection, in one press.
+  if (event.key === "Escape" && !typing && canvasMode() === "view" && drawerOpen()) closeOpenDrawers();
+
   if (event.ctrlKey && event.key === "b") {
     event.preventDefault();
-    togglePanel("left");
+    showPanel("left");
   } else if (event.ctrlKey && event.key === "]") {
     event.preventDefault();
-    togglePanel("right");
+    showPanel("right");
   } else if (event.ctrlKey && event.key === "s" && canvasMode() === "edit") {
     event.preventDefault();
     void saveDrawing();

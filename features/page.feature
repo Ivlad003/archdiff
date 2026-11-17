@@ -93,3 +93,39 @@ Feature: The page
     When I type "What does this layer do?" in the ask row and press Enter
     Then the transcript's own row reads the question "(with the picture)"
     And the agent's steps fold under one line and the answer is rendered
+
+  Scenario: The panels give way to the canvas
+    Given the page open on "modules" in a window 1900 pixels wide
+    When I press the tab on the details' edge
+    Then the canvas is 420 pixels wider and the browser remembers the fold
+    When I drag the details' edge 150 pixels into the canvas
+    Then the details are 570 pixels wide, and a double click on the edge gives 420 back
+    When the window is 1300 pixels wide and I tap a shape
+    Then the details open over the canvas with the shape's page, and Escape sends them away
+    When the window is 960 pixels wide and I press "v", then pick a view
+    Then the views open over the canvas on their filter, and go once the view is picked
+    When I press "f" in a window 1900 pixels wide
+    Then the canvas is 1900 pixels wide, and "f" again docks both panels as they were
+
+  Scenario: The toolbar folds, the legend is of the picture, the menus close
+    Given the page open on "modules"
+    Then the legend reads "module", "A → B: A imports B" and "types only"
+    When I press "tools" on the toolbar
+    Then the picture, show as and find stay, and the detail buttons are gone until I press it again
+    When I open the export menu, then the options
+    Then one menu is open, and Escape or a press outside closes it
+
+  Scenario: The settings window places the agents and keeps the keys
+    Given the page open on "layers" with no agent installed
+    When I open the Chat tab and press "agents & keys…"
+    Then the window names the settings file and lists Claude Code, Cursor, Codex and OpenCode, each with why it cannot run
+    When I add the agent "mine" with a command that runs the fake agent
+    Then the window shows the program started for it and the picker picks "mine"
+    When I set the key "OPENROUTER_API_KEY" to a value ending in "cdef"
+    Then the key is listed as "set …cdef" and its value is nowhere on the page
+    When I set the key "NODE_OPTIONS"
+    Then the window says a key is named …_KEY or …_TOKEN and lists one key
+    When I press "f", then Escape
+    Then the panels stay as they are and the window is closed
+    When I run the task "Say done."
+    Then the answer "Done." is rendered

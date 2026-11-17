@@ -7,15 +7,19 @@
 // (app.ts hands `tap` and `openShape` to it); the shapes and lines are
 // the current picture's, read through the page.
 //
+// A shape picked under the open drawer of the details (layout.ts) is moved
+// clear of it with its picture, which goes back when the drawer does.
+//
 // Entry points: `tap`, `openShape`, `select`, `toggleSelected`,
 // `pickShape`, `askSelected`, `showEdge`, `walk`, `resetSelection`,
-// `selection`, `lastPicked`, `tools`, `labelOf`.
+// `givePlaceBack`, `selection`, `lastPicked`, `tools`, `labelOf`.
 
 import { api, type Shape } from "./api.ts";
 import { chainBetween, chainFrom, neighbourhoodOf } from "./chains.ts";
 import { askAbout } from "./chat.ts";
 import { h, element } from "./dom.ts";
 import { VIEW_LINK, type PickedLine } from "./editor.tsx";
+import { detailsCover, onDetailsClosed, releaseDetails, revealDetails } from "./layout.ts";
 import { currentLink, refsOf, setLink } from "./link.ts";
 import { closeMenu } from "./menu.ts";
 import { page } from "./page.ts";
@@ -180,6 +184,47 @@ export function pickShape(id: string): void {
   select([id], true);
 }
 
+// ── A pick under the details' drawer ─────────────────────────────────────────
+
+/** The room left between a picked shape and the edge of what the drawer leaves of the canvas, in screen pixels. */
+const DRAWER_GAP = 24;
+
+/** How far the picture was moved for the picks under the drawer (scene units), and where that left it: to give back. */
+let movedForDrawer: { by: number; at: number } | null = null;
+
+/**
+ * A shape picked where the open drawer of the details covers the canvas is moved clear of it, the picture with it:
+ * what is read on the right is seen on the left. Never so far that the shape's own left edge leaves the canvas.
+ */
+function keepInSight(id: string): void {
+  const canvas = page.canvas();
+  const cover = detailsCover();
+  const at = canvas?.viewport();
+  const shape = cover > 0 ? canvas?.scene().find((element) => element.id === id && !element.isDeleted) : undefined;
+
+  if (!canvas || !at || !shape) return;
+  const room = canvas.size().width - cover - DRAWER_GAP;
+  const left = (shape.x + at.scrollX) * at.zoom;
+  const by = Math.min(left + shape.width * at.zoom - room, left - DRAWER_GAP) / at.zoom;
+
+  if (by <= 0) return;
+  // A move the reader has not panned away from since carries on; one they have is theirs now.
+  const carried = movedForDrawer && Math.abs(at.scrollX - movedForDrawer.at) < 0.5 ? movedForDrawer.by : 0;
+  canvas.setViewport({ ...at, scrollX: at.scrollX - by });
+  movedForDrawer = { by: carried + by, at: at.scrollX - by };
+}
+
+/** The picture back where it was before it moved for the drawer — unless the reader moved it since, or another picture is on the canvas. */
+export function givePlaceBack(): void {
+  const canvas = page.canvas();
+  const at = canvas?.viewport();
+
+  if (movedForDrawer && canvas && at && Math.abs(at.scrollX - movedForDrawer.at) < 0.5) canvas.setViewport({ ...at, scrollX: at.scrollX + movedForDrawer.by });
+  movedForDrawer = null;
+}
+
+onDetailsClosed(givePlaceBack);
+
 // ── The selection: several shapes at once ────────────────────────────────────
 
 /** The strip under the tabs: the selected shapes as chips, and what to do with them together. */
@@ -210,10 +255,15 @@ export function select(ids: string[], centre = false): void {
   page.canvas()?.highlight(selected);
   renderSelection();
 
+  // What is picked is read on the right: a drawer opens for it, and goes when nothing is picked any more.
+  if (selected.length > 0) revealDetails();
+  else releaseDetails();
+
   if (selected.length === 1) {
     picked = selected[0]!;
 
     if (centre) page.canvas()?.centreOn(picked);
+    keepInSight(picked);
     void showNode(picked);
   } else if (selected.length === 2) showChain(selected[0]!, selected[1]!);
   else if (selected.length > 2) showSelection();
@@ -311,6 +361,7 @@ export async function showEdge(lines: PickedLine[], follow: boolean): Promise<vo
   const state = currentLink();
   const line = lines[0]!;
   const chain = follow ? chainFrom(page.edges(), line) : null;
+  revealDetails();
   page.canvas()?.highlight(chain ? [...chain.lineIds, ...chain.nodeIds] : [...new Set(lines.flatMap((each) => [each.id, each.from, each.to]))]);
   let markdown: string;
 

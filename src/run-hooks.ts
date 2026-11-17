@@ -98,6 +98,21 @@ function instrument(source: string, bodies: { id: string; start: number; end: nu
   return out;
 }
 
+/**
+ * TypeScript as the JavaScript Node runs: the types stripped, and enums and parameter properties transformed where
+ * this Node still does that. Node 26 strips only and refuses the other mode by name: there the types are stripped, and
+ * a file with an enum says itself what it cannot run as.
+ */
+function withoutTypes(source: string, url: string): string {
+  try {
+    return stripTypeScriptTypes(source, { mode: "transform", sourceUrl: url });
+  } catch (error) {
+    if (!(error instanceof TypeError) || (error as NodeJS.ErrnoException).code !== "ERR_INVALID_ARG_VALUE") throw error;
+
+    return stripTypeScriptTypes(source, { mode: "strip", sourceUrl: url });
+  }
+}
+
 export async function load(url: string, context: LoadContext, next: (url: string, context: LoadContext) => Promise<LoadResult>): Promise<LoadResult> {
   if (url.startsWith("archdiff-mock:")) {
     const name = url.slice("archdiff-mock:".length);
@@ -113,7 +128,7 @@ export async function load(url: string, context: LoadContext, next: (url: string
   const source = readFileSync(path, "utf8");
   const traced = instrument(source, bodies);
   // A TypeScript file runs with its types stripped (enums and parameter properties transformed); JavaScript as it is.
-  const javascript = /\.[cm]?tsx?$/.test(path) ? stripTypeScriptTypes(traced, { mode: "transform", sourceUrl: url }) : traced;
+  const javascript = /\.[cm]?tsx?$/.test(path) ? withoutTypes(traced, url) : traced;
 
   return { format: formatOf(path, context.format, javascript), source: javascript, shortCircuit: true };
 }
