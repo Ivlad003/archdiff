@@ -1,30 +1,27 @@
 // The review: the base and head fields of the header with the review
-// button, and the bars under the title — the commits of the branch to
-// step through, and the branches (a base and any number of heads to
-// compare). The base field is the link's base (link.ts reads it). The
+// button, and the bar of the branches under the title (a base and any
+// number of heads to compare); the commits of a range to step through are
+// commits.ts's. The base field is the link's base (link.ts reads it). The
 // head field is the code the page shows, for every picture: a branch, a
 // tag or a commit (the branches offered as it is typed, [ and ] step
 // through them), the working tree when empty.
 //
-// Entry points: `showReviewBars`, `loadCommits`, `loadBranches`,
-// `loadHeadRefs`, `stepHead`, `reviewBase`.
+// Entry points: `showReviewBars`, `loadBranches`, `loadHeadRefs`,
+// `stepHead`, `reviewBase`.
 
-import { api, type Commit } from "./api.ts";
+import { api } from "./api.ts";
 import { leaveEdit } from "./canvas.ts";
 import { element } from "./dom.ts";
 import { reviewing, setLink, currentLink, type Link } from "./link.ts";
 
 const baseInput = element<HTMLInputElement>("base");
 const headInput = element<HTMLInputElement>("head");
-const commitList = element<HTMLSelectElement>("commit-list");
-let commits: Commit[] = [];
 
-/** The base and head fields as the link has them; the commits bar for a review, the branches bar for a review or a comparison. */
+/** The base and head fields as the link has them; the branches bar for a review or a comparison. */
 export function showReviewBars(state: Link): void {
   // The base is the link's: a link without one is reviewed from the default base, whatever the field held before.
   baseInput.value = new URLSearchParams(location.hash.slice(1)).get("base") ?? "";
   headInput.value = state.head ?? "";
-  element("commits").hidden = state.view !== "review";
   element("branches").hidden = !reviewing(state.view);
 }
 
@@ -35,77 +32,6 @@ baseInput.addEventListener("change", () => {
   if (reviewing(currentLink().view)) setLink(currentLink());
 });
 
-/** The range the commit bar lists (its base and head), kept while a commit of it is picked: stepping stays in the range. */
-let range: { base: string | null; head: string | null } | null = null;
-
-export async function loadCommits(state: Link): Promise<void> {
-  // A commit of the listed range picked (its own change, base the commit before it): the bar keeps the range and moves the pick.
-  const at = commits.findIndex((commit) => commit.sha === state.head || commit.short === state.head);
-  const picked = commits[at];
-  const before = at > 0 ? commits[at - 1]!.sha : (range?.base ?? "");
-
-  if (range && picked && baseInput.value.trim() === before) {
-    commitList.value = picked.sha;
-    element("commit-note").textContent = "this commit against the one before it";
-
-    return;
-  }
-
-  try {
-    range = { base: baseInput.value.trim() || null, head: state.head };
-    const result = await api.commits(range.base, range.head);
-    commits = result.commits;
-    commitList.replaceChildren();
-    const whole = document.createElement("option");
-    whole.value = "";
-    whole.textContent = `whole range: ${result.base.slice(0, 10)} → ${state.head ?? "working tree"} (${commits.length} commits)`;
-    commitList.append(whole);
-
-    for (const commit of commits) {
-      const option = document.createElement("option");
-      option.value = commit.sha;
-      option.textContent = `${commit.short} ${commit.date} ${commit.subject}`;
-      commitList.append(option);
-    }
-
-    // The picked commit is the head whose base is the commit before it.
-    const picked = commits.find((commit) => commit.sha === state.head || commit.short === state.head);
-    commitList.value = picked ? picked.sha : "";
-    element("commit-note").textContent = picked ? `this commit against the one before it` : commits.length === 0 ? "no commits between the base and the head" : "pick a commit to see its own change";
-  } catch (error) {
-    element("commit-note").textContent = error instanceof Error ? error.message : String(error);
-  }
-}
-
-function reviewCommit(index: number): void {
-  const commit = commits[index];
-
-  if (!commit) return;
-  // The first commit of the range against the range's own base, each later one against the one before it.
-  const previous = commits[index - 1];
-  baseInput.value = previous ? previous.sha : (range?.base ?? "");
-  setLink({ ...currentLink(), view: "review", head: commit.sha, heads: [] });
-}
-
-commitList.addEventListener("change", () => {
-  const index = commits.findIndex((commit) => commit.sha === commitList.value);
-
-  if (index === -1) {
-    // The whole range again: its own base and head, and the bar reads it afresh.
-    const whole = range;
-    range = null;
-    baseInput.value = whole?.base ?? "";
-    setLink({ ...currentLink(), view: "review", head: whole?.head ?? null, heads: [] });
-  } else reviewCommit(index);
-});
-element<HTMLButtonElement>("commit-prev").addEventListener("click", () => {
-  const index = commits.findIndex((commit) => commit.sha === commitList.value);
-  reviewCommit(index <= 0 ? commits.length - 1 : index - 1);
-});
-element<HTMLButtonElement>("commit-next").addEventListener("click", () => {
-  const index = commits.findIndex((commit) => commit.sha === commitList.value);
-  reviewCommit(index === -1 ? 0 : Math.min(commits.length - 1, index + 1));
-});
 // The head is the code of every picture: a change of it draws the same view at the other revision.
 headInput.addEventListener("change", () => setLink({ ...currentLink(), head: headInput.value.trim() || null }));
 

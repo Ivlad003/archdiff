@@ -252,6 +252,20 @@ The system SHALL reload the picture when a source file of any language the analy
 - **WHEN** `src/lib/tool.py` is written while the page shows the lib layer
 - **THEN** `/api/changes` names it and the next picture of the layer holds it
 
+### Requirement: A slider steps through the commits of a range
+
+The system SHALL show, on a review and on the timeline, a bar with the commits of the range: a list, a button to the previous and the next commit, a slider over the commits whose left end is the whole range (the thumb names the commit it is over while dragged; let go, that commit is opened), and a play button that opens the next commit by itself once the picture of this one is drawn and the pace has passed — slow, normal or fast, of a select — until the last commit, a press, a pick by hand or a view without the bar. On a review a commit SHALL be its own change against the one before it, the bar keeping the range. On the timeline a commit SHALL be the code as it was then (`at=<sha>` in the link, which a link to another view drops): the map with what the commit did marked, the title naming the commit and its place, the page's code that commit's, the editor off. Beside the slider three buttons SHALL switch the overlays read from git — churn, coupling, owners — which the options hold as boxes too. A step to a commit SHALL take under a second on the sample fixture. `.` and `,` SHALL step as the buttons do and `k` SHALL play and pause.
+
+#### Scenario: The timeline played
+
+- **WHEN** the timeline of four commits is open, the pace is set to fast and `k` is pressed
+- **THEN** the picture is the map at the first commit, then at each of the next, the slider moving with it, and at the fourth the play ends by itself
+
+#### Scenario: The overlays at a commit
+
+- **WHEN** the slider is let go on the third commit and churn, coupling and owners are pressed
+- **THEN** the link holds `at=` that commit and `overlay=churn,coupling,ownership`, the two modules changed together twice by then are joined by a dashed line without an arrowhead, and each module names its main author
+
 ### Requirement: The board of the uncommitted changes is walked
 
 The system SHALL open the board of the uncommitted changes (`view=changes`) from the picture select, the views list and the key `c`, and show under the title a bar with the steps of its walk — the whole board, then every group in reading order, each with its place, its layer and directory and the count of its modules — a button to the previous and one to the next step, and what the board is compared against. A step SHALL open the group's own picture (`changes:<layer>:<dir>`) and bring its page, which ends with the group's diff, to the Markdown tab (a drawer opens for it where the details are one); the diff SHALL be read by its signs — the lines added, removed and the heads of the hunks each in their colour. `.` and `,` SHALL step forward and back; past either end the line under the picture SHALL say so. The board SHALL be drawn again by the live reload, and its bar filled anew from every picture: a group that is no longer changed while its picture is open SHALL be named as such in the bar, with the walk leading on from it. The board SHALL not be drawn on, and SHALL keep the Chat tab.
@@ -301,7 +315,7 @@ The system SHALL fold each side panel away and back from the header's button, th
 
 ### Requirement: The keys
 
-The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or Cmd held: `/` focuses find, `v` the filter of the views (showing the left panel), `o` opens the options, `p` the project map, `0` fits, Backspace goes back, the arrows walk from the picked shape, Enter goes into it, `s` splits, `m` and `d` turn mix and dim on and off, `l` flips the lanes, `[` and `]` step the head through the branches, `b` shows the branches and `c` the board of the uncommitted changes, `.` and `,` step forward and back through what is walked (the groups of the board), `e` edits, `f` turns the full canvas on and off, Escape clears the selection and closes an open drawer with it (a menu and the project map close first); Ctrl+B and Ctrl+] SHALL fold the left and the right panel, Ctrl+S save a drawing. In a review, a comparison, a commit's change, the branches and the board of the uncommitted changes the keys of the tools (`p`, `s`, `m`, `d`, `e`) SHALL do nothing.
+The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or Cmd held: `/` focuses find, `v` the filter of the views (showing the left panel), `o` opens the options, `p` the project map, `0` fits, Backspace goes back, the arrows walk from the picked shape, Enter goes into it, `s` splits, `m` and `d` turn mix and dim on and off, `l` flips the lanes, `[` and `]` step the head through the branches, `b` shows the branches and `c` the board of the uncommitted changes, `.` and `,` step forward and back through what is walked (the groups of the board, the commits under the slider), `k` plays and pauses the commits under the slider, `e` edits, `f` turns the full canvas on and off, Escape clears the selection and closes an open drawer with it (a menu and the project map close first); Ctrl+B and Ctrl+] SHALL fold the left and the right panel, Ctrl+S save a drawing. In a review, a comparison, a commit's change, the branches and the board of the uncommitted changes the keys of the tools (`p`, `s`, `m`, `d`, `e`) SHALL do nothing.
 
 #### Scenario: Find and filter
 
@@ -315,7 +329,7 @@ The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or
 
 ### Requirement: The browser remembers the reader's choices
 
-The system SHALL remember in the browser, and only there, the zoom and place of every view the reader moved (a view left where the fit put it is fitted again, to the window it is shown in then; a place that no longer shows the picture gives way to the fit), the folded side panels and their widths, the full canvas, a folded toolbar, a hidden legend, a hidden minimap, the theme (the system's at first) and the options kept with *remember as defaults*; the options menu SHALL offer the presets of who reads — reviewer (the changes and the tests overlay), newcomer (one step deep, thirty shapes) and architect (the heat, sixty shapes, lines of weight two) — and *reset*, which forgets the remembered defaults and sets every option of the picture back to the built-in one (opened modules, hidden lanes and type-only imports too). Both SHALL say what they did once the picture is drawn again. A private window without storage SHALL work the same, forgetting.
+The system SHALL remember in the browser, and only there, the zoom and place of every view the reader moved (a view left where the fit put it is fitted again, to the window it is shown in then; a place that no longer shows the picture gives way to the fit), the folded side panels and their widths, the full canvas, a folded toolbar, a hidden legend, a hidden minimap, the pace of the commits' play, the theme (the system's at first) and the options kept with *remember as defaults*; the options menu SHALL offer the presets of who reads — reviewer (the changes and the tests overlay), newcomer (one step deep, thirty shapes) and architect (the heat, sixty shapes, lines of weight two) — and *reset*, which forgets the remembered defaults and sets every option of the picture back to the built-in one (opened modules, hidden lanes and type-only imports too). Both SHALL say what they did once the picture is drawn again. A private window without storage SHALL work the same, forgetting.
 
 #### Scenario: Back to a view
 

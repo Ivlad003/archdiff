@@ -1,5 +1,6 @@
 // The link of the page: what the hash says — the view (a review and a
-// comparison are views too), the head and the heads, how the centre shows
+// comparison are views too), the head and the heads, the commit a
+// timeline is at, how the centre shows
 // the view (`as`: the canvas, 3D, its Markdown, its code), and the options
 // of the picture as options.ts names them (depth, limit, weight, hubs,
 // packages, opened modules, hidden lanes, overlays, the review's marks,
@@ -59,6 +60,8 @@ export interface Link extends PictureOptions {
   heads: string[];
   /** How the centre shows the view (`as=3d`); the canvas when the link says nothing. */
   as: Presentation;
+  /** The commit of its range the timeline is at (`at=<sha>`): the code as it was then; null for the whole range. */
+  at: string | null;
 }
 
 /** A review of a change or a comparison of heads: the page shows the branch bar. */
@@ -77,14 +80,14 @@ export function readOnlyView(view: string): boolean {
 
 /** The revision whose code the page shows (null: the working tree), as `codeRevision` says for the link's view. */
 export function codeHead(link: Link): string | null {
-  return codeRevision(parseView(link.view), link.head);
+  return codeRevision(parseView(link.view), link.head, link.at);
 }
 
-/** The refs of the link: the base (the base field), the head, the heads. */
+/** The refs of the link: the base (the base field), the head, the heads, the commit the timeline is at. */
 export function refsOf(link: Link): Refs {
   const base = (document.getElementById("base") as HTMLInputElement | null)?.value.trim() || null;
 
-  return { base, head: link.head, heads: link.heads };
+  return { base, head: link.head, heads: link.heads, at: link.at };
 }
 
 /** The options a link may leave out: remembered in this browser as defaults ("remember as defaults"). */
@@ -157,7 +160,10 @@ export function currentLink(): Link {
 
   const as = params.get("as");
 
-  return { ...options, view, head: params.get("head") || null, heads, as: isPresentation(as) ? as : "canvas" };
+  // The commit a timeline is at; another view has none, whatever a link carried over says.
+  const at = parseView(view)?.kind === "timeline" ? params.get("at") || null : null;
+
+  return { ...options, view, head: params.get("head") || null, heads, as: isPresentation(as) ? as : "canvas", at };
 }
 
 /** The values of the link the options table refuses (`limit=1.5 (limit must be a whole number of at least 1)`), each left out of the picture. */
@@ -179,6 +185,8 @@ export function setLink(link: Link): void {
   if (link.heads.length > 0) params.set("heads", link.heads.join(","));
 
   if (link.as !== "canvas") params.set("as", link.as);
+
+  if (link.at && parseView(link.view)?.kind === "timeline") params.set("at", link.at);
   // The picture's options, written only when they differ from the remembered defaults, so a plain link stays short; an
   // explicit "none" when a default is turned off. "Only the changes" needs marks: the changes laid over, or a review.
   const picture = writePictureParams({ ...link, onlyChanges: link.onlyChanges && (link.changes || readOnlyView(link.view)) }, { ...DEFAULT_PICTURE_OPTIONS, ...readDefaults() });

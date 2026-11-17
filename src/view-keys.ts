@@ -96,7 +96,8 @@ export const VIEW_KINDS = {
   tests: { subject: "none", question: "which modules the tests import, and which none does", modules: true, overview: "test coverage" },
   hotspots: { subject: "none", question: "which modules are big, and which are called from everywhere", overview: "hotspots", mermaid: ["quadrant"] },
   packages: { subject: "none", question: "which packages depend on which, declared or not", overview: "packages", mermaid: ["c4", "pie"] },
-  timeline: { subject: "none", question: "how the coupling between layers drifted, commit by commit", change: true, overview: "timeline" },
+  // At one commit the timeline is the whole map of the code as it was then, which keeps as many shapes as the map does.
+  timeline: { subject: "none", question: "how the coupling between layers drifted, commit by commit", fold: 200, change: true, overview: "timeline" },
   coverage: { subject: "none", question: "where the diagrams are blind: calls and imports archdiff could not follow", overview: "blind spots" },
   intent: { subject: "none", question: "what was intended, what is built, and where the code went beyond the intent", modules: true, overview: "the intent against the code" },
   // The whole map shows every module of all but a big repository (the fold of `full`); the project map has the rest.
@@ -224,13 +225,15 @@ export function drawnAtHead(kind: ViewKind | undefined): boolean {
 /**
  * The revision whose code the pages of a view read — a shape's page, its file, the views list, the project map —
  * null for the working tree: the head of a picture of the code and of a review (the change's result), the commit of
- * a commit's change; the working tree for a comparison of several heads, for the timeline and for the board of the
- * uncommitted changes.
+ * a commit's change, the commit the timeline is at (`at`); the working tree for a comparison of several heads, for the
+ * timeline of a whole range and for the board of the uncommitted changes.
  */
-export function codeRevision(view: View | null, head: string | null): string | null {
+export function codeRevision(view: View | null, head: string | null, at: string | null = null): string | null {
   if (view?.kind === "commit") return view.subject;
 
-  return view?.kind === "compare" || view?.kind === "timeline" || view?.kind === "changes" ? null : head;
+  if (view?.kind === "timeline") return at;
+
+  return view?.kind === "compare" || view?.kind === "changes" ? null : head;
 }
 
 /** How many shapes a picture of the kind keeps before its tail folds, without `--limit`. */

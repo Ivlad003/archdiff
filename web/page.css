@@ -1235,8 +1235,44 @@ body.editing #empty {
 }
 
 #commit-list {
-  max-width: 60%;
+  max-width: 34%;
   font: inherit;
+}
+
+/* The slider over the commits of the range (commits.ts), its pace, and the overlays read from git beside it. */
+#commit-slider {
+  flex: 0 1 220px;
+  min-width: 90px;
+  accent-color: var(--accent);
+}
+
+#commit-speed {
+  font: inherit;
+}
+
+#git-overlays {
+  display: inline-flex;
+  white-space: nowrap;
+}
+
+#git-overlays button {
+  border-radius: 0;
+  margin-left: -1px;
+}
+
+#git-overlays button:first-child {
+  border-radius: 4px 0 0 4px;
+  margin-left: 0;
+}
+
+#git-overlays button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+#commit-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #crumbs {

@@ -105,7 +105,9 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
   const contract = overrides.get(INTENT_FILE);
   const intent = !overrides.has(INTENT_FILE) ? readIntent(root) : contract ? parseIntent(contract) : null;
   const config = withIntentLayers(options.config ?? loadConfig(root), intent);
-  const listed0 = listSourceFiles(root, config.exclude);
+  // Every file of the repository, listed once: the sources among them, and the manifests beside them further down.
+  const allFiles = listAllFiles(root);
+  const listed0 = listSourceFiles(root, config.exclude, allFiles);
   const files = [...new Set([...listed0.files, ...[...overrides.keys()].filter((path) => path !== INTENT_FILE && overrides.get(path) !== null)])].filter((path) => overrides.get(path) !== null).sort();
   const listed = performance.now();
   // One cache per repository and process: the analyses of a history or a comparison share what each extracts. A file
@@ -127,7 +129,6 @@ export async function analyze(root: string, options: AnalyzeOptions = {}): Promi
   }
 
   const extracted = performance.now();
-  const allFiles = listAllFiles(root);
   // The packages of a monorepo first: an import of one by its name is an import of its source, not of a package.
   const packages = repositoryPackages(root, allFiles);
   // One reading of the tsconfigs for both: the paths to resolve, and whether `import { type A }` stays in the code.

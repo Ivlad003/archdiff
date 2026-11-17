@@ -351,7 +351,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   const at = analysesAt(root, analyses.fresh);
   // A picture of the code is drawn on the analysis of its head; a change reads its revisions itself (picture.ts).
   const pictureAnalysis = (query: URLSearchParams): Promise<Analysis> => (drawnAtHead(parseView(query.get("view") ?? "layers")?.kind) ? at(query.get("head") || null) : analyses.fresh());
-  const analysisFor = (query: URLSearchParams): Promise<Analysis> => at(codeRevision(parseView(query.get("view") ?? "layers"), query.get("head") || null));
+  const analysisFor = (query: URLSearchParams): Promise<Analysis> => at(codeRevision(parseView(query.get("view") ?? "layers"), query.get("head") || null, query.get("at") || null));
   const changes = changeChannel(analyses.invalidate);
 
   // Whether the page follows the code, and why not when it was asked to (`--no-watch` is no problem).

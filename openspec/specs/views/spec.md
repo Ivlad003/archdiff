@@ -124,6 +124,20 @@ The system SHALL leave out, with `--hide-lanes a,b`, the named lanes with their 
 
 The system SHALL apply, with `--overlay tests,storages,heat` in any mix, these marks: modules no test imports (orange, "no tests"), storages ("⛁ what it holds"), and a shade by the calls into each shape with the count in its label; with `--changes`, the review's marks (added, removed, changed) over the same picture; `--only-changes` keeps the marked shapes and their neighbours.
 
+### Requirement: Three overlays are read from git
+
+The system SHALL read, for `--overlay churn`, `coupling` and `ownership` in any mix with the others, the commits of the picture's range — its base (the merge-base of the head with develop, main or master unless named) to its head, on the timeline at a commit up to that commit, and the head's last 200 commits when the range holds none — in one `git log` (merges left out), and lay over the picture: **churn**, every module shaded by how many of those commits changed its file with the count in its label, a layer by its modules together; **coupling**, a line of the kind `cochange` between two modules of the picture whose files changed in one commit at least twice, labelled `×N`, dashed and without an arrowhead in every export, left out of the layout so the shapes stand where they stand without it, at most forty a picture, a commit of more than fifty files counted as churn only; **ownership**, every module labelled `◉ author` — the author of most of the head's last 1000 commits that changed its file, with the share when others changed it too — and filled with that author's tint (the authors of the most modules of the picture each have one, the rest share the last). The reason SHALL name the range and how many commits were read. Outside git, or on a ref git does not know, the picture SHALL be drawn without them and its reason SHALL say why.
+
+#### Scenario: A module changed with another
+
+- **WHEN** two commits of the range changed `src/lib/log.ts` and `src/lib/step1.ts` together and `archdiff diagram modules --overlay churn,coupling,ownership` runs
+- **THEN** `step1.ts` is labelled "3 changes" and "◉ Bob 67%", the two are joined by a `cochange` line "×2", every shape stands where it does without the overlays, and the reason says "the commits of <base>..HEAD that changed each file (4 commits read)"
+
+#### Scenario: Outside git
+
+- **WHEN** `archdiff diagram modules --overlay churn` runs in a directory that is no repository
+- **THEN** the picture is drawn and its reason ends with "⚠ the overlays read from git (churn) are not laid over: … is not a git repository"
+
 #### Scenario: Three overlays at once
 
 - **WHEN** `archdiff diagram layer:lib --overlay tests,storages,heat` runs

@@ -82,7 +82,7 @@ export const STEPS: readonly Step[] = [
   { name: "question", applies: (_ctx, diagram) => !diagram.question, run: (diagram, { view }) => ({ ...diagram, question: questionOf(view.kind) }) },
   { name: "fold", applies: (_ctx, diagram) => !diagram.placed && !diagram.classes && !diagram.logic, run: (diagram, { options, view }) => fold(diagram, options.limit ?? foldLimit(view.kind)) },
   { name: "light lines", applies: ({ options }) => (options.weight ?? 1) > 1, run: (diagram, { options }) => dropLightLines(diagram, options.weight ?? 1) },
-  { name: "overlays", applies: ({ options }) => options.overlays.length > 0, run: (diagram, { analysis, options }) => applyOverlays(diagram, analysis, options.overlays) },
+  { name: "overlays", applies: ({ options }) => options.overlays.length > 0, run: (diagram, { analysis, options, reads }) => applyOverlays(diagram, analysis, options.overlays, reads.git) },
   // Rows or columns, said once, here: `layout` lays the lanes as the picture says and writes back what it could do.
   { name: "lane mode", applies: () => true, run: (diagram, { options, view }) => ({ ...diagram, lanes: options.lanes !== "auto" ? options.lanes : isMapView(view.kind) && diagram.groups.length > COLUMNS_ABOVE ? "columns" : "rows" }) },
   // A depth has no ceiling: past DEEP_DEPTH the picture says first that it may be big, on a view the depth changes.

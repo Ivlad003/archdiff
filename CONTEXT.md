@@ -190,6 +190,18 @@ _Avoid_: events (for the typed messages), calls
 How the dependencies between layers moved, commit by commit.
 _Avoid_: history graph
 
+**Churn**:
+How many commits of a range changed a file.
+_Avoid_: activity, hotness (heat is the calls into a shape)
+
+**Change coupling**:
+Two files that the commits of a range changed together, at least twice.
+_Avoid_: temporal coupling, co-change (for the fact; `cochange` is the kind of its line)
+
+**Ownership**:
+The author of most of the commits that changed a file.
+_Avoid_: blame, maintainer
+
 **Branches**:
 The picture of the branches against the base: where each left it, its own commits, how far it is ahead and behind.
 _Avoid_: git graph, history graph

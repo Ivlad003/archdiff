@@ -41,6 +41,9 @@
             <label title="Label the modules that hold data: stores, databases, caches"><input type="checkbox" class="overlay" value="storages" /> storages</label>
             <label title="Shade every shape by the calls into it from other modules"><input type="checkbox" class="overlay" value="heat" /> heat: calls in</label>
             <label title="Shade every module by its instability I = Ce / (Ca + Ce); orange when it is unstable and others depend on it"><input type="checkbox" class="overlay" value="instability" /> instability</label>
+            <label title="From git: shade every module by how many commits of the range (base → head) changed its file"><input type="checkbox" class="overlay" value="churn" /> churn: changes per file</label>
+            <label title="From git: a dashed line between two modules the commits of the range changed together at least twice"><input type="checkbox" class="overlay" value="coupling" /> change coupling</label>
+            <label title="From git: name and tint every module for the author of most of the commits that changed its file"><input type="checkbox" class="overlay" value="ownership" /> ownership: the main author</label>
           </fieldset>
           <label title="The Mermaid type of the Markdown and the export">Mermaid
             <select id="mermaid">
@@ -116,9 +119,15 @@
           <span id="board-note" class="muted"></span>
         </div>
         <div id="commits" hidden>
-          <button id="commit-prev" class="icon" title="The previous commit of the branch">‹</button>
-          <select id="commit-list" title="The commits from the base to the head, oldest first; pick one to review it against the previous"></select>
-          <button id="commit-next" class="icon" title="The next commit of the branch">›</button>
+          <button id="commit-prev" class="icon" title="The previous commit of the range (,)">‹</button>
+          <select id="commit-list" title="The commits from the base to the head, oldest first; pick one: on a review its own change against the one before it, on the timeline the code as it was then"></select>
+          <button id="commit-next" class="icon" title="The next commit of the range (.)">›</button>
+          <button id="commit-play" class="icon">▶</button>
+          <input id="commit-slider" type="range" min="0" max="0" step="1" value="0" title="The commits of the range, the oldest on the left; the left end is the whole range. Let go on a commit and the picture is drawn again at it" />
+          <select id="commit-speed" title="How long each commit stays while playing"></select>
+          <span id="git-overlays" class="group" title="Laid over the picture, read from the commits of the range up to the commit shown (the options hold them too)">
+            <button data-overlay="churn" title="Churn: every module shaded by how many commits of the range changed its file">churn</button><button data-overlay="coupling" title="Change coupling: a dashed line between two modules the commits of the range changed together at least twice">coupling</button><button data-overlay="ownership" title="Ownership: every module named and tinted for the author of most of the commits that changed it">owners</button>
+          </span>
           <span id="commit-note" class="muted"></span>
         </div>
         <div id="canvas-wrap">

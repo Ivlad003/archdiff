@@ -51,11 +51,12 @@ async function get<T>(url: string): Promise<T> {
   return body as T;
 }
 
-/** The revisions a picture is drawn against, as the link holds them: the base (null: the default), the head (null: the working tree), the heads of a comparison. */
+/** The revisions a picture is drawn against, as the link holds them: the base (null: the default), the head (null: the working tree), the heads of a comparison, the commit the timeline is at. */
 export interface Refs {
   base: string | null;
   head: string | null;
   heads: readonly string[];
+  at?: string | null;
 }
 
 /** What a review or a comparison found, as the page reads it for the title (the server sends the whole diff). */
@@ -68,7 +69,7 @@ function headQuery(joint: string, head: string | null): string {
 
 /** The refs as query parameters, empty when there are none. */
 function refsQuery(refs: Refs): string {
-  return `${refs.base ? `&base=${encodeURIComponent(refs.base)}` : ""}${refs.head ? `&head=${encodeURIComponent(refs.head)}` : ""}${refs.heads.length > 0 ? `&heads=${encodeURIComponent(refs.heads.join(","))}` : ""}`;
+  return `${refs.base ? `&base=${encodeURIComponent(refs.base)}` : ""}${refs.head ? `&head=${encodeURIComponent(refs.head)}` : ""}${refs.heads.length > 0 ? `&heads=${encodeURIComponent(refs.heads.join(","))}` : ""}${refs.at ? `&at=${encodeURIComponent(refs.at)}` : ""}`;
 }
 
 export interface SceneResponse {

@@ -200,7 +200,7 @@ export async function getShape(ctx: RouteContext, { url, response }: RouteReques
 
   if (!analysis) return;
   // The code as the picture's head has it: a branch's file from git, the working tree's from the disk.
-  const head = codeRevision(parseView(url.searchParams.get("view") ?? ""), url.searchParams.get("head") || null);
+  const head = codeRevision(parseView(url.searchParams.get("view") ?? ""), url.searchParams.get("head") || null, url.searchParams.get("at") || null);
   const readSource = (file: string): string | null => (!analysis.facts.has(file) ? null : head ? fileAt(root, head, file) : readFileSync(join(root, file), "utf8"));
   // In a review or a comparison, a module's page says what the change, or each head, did to it.
   const { change } = picture.value;

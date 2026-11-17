@@ -45,7 +45,7 @@ test("a wrong option names itself: a word for a number, an unknown overlay, a ba
   const limit = readPictureOptions((name) => (name === "limit" ? "0" : null), "param");
   assert.ok(!limit.ok && limit.problem.message.includes("limit must be a whole number of at least 1"));
   const overlay = readPictureOptions((name) => (name === "overlay" ? "tests,nope" : undefined), "flag");
-  assert.ok(!overlay.ok && overlay.problem.message === 'unknown overlay "nope" (tests, storages, heat, instability)');
+  assert.ok(!overlay.ok && overlay.problem.message === 'unknown overlay "nope" (tests, storages, heat, instability, churn, coupling, ownership)');
   const bare = readPictureOptions((name) => (name === "expand" ? true : undefined), "flag");
   assert.ok(!bare.ok && bare.problem.message === "--expand needs a value");
   const mermaid = readPictureOptions((name) => (name === "mermaid" ? "svg" : undefined), "flag");

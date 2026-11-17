@@ -429,6 +429,56 @@ test("the board of the uncommitted changes through the API: the groups in readin
     },
   ));
 
+/** A branch `feature` off main in `dir`, by two authors: a module added, then changed twice together with the log, then the store reading the log. */
+function commitHistory(dir: string): void {
+  const git = (author: string, ...args: string[]): void => {
+    const result = spawnSync("git", ["-C", dir, "-c", `user.email=${author.toLowerCase()}@example.com`, "-c", `user.name=${author}`, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const commit = (author: string, subject: string, files: Record<string, string>): void => {
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
+    git(author, "add", ".");
+    git(author, "commit", "-q", "-m", subject);
+  };
+  const log = (how: string): string => `import { step1 } from "./step1.ts";\n\nexport function log(message: string): void {\n  console.${how}(message, step1());\n}\n`;
+  const step1 = (value: number): string => `export function step1(): number {\n  return ${value};\n}\n`;
+  git("Ann", "init", "-q", "-b", "main");
+  git("Ann", "add", ".");
+  git("Ann", "commit", "-q", "-m", "base");
+  git("Ann", "checkout", "-q", "-b", "feature");
+  commit("Ann", "step 1: a module", { "src/lib/step1.ts": step1(1) });
+  commit("Bob", "step 2: the log counts", { "src/lib/log.ts": log("log"), "src/lib/step1.ts": step1(11) });
+  commit("Bob", "step 3: louder", { "src/lib/log.ts": log("error"), "src/lib/step1.ts": step1(111) });
+  commit("Ann", "step 4: the store logs", { "src/db/store.ts": 'import { log } from "../lib/log.ts";\nimport type { Order } from "../lib/orders.ts";\n\nconst rows = new Map<string, Order>();\n\nexport function saveOrder(order: Order): void {\n  log("save");\n  rows.set(order.id, order);\n}\n\nexport function readOrder(id: string): Order | null {\n  return rows.get(id) ?? null;\n}\n' });
+}
+
+test("the timeline at a commit through the API: the map of the code then, a module's page and file as the commit has them, the page of a line of two files changed together", () =>
+  withOwnServer("archdiff-slider-api-", commitHistory, async (origin, dir) => {
+    const shas = spawnSync("git", ["-C", dir, "log", "--reverse", "--format=%H", "main..feature"], { encoding: "utf8" }).stdout.trim().split("\n");
+    type Scene = { diagram: { title: string; reason: string; nodes: { id: string; diff?: string; label: string }[]; edges: { from: string; to: string; kind: string }[]; stamp?: { commit: string } }; markdown: string; change: { kind: string } | null; drawn: boolean; error?: string };
+    const scene = async (query: string): Promise<Scene> => (await (await fetch(`${origin}/api/scene?${query}`)).json()) as Scene;
+    const third = await scene(`view=timeline&at=${shas[2]}&overlay=churn,coupling`);
+    assert.match(third.diagram.title, /step 3: louder — commit 3 of 4$/);
+    assert.equal(third.diagram.stamp?.commit, shas[2]!.slice(0, 7));
+    assert.equal(third.change?.kind, "review");
+    assert.ok(third.markdown.startsWith(`<!-- archdiff:generated — commit ${shas[2]!.slice(0, 7)} -->`), third.markdown.slice(0, 80));
+    assert.deepEqual(third.diagram.nodes.filter((node) => node.diff).map((node) => node.id), ["src/lib/log.ts", "src/lib/step1.ts"]);
+    assert.ok(third.diagram.edges.some((edge) => edge.kind === "cochange" && edge.from === "src/lib/log.ts" && edge.to === "src/lib/step1.ts"));
+    // A module's page says what the commit did to it, and reads the module as the commit has it.
+    const logAt = (await (await fetch(`${origin}/api/shape?view=timeline&at=${shas[2]}&id=${encodeURIComponent("src/lib/log.ts")}`)).json()) as { markdown: string };
+    assert.ok(logAt.markdown.includes("## In this change\n\n- changed fn `log` — src/lib/log.ts:3 (body)"), logAt.markdown);
+    const storeAt = (await (await fetch(`${origin}/api/shape?view=timeline&at=${shas[2]}&id=${encodeURIComponent("src/db/store.ts")}`)).json()) as { markdown: string };
+    assert.ok(!storeAt.markdown.includes("src/lib/log.ts"), storeAt.markdown);
+    // The line of the two files changed together has a page of its own.
+    const line = (await (await fetch(`${origin}/api/line?view=timeline&at=${shas[2]}&overlay=coupling&from=${encodeURIComponent("src/lib/log.ts")}&to=${encodeURIComponent("src/lib/step1.ts")}&kind=cochange`)).json()) as { markdown: string };
+    assert.equal(line.markdown, "# src/lib/log.ts ⇄ src/lib/step1.ts\n\nsrc/lib/log.ts and src/lib/step1.ts changed together in 2 commits of the range the picture reads (the coupling overlay).\n\nAn import joins them: the code says they belong together.\n");
+    // A commit git does not know is the request's problem; the whole range is still the bars.
+    const unknown = await fetch(`${origin}/api/scene?view=timeline&at=nope`);
+    assert.equal(unknown.status, 400);
+    assert.ok(((await unknown.json()) as { error: string }).error.includes('no commit "nope"'));
+    assert.match((await scene("view=timeline")).diagram.title, /: 4 commits$/);
+  }));
+
 test("chat tags are suggested and expanded into context; mocks come from the types when the agent gives no JSON", async () => {
   const tags = await getJson<{ tags: { tag: string; title: string }[] }>("/api/tags?q=orders");
   assert.ok(tags.tags.some((tag) => tag.tag === "@module:src/lib/orders.ts"), JSON.stringify(tags.tags.slice(0, 5)));

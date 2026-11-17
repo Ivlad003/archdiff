@@ -336,7 +336,8 @@ export function mermaidStyleFor(diagram: Diagram, style: MermaidStyle): Exclude<
   // The commits of the timeline or of the branches are a gitGraph: the kinds that type draws alone.
   const kind = parseView(diagram.view)?.kind;
 
-  if (kind !== undefined && MERMAID_ONLY_FOR.gitgraph?.kinds.includes(kind)) return "gitgraph";
+  // The timeline at one commit is the map of the code as it was then, laid out like any map: a flowchart.
+  if (kind !== undefined && MERMAID_ONLY_FOR.gitgraph?.kinds.includes(kind) && diagram.placed) return "gitgraph";
 
   if (diagram.metrics) return "quadrant";
 
@@ -350,7 +351,7 @@ export function mermaidMismatch(diagram: Diagram, style: MermaidStyle): string |
   const only = MERMAID_ONLY_FOR[style];
   const kind = parseView(diagram.view)?.kind;
 
-  return only && (kind === undefined || !only.kinds.includes(kind)) ? `${style} draws ${only.what}` : null;
+  return only && (kind === undefined || !only.kinds.includes(kind) || (style === "gitgraph" && !diagram.placed)) ? `${style} draws ${only.what}` : null;
 }
 
 /** The text with a Mermaid comment after its first line (the generated mark). */
@@ -432,7 +433,8 @@ function flowchartMermaid(diagram: Diagram): string {
     const to = ids.get(edge.to);
 
     if (!from || !to || edge.kind === "lifeline") continue;
-    const arrow = edge.kind === "ref" || edge.typeOnly || edge.loads || edge.diff === "removed" ? "-.->" : edge.kind === "call" || edge.kind === "message" ? "==>" : "-->";
+    // Two files changed together are joined without a direction.
+    const arrow = edge.kind === "cochange" ? "-.-" : edge.kind === "ref" || edge.typeOnly || edge.loads || edge.diff === "removed" ? "-.->" : edge.kind === "call" || edge.kind === "message" ? "==>" : "-->";
     const text = edge.label ? `|${label(edge.label)}|` : "";
     lines.push(`  ${from} ${arrow}${text} ${to}`);
 

@@ -107,6 +107,19 @@ Feature: The page
     When I press "f" in a window 1900 pixels wide
     Then the canvas is 1900 pixels wide, and "f" again docks both panels as they were
 
+  Scenario: The slider over the commits of a range
+    Given a branch of four commits by two authors, open on "timeline"
+    When I press "."
+    Then the canvas shows the map of the code at the first commit, the module it added marked, and the link holds "at="
+    When I let the slider go on the third commit and press ›
+    Then the title ends "commit 4 of 4" within a second
+    When I press "churn", "coupling" and "owners"
+    Then the modules are shaded by their changes, the two changed together are joined by a dashed line, and each names its author
+    When I open the whole range, set the pace to fast and press "k"
+    Then the commits follow by themselves and the play ends at the fourth
+    When I open the review and let the slider go on the second commit
+    Then the review is that commit's own change against the one before it
+
   Scenario: The board of the uncommitted changes
     Given a repository with a changed route, a changed library module and a new one, not committed
     When I press "c"

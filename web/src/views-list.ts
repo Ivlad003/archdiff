@@ -150,7 +150,8 @@ export async function loadViews(): Promise<void> {
   const notFollowing = response.watching.problem ? ` · ⚠ not following the code: ${response.watching.problem}` : "";
   // With the changed files alone: how many since which base, or why they could not be read (the list is whole then).
   const changed = response.changed ? `${response.changed.files} changed since ${response.changed.since} · ` : response.note ? `⚠ ${response.note} · ` : "";
-  element("stats").textContent = `${head ? `at ${head} · ` : ""}${changed}${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms${notFollowing}`;
+  // A commit is named by its first seven characters, as git shows it; a branch or a tag as written.
+  element("stats").textContent = `${head ? `at ${/^[0-9a-f]{40}$/.test(head) ? head.slice(0, 7) : head} · ` : ""}${changed}${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms${notFollowing}`;
   element("stats").title = element("stats").textContent;
   renderViews();
 }

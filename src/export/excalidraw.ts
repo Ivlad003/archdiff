@@ -477,8 +477,8 @@ export function toExcalidraw(diagram: Diagram): string {
     const label = node.kind === "class" ? node.label : logicBox ? wrapLabel(node.label, LOGIC_LABEL.lines, node.kind === "end" ? LOGIC_LABEL.endWidth : LOGIC_LABEL.width, true) : wrapLabel(node.count !== undefined && node.kind === "layer" ? `${node.label} (${node.count})` : node.label);
     const { fontSize } = look;
     const height = textHeight(label.split("\n").length, fontSize);
-    // On a fill darker than this, the label is white.
-    const dark = node.heat !== undefined && node.heat > 0.55;
+    // On a fill darker than this, the label is white; an author's tint is a light fill whatever the heat under it.
+    const dark = node.tint === undefined && node.heat !== undefined && node.heat > 0.55;
     const classText = node.kind === "class" ? { textAlign: "left", verticalAlign: "top", fontFamily: 3 } : {};
     const labelBox = { x: node.x + LABEL_INSET, y: node.kind === "class" ? node.y + LABEL_INSET : node.y + node.h / 2 - height / 2, w: node.w - 2 * LABEL_INSET, h: height };
     elements.push({ ...text(`${node.id}:text`, node.id, labelBox, label, fontSize), ...classText, ...(dark ? { strokeColor: "#ffffff" } : {}), customData: { archdiff: "label" } });
@@ -514,7 +514,7 @@ export function toExcalidraw(diagram: Diagram): string {
     elements.push({
       ...base(id, "arrow", { x: start.x, y: start.y, w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }),
       strokeColor: lineStroke(edge),
-      strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.diff === "removed" || edge.diff === "planned" || edge.typeOnly || edge.loads ? "dashed" : "solid",
+      strokeStyle: edge.kind === "ref" || edge.kind === "lifeline" || edge.kind === "cochange" || edge.diff === "removed" || edge.diff === "planned" || edge.typeOnly || edge.loads ? "dashed" : "solid",
       strokeWidth: edge.diff ? 2 : 1,
       points: route.map((point) => [point.x - start.x, point.y - start.y]),
       // No binding: Excalidraw would pull every end to the centre of a side and the ports would collapse into one point.
@@ -522,7 +522,7 @@ export function toExcalidraw(diagram: Diagram): string {
       startBinding: null,
       endBinding: null,
       startArrowhead: null,
-      endArrowhead: edge.kind === "lifeline" ? null : "arrow",
+      endArrowhead: edge.kind === "lifeline" || edge.kind === "cochange" ? null : "arrow",
       elbowed: false,
       roundness: null,
       boundElements: edge.label ? [{ id: `${id}:text`, type: "text" }] : null,

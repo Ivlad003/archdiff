@@ -6,14 +6,18 @@
 // changed files are parsed twice. The diff of two graphs is diff.ts's,
 // pure; here is only the reading.
 //
+// A commit's own change is kept per commit (`reviewOfCommit`): its code
+// never changes, so a slider over the commits of a range reads each once
+// and finds its parent analysed by the step before.
+//
 // Sits at the edge, between the commands (and picture.ts) and diff.ts.
-// Entry points: `review`, `compareBranches`, `history`, `analysisAt`,
-// `ReviewResult`, `ComparisonResult`.
+// Entry points: `review`, `reviewOfCommit`, `compareBranches`, `history`,
+// `analysisAt`, `ReviewResult`, `ComparisonResult`.
 
 import { analyze, analyzeRevisions, type Analysis } from "./analyze.ts";
 import { loadConfig, type Config } from "./config.ts";
 import { graphDiff, historyRow, markContract, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
-import { changedFiles, commitOf, commitsBetween, defaultBase, forkPoint, mergeBase, treeAt as filesAt } from "./git.ts";
+import { changedFiles, changedSources, commitOf, commitsBetween, defaultBase, forkPoint, mergeBase, treeAt as filesAt } from "./git.ts";
 import { INTENT_FILE, judgesLayers } from "./intent.ts";
 import type { Graph } from "./graph.ts";
 
@@ -98,6 +102,49 @@ async function reviewUncached(root: string, base: string | null, headRef: string
   const diff = markContract(graphDiff(baseAnalysis.graph, head.graph, headRef === null ? ref : `${ref}..${headRef}`, [...changed.base.keys()]), contract, head.graph);
 
   return { head, base: baseAnalysis, diff, contract: contract !== null };
+}
+
+/** How many commits' analyses and reviews are kept, the least recently asked for dropped first. */
+const KEPT_COMMITS = 16;
+
+/** The analyses and the reviews of commits, by repository, commit and configuration. */
+const commitAnalyses = new Map<string, Promise<Analysis>>();
+const commitReviews = new Map<string, Promise<ReviewResult>>();
+
+/** What `make` gives for `key`, made once and kept among the last asked for; one that failed is not kept. */
+function kept<T>(cache: Map<string, Promise<T>>, key: string, make: () => Promise<T>): Promise<T> {
+  let value = cache.get(key);
+
+  if (value) cache.delete(key);
+  else {
+    value = make();
+    value.catch(() => cache.delete(key));
+  }
+
+  cache.set(key, value);
+
+  if (cache.size > KEPT_COMMITS) cache.delete(cache.keys().next().value!);
+
+  return value;
+}
+
+/**
+ * One commit's own change — `sha` against `parent`, its first parent or the empty tree, both by their full hashes —
+ * as `review` reads it, but kept: the code of a commit never changes, so its analysis is made once (per configuration
+ * of the repository) and the review of the next commit finds its parent analysed. What the timeline's slider steps on.
+ */
+export function reviewOfCommit(root: string, parent: string, sha: string): Promise<ReviewResult> {
+  const config = loadConfig(root);
+  const of = `${root}\u0000${JSON.stringify(config)}`;
+  const at = (commit: string): Promise<Analysis> => kept(commitAnalyses, `${of}\u0000${commit}`, () => analyze(root, { overrides: treeAt(root, commit), config }));
+
+  return kept(commitReviews, `${of}\u0000${parent}\u0000${sha}`, async () => {
+    const head = await at(sha);
+    const base = await at(parent);
+    const contract = judgesLayers(head.intent) ? head.intent : null;
+
+    return { head, base, diff: markContract(graphDiff(base.graph, head.graph, `${parent}..${sha}`, changedSources(root, parent, sha)), contract, head.graph), contract: contract !== null };
+  });
 }
 
 /**

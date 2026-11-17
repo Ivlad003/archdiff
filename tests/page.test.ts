@@ -1424,3 +1424,120 @@ test("the board of the uncommitted changes: the groups in reading order, a walk 
     await drawn("changes");
     await page!.waitForFunction(`(document.querySelector("#empty")?.textContent ?? "").includes("nothing to walk")`, undefined, { timeout: 10_000 });
   }));
+
+/** The commits of a branch `feature` off main in `dir`, by two authors: a module added, then changed twice together with the log, then the store reading the log. */
+function commitHistory(dir: string): void {
+  const git = (author: string, ...args: string[]): void => {
+    const result = spawnSync("git", ["-C", dir, "-c", `user.email=${author.toLowerCase()}@example.com`, "-c", `user.name=${author}`, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const commit = (author: string, subject: string, files: Record<string, string>): void => {
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
+    git(author, "add", ".");
+    git(author, "commit", "-q", "-m", subject);
+  };
+  const log = (how: string): string => `import { step1 } from "./step1.ts";\n\nexport function log(message: string): void {\n  console.${how}(message, step1());\n}\n`;
+  const step1 = (value: number): string => `export function step1(): number {\n  return ${value};\n}\n`;
+  git("Ann", "init", "-q", "-b", "main");
+  git("Ann", "add", ".");
+  git("Ann", "commit", "-q", "-m", "base");
+  git("Ann", "checkout", "-q", "-b", "feature");
+  commit("Ann", "step 1: a module", { "src/lib/step1.ts": step1(1) });
+  commit("Bob", "step 2: the log counts", { "src/lib/log.ts": log("log"), "src/lib/step1.ts": step1(11) });
+  commit("Bob", "step 3: louder", { "src/lib/log.ts": log("error"), "src/lib/step1.ts": step1(111) });
+  commit("Ann", "step 4: the store logs", { "src/db/store.ts": 'import { log } from "../lib/log.ts";\nimport type { Order } from "../lib/orders.ts";\n\nconst rows = new Map<string, Order>();\n\nexport function saveOrder(order: Order): void {\n  log("save");\n  rows.set(order.id, order);\n}\n\nexport function readOrder(id: string): Order | null {\n  return rows.get(id) ?? null;\n}\n' });
+}
+
+test("the slider over the commits of a range: the timeline drawn at each commit, played and paused, with churn, coupling and ownership laid over; the review's bar steps the same way", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer("archdiff-page-slider-", commitHistory, async (origin) => {
+    const titled = (text: string): Promise<unknown> => page!.waitForFunction(`(document.querySelector("#title-text")?.textContent ?? "").includes(${JSON.stringify(text)})`, undefined, { timeout: 20_000 });
+    const shapes = (): Promise<Record<string, { diff: string; label: string; tint: string | null; heat: number }>> => page!.evaluate(`Object.fromEntries([...window.archdiff.nodes().values()].map((node) => [node.id, { diff: node.diff ?? "", label: node.label, tint: node.tint ?? null, heat: node.heat ?? 0 }]))`) as Promise<Record<string, { diff: string; label: string; tint: string | null; heat: number }>>;
+    const slider = (): Promise<{ value: string; max: string; picked: string }> => page!.evaluate(`({ value: document.querySelector("#commit-slider").value, max: document.querySelector("#commit-slider").max, picked: document.querySelector("#commit-list").selectedOptions[0]?.textContent ?? "" })`) as Promise<{ value: string; max: string; picked: string }>;
+    const slideTo = (value: number): Promise<unknown> => page!.evaluate(`(() => { const slider = document.querySelector("#commit-slider"); slider.value = "${value}"; slider.dispatchEvent(new Event("input")); slider.dispatchEvent(new Event("change")); })()`);
+
+    await page!.goto(`${origin}/?fresh=slider#view=timeline`);
+    await page!.evaluate("localStorage.clear()");
+    await titled("4 commits");
+    await page!.waitForFunction(`document.querySelectorAll("#commit-list option").length === 5`);
+    // The whole range: the bars, the slider at its left end over the four commits.
+    assert.deepEqual(await slider(), { value: "0", max: "4", picked: `whole range: ${((await page!.evaluate(`document.querySelector("#commit-list option").textContent`)) as string).slice("whole range: ".length)}` });
+    assert.ok(await page!.evaluate(`!document.querySelector("#commits").hidden && !document.querySelector("#edit").disabled`));
+
+    // . steps to the first commit: the map of the code as it was then, the module it added marked; the link says where.
+    await page!.click("#title-text");
+    await page!.keyboard.press(".");
+    await titled("step 1: a module — commit 1 of 4");
+    assert.match((await page!.evaluate("location.hash")) as string, /^#view=timeline&at=[0-9a-f]{40}$/);
+    let drawn = await shapes();
+    assert.equal(drawn["src/lib/step1.ts"]?.diff, "added");
+    assert.equal(drawn["src/lib/log.ts"]?.diff, "");
+    assert.equal((await slider()).value, "1");
+    // The code of a module there is the commit's: step1 returned 1 then. Nothing is drawn on a commit's picture.
+    assert.ok(await page!.evaluate(`document.querySelector("#edit").disabled`));
+    assert.ok(((await (await fetch(`${origin}/api/file?path=src/lib/step1.ts&head=${((await page!.evaluate("location.hash")) as string).slice(-40)}`)).text()).includes("return 1;")));
+
+    // The slider let go on the third commit; then › to the fourth, a commit not seen before, in under a second.
+    await slideTo(3);
+    await titled("step 3: louder — commit 3 of 4");
+    drawn = await shapes();
+    assert.deepEqual([drawn["src/lib/log.ts"]?.diff, drawn["src/lib/step1.ts"]?.diff, drawn["src/db/store.ts"]?.diff], ["changed", "changed", ""]);
+    const started = Date.now();
+    await page!.click("#commit-next");
+    await titled("step 4: the store logs — commit 4 of 4");
+    const took = Date.now() - started;
+    assert.ok(took < 1000, `a step of the slider took ${took} ms`);
+    assert.equal((await shapes())["src/db/store.ts"]?.diff, "changed");
+    await page!.click("#commit-next");
+    await page!.waitForFunction(`document.querySelector("#reason").textContent === "the last commit of the range"`);
+
+    // The overlays read from git, from the range up to the commit shown: churn shades, coupling joins, ownership names and tints.
+    await page!.click("#git-overlays button[data-overlay='churn']");
+    await page!.waitForFunction(`location.hash.includes("overlay=churn") && [...window.archdiff.nodes().values()].some((node) => node.label.includes("3 changes"))`, undefined, { timeout: 20_000 });
+    drawn = await shapes();
+    assert.ok(drawn["src/lib/step1.ts"]!.heat === 1 && drawn["src/lib/log.ts"]!.heat > 0.6 && drawn["src/lib/orders.ts"]!.heat === 0, JSON.stringify(drawn));
+    await page!.click("#git-overlays button[data-overlay='coupling']");
+    await page!.waitForFunction(`window.archdiff.canvas().scene().some((element) => element.customData?.archdiff === "edge" && element.customData.kind === "cochange")`, undefined, { timeout: 20_000 });
+    assert.deepEqual(await page!.evaluate(`window.archdiff.canvas().scene().filter((element) => element.customData?.kind === "cochange").map((element) => [element.customData.from, element.customData.to, element.strokeStyle, element.endArrowhead])`), [["src/lib/log.ts", "src/lib/step1.ts", "dashed", null]]);
+    await page!.click("#git-overlays button[data-overlay='ownership']");
+    await page!.waitForFunction(`[...window.archdiff.nodes().values()].some((node) => node.label.includes("◉ Bob"))`, undefined, { timeout: 20_000 });
+    drawn = await shapes();
+    assert.ok(drawn["src/lib/log.ts"]!.label.endsWith("◉ Bob 67%") && drawn["src/lib/orders.ts"]!.label.endsWith("◉ Ann"), JSON.stringify(drawn));
+    assert.ok(drawn["src/lib/log.ts"]!.tint !== null && drawn["src/lib/log.ts"]!.tint !== drawn["src/lib/orders.ts"]!.tint);
+    assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#git-overlays button.active")].map((button) => button.dataset.overlay)`), ["churn", "coupling", "ownership"]);
+    assert.ok((await page!.evaluate(`[...document.querySelectorAll("#options .overlay:checked")].map((box) => box.value)`) as string[]).includes("coupling"));
+    // The legend names the new line; the line's page says how often, and that an import joins the two.
+    assert.ok(((await page!.textContent("#legend")) ?? "").includes("changed together"));
+
+    // Play from the whole range, fast: the commits follow by themselves to the last, where the play ends; the pace is remembered.
+    await page!.evaluate(`location.hash = "view=timeline"`);
+    await titled("4 commits");
+    await page!.selectOption("#commit-speed", "fast");
+    assert.equal(await page!.evaluate(`localStorage.getItem("archdiff.slider.speed")`), "fast");
+    await page!.click("#title-text");
+    await page!.keyboard.press("k");
+    await titled("commit 1 of 4");
+    assert.equal(await page!.textContent("#commit-play"), "⏸");
+    await titled("commit 4 of 4");
+    await page!.waitForFunction(`document.querySelector("#commit-play").textContent === "▶"`, undefined, { timeout: 5000 });
+    // Played again and paused on the way: the picture stays at the commit it was paused on.
+    await page!.click("#commit-play");
+    await titled("commit 1 of 4");
+    await page!.keyboard.press("k");
+    assert.equal(await page!.textContent("#commit-play"), "▶");
+    await page!.waitForTimeout(1500);
+    assert.equal((await slider()).value, "1");
+
+    // The review's bar has the same slider: a commit is its own change against the one before it; , steps back.
+    await page!.evaluate(`location.hash = "view=review"`);
+    await page!.waitForFunction(`window.archdiff.drawn() === "review" && document.querySelectorAll("#commit-list option").length === 5`, undefined, { timeout: 20_000 });
+    await slideTo(2);
+    await page!.waitForFunction(`document.querySelector("#commit-list").selectedOptions[0]?.textContent.endsWith("step 2: the log counts") && /— 2 source files changed$/.test(document.querySelector("#title-text")?.textContent ?? "")`, undefined, { timeout: 20_000 });
+    assert.equal((await slider()).value, "2");
+    assert.equal(await page!.textContent("#commit-note"), "commit 2 of 4 · this commit against the one before it");
+    await page!.click("#title-text");
+    await page!.keyboard.press(",");
+    await page!.waitForFunction(`document.querySelector("#commit-list").selectedOptions[0]?.textContent.endsWith("step 1: a module")`, undefined, { timeout: 20_000 });
+    await page!.keyboard.press("k");
+    await page!.waitForFunction(`document.querySelector("#commit-list").selectedOptions[0]?.textContent.endsWith("step 4: the store logs") && document.querySelector("#commit-play").textContent === "▶"`, undefined, { timeout: 20_000 });
+    await page!.evaluate("localStorage.clear()");
+  }));

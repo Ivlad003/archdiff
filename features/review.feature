@@ -25,6 +25,14 @@ Feature: Reviewing a change by its architecture
     Then the exit code is 2
     And stderr says "is not a git repository"
 
+  Scenario: The timeline at one commit, and what git says of the files
+    Given a branch of four commits by two authors, two of which change log.ts and step1.ts together
+    When I run "archdiff diagram timeline --at" with the second commit
+    Then the picture is the map of the code at that commit with log.ts and step1.ts marked changed
+    When I run "archdiff diagram modules --overlay churn,coupling,ownership"
+    Then step1.ts is labelled "3 changes" and "◉ Bob 67%"
+    And a line "×2" joins log.ts and step1.ts without moving a shape
+
   Scenario: The uncommitted changes as a board
     Given a repository committed on main
     And a working tree that adds a loader to the route and a module the orders call

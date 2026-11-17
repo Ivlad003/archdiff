@@ -17,7 +17,8 @@
 // the code (presentation.ts) — the toolbar (toolbar.ts), the minimap
 // (minimap.ts), the options (options-panel.ts), the views
 // (views-list.ts), the exports (export-menu.ts), the review (review.ts),
-// the walk of the uncommitted changes (board.ts),
+// the commits of a range under their slider (commits.ts), the walk of
+// the uncommitted changes (board.ts),
 // the keys (shortcuts.ts), the tabs of the flow, the chat and the spec, and
 // the window of the user's settings (settings.ts).
 //
@@ -26,6 +27,7 @@
 import { api, type Line, type Shape } from "./api.ts";
 import { fillBoardBar, showBoardBar } from "./board.ts";
 import { canvasHandle, canvasMode, leaveEdit, showScene } from "./canvas.ts";
+import { loadCommits, showCommitsBar } from "./commits.ts";
 import { loadAgents, loadTasks } from "./chat.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
@@ -41,7 +43,7 @@ import { loadCoverage, markdownPanel, renderMarkdown, setMarkdown, setPicturePag
 import { givePlaceBack, openShape, resetSelection, select, selection, tap } from "./picking.ts";
 import { applyPresentation, markPresentation, presentationState } from "./presentation.ts";
 import { mapDots, mapSettled, refreshProjectMap } from "./project-map.ts";
-import { loadBranches, loadCommits, loadHeadRefs, showReviewBars } from "./review.ts";
+import { loadBranches, loadHeadRefs, showReviewBars } from "./review.ts";
 import { menuItems } from "./shape-menu.ts";
 import "./settings.ts";
 import "./shortcuts.ts";
@@ -139,7 +141,8 @@ async function load(): Promise<void> {
   // A change (a review, a comparison, a commit) is read, not drawn on; the chat has nothing to build from it — but the
   // uncommitted changes, which are what an agent is doing now. Drawing needs the canvas: not a scene, a page or code
   // in the centre.
-  element<HTMLButtonElement>("edit").disabled = readOnlyView(state.view) || !presentationOf(state.as).canvas;
+  // The timeline at a commit is another picture at every commit: read, like a commit's change.
+  element<HTMLButtonElement>("edit").disabled = readOnlyView(state.view) || state.at !== null || !presentationOf(state.as).canvas;
   element("chat-tab").hidden = readOnlyView(state.view) && kind !== "changes";
 
   /** The scene is on the canvas: a failure after it (the flow, the page) leaves the picture be. */
@@ -148,6 +151,7 @@ async function load(): Promise<void> {
   try {
     renderCrumbs(state);
     showReviewBars(state);
+    showCommitsBar(state);
     showBoardBar(state);
     const result = await api.scene(state.view, state, refsOf(state));
 
@@ -174,7 +178,7 @@ async function load(): Promise<void> {
     setReason([...wrong, result.diagram.reason ?? ""].filter(Boolean).join("; "));
     renderExports(state);
 
-    if (state.view === "review") void loadCommits(state);
+    void loadCommits(state);
 
     if (reviewing(state.view)) void loadBranches(state);
     setPicturePage(result.markdown);

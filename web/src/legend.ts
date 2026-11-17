@@ -9,7 +9,7 @@
 
 import type { Line, Shape } from "./api.ts";
 import { element, h } from "./dom.ts";
-import { DIFF_STROKE, LOOKS } from "../../src/looks.ts";
+import { COCHANGE_STROKE, DIFF_STROKE, LOOKS } from "../../src/looks.ts";
 
 /** What the legend calls each kind of shape, in the order it lists them; a kind left out (the foot of a lifeline) is never explained. */
 const SHAPES: [kind: Shape["kind"], label: string, title: string][] = [
@@ -40,6 +40,7 @@ const LINES: [kind: Line["kind"], label: string, stroke: string, dashed: boolean
   ["ref", "passed as a value", "#1565c0", true, "A function passed as a value: it may be called"],
   ["message", "message", "#1565c0", false, "One call of a sequence, in order from the top"],
   ["flow", "next step", "#424242", false, "The next step of a function's logic, labelled with the branch taken"],
+  ["cochange", "changed together", COCHANGE_STROKE, true, "Two files the commits of the range changed together at least twice (the coupling overlay)"],
 ];
 
 /** What the legend calls each mark of a change, in the order it lists them. */

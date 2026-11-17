@@ -95,10 +95,12 @@ export function listAllFiles(root: string): string[] {
 /**
  * The source files of `root`, relative POSIX paths, sorted. `exclude` is a
  * list of globs (archdiff.json). A path git lists but the disk no longer
- * has (deleted, not yet staged) is left out.
+ * has (deleted, not yet staged) is left out. `listed`: every file of the
+ * root when the caller has listed them already (`listAllFiles`), so git is
+ * asked once.
  */
-export function listSourceFiles(root: string, exclude: readonly string[] = []): { files: string[]; skipped: SkippedFile[] } {
-  const all = listedFiles(root) ?? walkFiles(root);
+export function listSourceFiles(root: string, exclude: readonly string[] = [], listed?: readonly string[]): { files: string[]; skipped: SkippedFile[] } {
+  const all = listed ?? listedFiles(root) ?? walkFiles(root);
   // Hidden directories (.github, .agents, .scratch) hold tooling, not the program; `exclude` cannot bring them back but archdiff.json layers may name them later.
   const kept = all.filter((path) => isSourceFile(path) && !path.startsWith(".") && !path.split("/").some((segment) => SKIPPED_DIRECTORIES.has(segment)) && !exclude.some((glob) => matchesGlob(path, glob)));
   const files: string[] = [];

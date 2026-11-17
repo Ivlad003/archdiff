@@ -67,6 +67,15 @@ The system SHALL list, commit by commit between a base and a head, the modules, 
 - **WHEN** a commit adds the first import from `routes` to `db`
 - **THEN** that commit's row names `+routes→db` and its bar in the timeline is red
 
+### Requirement: The timeline is drawn at any commit of its range
+
+The system SHALL draw the `timeline` view, with `--at SHA` (`at=` in the API and the page's link), as the code at that commit: every module in its layer with every import, in the whole map's order whatever the commit changed, the modules the commit added and those with a declaration it added, removed or changed marked, the imports it added marked, and the modules and imports it removed drawn where they were; titled by the commit and its place in the range, its Markdown the commit's own change with a flowchart of the map, its stamp the commit's. A module's page and file there SHALL be the commit's. No saved drawing SHALL be laid over it. A commit git does not know SHALL be refused by name. The commit's own change SHALL be kept per commit and configuration, so that a commit asked for again, and the parent of the next one, are not analysed again.
+
+#### Scenario: The second commit of four
+
+- **WHEN** `archdiff diagram timeline --at <sha>` runs for the commit that made `log.ts` import `step1.ts`
+- **THEN** the title ends "— commit 2 of 4", `log.ts` and `step1.ts` carry the changed mark, the import between them is added, and an import a later commit made is not in the picture
+
 ### Requirement: The branches and one commit are pictures
 
 The system SHALL draw the branches as the `branches` view: a lane per branch with commits of its own, the base's lane on top (develop, main or master unless a base is named), its last commits from left to right; each branch SHALL leave the commit it forked from — on the base, or the newest commit of a branch it was started on — and its lane SHALL say how many commits it is ahead and behind the base; a branch with nothing of its own SHALL be named on the commit it points at. Every commit SHALL open `commit:<sha>`: the review of the commit against its first parent (the empty tree for a first commit), headed and stamped by the commit. A commit git does not know SHALL be refused by name.

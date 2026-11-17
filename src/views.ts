@@ -16,7 +16,7 @@
 
 import type { Analysis } from "./analyze.ts";
 import { hubThreshold, type HubThresholds } from "./config.ts";
-import { SIZE, type Diagram, type Line, type PictureContent, type SequenceFragment, type Shape } from "./diagram.ts";
+import { SIZE, type Diagram, type DiffMark, type Line, type PictureContent, type SequenceFragment, type Shape } from "./diagram.ts";
 import { matchesGlob } from "./glob.ts";
 import { INTENT_FILE } from "./intent.ts";
 import { intentView } from "./intent-view.ts";
@@ -32,7 +32,7 @@ import { apiLanesOf, depEdges, externalNode, fnNode, grow, lane, lanesOf, module
 import { defaultDepth, foldLimit, viewKey, type View, type ViewEntry } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
 import { branchesDiagram, timelineDiagram } from "./views-more.ts";
-import type { BranchGraph } from "./git.ts";
+import type { BranchGraph, GitStats } from "./git.ts";
 import { compareDiagram, diffDiagram, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
 import { boardDiagram, groupDiagram, type Board } from "./board.ts";
 import type { LogicFact } from "./extract/logic.ts";
@@ -51,7 +51,10 @@ export { depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, unplac
 export interface EdgeReads {
   /** `changes`: the review's diff whose marks are laid over the picture. */
   diff?: GraphDiff;
-  timeline?: { rows: readonly HistoryRow[]; base: string; head: string };
+  /** The commits of the range for the timeline's bars; or (`at`) one commit of it for the map of the code as it was then: its diff against the commit before, the two graphs, and its place in the range (0 outside it). */
+  timeline?: { rows: readonly HistoryRow[]; base: string; head: string; at?: TimelineCommit };
+  /** The statistics of the range's commits, for the overlays read from git (churn, coupling, ownership). */
+  git?: GitStats;
   /** The flowchart of the function of a `logic:` view; null when its body could not be read. */
   logic?: LogicFact | null;
   review?: { diff: GraphDiff; base: Graph; head: Graph };
@@ -62,6 +65,17 @@ export interface EdgeReads {
   branches?: BranchGraph;
   /** The board of the uncommitted changes: the groups in reading order, the diff and the two graphs they are drawn from, and the text of a group's diff by file. */
   board?: { board: Board; diff: GraphDiff; base: Graph; head: Graph; text: ReadonlyMap<string, string> };
+}
+
+/** One commit of the timeline, to draw the code as it was at it. */
+export interface TimelineCommit {
+  commit: { sha: string; short: string; author: string; date: string; subject: string };
+  diff: GraphDiff;
+  /** The graph of the commit before it, where a module it removed was. */
+  before: Graph;
+  graph: Graph;
+  index: number;
+  of: number;
 }
 
 /** Modules whose public methods a framework calls: controllers, handlers, commands, jobs, listeners, middleware, routes. */
@@ -305,6 +319,41 @@ function modulesView(graph: Graph): PictureContent {
   const nodes = ids.map((id) => moduleNode(graph, id));
 
   return unplaced(`Modules: ${ids.length} in ${counted(graph.layers.length, "layer")}`, nodes, depEdges(graph, new Set(ids), false), lanesOf(graph, nodes));
+}
+
+/**
+ * The timeline at one commit: the whole map of the code as that commit left it, with what the commit did marked —
+ * the modules it added and those with a declaration it added, removed or changed, the imports it added, and what it
+ * removed drawn where it was. The shapes keep the map's order from one commit to the next, so the picture moves
+ * only where the code did.
+ */
+function commitMap({ commit, diff, before, graph, index, of }: TimelineCommit): PictureContent {
+  const map = modulesView(graph);
+  const marks = new Map<string, DiffMark>();
+
+  for (const change of [...diff.nodesChanged, ...diff.nodesAdded, ...diff.nodesRemoved]) marks.set(change.module, "changed");
+
+  for (const id of diff.modulesAdded) marks.set(id, "added");
+  const nodes: Shape[] = map.nodes.map((node) => (marks.has(node.id) ? { ...node, diff: marks.get(node.id)! } : node));
+  const groups = [...map.groups];
+
+  for (const id of diff.modulesRemoved) {
+    const module = before.modules.get(id);
+
+    if (!module) continue;
+    nodes.push({ id, kind: "module", label: id, ref: { id, file: id, line: 1 }, group: module.layer, diff: "removed", x: 0, y: 0, w: 0, h: 0 });
+
+    if (!groups.some((group) => group.id === module.layer)) groups.push(lane(module.layer));
+  }
+
+  const drawn = new Set(nodes.map((node) => node.id));
+  const added = new Set(diff.depsAdded.map((dep) => `${dep.from}\u0000${dep.to}`));
+  const edges: Line[] = map.edges.map((edge) => (added.has(`${edge.from}\u0000${edge.to}`) ? { ...edge, diff: "added" as const } : edge));
+
+  for (const dep of diff.depsRemoved) if (drawn.has(dep.from) && drawn.has(dep.to)) edges.push({ from: dep.from, to: dep.to, kind: "dependency", diff: "removed" });
+  const did = [`modules +${diff.modulesAdded.length} −${diff.modulesRemoved.length}`, `functions +${diff.nodesAdded.length} −${diff.nodesRemoved.length} ~${diff.nodesChanged.length}`, `imports +${diff.depsAdded.length} −${diff.depsRemoved.length}`].join(", ");
+
+  return unplaced(`${commit.short} ${commit.date}: ${commit.subject}${index > 0 ? ` — commit ${index} of ${of}` : ""}`, nodes, edges, groups, { question: `how the code stood at ${commit.short} (${commit.author}), and what that commit did to it`, reason: `the code at ${commit.short}, what the commit changed marked: ${did}` });
 }
 
 /** The call tree from a function: the functions it calls, and theirs, `depth` levels (default 3); its gaps drawn as hole shapes. */
@@ -991,7 +1040,9 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
       case "packages":
         return packagesView(analysis);
       case "timeline":
-        // From the commits of a range, which picture.ts reads from git.
+        // From the commits of a range, which picture.ts reads from git; at one of them, the map of the code as it was then.
+        if (reads.timeline?.at) return commitMap(reads.timeline.at);
+
         return reads.timeline ? timelineDiagram(reads.timeline.rows, reads.timeline.base, reads.timeline.head) : unplaced("Timeline", [], [], [], { placed: true, reason: "the timeline is built from the commits of a range (archdiff diagram timeline --base --head)" });
       case "review":
         // The analyses of the base and the head, which picture.ts reads from git.

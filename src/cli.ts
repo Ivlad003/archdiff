@@ -77,9 +77,9 @@ const flag = (name: string, value: FlagSpec["value"] = false): FlagSpec => ({ na
 /** A flag of a ref (--base, --head): a value. */
 const REF_FLAGS = [flag("base", true), flag("head", true)];
 
-/** The refs of a picture from the flags: `--base`, `--head` and `--heads a,b` (a comparison's). */
+/** The refs of a picture from the flags: `--base`, `--head`, `--heads a,b` (a comparison's) and `--at SHA` (the commit the timeline is at). */
 function refsOf(call: Call): Refs {
-  return { base: call.text("base"), head: call.text("head"), heads: (call.text("heads") ?? "").split(",").filter((head) => head !== "") };
+  return { base: call.text("base"), head: call.text("head"), heads: (call.text("heads") ?? "").split(",").filter((head) => head !== ""), at: call.text("at") };
 }
 
 /**
@@ -258,19 +258,20 @@ const COMMANDS: readonly Command[] = [
   },
   {
     name: "diagram",
-    usage: "<view> [dir] [--format F] [--out FILE] [--base REF] [--head REF] [--heads A,B] [picture options]",
+    usage: "<view> [dir] [--format F] [--out FILE] [--base REF] [--head REF] [--heads A,B] [--at SHA] [picture options]",
     help: [
       "Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,",
       "drawio, excalidraw, archimate. Views (the table of kinds, view-keys.ts):",
       ...wrapped(viewSyntax().join(" | "), 88),
-      "timeline and review take --base --head, compare --base --heads; logic:<path>#<fn> is the",
+      "timeline and review take --base --head, compare --base --heads; timeline --at SHA is the map",
+      "of the code at one commit of the range, what the commit did marked; logic:<path>#<fn> is the",
       "function's body as a flowchart, with its paths as rules; commit:<sha> is one commit's",
       "change against the commit before it. Every export names the commit it was drawn from.",
       "The picture options:",
       ...pictureOptionsHelp().map((line) => `  ${line}`),
     ],
     arity: 2,
-    flags: [...OUTPUT_FLAGS, ...REF_FLAGS, flag("heads", true), ...pictureFlags().map((item) => flag(item.name, item.value))],
+    flags: [...OUTPUT_FLAGS, ...REF_FLAGS, flag("heads", true), flag("at", true), ...pictureFlags().map((item) => flag(item.name, item.value))],
     async run(call) {
       const key = call.positional[0];
 

@@ -23,25 +23,28 @@ import { layout, type Diagram } from "./diagram.ts";
 import { boardMarkdown, boardOf, groupMarkdown, type Board } from "./board.ts";
 import { comparisonMarkdown, reviewMarkdown, type Compared, type GraphDiff } from "./diff.ts";
 import { readLogic, type LogicFact } from "./extract/logic.ts";
-import { branchGraph, changedPaths, commitInfo, commitOf, defaultBase, EMPTY_TREE, mergeBase, revisionStamp, worktreeDiff, type CommitInfo } from "./git.ts";
+import { branchGraph, changedPaths, commitInfo, commitOf, commitsBetween, defaultBase, EMPTY_TREE, gitStats, mergeBase, revisionStamp, worktreeDiff, type CommitInfo } from "./git.ts";
 import { isSourceFile } from "./languages.ts";
 import { positionsOf, readDrawing, type DrawingFile } from "./drawings.ts";
 import { diagramMarkdown } from "./markdown.ts";
-import type { PictureOptions } from "./options.ts";
-import { compareBranches, history, reviewOf } from "./review.ts";
+import { GIT_OVERLAYS, type PictureOptions } from "./options.ts";
+import { compareBranches, history, reviewOf, reviewOfCommit } from "./review.ts";
 import { codeRevision, viewKey, type View } from "./view-keys.ts";
 import { entryPoints, viewOf, type EdgeReads } from "./views.ts";
 
 /**
  * The revisions a picture is drawn against: the base (null: the
  * merge-base with develop, main or master; for a comparison that branch
- * itself), the head (null: the working tree) and the heads of a
- * comparison (`WORKTREE` for the working tree).
+ * itself), the head (null: the working tree), the heads of a
+ * comparison (`WORKTREE` for the working tree), and for the timeline the
+ * one commit of its range the picture is at (`at`; absent or null: the
+ * whole range).
  */
 export interface Refs {
   base: string | null;
   head: string | null;
   heads: readonly string[];
+  at?: string | null;
 }
 
 export const NO_REFS: Refs = { base: null, head: null, heads: [] };
@@ -73,7 +76,8 @@ const pictures = new WeakMap<Analysis, Map<string, Promise<Picture>>>();
 /** The picture of a request on `analysis`; drawn once per analysis and request (a saved drawing changes the request). */
 export function drawPicture(analysis: Analysis, request: PictureRequest): Promise<Picture> {
   const key = viewKey(request.view);
-  const drawing = readDrawing(analysis.root, key);
+  // The timeline at a commit is another picture at every commit: a drawing saved on the range's bars is not laid over it.
+  const drawing = request.refs.at ? null : readDrawing(analysis.root, key);
   const memoKey = JSON.stringify([key, request.options, request.refs, drawing?.saved ?? null]);
   const known = pictures.get(analysis) ?? new Map<string, Promise<Picture>>();
   pictures.set(analysis, known);
@@ -96,7 +100,7 @@ async function draw(analysis: Analysis, { view, options, refs }: PictureRequest,
   const said = notes.length > 0 ? { ...content, reason: [content.reason, ...notes].filter(Boolean).join("; ") } : content;
   const placed = layout(said, positionsOf(drawing?.elements ?? null));
   // The revision the picture is of: the code's head, a review's head, a commit itself; the checkout's otherwise.
-  const revision = codeRevision(view, refs.head);
+  const revision = codeRevision(view, refs.head, refs.at ?? null);
   const stamp = revision ? revisionStamp(analysis.root, revision) : revisionStamp(analysis.root);
   const diagram = stamp ? { ...placed, stamp } : placed;
   const markdown = reads.board && change?.kind === "review" ? boardPage(view, reads.board, diagram, change.contract) : change?.kind === "review" ? reviewMarkdown(change.diff, diagram, change.contract, change.commit ?? null) : change?.kind === "compare" ? comparisonMarkdown(change.base, change.heads, diagram) : diagramMarkdown(diagram, analysis, options.mermaid);
@@ -130,14 +134,46 @@ function boardPage(view: View, read: NonNullable<EdgeReads["board"]>, diagram: D
  * other view, the review's diff to lay its marks over the picture. A view
  * that is a change (a timeline, a review, a comparison) fails when git
  * refuses; the changes laid over another view are only left out, with a
- * note saying why (`notes`), and the picture is drawn without them.
+ * note saying why (`notes`), and the picture is drawn without them. The
+ * overlays read from git (churn, coupling, ownership) get the statistics
+ * of the picture's range — the link's base to its head, to the commit the
+ * timeline is at — and are left out the same way when git refuses.
  */
 async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOptions, refs: Refs): Promise<{ reads: EdgeReads; change?: Change; notes: string[] }> {
+  const read = await readForView(analysis, view, options, refs);
+
+  if (!options.overlays.some((overlay) => GIT_OVERLAYS.includes(overlay))) return read;
+
+  try {
+    const head = (view.kind === "timeline" ? refs.at : null) ?? refs.head ?? "HEAD";
+    // The timeline found its range's base already; another view's is the link's, else where its head left the main line.
+    const base = read.reads.timeline?.base ?? refs.base ?? mergeBase(analysis.root, refs.head ?? "HEAD");
+    read.reads.git = gitStats(analysis.root, base, head, options.overlays.includes("ownership"));
+  } catch (error) {
+    read.notes.push(`⚠ the overlays read from git (${options.overlays.filter((overlay) => GIT_OVERLAYS.includes(overlay)).join(", ")}) are not laid over: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  return read;
+}
+
+/** What the view itself reads at the edge (`readAtTheEdge`), before the overlays read from git. */
+async function readForView(analysis: Analysis, view: View, options: PictureOptions, refs: Refs): Promise<{ reads: EdgeReads; change?: Change; notes: string[] }> {
   const { root } = analysis;
 
   if (view.kind === "timeline") {
     const head = refs.head ?? "HEAD";
     const base = refs.base ?? mergeBase(root, head);
+
+    // At one commit of the range: that commit's own change, as its `commit:` view reads it, and where it stands in the range.
+    if (refs.at) {
+      const commit = commitInfo(root, refs.at);
+
+      if (!commit) throw new Error(`no commit "${refs.at}" (archdiff history lists the commits of the range)`);
+      const result = await reviewOfCommit(root, commit.parent, commit.sha);
+      const commits = commitsBetween(root, base, head);
+
+      return { reads: { timeline: { rows: [], base, head, at: { commit, diff: result.diff, before: result.base.graph, graph: result.head.graph, index: commits.findIndex((candidate) => candidate.sha === commit.sha) + 1, of: commits.length } } }, change: { kind: "review", diff: result.diff, contract: result.contract, commit }, notes: [] };
+    }
 
     return { reads: { timeline: { rows: await history(root, base, head), base, head } }, notes: [] };
   }

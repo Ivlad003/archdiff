@@ -8,10 +8,10 @@
 //
 // Sits at the I/O edge below review.ts (which reads a change), files.ts
 // (which lists the sources) and the server. Entry points: `listedFiles`,
-// `changedFiles`, `changedPaths`, `worktreeDiff`, `treeAt`, `mergeBase`, `forkPoint`, `commitOf`,
+// `changedFiles`, `changedSources`, `changedPaths`, `worktreeDiff`, `treeAt`, `mergeBase`, `forkPoint`, `commitOf`,
 // `defaultBase`, `listBranches`, `branchGraph`, `commitsBetween`,
-// `commitInfo`, `commitFiles`, `fileHistory`, `fileAt`, `revisionStamp`,
-// `commitFirst`.
+// `commitInfo`, `commitFiles`, `fileHistory`, `gitStats`, `fileAt`,
+// `revisionStamp`, `commitFirst`.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -62,13 +62,11 @@ function assertRef(ref: string): void {
 export function mergeBase(root: string, head = "HEAD"): string {
   assertRef(head);
 
+  // A branch that does not exist has no merge-base either: one question per candidate answers both.
   for (const candidate of ["origin/HEAD", "develop", "main", "master", "origin/develop", "origin/main", "origin/master"]) {
-    const exists = git(root, ["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`]);
-
-    if (!exists.ok) continue;
     const base = git(root, ["merge-base", head, candidate]);
 
-    if (base.ok) return base.out.trim();
+    if (base.ok && base.out.trim() !== "") return base.out.trim();
   }
 
   const shallow = git(root, ["rev-parse", "--is-shallow-repository"]);
@@ -100,8 +98,40 @@ export interface CommitInfo extends Commit {
   body: string;
 }
 
+/** Whether a ref is a commit's full hash: what it names never changes, so what git says of it is asked once. */
+function isFullHash(ref: string): boolean {
+  return /^[0-9a-f]{40}$/.test(ref);
+}
+
+/** What git said of a commit named by its full hash, by repository and question: a slider that comes back to a commit asks nothing again. */
+const said = new Map<string, unknown>();
+
+/** How many such answers are kept, the oldest dropped first. */
+const SAID = 400;
+
+/** The answer to `key` about the commit `ref`, asked once when `ref` is a full hash (and an answer came); asked every time for a name that can move. */
+function once<T>(root: string, key: string, ref: string, ask: () => T): T {
+  if (!isFullHash(ref)) return ask();
+  const id = `${root}\0${key}\0${ref}`;
+
+  if (said.has(id)) return said.get(id) as T;
+  const answer = ask();
+
+  if (answer !== null) {
+    said.set(id, answer);
+
+    if (said.size > SAID) said.delete(said.keys().next().value!);
+  }
+
+  return answer;
+}
+
 /** The commit a ref names, as `CommitInfo`; null when git knows no commit of that name. */
 export function commitInfo(root: string, ref: string): CommitInfo | null {
+  return once(root, "commit", ref, () => readCommitInfo(root, ref));
+}
+
+function readCommitInfo(root: string, ref: string): CommitInfo | null {
   if (commitOf(root, ref) === null) return null;
   const result = git(root, ["log", "-1", "--format=%H%x00%h%x00%P%x00%an%x00%ad%x00%s%x00%b", "--date=short", ref]);
 
@@ -306,6 +336,17 @@ export function treeAt(root: string, ref: string, also: readonly string[] = []):
   return overrides;
 }
 
+/** The source files that differ between two revisions, by name alone (`changedFiles` reads their content too). */
+export function changedSources(root: string, base: string, head: string): string[] {
+  assertRef(base);
+  assertRef(head);
+  const diff = git(root, ["diff", "--relative", "--name-only", "-z", "--no-renames", base, head, "--"]);
+
+  if (!diff.ok) throw new Error(diff.error);
+
+  return diff.out.split("\0").filter((path) => path !== "" && isSourceFile(path));
+}
+
 /**
  * Every path the working tree changes against `base`, source file or not, as git names what happened to it: `A`
  * added, `M` modified, `D` deleted, `R` renamed (the new path), `?` not tracked yet. Relative to `root`.
@@ -388,6 +429,105 @@ export function commitsBetween(root: string, base: string, head: string): Commit
 /** The commits that touched a file, newest first, for the history of a shape. */
 export function fileHistory(root: string, path: string, limit = 30): Commit[] {
   return logOf(root, [`-${limit}`, "--", path]);
+}
+
+/** What the commits of a range say of the files, for the overlays read from git (overlays.ts). */
+export interface GitStats {
+  /** The commits read, as a reader names them: `main..feature`, or the last commits of a head when the range holds none. */
+  range: string;
+  /** How many commits were read. */
+  commits: number;
+  /** Churn: how many of those commits changed each file. */
+  churn: Map<string, number>;
+  /** Change coupling: the pairs of files changed in one commit at least twice, the most often together first. */
+  coupling: { a: string; b: string; together: number }[];
+  /** Ownership: for each file, the author of most of the commits that changed it, with how many of how many. */
+  owners: Map<string, { author: string; commits: number; of: number }>;
+  /** How many commits the ownership was read from (the head's history, not the range alone). */
+  ownersFrom: number;
+}
+
+/** A commit that changes more files than this says nothing of which belong together (a rename of a directory, a formatter's run): it counts as churn only. */
+const COUPLING_FILES = 50;
+
+/** The pairs of files a picture is given, at most: the most often changed together. */
+const COUPLING_PAIRS = 400;
+
+/** How many commits the range falls back to when it holds none (the main line itself), and how many the ownership reads. */
+const STATS_COMMITS = { fallback: 200, owners: 1000 } as const;
+
+/** The commits `git log` lists for the arguments, each with its author and the files it changed (merges left out; paths relative to `root`). */
+function commitsWithFiles(root: string, args: string[]): { author: string; files: string[] }[] {
+  const log = git(root, ["log", "--no-merges", "--no-renames", "--relative", "--name-only", "--format=%x00%an", ...args]);
+
+  if (!log.ok) throw new Error(log.error);
+
+  return log.out
+    .split("\0")
+    .slice(1)
+    .map((record) => {
+      const [author = "", ...files] = record.split("\n");
+
+      return { author, files: files.filter((file) => file !== "") };
+    });
+}
+
+/**
+ * The statistics of the commits from `base` (excluded) to `head`, in one `git log`: the churn of every file, the
+ * pairs changed together, and — with `owners`, from the last commits of `head`'s whole history — the main author
+ * of every file. A range without a commit (the main line against itself) is read as the last commits of `head`,
+ * and `range` says so.
+ */
+export function gitStats(root: string, base: string, head: string, owners = false): GitStats {
+  assertRef(base);
+  assertRef(head);
+
+  // Between two commits named by their hashes the statistics never change: the slider reads each range once.
+  return isFullHash(base) ? once(root, `stats ${base} ${owners}`, head, () => readGitStats(root, base, head, owners)) : readGitStats(root, base, head, owners);
+}
+
+function readGitStats(root: string, base: string, head: string, owners: boolean): GitStats {
+  let commits = commitsWithFiles(root, [`${base}..${head}`]);
+  let range = `${base.length === 40 ? base.slice(0, 7) : base}..${head.length === 40 ? head.slice(0, 7) : head}`;
+
+  if (commits.length === 0) {
+    commits = commitsWithFiles(root, [`-${STATS_COMMITS.fallback}`, head]);
+    range = `the last ${commits.length === 1 ? "commit" : `${commits.length} commits`} of ${head.length === 40 ? head.slice(0, 7) : head}`;
+  }
+
+  const churn = new Map<string, number>();
+  const together = new Map<string, number>();
+
+  for (const commit of commits) {
+    for (const file of commit.files) churn.set(file, (churn.get(file) ?? 0) + 1);
+
+    if (commit.files.length < 2 || commit.files.length > COUPLING_FILES) continue;
+    const files = [...commit.files].sort();
+
+    for (let i = 0; i < files.length; i++) for (let j = i + 1; j < files.length; j++) together.set(`${files[i]}\0${files[j]}`, (together.get(`${files[i]}\0${files[j]}`) ?? 0) + 1);
+  }
+
+  const coupling = [...together]
+    .filter(([, count]) => count >= 2)
+    .sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))
+    .slice(0, COUPLING_PAIRS)
+    .map(([pair, count]) => {
+      const [a, b] = pair.split("\0") as [string, string];
+
+      return { a, b, together: count };
+    });
+  const authors = new Map<string, Map<string, number>>();
+  const history = owners ? commitsWithFiles(root, [`-${STATS_COMMITS.owners}`, head]) : [];
+
+  for (const commit of history) for (const file of commit.files) authors.set(file, (authors.get(file) ?? new Map<string, number>()).set(commit.author, (authors.get(file)?.get(commit.author) ?? 0) + 1));
+  const owned = new Map<string, { author: string; commits: number; of: number }>();
+
+  for (const [file, by] of authors) {
+    const [author, most] = [...by].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))[0]!;
+    owned.set(file, { author, commits: most, of: [...by.values()].reduce((sum, count) => sum + count, 0) });
+  }
+
+  return { range, commits: commits.length, churn, coupling, owners: owned, ownersFrom: history.length };
 }
 
 /** A branch of the repository, local or remote. */
@@ -541,12 +681,15 @@ export function defaultBase(root: string): string | null {
 /** The short commit and its date of a revision (the checkout's by default), for the stamp of an export; null outside git or before the first commit. */
 export function revisionStamp(root: string, ref = "HEAD"): { commit: string; date: string } | null {
   assertRef(ref);
-  const result = git(root, ["log", "-1", "--format=%h %cs", ref]);
 
-  if (!result.ok) return null;
-  const [commit, date] = result.out.trim().split(" ");
+  return once(root, "stamp", ref, () => {
+    const result = git(root, ["log", "-1", "--format=%h %cs", ref]);
 
-  return commit && date ? { commit, date } : null;
+    if (!result.ok) return null;
+    const [commit, date] = result.out.trim().split(" ");
+
+    return commit && date ? { commit, date } : null;
+  });
 }
 
 /** Tracked and untracked-but-not-ignored files as git lists them, or null outside a repository (or without git). */

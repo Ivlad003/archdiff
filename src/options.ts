@@ -16,13 +16,16 @@
 // Entry points: `PICTURE_OPTIONS`, `PictureOptions`, `readPictureOptions`,
 // `readEachPictureOption`, `writePictureParams`, `pictureOptionsHelp`,
 // `DEFAULT_PICTURE_OPTIONS`, `DEEP_DEPTH`, `depthWarning`, `OVERLAYS`,
-// `MERMAID_STYLES`, `MERMAID_ONLY_FOR`, `LANE_MODES`.
+// `GIT_OVERLAYS`, `MERMAID_STYLES`, `MERMAID_ONLY_FOR`, `LANE_MODES`.
 
 import { ok, wrong, type Result } from "./result.ts";
 import type { ViewKind } from "./view-keys.ts";
 
 /** The overlays a picture can carry, in the order `--overlay` lists them. */
-export const OVERLAYS = ["tests", "storages", "heat", "instability"] as const;
+export const OVERLAYS = ["tests", "storages", "heat", "instability", "churn", "coupling", "ownership"] as const;
+
+/** The overlays read from git — the commits of the picture's range — which picture.ts reads at the edge. */
+export const GIT_OVERLAYS: readonly Overlay[] = ["churn", "coupling", "ownership"];
 
 export type Overlay = (typeof OVERLAYS)[number];
 
@@ -59,7 +62,7 @@ export const PICTURE_OPTIONS = [
   { key: "packages", flag: "packages", param: "packages", type: "bool", default: false, help: "draw the packages and built-ins a module imports" },
   { key: "expand", flag: "expand", param: "expand", type: "list", help: "open modules in place: each becomes a lane of its functions (the mix of a module view and an inside view)" },
   { key: "hideLanes", flag: "hide-lanes", param: "hide", type: "list", help: "leave lanes out of the picture" },
-  { key: "overlays", flag: "overlay", param: "overlay", type: "enum-list", values: OVERLAYS, help: "tests marks untested modules, storages labels the stores, heat shades by calls in, instability shades by Martin's I — on any view" },
+  { key: "overlays", flag: "overlay", param: "overlay", type: "enum-list", values: OVERLAYS, help: "tests marks untested modules, storages labels the stores, heat shades by calls in, instability shades by Martin's I; from git (--base, --head): churn shades by the commits that changed each file, coupling joins the files changed together, ownership names and tints each module's main author — on any view" },
   { key: "changes", flag: "changes", param: "changes", type: "bool", default: false, help: "lay the review's marks (--base, --head) over the view: structure and change in one picture" },
   { key: "onlyChanges", flag: "only-changes", param: "only", type: "bool", default: false, paramValue: "changes", help: "with --changes: keep the marked shapes and their neighbours only" },
   { key: "changed", flag: "changed", param: "changed", type: "bool", default: false, help: "only the files changed since the base (--base, --head): their shapes alone, with the review's marks; `views --changed` and the page's lists the same" },

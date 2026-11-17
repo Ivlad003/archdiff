@@ -34,6 +34,15 @@ The system SHALL draw `diagram <view> --head REF`, for a view that is no change,
 - **WHEN** `archdiff diagram modules --head gone` runs on main, where branch `gone` removed `log.ts`
 - **THEN** the map has no `log.ts`, and the stamp names `gone`'s commit
 
+### Requirement: The timeline can be drawn at one commit
+
+The system SHALL draw `diagram timeline --at SHA` as the map of the code at that commit of the range `--base`..`--head` with what the commit did marked, and SHALL exit 2 naming a commit git does not know.
+
+#### Scenario: A commit that is none
+
+- **WHEN** `archdiff diagram timeline --at nope` runs
+- **THEN** it exits 2 with `no commit "nope" (archdiff history lists the commits of the range)`
+
 ### Requirement: Exit codes mean one thing
 
 The system SHALL exit 0 on success, 1 when a check found something (a new layer dependency in `review` or `compare`, an import against the contract in `check`, a run that threw in `run`), and 2 on a wrong call or an I/O error — a view of a subject the code does not have, an entry `run` cannot run (unknown, a method, another language, not exported), a repository that is not one when git is needed.

@@ -417,6 +417,92 @@ test("the board of the uncommitted changes: the working tree against the last co
     assert.ok(archdiff(["diagram", "changes", dir]).stdout.includes("nothing to walk"));
   }));
 
+/** A branch `feature` off main in `dir`, by two authors: a module added, then changed twice together with the log, then the store reading the log. */
+function commitHistory(dir: string): void {
+  const git = (author: string, ...args: string[]): void => {
+    const result = spawnSync("git", ["-C", dir, "-c", `user.email=${author.toLowerCase()}@example.com`, "-c", `user.name=${author}`, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const commit = (author: string, subject: string, files: Record<string, string>): void => {
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
+    git(author, "add", ".");
+    git(author, "commit", "-q", "-m", subject);
+  };
+  const log = (how: string): string => `import { step1 } from "./step1.ts";\n\nexport function log(message: string): void {\n  console.${how}(message, step1());\n}\n`;
+  const step1 = (value: number): string => `export function step1(): number {\n  return ${value};\n}\n`;
+  git("Ann", "init", "-q", "-b", "main");
+  git("Ann", "add", ".");
+  git("Ann", "commit", "-q", "-m", "base");
+  git("Ann", "checkout", "-q", "-b", "feature");
+  commit("Ann", "step 1: a module", { "src/lib/step1.ts": step1(1) });
+  commit("Bob", "step 2: the log counts", { "src/lib/log.ts": log("log"), "src/lib/step1.ts": step1(11) });
+  commit("Bob", "step 3: louder", { "src/lib/log.ts": log("error"), "src/lib/step1.ts": step1(111) });
+  commit("Ann", "step 4: the store logs", { "src/db/store.ts": 'import { log } from "../lib/log.ts";\nimport type { Order } from "../lib/orders.ts";\n\nconst rows = new Map<string, Order>();\n\nexport function saveOrder(order: Order): void {\n  log("save");\n  rows.set(order.id, order);\n}\n\nexport function readOrder(id: string): Order | null {\n  return rows.get(id) ?? null;\n}\n' });
+}
+
+test("the timeline at a commit is the map of the code as it was then; churn, coupling and ownership are read from the commits of the range", () =>
+  withTempDir("archdiff-slider-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    // Outside git the overlays read from it are left out, and the picture says why; the command does not fail.
+    const outside = archdiff(["diagram", "modules", dir, "--overlay", "churn,ownership", "--format", "json"]);
+    assert.equal(outside.status, 0, outside.stderr);
+    assert.match((JSON.parse(outside.stdout) as { reason: string }).reason, /⚠ the overlays read from git \(churn, ownership\) are not laid over: .* is not a git repository$/);
+    commitHistory(dir);
+    const git = gitIn(dir);
+    const shas = git("log", "--reverse", "--format=%H", "main..feature").split("\n");
+    assert.equal(shas.length, 4);
+    type Drawn = { title: string; reason: string; nodes: { id: string; label: string; diff?: string; heat?: number; tint?: string }[]; edges: { from: string; to: string; kind: string; count?: number; label?: string; diff?: string }[] };
+    const drawn = (...args: string[]): Drawn => {
+      const result = archdiff(["diagram", ...args, "--format", "json"]);
+      assert.equal(result.status, 0, result.stderr);
+
+      return JSON.parse(result.stdout) as Drawn;
+    };
+    const shape = (picture: Drawn, id: string) => picture.nodes.find((node) => node.id === id)!;
+
+    // The second commit: the whole map as it stood, the two modules it changed marked, the import it added in green.
+    const second = drawn("timeline", dir, "--at", shas[1]!);
+    assert.match(second.title, /^[0-9a-f]{7} \d{4}-\d\d-\d\d: step 2: the log counts — commit 2 of 4$/);
+    assert.deepEqual(second.nodes.map((node) => `${node.id} ${node.diff ?? "-"}`), ["cartridges/base/cartridge/scripts/hooks/basket.js -", "src/db/store.ts -", "src/lib/log.ts changed", "src/lib/orders.ts -", "src/lib/step1.ts changed", "src/routes/checkout.tsx -"]);
+    assert.ok(second.edges.some((edge) => edge.from === "src/lib/log.ts" && edge.to === "src/lib/step1.ts" && edge.diff === "added"));
+    // The store does not read the log yet at that commit: the map is the commit's, not the working tree's.
+    assert.ok(!second.edges.some((edge) => edge.from === "src/db/store.ts" && edge.to === "src/lib/log.ts"));
+    // Its page is the commit's own change, its Mermaid a flowchart of the map (no gitGraph of one commit).
+    const page = archdiff(["diagram", "timeline", dir, "--at", shas[1]!.slice(0, 7)]);
+    assert.equal(page.status, 0, page.stderr);
+    assert.match(page.stdout, /^<!-- archdiff:generated — commit [0-9a-f]{7} -->\n# Architecture changes of commit [0-9a-f]{7}: step 2: the log counts\n/);
+    assert.ok(page.stdout.includes("flowchart LR") && page.stdout.includes("class src_lib_log_ts,src_lib_step1_ts changed") && !page.stdout.includes("gitGraph"), page.stdout);
+    // The first commit adds the module; the whole range is still the bars.
+    assert.equal(shape(drawn("timeline", dir, "--at", shas[0]!), "src/lib/step1.ts").diff, "added");
+    assert.match(drawn("timeline", dir).title, /^Timeline [0-9a-f]{40}\.\.HEAD: 4 commits$/);
+    // A commit git does not know is refused by name.
+    const unknown = archdiff(["diagram", "timeline", dir, "--at", "nope"]);
+    assert.equal(unknown.status, 2);
+    assert.ok(unknown.stderr.includes('no commit "nope"'), unknown.stderr);
+
+    // The overlays on the whole map, from the four commits of the range: who changed, what changed together, whose it is.
+    const map = drawn("modules", dir, "--overlay", "churn,coupling,ownership");
+    assert.match(map.reason, /shade: churn, the commits of [0-9a-f]{7}\.\.HEAD that changed each file \(4 commits read\); 1 pair of modules changed together at least twice in [0-9a-f]{7}\.\.HEAD \(dashed, × the commits\); ownership, the author of most of the commits that changed each file \(the last 5 commits\): Ann 4, Bob 2$/);
+    assert.equal(shape(map, "src/lib/step1.ts").label, "src/lib/step1.ts\n3 changes\n◉ Bob 67%");
+    assert.equal(shape(map, "src/lib/step1.ts").heat, 1);
+    assert.equal(shape(map, "src/lib/orders.ts").label, "src/lib/orders.ts\n◉ Ann");
+    assert.equal(shape(map, "src/lib/orders.ts").heat, undefined);
+    assert.ok(shape(map, "src/lib/log.ts").tint !== undefined && shape(map, "src/lib/log.ts").tint === shape(map, "src/lib/step1.ts").tint && shape(map, "src/lib/log.ts").tint !== shape(map, "src/lib/orders.ts").tint);
+    assert.deepEqual(map.edges.filter((edge) => edge.kind === "cochange"), [{ from: "src/lib/log.ts", to: "src/lib/step1.ts", kind: "cochange", count: 2, label: "×2" }]);
+    // The line of two files changed together does not move the map: the shapes stand where they stand without it.
+    const plain = drawn("modules", dir);
+    assert.deepEqual((map.nodes as unknown as { id: string; x: number; y: number }[]).map((node) => [node.id, node.x, node.y]), (plain.nodes as unknown as { id: string; x: number; y: number }[]).map((node) => [node.id, node.x, node.y]));
+    // At the second commit the range is two commits long: the pair changed together once, which is no coupling yet.
+    const early = drawn("timeline", dir, "--at", shas[1]!, "--overlay", "churn,coupling");
+    assert.equal(shape(early, "src/lib/step1.ts").label, "src/lib/step1.ts\n2 changes");
+    assert.ok(early.reason.includes("no two modules of this picture changed together twice"), early.reason);
+    assert.ok(!early.edges.some((edge) => edge.kind === "cochange"));
+    // In Mermaid the pair is joined without a direction; on the main line itself the range is its last commits.
+    assert.ok(archdiff(["diagram", "modules", dir, "--overlay", "coupling", "--format", "mermaid"]).stdout.includes('src_lib_log_ts -.-|"×2"| src_lib_step1_ts'));
+    git("checkout", "-q", "main");
+    assert.match(drawn("modules", dir, "--overlay", "churn").reason, /the commits of the last commit of HEAD that changed each file \(1 commit read\)$/);
+  }));
+
 test("--out writes a new file or one archdiff wrote, and refuses any other file", () =>
   withTempDir("archdiff-out-", (dir) => {
     const out = join(dir, "layers.md");
