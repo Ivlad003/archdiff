@@ -1209,6 +1209,143 @@ body.editing #empty {
   display: none;
 }
 
+/* The guided tours (tours.ts): the menu of the header, fixed and placed under its button as the export's is; and the
+   bar of the tour played or recorded, its note under it. */
+#tours-menu {
+  position: relative;
+}
+
+#tours-menu summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  background: var(--panel);
+  white-space: nowrap;
+}
+
+#tours-menu[open] summary {
+  border-color: var(--accent);
+}
+
+#tours {
+  position: fixed;
+  z-index: 36;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 260px;
+  max-width: 420px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+#tours .row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+#tours .row .play {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#tours-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+#tour {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+#tour[hidden],
+#tour-editor[hidden],
+#tour-note[hidden] {
+  display: none;
+}
+
+#tour .row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#tour-title {
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 30%;
+}
+
+#tour-steps {
+  max-width: 34%;
+  font: inherit;
+}
+
+#tour button.small {
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+#tour-state {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#tour-note {
+  max-height: 22vh;
+  overflow: auto;
+  margin-top: 2px;
+  padding: 2px 4px 2px 10px;
+  border-left: 3px solid var(--accent);
+}
+
+#tour-note > :first-child {
+  margin-top: 2px;
+}
+
+#tour-note > :last-child {
+  margin-bottom: 2px;
+}
+
+#tour-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+#tour-text {
+  width: 100%;
+  min-height: 70px;
+  font: 12px/1.4 var(--mono);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px;
+  resize: vertical;
+}
+
 /* The walk of the uncommitted changes (board.ts): the steps under the title, as the commits of a review are. */
 #board {
   display: flex;

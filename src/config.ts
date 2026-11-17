@@ -1,6 +1,6 @@
 // The optional `archdiff.json` of a repository and the defaults without
 // one: which files to skip, which layers the modules fall into, which
-// functions are entry points, and which coding agent the page may run. Layers are globs; without any, a module's
+// functions are entry points, which coding agent the page may run, and where the guided tours are kept. Layers are globs; without any, a module's
 // layer is its top directory (`src/<dir>` when under `src/`). Validated on
 // read: a wrong field names the file and the field.
 //
@@ -47,6 +47,8 @@ export interface Config {
   checks: string[];
   /** Postman collections to read against the code, besides every `*.postman_collection.json` of the repository: paths from the root. */
   postman: string[];
+  /** The directory of the guided tours, from the root — one the repository commits (`docs/tours`); null: beside the drawings, in `.archdiff/tours`. */
+  tours: string | null;
 }
 
 export interface HubThresholds {
@@ -63,7 +65,7 @@ export function hubThreshold(modules: number, thresholds: HubThresholds): number
 /** A quarter of a picture marks the logger and the shared types, not a busy neighbour; at least 6 importers, and 40 on a big map whatever its size. */
 export const DEFAULT_HUBS: HubThresholds = { min: 6, share: 0.25, max: 40 };
 
-export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null, hubs: DEFAULT_HUBS, storages: {}, storagePackages: {}, checks: [], postman: [] };
+export const DEFAULT_CONFIG: Config = { exclude: [], layers: null, entries: [], otherLayer: "other", agent: null, hubs: DEFAULT_HUBS, storages: {}, storagePackages: {}, checks: [], postman: [], tours: null };
 
 /** `"storages": { "<glob>": "<what it holds>" }`: an object of strings. */
 function stringMap(value: JsonValue | undefined, file: string, field: string): Record<string, string> {
@@ -114,7 +116,17 @@ export function loadConfig(root: string): Config {
 
   if (other !== undefined && !isJsonString(other)) throw new Error(`${CONFIG_FILE}: "other" must be a string`);
 
-  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: named(() => agentFromConfig(parsed["agent"])), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages"), checks: stringList(parsed["checks"], CONFIG_FILE, "checks"), postman: collectionPaths(root, stringList(parsed["postman"], CONFIG_FILE, "postman")) };
+  return { exclude, layers, entries, otherLayer: other ?? DEFAULT_CONFIG.otherLayer, agent: named(() => agentFromConfig(parsed["agent"])), hubs: hubThresholds(parsed["hubs"]), storages: stringMap(parsed["storages"], CONFIG_FILE, "storages"), storagePackages: stringMap(parsed["storagePackages"], CONFIG_FILE, "storagePackages"), checks: stringList(parsed["checks"], CONFIG_FILE, "checks"), postman: collectionPaths(root, stringList(parsed["postman"], CONFIG_FILE, "postman")), tours: toursPath(parsed["tours"]) };
+}
+
+/** `"tours": "docs/tours"`: a directory of the repository, written from its root; a path that leaves it is refused. */
+function toursPath(value: JsonValue | undefined): string | null {
+  if (value === undefined) return null;
+  const path = isJsonString(value) ? value.replace(/\\/g, "/").replace(/\/+$/, "") : "";
+
+  if (path === "" || path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) throw new Error(`${CONFIG_FILE}: "tours" must be a directory of the repository, written from its root ("docs/tours")`);
+
+  return path;
 }
 
 /** The configured Postman collections, each a file that is there and reads as a collection; a wrong one names the field and the file. */

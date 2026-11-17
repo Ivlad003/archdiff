@@ -1541,3 +1541,116 @@ test("the slider over the commits of a range: the timeline drawn at each commit,
     await page!.waitForFunction(`document.querySelector("#commit-list").selectedOptions[0]?.textContent.endsWith("step 4: the store logs") && document.querySelector("#commit-play").textContent === "▶"`, undefined, { timeout: 20_000 });
     await page!.evaluate("localStorage.clear()");
   }));
+
+test("a guided tour is recorded step by step — the picture, its options, its selection, a note — played with . and , and opened by a link that names the tour and the step alone", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-tours-",
+    () => undefined,
+    async (origin, dir) => {
+      const file = join(dir, ".archdiff/tours/intro.json");
+      const kept = (): { title: string; steps: { link: string; select: string[]; note: string }[] } => JSON.parse(readFileSync(file, "utf8")) as { title: string; steps: { link: string; select: string[]; note: string }[] };
+      const drawn = (view: string): Promise<unknown> => page!.waitForFunction(`window.archdiff.drawn() === ${JSON.stringify(view)}`, undefined, { timeout: 20_000 });
+      const hash = (): Promise<string> => page!.evaluate("location.hash") as Promise<string>;
+      const module = "module:src/lib/orders.ts";
+      await page!.goto(`${origin}/?fresh=tours#view=layers`);
+      await page!.evaluate("localStorage.clear()");
+      await drawn("layers");
+      assert.ok(await page!.evaluate(`document.querySelector("#tour").hidden`));
+
+      // The menu of the header: no tour yet; a name starts the recording of one, and the bar says how.
+      await page!.click("#tours-menu summary");
+      await page!.waitForFunction(`document.querySelector("#tours-note").textContent === "no tours yet in .archdiff/tours/"`);
+      await page!.fill("#tour-name", "not a name!");
+      await page!.press("#tour-name", "Enter");
+      await page!.waitForFunction(`document.querySelector("#tours-note").textContent.startsWith("a name of letters")`);
+      await page!.fill("#tour-name", "intro");
+      await page!.press("#tour-name", "Enter");
+      await page!.waitForFunction(`location.hash === "#view=layers&tour=intro" && !document.querySelector("#tour").hidden && !document.querySelector("#tours-menu").open`);
+      await page!.waitForFunction(`document.querySelector("#tour-state").textContent.startsWith("recording: add step keeps the picture shown")`);
+      assert.equal(await page!.textContent("#tour-title"), "intro");
+
+      // The first step: the layers as shown, under a note in Markdown.
+      await page!.click("#tour-add");
+      await page!.fill("#tour-text", "The **layers** of the sample.");
+      await page!.click("#tour-keep");
+      await page!.waitForFunction(`location.hash === "#view=layers&tour=intro&step=1" && document.querySelector("#tour-note strong")?.textContent === "layers"`, undefined, { timeout: 10_000 });
+      assert.deepEqual(kept().steps, [{ link: "view=layers", select: [], note: "The **layers** of the sample." }]);
+
+      // On to a module, with an overlay and a shape picked: the tour stays in the link, and the bar says the picture left the step.
+      await page!.click(`#views li[title='${module}']`);
+      await drawn(module);
+      await page!.waitForFunction(`document.querySelector("#tour-state").textContent === "away from step 1: ‹ › or the list lead back"`);
+      await page!.evaluate(`document.querySelector("#options .overlay[value='storages']").click()`);
+      await page!.waitForFunction(`location.hash.includes("overlay=storages") && [...window.archdiff.nodes().values()].some((node) => node.label.includes("⛁"))`, undefined, { timeout: 20_000 });
+      await page!.waitForTimeout(600);
+      const store = await screenPointOf("src/db/store.ts");
+      await page!.mouse.click(store.x, store.y);
+      await page!.waitForFunction(`window.archdiff.selected().join() === "src/db/store.ts"`);
+      await page!.click("#tour-add");
+      await page!.fill("#tour-text", "The orders **write** to the store.\n\nIt holds the file system.");
+      await page!.press("#tour-text", "Control+Enter");
+      await page!.waitForFunction(`location.hash.endsWith("&tour=intro&step=2") && document.querySelector("#tour-note strong")?.textContent === "write"`, undefined, { timeout: 10_000 });
+      assert.deepEqual(kept().steps[1], { link: `view=${encodeURIComponent(module)}&overlay=storages`, select: ["src/db/store.ts"], note: "The orders **write** to the store.\n\nIt holds the file system." });
+      // The step kept is the step shown: its selection is back once the picture is drawn again, and the list names both.
+      await page!.waitForFunction(`window.archdiff.selected().join() === "src/db/store.ts"`, undefined, { timeout: 10_000 });
+      assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#tour-steps option")].map((option) => option.textContent)`), ["1 of 2 · The layers of the sample.", "2 of 2 · The orders write to the store."]);
+      assert.equal(await page!.textContent("#tour-state"), "");
+
+      // , and . walk the tour: each step its picture, its options, its selection, its note.
+      await page!.click("#title-text");
+      await page!.keyboard.press(",");
+      await drawn("layers");
+      assert.equal(await hash(), "#view=layers&tour=intro&step=1");
+      await page!.waitForFunction(`document.querySelector("#tour-note strong")?.textContent === "layers" && document.querySelector("#tour-prev").disabled`);
+      await page!.keyboard.press(".");
+      await drawn(module);
+      await page!.waitForFunction(`window.archdiff.selected().join() === "src/db/store.ts" && window.archdiff.state().overlays.join() === "storages"`, undefined, { timeout: 10_000 });
+      await page!.keyboard.press(".");
+      await page!.waitForFunction(`document.querySelector("#reason").textContent === "the last step of the tour"`);
+
+      // A second picture beside this one is a picture alone: the tour stays the first pane's (the pane goes with the next address).
+      await page!.keyboard.press("s");
+      const pane = await (await page!.waitForSelector("#split-frame"))!.contentFrame();
+      await pane!.waitForFunction(`window.archdiff?.drawn() === ${JSON.stringify(module)}`, undefined, { timeout: 20_000 });
+      assert.ok(await pane!.evaluate(`document.querySelector("#tour").hidden && location.hash.includes("tour=intro")`));
+      await page!.keyboard.press("s");
+      await page!.waitForFunction(`document.querySelector("#split").hidden`);
+
+      // The link that is shared names the tour and the step alone; it opens the step whatever this browser remembers as its defaults.
+      await page!.evaluate(`localStorage.setItem("archdiff.defaults.v2", "overlay=tests")`);
+      await page!.goto(`${origin}/?fresh=shared#tour=intro&step=2`);
+      await drawn(module);
+      assert.equal(await hash(), `#view=${encodeURIComponent(module)}&overlay=storages&tour=intro&step=2`);
+      await page!.waitForFunction(`window.archdiff.selected().join() === "src/db/store.ts" && document.querySelector("#tour-note strong")?.textContent === "write"`, undefined, { timeout: 10_000 });
+      assert.deepEqual(await page!.evaluate("window.archdiff.state().overlays"), ["storages"]);
+      await page!.selectOption("#tour-steps", "1");
+      await drawn("layers");
+      assert.deepEqual(await page!.evaluate("window.archdiff.state().overlays"), []);
+      assert.ok(!(await page!.evaluate(`[...window.archdiff.nodes().values()].some((node) => node.label.includes("no tests"))`)));
+
+      // A note rewritten; the link to the step copied; a step taken out; the tour in the menu, played from its first step.
+      await page!.click("#tour-edit");
+      assert.equal(await page!.inputValue("#tour-text"), "The **layers** of the sample.");
+      await page!.fill("#tour-text", "Four layers, _routes_ on top.");
+      await page!.click("#tour-keep");
+      await page!.waitForFunction(`document.querySelector("#tour-note em")?.textContent === "routes"`, undefined, { timeout: 10_000 });
+      assert.equal(kept().steps[0]!.note, "Four layers, _routes_ on top.");
+      await page!.click("#tour-link");
+      await page!.waitForFunction(`document.querySelector("#reason").textContent === "the link to step 1 is copied: tour=intro&step=1"`);
+      await page!.selectOption("#tour-steps", "2");
+      await drawn(module);
+      await page!.click("#tour-remove");
+      await drawn("layers");
+      assert.equal(kept().steps.length, 1);
+      await page!.click("#tours-menu summary");
+      await page!.waitForFunction(`document.querySelector("#tours-list .play")?.textContent === "▶ intro · 1 step"`);
+      await page!.click("#tours-list .play");
+      await page!.waitForFunction(`location.hash === "#view=layers&tour=intro&step=1" && !document.querySelector("#tours-menu").open`, undefined, { timeout: 10_000 });
+
+      // Leaving the tour keeps the picture: the link says the same without it, against this browser's defaults again.
+      await page!.click("#tour-end");
+      await page!.waitForFunction(`document.querySelector("#tour").hidden && location.hash === "#view=layers&overlay=none"`);
+      assert.deepEqual(await page!.evaluate("window.archdiff.state().overlays"), []);
+      await page!.evaluate("localStorage.clear()");
+    },
+  ));

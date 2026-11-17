@@ -28,6 +28,7 @@ flowchart LR
     n_src_spec_ts["src/spec.ts<br>the specs and features of the repository, the agent's task for them, the OpenSpec CLI"]
     n_src_scaffold_ts["src/scaffold.ts<br>a project from scratch with its intent and first commit"]
     n_src_gherkin_ts["src/gherkin.ts<br>Gherkin features as data, and test skeletons written from them"]
+    n_src_tours_ts["src/tours.ts<br>the guided tours: steps through the pictures kept as files, and a tour as Markdown"]
   end
   subgraph n_views["views — one picture per question, and the reports; pure functions of the analysis"]
     n_src_views_ts["src/views.ts<br>the structural views and viewOf: the chain of pure steps after a view"]
@@ -128,6 +129,8 @@ flowchart LR
   n_src_picture_ts --> n_src_board_ts
   n_src_board_ts --> n_src_diff_ts
   n_src_cli_ts --> n_src_run_ts
+  n_src_cli_ts --> n_src_tours_ts
+  n_src_tours_ts --> n_src_picture_ts
   n_src_run_ts --> n_src_flow_ts
   n_src_run_ts --> n_src_extract_bodies_ts
   n_src_views_ts --> n_src_logic_ts

@@ -107,6 +107,19 @@ Feature: The page
     When I press "f" in a window 1900 pixels wide
     Then the canvas is 1900 pixels wide, and "f" again docks both panels as they were
 
+  Scenario: A guided tour is recorded, played and shared
+    Given the page open on "layers"
+    When I open "tours", type the name "intro" and press Enter
+    Then the bar of the tour says "recording"
+    When I press "add step" and keep the note "The **layers** of the sample."
+    Then the link holds "tour=intro&step=1" and the note shows "layers" in bold
+    When I open the module of orders.ts with the storages overlay, tap store.ts and add a step with a note
+    Then .archdiff/tours/intro.json holds two steps, the second with the overlay in its link and store.ts selected
+    When I press ","
+    Then the layers are shown with the first note
+    When I open "#tour=intro&step=2" in a browser that remembers another overlay
+    Then the module is shown with the storages overlay alone, store.ts selected and the second note
+
   Scenario: The slider over the commits of a range
     Given a branch of four commits by two authors, open on "timeline"
     When I press "."

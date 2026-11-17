@@ -18,7 +18,7 @@
 // (minimap.ts), the options (options-panel.ts), the views
 // (views-list.ts), the exports (export-menu.ts), the review (review.ts),
 // the commits of a range under their slider (commits.ts), the walk of
-// the uncommitted changes (board.ts),
+// the uncommitted changes (board.ts), the guided tours (tours.ts),
 // the keys (shortcuts.ts), the tabs of the flow, the chat and the spec, and
 // the window of the user's settings (settings.ts).
 //
@@ -50,6 +50,7 @@ import "./shortcuts.ts";
 import "./theme.ts";
 import { notice, renderCrumbs, setReason, showEmpty, showNoTitle, showPendingNotice, showTitle } from "./title.ts";
 import { renderCanvasTools, setPictureLanes } from "./toolbar.ts";
+import { enterTour, showTourBar, tourDrawn } from "./tours.ts";
 import { loadViews, renderViews, viewEntries, viewsStale } from "./views-list.ts";
 import { depthWarning } from "../../src/options.ts";
 import { drawnAtHead, parseView, usesDepth } from "../../src/view-keys.ts";
@@ -109,6 +110,10 @@ let shownHash = location.hash;
 async function load(): Promise<void> {
   const generation = ++loads;
   const overtaken = (): boolean => generation !== loads;
+  // The tour the link names is read first; a link that names a tour's step alone becomes that step's own link.
+  await enterTour();
+
+  if (overtaken()) return;
   const state = currentLink();
   const hash = location.hash;
 
@@ -153,6 +158,7 @@ async function load(): Promise<void> {
     showReviewBars(state);
     showCommitsBar(state);
     showBoardBar(state);
+    showTourBar(state);
     const result = await api.scene(state.view, state, refsOf(state));
 
     if (overtaken()) return;
@@ -183,6 +189,7 @@ async function load(): Promise<void> {
     if (reviewing(state.view)) void loadBranches(state);
     setPicturePage(result.markdown);
     fillBoardBar(state, result.board);
+    tourDrawn(state);
     // The centre as the link says: the scene in 3D, the page or the code over the canvas, or the canvas alone.
     await applyPresentation(state, result.diagram);
 

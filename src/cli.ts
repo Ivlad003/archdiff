@@ -36,6 +36,8 @@ import { listSpecs, specPrompt, specSubject, validateSpecs } from "./spec.ts";
 import { writeTestSkeletons } from "./gherkin.ts";
 import { FEATURES_DIRECTORY as FEATURES_DIRECTORY_NAME } from "./spec.ts";
 import { DEFAULT_PICTURE_OPTIONS, depthWarning, pictureFlags, pictureOptionsHelp, readPictureOptions, type PictureOptions } from "./options.ts";
+import { loadConfig } from "./config.ts";
+import { listTours, loadTour, tourMarkdown, toursDirectory } from "./tours.ts";
 import { metricsOf } from "./metrics.ts";
 import { counted } from "./words.ts";
 
@@ -718,6 +720,28 @@ const COMMANDS: readonly Command[] = [
       const plan = planFromScene(analysis, key, saved.elements);
 
       return writeOut(call.has("json") ? `${JSON.stringify(plan, null, 2)}\n` : taskMarkdown(plan, analysis), call.text("out"));
+    },
+  },
+  {
+    name: "tour",
+    usage: "<name> [dir] [--out FILE]",
+    help: ["A guided tour as Markdown: every step with its note and its picture as Mermaid.", "The tours are recorded on the page (tours ▾, add step) and kept as", ".archdiff/tours/<name>.json, or under the directory archdiff.json names as", "\"tours\" (one the repository commits). Without a name: the tours there are"],
+    arity: 2,
+    flags: [flag("out", true)],
+    async run(call) {
+      const root = call.dir(1);
+      const directory = toursDirectory(loadConfig(root));
+      const name = call.positional[0];
+      const known = listTours(root, directory).map((tour) => tour.name);
+      const there = known.length > 0 ? `the tours in ${directory}: ${known.join(", ")}` : `no tour in ${directory} yet; the page records one (archdiff web, tours ▾)`;
+
+      if (!name) return fail(`tour: a name is required (${there})`);
+      const tour = loadTour(root, directory, name);
+
+      // No tour of that name: the ones there are; a file that does not read as one: what is wrong in it.
+      if (!tour.ok) return fail(`tour: ${tour.problem.message}${tour.problem.status === 404 ? ` (${there})` : ""}`);
+
+      return writeOut(await tourMarkdown(root, tour.value, `${directory}/${name}.json`), call.text("out"));
     },
   },
   {

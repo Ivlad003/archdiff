@@ -2,7 +2,7 @@
 // options, the analysis cache, the agent, the live-reload listeners, the
 // picture of a request) and the request (URL, body, response, request),
 // plus the ways to answer and to read a picture's request from a query. The handlers live in pictures.ts,
-// agent.ts, git.ts, spec.ts and settings.ts; server.ts builds the context and dispatches by
+// agent.ts, git.ts, spec.ts, settings.ts and tours.ts; server.ts builds the context and dispatches by
 // `METHOD /path`.
 //
 // Entry points: `RouteContext`, `RouteRequest`, `requestOf`, `optionsOf`,

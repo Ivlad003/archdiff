@@ -503,6 +503,55 @@ test("the timeline at a commit is the map of the code as it was then; churn, cou
     assert.match(drawn("modules", dir, "--overlay", "churn").reason, /the commits of the last commit of HEAD that changed each file \(1 commit read\)$/);
   }));
 
+test("tour prints a guided tour as Markdown, every step with its note and its picture as Mermaid", () =>
+  withTempDir("archdiff-tour-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    // No tour yet: the command says where they are kept and how one is made.
+    const none = archdiff(["tour", "intro", dir]);
+    assert.equal(none.status, 2);
+    assert.equal(none.stderr, 'archdiff: tour: no tour "intro" (no tour in .archdiff/tours yet; the page records one (archdiff web, tours ▾))\n');
+    mkdirSync(join(dir, ".archdiff/tours"), { recursive: true });
+    const steps = [
+      { link: "view=layers", select: ["lib"], note: "The **layers**: routes on top, the store at the bottom." },
+      { link: "view=module%3Asrc%2Flib%2Forders.ts&overlay=storages&depth=1", select: ["src/lib/orders.ts", "src/db/store.ts"], note: "The orders write to the store." },
+      { link: "view=module%3Asrc%2Fgone.ts", select: [], note: "A module the code no longer has." },
+    ];
+    writeFileSync(join(dir, ".archdiff/tours/intro.json"), JSON.stringify({ format: 1, title: "How an order is placed", steps }));
+    const tour = archdiff(["tour", "intro", dir]);
+    assert.equal(tour.status, 0, tour.stderr);
+    assert.ok(tour.stdout.startsWith("<!-- archdiff:generated — tour intro -->\n# How an order is placed\n\n_A guided tour of 3 steps (`.archdiff/tours/intro.json`); on the page it opens with `#tour=intro&step=1`._\n\n## 1. Layers\n\nThe **layers**: routes on top, the store at the bottom.\n\n```mermaid\n"), tour.stdout.slice(0, 400));
+    assert.ok(tour.stdout.includes('  routes -->|"1"| lib\n```\n\nPicked: **lib**.\n\n`view=layers`\n\n## 2. src/lib/orders.ts\n\nThe orders write to the store.\n'), tour.stdout);
+    // The step's options are the link's: the storages overlay is in its picture.
+    assert.ok(tour.stdout.includes('src_db_store_ts["src/db/store.ts<br/>⛁ the file system"]') && tour.stdout.includes("Picked: **src/lib/orders.ts**, **src/db/store.ts**.\n\n`view=module%3Asrc%2Flib%2Forders.ts&overlay=storages&depth=1`\n"), tour.stdout);
+    // A step whose picture cannot be drawn says so in its place; the tour is still written.
+    assert.ok(tour.stdout.includes("## 3. module:src/gone.ts\n\nA module the code no longer has.\n\n_The picture of this step could not be drawn: no module \"src/gone.ts\"_\n"), tour.stdout);
+    // --out writes it; the name alone is asked for with the tours there are.
+    const out = join(dir, "TOUR.md");
+    assert.equal(archdiff(["tour", "intro", dir, "--out", out]).status, 0);
+    assert.equal(readFileSync(out, "utf8"), tour.stdout);
+    const unnamed = archdiff(["tour"], dir);
+    assert.equal(unnamed.status, 2);
+    assert.equal(unnamed.stderr, "archdiff: tour: a name is required (the tours in .archdiff/tours: intro)\n");
+    assert.ok(archdiff(["tour", "other", dir]).stderr.includes('no tour "other" (the tours in .archdiff/tours: intro)'));
+    // A file that does not read as a tour says what is wrong in it.
+    writeFileSync(join(dir, ".archdiff/tours/broken.json"), JSON.stringify({ format: 1, steps: [{ link: "view=nope" }] }));
+    const broken = archdiff(["tour", "broken", dir]);
+    assert.equal(broken.status, 2);
+    assert.equal(broken.stderr, "archdiff: tour: .archdiff/tours/broken.json does not read as a tour: the link of step 1 names no view (view=<key>)\n");
+    // archdiff.json names a directory the repository commits; one that leaves the repository is refused.
+    mkdirSync(join(dir, "docs/tours"), { recursive: true });
+    writeFileSync(join(dir, "docs/tours/short.json"), JSON.stringify({ format: 1, steps: [steps[0]] }));
+    const config = JSON.parse(readFileSync(join(dir, "archdiff.json"), "utf8")) as Record<string, unknown>;
+    writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ ...config, tours: "docs/tours/" }));
+    const committed = archdiff(["tour", "short", dir]);
+    assert.equal(committed.status, 0, committed.stderr);
+    assert.ok(committed.stdout.includes("# short\n\n_A guided tour of 1 step (`docs/tours/short.json`)"), committed.stdout.slice(0, 200));
+    writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ ...config, tours: "../elsewhere" }));
+    const outside = archdiff(["tour", "short", dir]);
+    assert.equal(outside.status, 2);
+    assert.ok(outside.stderr.includes('archdiff.json: "tours" must be a directory of the repository'), outside.stderr);
+  }));
+
 test("--out writes a new file or one archdiff wrote, and refuses any other file", () =>
   withTempDir("archdiff-out-", (dir) => {
     const out = join(dir, "layers.md");

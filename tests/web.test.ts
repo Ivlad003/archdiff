@@ -479,6 +479,56 @@ test("the timeline at a commit through the API: the map of the code then, a modu
     assert.match((await scene("view=timeline")).diagram.title, /: 4 commits$/);
   }));
 
+test("the guided tours through the API: saved whole, listed, read, removed; what is no tour is refused; the directory archdiff.json names", () =>
+  withOwnServer(
+    "archdiff-tours-api-",
+    (dir) => {
+      const config = JSON.parse(readFileSync(join(dir, "archdiff.json"), "utf8")) as Record<string, unknown>;
+      writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ ...config, tours: "docs/tours" }));
+    },
+    async (origin, dir) => {
+      const post = (path: string, body: unknown): Promise<Response> => fetch(`${origin}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      assert.deepEqual(await (await fetch(`${origin}/api/tours`)).json(), { directory: "docs/tours", tours: [] });
+      // A tour is saved whole: its title and steps; a step's link loses the tour's own parameters and its `#`.
+      const steps = [
+        { link: "#view=layers&tour=intro&step=1", select: ["lib"], note: "The **layers**." },
+        { link: "view=module%3Asrc%2Flib%2Forders.ts&overlay=storages", note: "The orders." },
+      ];
+      const saved = (await (await post("/api/tour?name=intro", { title: "How an order is placed", steps })).json()) as { saved: string; tour: { name: string; title: string; steps: unknown[] } };
+      assert.equal(saved.saved, "docs/tours/intro.json");
+      assert.deepEqual(saved.tour.steps, [
+        { link: "view=layers", select: ["lib"], note: "The **layers**." },
+        { link: "view=module%3Asrc%2Flib%2Forders.ts&overlay=storages", select: [], note: "The orders." },
+      ]);
+      const onDisk = JSON.parse(readFileSync(join(dir, "docs/tours/intro.json"), "utf8")) as { format: number; name: string; title: string; steps: unknown[] };
+      assert.deepEqual([onDisk.format, onDisk.name, onDisk.title, onDisk.steps.length], [1, "intro", "How an order is placed", 2]);
+      assert.deepEqual(await (await fetch(`${origin}/api/tours`)).json(), { directory: "docs/tours", tours: [{ name: "intro", title: "How an order is placed", steps: 2 }] });
+      assert.equal(((await (await fetch(`${origin}/api/tour?name=intro`)).json()) as { title: string }).title, "How an order is placed");
+      // What is no tour is refused, each with its reason, and nothing is written.
+      const refused = async (path: string, body: unknown): Promise<string> => {
+        const response = await post(path, body);
+        assert.equal(response.status, 400, path);
+
+        return ((await response.json()) as { error: string }).error;
+      };
+      assert.ok((await refused("/api/tour?name=..%2Fescape", { steps: [] })).includes("is no name of a tour"));
+      assert.equal(await refused("/api/tour?name=bad", { steps: [{ link: "view=nope" }] }), "tour: the link of step 1 names no view (view=<key>)");
+      assert.equal(await refused("/api/tour?name=bad", { steps: [{ link: "view=layers", select: "lib" }] }), 'tour: "select" of step 1 must be a list of shape IDs');
+      assert.ok(!existsSync(join(dir, "docs/tours/bad.json")) && !existsSync(join(dir, "docs/escape.json")));
+      assert.equal((await fetch(`${origin}/api/tour?name=bad`)).status, 404);
+      // A file written by hand that does not read as a tour says what is wrong in it, and is not listed.
+      writeFileSync(join(dir, "docs/tours/broken.json"), JSON.stringify({ format: 1, steps: [{ link: "view=layers" }, { note: "no link" }] }));
+      const broken = await fetch(`${origin}/api/tour?name=broken`);
+      assert.equal(broken.status, 400);
+      assert.equal(((await broken.json()) as { error: string }).error, 'docs/tours/broken.json does not read as a tour: step 2 needs a "link" (a view\'s link with its options)');
+      assert.equal(((await (await fetch(`${origin}/api/tours`)).json()) as { tours: unknown[] }).tours.length, 1);
+      // Removed: its file goes; a second time there is none.
+      assert.deepEqual(await (await post("/api/tour/delete?name=intro", {})).json(), { removed: "intro" });
+      assert.ok(!existsSync(join(dir, "docs/tours/intro.json")));
+      assert.equal((await post("/api/tour/delete?name=intro", {})).status, 404);
+    },
+  ));
+
 test("chat tags are suggested and expanded into context; mocks come from the types when the agent gives no JSON", async () => {
   const tags = await getJson<{ tags: { tag: string; title: string }[] }>("/api/tags?q=orders");
   assert.ok(tags.tags.some((tag) => tag.tag === "@module:src/lib/orders.ts"), JSON.stringify(tags.tags.slice(0, 5)));

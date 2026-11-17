@@ -7,7 +7,7 @@
 // returns no file outside the repository.
 //
 // The routes live in routes/*.ts by `METHOD /path` — the pictures, the
-// agent and the contract, git's bars, the specs, the user's settings — over one context; every
+// agent and the contract, git's bars, the specs, the user's settings, the guided tours — over one context; every
 // picture is the one picture.ts draws for the query. Entry points:
 // `serve`, `ServeOptions`, `DEFAULT_PORT`.
 
@@ -32,6 +32,7 @@ import { routes as agentRoutes } from "./routes/agent.ts";
 import { routes as gitRoutes } from "./routes/git.ts";
 import { routes as specRoutes } from "./routes/spec.ts";
 import { routes as settingsRoutes } from "./routes/settings.ts";
+import { routes as toursRoutes } from "./routes/tours.ts";
 import { agentSpecs, NO_SETTINGS, readSettings } from "./settings.ts";
 
 export interface ServeOptions {
@@ -254,7 +255,7 @@ async function pictureOf(query: URLSearchParams, defaultBase: string | null, ana
 }
 
 /** Every route of the API by `METHOD /path`. */
-const ROUTES = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes, ...settingsRoutes };
+const ROUTES = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes, ...settingsRoutes, ...toursRoutes };
 
 /** Answers one request: an API route by its method and path, else a static file of the page. */
 async function handle(ctx: RouteContext, web: string, request: IncomingMessage, response: ServerResponse): Promise<void> {

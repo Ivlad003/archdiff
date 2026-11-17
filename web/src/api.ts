@@ -129,6 +129,21 @@ export interface Branch {
   current: boolean;
 }
 
+/** One step of a guided tour: the link of its picture (without the tour's own parameters), the shapes selected, a note in Markdown. */
+export interface TourStep {
+  link: string;
+  select: string[];
+  note: string;
+}
+
+/** A guided tour as the server keeps it (src/tours.ts). */
+export interface Tour {
+  name: string;
+  title: string;
+  steps: TourStep[];
+  saved: string;
+}
+
 /** An agent as the settings window shows it: whose it is, whether it can run here, and what the settings place for it. */
 export interface SettingsAgent {
   name: string;
@@ -195,6 +210,12 @@ export const api = {
 
     return () => source.close();
   },
+  /** The guided tours of the repository, and the directory they are kept in. */
+  tours: () => get<{ directory: string; tours: { name: string; title: string; steps: number }[] }>("/api/tours"),
+  tour: (name: string) => get<Tour>(`/api/tour?name=${encodeURIComponent(name)}`),
+  /** Saves a tour whole, as recorded: its title and every step; the tour as the server keeps it. */
+  saveTour: (name: string, title: string, steps: readonly TourStep[]) => post<{ saved: string; tour: Tour }>(`/api/tour?name=${encodeURIComponent(name)}`, { title, steps }),
+  removeTour: (name: string) => post<{ removed: string }>(`/api/tour/delete?name=${encodeURIComponent(name)}`, {}),
   specs: () => get<{ initialised: boolean; specs: { path: string; title: string; kind: "openspec" | "gherkin" }[] }>("/api/specs"),
   spec: (path: string) => get<{ path: string; text: string }>(`/api/spec?path=${encodeURIComponent(path)}`),
   specPrompt: (mode: "generate" | "update", view: string | null) => get<{ markdown: string }>(`/api/spec/prompt?mode=${mode}${view ? `&view=${encodeURIComponent(view)}` : ""}`),
