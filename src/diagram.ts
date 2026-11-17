@@ -151,6 +151,8 @@ export interface Diagram {
   matrix?: MatrixData;
   /** A logic view: the function, and every path from its start to an exit as a rule (the Markdown's table); the Mermaid is a flowchart TB. */
   logic?: LogicData;
+  /** An impact view: every subject with what depends on it, the tests that reach it and its risk, for the Markdown and `impact --json`. */
+  impact?: ImpactData;
   /** A class view: the Mermaid export is a classDiagram. */
   classes?: { boxes: { id: string; name: string; kind: "class" | "interface" | "type"; fields: string[]; methods: string[] }[]; relations: { from: string; to: string; kind: "extends" | "implements" | "has" | "uses" }[] };
 }
@@ -216,6 +218,55 @@ export interface LogicRule {
   /** `return order`, `throw new Error("…")`, or `end` for the end of the body. */
   outcome: string;
   kind: "return" | "throw" | "end";
+}
+
+/** A blast radius as a picture carries it (impact.ts): the subject of the view, or every file of a change, each with its dependents and its risk. */
+export interface ImpactData {
+  /** How many steps from a subject its dependents are listed and drawn to. */
+  depth: number;
+  /** The files of a change: the base they changed since. */
+  since?: string;
+  /** The riskiest first. */
+  subjects: Impact[];
+}
+
+/** What depends on one subject, and how risky a change to it is (impact.ts's `impactOf`). */
+export interface Impact {
+  /** A module's path, or a declaration's ID (`<path>#<name>`). */
+  subject: string;
+  kind: "module" | "fn" | "class" | "type";
+  /** The module the subject is, or is declared in, and its layer. */
+  module: string;
+  layer: string;
+  /** What depends on it within the depth asked, the nearest first, the tests among them. */
+  dependents: ImpactDependent[];
+  /** How many depend on it at any distance: the tests apart from the rest. */
+  total: { dependents: number; tests: number };
+  /** The layers its dependents lie in at any distance, the tests left out. */
+  layers: string[];
+  /** 0–100, the sum of the parts' points: `low` under 34, `medium` under 67, `high` from there. */
+  risk: { score: number; level: "low" | "medium" | "high"; parts: RiskPart[] };
+}
+
+/** One dependent of a subject: a module, a function, or a module for a call at its top level. */
+export interface ImpactDependent {
+  id: string;
+  module: string;
+  layer: string;
+  /** How many imports or calls lie between it and the subject, by the nearest way. */
+  distance: number;
+  /** The dependent a step nearer through which it reaches the subject; the subject itself at one step. */
+  via: string;
+  /** Written in a test file: what would catch the change, not what it breaks. */
+  test: boolean;
+}
+
+/** One part of a risk score: its points of how many, and the fact of the code they stand for. */
+export interface RiskPart {
+  part: "dependents" | "layers" | "tests" | "instability" | "hotspot";
+  points: number;
+  of: number;
+  fact: string;
 }
 
 /** The whole repository for the page's project map (project-map.ts): a dot per module (or directory), a line per import. */

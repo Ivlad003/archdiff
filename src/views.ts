@@ -9,7 +9,8 @@
 // lanes being modules), `sequence:<path>#<fn>` (the calls from a function
 // as a sequence diagram, placed), `focus:<path>[#<fn>]` (everything joined
 // to one shape across the modules). Lanes are layers elsewhere; the depth
-// is how far from the subject the picture goes.
+// is how far from the subject the picture goes. The question views live in
+// views-more.ts, the blast radius of a change in impact.ts.
 //
 // Pipeline: Analysis → View → Diagram → layout → canvas/exports/markdown.
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
@@ -25,6 +26,7 @@ import { familyId, operationId, parseApiId, participantLabel, API_SHORT } from "
 import type { GuardFact } from "./extract/facts.ts";
 import { apiFamilies, apisView, postmanView, classesView, usageView, eventsView, hotspotsView, matrixView, messageHandlers, messageSends, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
+import { impactView } from "./impact.ts";
 import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
 import { logicList, logicView } from "./logic.ts";
@@ -59,6 +61,8 @@ export interface EdgeReads {
   commit?: { sha: string; short: string; author: string; date: string; subject: string };
   /** The branches and their commits, for the branches' picture. */
   branches?: BranchGraph;
+  /** The bare `impact` view: the files changed since the base, each a subject of the blast radius. */
+  impact?: { files: readonly string[]; since: string };
 }
 
 /** Modules whose public methods a framework calls: controllers, handlers, commands, jobs, listeners, middleware, routes. */
@@ -213,6 +217,7 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   }
   list.push({ key: "tests", title: "Tests: which modules the tests cover", kind: "tests" });
   list.push({ key: "hotspots", title: "Hotspots: size and calls in", kind: "hotspots" });
+  list.push({ key: "impact", title: "Impact: what the files changed since the base reach, and the risk of each", kind: "impact" });
 
   if (analysis.packages.length > 1) list.push({ key: "packages", title: `Packages: ${analysis.packages.length} package.json as a system`, kind: "packages" });
   list.push({ key: "timeline", title: "Timeline: the drift of the architecture, commit by commit", kind: "timeline" });
@@ -970,6 +975,9 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
         return machineView(analysis, view.subject);
       case "focus":
         return focusView(graph, view.subject, depth);
+      case "impact":
+        // Of one subject; without one, of the files of a change, which picture.ts reads from git.
+        return impactView(analysis, view.subject, { depth, limit, types: options.types }, reads.impact);
       case "logic":
         return logicView(analysis, view.subject, reads.logic);
       case "events":

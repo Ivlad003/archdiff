@@ -161,7 +161,7 @@ The system SHALL offer on the canvas: a picture select (the pictures of this sub
 
 ### Requirement: Several shapes can be selected, and every shape has a menu
 
-The system SHALL add a shape to the selection on a tap with Shift, Ctrl or Cmd held (and take it out on another), count the editor's own box selection the same way, light the selected shapes, show two as the shortest chain of lines between them and more as a list with the lines among them, and offer in a strip under the tabs *ask about them* (the Chat tab's question row with the shapes attached), *dim others* and *clear* (Escape). A right click SHALL open a menu: on a shape, its own view, its focus view, its logic (a function), the other pictures of its subject, adding it to the selection, asking the agent about it, dimming all but its neighbours, its code and its name to copy; on a line, where it leads and the chain onward; on the empty canvas, a question about the picture, the project map, fit, clear and edit.
+The system SHALL add a shape to the selection on a tap with Shift, Ctrl or Cmd held (and take it out on another), count the editor's own box selection the same way, light the selected shapes, show two as the shortest chain of lines between them and more as a list with the lines among them, and offer in a strip under the tabs *ask about them* (the Chat tab's question row with the shapes attached), *dim others* and *clear* (Escape). A right click SHALL open a menu: on a shape, its own view, its focus view, its impact (a module, a function or a class: what a change to it reaches), its logic (a function), the other pictures of its subject, adding it to the selection, asking the agent about it, dimming all but its neighbours, its code and its name to copy; on a line, where it leads and the chain onward; on the empty canvas, a question about the picture, the project map, fit, clear and edit.
 
 #### Scenario: Three shapes
 
@@ -172,6 +172,11 @@ The system SHALL add a shape to the selection on a tap with Shift, Ctrl or Cmd h
 
 - **WHEN** a module shape is right-clicked and "Focus: everything joined to it" is chosen
 - **THEN** the link holds `focus:<module>` and the title starts "Everything joined to"
+
+#### Scenario: The impact of a module, from its menu
+
+- **WHEN** a module shape is right-clicked and "Impact: what a change to it reaches" is chosen
+- **THEN** the link holds `impact:<module>`, the title starts "Impact of" and the picture has the module in its middle lane
 
 
 ### Requirement: A peek shows a shape's lines alone

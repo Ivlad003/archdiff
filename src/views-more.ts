@@ -15,7 +15,8 @@
 //
 // Entry points: `matrixView`, `typeView`, `pathView`, `usageView`,
 // `eventsView`, `testsView`, `hotspotsView`, `packagesView`, `classesView`,
-// `timelineDiagram`, `branchesDiagram` (views.ts's `viewOf` dispatches to them).
+// `timelineDiagram`, `branchesDiagram` (views.ts's `viewOf` dispatches to them),
+// `isTestModule`.
 
 import type { Analysis } from "./analyze.ts";
 import { hookOf, isApiId, operationFromId, operationId, operationLabel, familyId, API_SHORT, SCAPI, type ApiHook, type ApiOperation } from "./apis.ts";
@@ -512,6 +513,11 @@ export function eventsView(analysis: Analysis): PictureContent {
  * module whose name only contains the word (`ab-test.ts`, an A/B test).
  */
 const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$|_test\.(py|rs|php)$|(^|\/)tests?(_[^/]*)?\.py$|(^|\/)conftest\.py$|Test\.php$/;
+
+/** Whether a module is a test file, by its path: the rule of the tests view, for the views that tell the tests apart (impact.ts). */
+export function isTestModule(path: string): boolean {
+  return TEST_MODULE.test(path);
+}
 
 /** Which modules the tests import: every non-test module in its layer's lane, with the number of test files importing it; one no test imports is marked. */
 export function testsView(graph: Graph): PictureContent {

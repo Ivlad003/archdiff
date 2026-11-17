@@ -1328,3 +1328,24 @@ test("the settings window places the agents and keeps the keys: an agent of the 
       await page!.waitForFunction(`document.querySelector("#transcript .answer")?.textContent?.includes("Done.")`, undefined, { timeout: 15_000 });
     },
   ));
+
+test("a shape's menu opens its impact: the subject in the middle lane, what depends on it a step away, the picture among its subject's pictures", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/#view=layer%3Alib`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`);
+  await page!.waitForTimeout(600);
+  const orders = await screenPointOf("src/lib/orders.ts");
+  await page!.mouse.click(orders.x, orders.y, { button: "right" });
+  await page!.waitForSelector("#context-menu:not([hidden])");
+  await page!.click("#context-menu li:has-text('Impact: what a change to it reaches')");
+  await page!.waitForFunction(`window.archdiff.drawn() === "impact:src/lib/orders.ts"`);
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.startsWith("Impact of src/lib/orders.ts")`);
+  // The lanes of the picture as the canvas draws them, and the shapes in them: the subject, then the route that imports it.
+  const lanes = (await page!.evaluate(`window.archdiff.canvas().scene().filter((element) => !element.isDeleted && element.customData?.archdiff === "label" && element.id.startsWith("lane:")).map((element) => element.text)`)) as string[];
+  assert.deepEqual(lanes, ["the subject", "1 step away (1)"]);
+  const shapes = (await page!.evaluate(`[...window.archdiff.nodes().values()].map((node) => [node.id, node.group])`)) as [string, string][];
+  assert.deepEqual(shapes, [["src/lib/orders.ts", "d00"], ["src/routes/checkout.tsx", "d01"]]);
+  // The Markdown panel has the risk with its parts, and the picture select offers the impact beside the module's other pictures.
+  await page!.waitForFunction(`(document.querySelector("#markdown")?.textContent ?? "").includes("no test reaches it")`);
+  const pictures = (await page!.evaluate(`[...document.querySelectorAll("#picture option")].map((option) => option.value)`)) as string[];
+  assert.ok(pictures.includes("impact:src/lib/orders.ts") && pictures.includes("module:src/lib/orders.ts"), pictures.join(", "));
+});

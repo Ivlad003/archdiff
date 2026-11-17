@@ -5,7 +5,7 @@
 // heads). What the view needs from git or a file is read here — the
 // commits of a timeline, the two analyses of a review, the heads of a
 // comparison, a function's body for its logic, the review's diff for
-// `changes` — then the view is drawn (viewOf), placed where the saved
+// `changes`, the changed files of an impact without a subject — then the view is drawn (viewOf), placed where the saved
 // drawing puts its shapes (layout), stamped with the revision and written
 // as Markdown. One picture per analysis and request: asking twice is a
 // lookup.
@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
 import { layout, type Diagram } from "./diagram.ts";
-import { comparisonMarkdown, reviewMarkdown, type Compared, type GraphDiff } from "./diff.ts";
+import { comparisonMarkdown, reviewMarkdown, shortCommits, type Compared, type GraphDiff } from "./diff.ts";
 import { readLogic, type LogicFact } from "./extract/logic.ts";
 import { branchGraph, commitInfo, defaultBase, mergeBase, revisionStamp, type CommitInfo } from "./git.ts";
 import { positionsOf, readDrawing, type DrawingFile } from "./drawings.ts";
@@ -101,10 +101,11 @@ async function draw(analysis: Analysis, { view, options, refs }: PictureRequest,
 /**
  * What a view reads beside the analysis, by its kind: the commits of the
  * range for a timeline, the two analyses of a review, the heads of a
- * comparison, a function's body for its logic; and, with `changes` on any
- * other view, the review's diff to lay its marks over the picture. A view
- * that is a change (a timeline, a review, a comparison) fails when git
- * refuses; the changes laid over another view are only left out, with a
+ * comparison, a function's body for its logic, the files of the change
+ * for an impact without a subject; and, with `changes` on any other view,
+ * the review's diff to lay its marks over the picture. A view that is of
+ * a change (a timeline, a review, a comparison, the impact of the changed
+ * files) fails when git refuses; the changes laid over another view are only left out, with a
  * note saying why (`notes`), and the picture is drawn without them.
  */
 async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOptions, refs: Refs): Promise<{ reads: EdgeReads; change?: Change; notes: string[] }> {
@@ -146,6 +147,12 @@ async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOpt
   const notes: string[] = [];
 
   if (view.kind === "logic" && view.subject !== null) reads.logic = await logicOf(analysis, view.subject);
+
+  // The impact of a change: the files changed since the base, as a review reads them, each a subject.
+  if (view.kind === "impact" && view.subject === null) {
+    const { diff } = await reviewOf(analysis, refs.base, refs.head);
+    reads.impact = { files: diff.changedFiles, since: shortCommits(diff.base) };
+  }
 
   if (options.changes || options.changed) {
     try {

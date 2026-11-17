@@ -62,7 +62,8 @@ function wholeUnderChanged(view: View, diagram: Diagram): boolean {
 
 export const STEPS: readonly Step[] = [
   // First, on the picture as the view drew it: each shape's neighbours past the depth, before a fold or a hidden lane takes shapes away.
-  { name: "beyond", applies: ({ view }) => usesDepth(view.kind) && view.kind !== "sequence", run: (diagram, { graph }) => withBeyond(diagram, graph) },
+  // Not on an impact, whose every shape has imports of its own that are no part of the question: it says itself how many lie beyond.
+  { name: "beyond", applies: ({ view }) => usesDepth(view.kind) && view.kind !== "sequence" && view.kind !== "impact", run: (diagram, { graph }) => withBeyond(diagram, graph) },
   { name: "hide lanes", applies: ({ options }) => options.hideLanes.length > 0, run: (diagram, { options }) => hideLanes(diagram, options.hideLanes) },
   { name: "open in place", applies: ({ options, view }) => options.expand.length > 0 && isModuleView(view.kind), run: (diagram, { graph, options }) => expandInPlace(diagram, graph, options.expand) },
   // The review's marks come before the hubs and the fold, which spare a marked shape: a changed hub stays a shape, a changed module stays out of the folded tail.

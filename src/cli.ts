@@ -28,7 +28,7 @@ import { analysisAt, history, reviewOf } from "./review.ts";
 import { defaultBase, isIgnored, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { CACHE_DIRECTORY } from "./cache.ts";
 import { serve } from "./server.ts";
-import { drawnAtHead, usesDepth, viewSyntax, viewsOfFiles } from "./view-keys.ts";
+import { defaultDepth, drawnAtHead, usesDepth, viewSyntax, viewsOfFiles } from "./view-keys.ts";
 import { parseView, viewList, viewOf, type View } from "./views.ts";
 import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
@@ -183,6 +183,11 @@ function formatOf(call: Call, command: string): ExportFormat | null {
   fail(`${command}: unknown format "${written}" (${EXPORT_FORMATS.join(", ")})`);
 
   return null;
+}
+
+/** A module or a function as a command line names it (`src\\x.ts#f` typed or completed on Windows, `./src/x.ts`): the path as the graph has it, with slashes and no `./`. */
+function subjectOf(written: string): string {
+  return written.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
 /** Text broken into lines of at most `width` characters at its spaces, for the help. */
@@ -476,6 +481,40 @@ const COMMANDS: readonly Command[] = [
       if (code !== 0 || picture?.change?.kind !== "review") return code;
 
       return reviewFindings(picture.change.diff, picture.change.contract).length > 0 ? 1 : 0;
+    },
+  },
+  {
+    name: "impact",
+    usage: "<path>[#<fn>] | --changed [dir] [--depth N] [--limit N] [--types] [--base REF] [--head REF] [--json] [--format F] [--out FILE]",
+    help: [
+      "The blast radius of a change to a module or a function: everything that depends",
+      `on it — the modules that import it, the functions that call it — step by step to`,
+      `--depth (default ${defaultDepth("impact")}), the tests that reach it, and a risk score of 0-100 with its`,
+      "parts: the dependents, the layers they span, whether a test reaches it, its",
+      "instability, its rank among the hotspots. --changed: every file changed since",
+      "--base (default: where the head left develop, main or master), the riskiest",
+      "first. Markdown with the picture (the subject in the middle, its dependents by",
+      "distance, the tests on the left); --json: the same as data; --format: the picture",
+    ],
+    arity: 2,
+    flags: [...REF_FLAGS, ...OUTPUT_FLAGS, flag("changed"), flag("depth", true), flag("limit", true), flag("types"), flag("json")],
+    async run(call) {
+      const changed = call.has("changed");
+
+      if (changed && call.positional.length > 1) return fail(`impact: --changed takes no subject (the files changed since the base are the subjects); "${call.positional[0]}" given`);
+
+      if (!changed && !call.positional[0]) return fail("impact: a module (src/x.ts) or a function (src/x.ts#fn) is required, or --changed");
+      const format = call.has("json") ? "json" : formatOf(call, "impact");
+
+      if (format === null) return 2;
+      // The depth, the limit and the types are the picture's own options; --changed here names the subjects, it does not cut the picture.
+      const picture = readPictureOptions((name) => (name === "changed" ? undefined : call.flags.get(name)), "flag");
+
+      if (!picture.ok) return fail(`impact: ${picture.problem.message}`);
+      const view: View = { kind: "impact", subject: changed ? null : subjectOf(call.positional[0]!) };
+
+      // `json` is the report itself: every subject with its dependents, the tests that reach it and its risk.
+      return (await writePicture(call, "impact", call.dir(changed ? 0 : 1), view, picture.value.options, format, ({ diagram }) => `${JSON.stringify(diagram.impact ?? null, null, 2)}\n`)).code;
     },
   },
   {

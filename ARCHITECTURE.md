@@ -39,6 +39,7 @@ flowchart LR
     n_src_pipeline_ts["src/pipeline.ts<br>the steps after a view as data: hide, mix, hubs, fold, weight, marks, overlays"]
     n_src_metrics_ts["src/metrics.ts<br>coupling and cohesion: Ca, Ce, I, A, D, the cohesion of a module's functions"]
     n_src_cycles_ts["src/cycles.ts<br>import, call and layer cycles, and where to cut them"]
+    n_src_impact_ts["src/impact.ts<br>the blast radius of a change: a subject's dependents step by step, the tests that reach it, its risk with the parts; impactOf is the one function another reader calls"]
     n_src_machines_ts["src/machines.ts<br>state machines: declared by a library, or written with literal states"]
     n_src_logic_ts["src/logic.ts<br>a function's body as a flowchart with its paths as rules, and the list of branching functions"]
     n_src_project_map_ts["src/project-map.ts<br>the whole repository as dots and lines for the page's project map"]
@@ -116,6 +117,9 @@ flowchart LR
   n_src_views_ts --> n_src_pipeline_ts
   n_src_views_ts --> n_src_metrics_ts
   n_src_views_ts --> n_src_cycles_ts
+  n_src_views_ts --> n_src_impact_ts
+  n_src_impact_ts --> n_src_views_more_ts
+  n_src_impact_ts --> n_src_graph_ts
   n_src_views_ts --> n_src_machines_ts
   n_src_cli_ts --> n_src_picture_ts
   n_src_picture_ts --> n_src_views_ts
