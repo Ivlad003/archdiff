@@ -13,14 +13,15 @@
 // which is why it is Markdown and Mermaid, not a format of archdiff's own.
 //
 // Pure except `readIntent` / `writeIntent`. Entry points: `parseIntent`,
-// `intentMarkdown`, `checkIntent`, `checkMarkdown`,
-// `mergePlan`, `intentFromCode`, `INTENT_FILE`.
+// `intentMarkdown`, `checkIntent`, `checkMarkdown`, `nothingToCheck`,
+// `importVerdict`, `importVerdictText`, `mergePlan`, `intentFromCode`,
+// `INTENT_FILE`.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
 import { moduleOf, type Graph } from "./graph.ts";
-import { CONFIG_FILE, type Config } from "./config.ts";
+import { CONFIG_FILE, layerOf as layerByPath, type Config } from "./config.ts";
 import { isJsonObject, parseJson, type JsonValue } from "./json.ts";
 
 export const INTENT_FILE = "ARCHITECTURE.md";
@@ -447,6 +448,11 @@ export function judgesLayers(intent: Intent | null): intent is Intent {
   return intent !== null && (intent.layers.length > 0 || intent.modules.some((module) => module.layer !== undefined));
 }
 
+/** Why there is nothing to check the code against, for a contract that does not judge the layers (`judgesLayers`): no file, or one that names no layer; with the command that writes one. */
+export function nothingToCheck(intent: Intent | null): string {
+  return intent === null ? `no ${INTENT_FILE}, nothing to check against (archdiff intent --init)` : `${INTENT_FILE} names no layer (no Mermaid flowchart with a subgraph, or a module in one): nothing to check against (archdiff intent --init --force)`;
+}
+
 export function allowedLayerPairs(intent: Intent, graph: Graph): { layers: Set<string>; allowed: Set<string> } {
   const layers = new Set([...intent.layers.map((layer) => layer.name), ...intent.modules.map((module) => module.layer).filter((layer): layer is string => layer !== undefined)]);
   const allowed = new Set<string>();
@@ -459,6 +465,64 @@ export function allowedLayerPairs(intent: Intent, graph: Graph): { layers: Set<s
   }
 
   return { layers, allowed };
+}
+
+/** Whether the contract lets one module import another, asked before the import is written: the layer of each end, the verdict, and what allows it. */
+export interface ImportVerdict {
+  from: string;
+  to: string;
+  /** The layer of each end: the contract's for a module it names, else the code's; a layer named as itself; a path the code does not have yet where archdiff.json would place it. */
+  fromLayer: string;
+  toLayer: string;
+  /**
+   * `allowed`: one layer, or an arrow of the contract crosses the two; `forbidden`: two layers of the contract that
+   * no arrow crosses, which `check` would report; `unjudged`: a layer the contract does not name, which it neither
+   * allows nor forbids.
+   */
+  verdict: "allowed" | "forbidden" | "unjudged";
+  /** An intended import that crosses the two layers, when one allows the pair. */
+  arrow?: IntentEdge;
+  /** The other layers the contract lets the `from` layer import. */
+  mayImport: string[];
+  /** The layers of the two ends that the contract does not name: why an import is unjudged. */
+  unnamed: string[];
+}
+
+/**
+ * The contract's verdict on an import from `from` to `to` — each a module's path (a function's ID stands for its
+ * module), a path still to be written, or a layer by its name — by the rule `checkIntent` holds the code to: an
+ * import inside one layer is free, one between two layers of the contract needs an intended import across them.
+ */
+export function importVerdict(analysis: Analysis, intent: Intent, from: string, to: string): ImportVerdict {
+  const { graph } = analysis;
+  const { layers, allowed } = allowedLayerPairs(intent, graph);
+  const placed = (end: string): string => layerOf(intent, graph, moduleOf(end)) ?? (layers.has(end) ? end : layerByPath(moduleOf(end), analysis.config));
+  const fromLayer = placed(from);
+  const toLayer = placed(to);
+  const mayImport = [...layers].filter((layer) => layer !== fromLayer && allowed.has(`${fromLayer}\u0000${layer}`));
+  const unnamed = [...new Set([fromLayer, toLayer])].filter((layer) => !layers.has(layer));
+  const ends = { from, to, fromLayer, toLayer, mayImport, unnamed };
+
+  if (fromLayer === toLayer) return { ...ends, verdict: "allowed" };
+
+  if (unnamed.length > 0) return { ...ends, verdict: "unjudged" };
+
+  if (!allowed.has(`${fromLayer}\u0000${toLayer}`)) return { ...ends, verdict: "forbidden" };
+  const arrow = intent.edges.find((edge) => layerOf(intent, graph, moduleOf(edge.from)) === fromLayer && layerOf(intent, graph, moduleOf(edge.to)) === toLayer);
+
+  return arrow ? { ...ends, verdict: "allowed", arrow } : { ...ends, verdict: "allowed" };
+}
+
+/** A verdict in a sentence or two: the answer first, then the layers, why, and for a forbidden import what to do instead. */
+export function importVerdictText(verdict: ImportVerdict): string {
+  const end = (name: string, layer: string): string => (name === layer ? `the layer **${layer}**` : `\`${name}\` (layer **${layer}**)`);
+  const ends = `${end(verdict.from, verdict.fromLayer)} → ${end(verdict.to, verdict.toLayer)}`;
+
+  if (verdict.verdict === "allowed") return `Allowed: ${ends}. ${verdict.fromLayer === verdict.toLayer ? "Both ends are in one layer." : `${INTENT_FILE} has an import across these layers${verdict.arrow ? ` (\`${verdict.arrow.from}\` → \`${verdict.arrow.to}\`)` : ""}.`}\n`;
+
+  if (verdict.verdict === "unjudged") return `Not judged: ${ends}. ${INTENT_FILE} does not name the ${verdict.unnamed.length === 1 ? "layer" : "layers"} ${verdict.unnamed.map((layer) => `**${layer}**`).join(" and ")}, so it neither allows nor forbids the import.\n`;
+
+  return `Not allowed: ${ends}. The layer **${verdict.fromLayer}** → **${verdict.toLayer}** is not in the intent: \`archdiff check\` would report the import. **${verdict.fromLayer}** may import ${verdict.mayImport.length > 0 ? verdict.mayImport.map((layer) => `**${layer}**`).join(", ") : "no other layer"}. Add the arrow to ${INTENT_FILE} if the import is wanted, else move it; an import of types only (\`import type\`) is never a violation.\n`;
 }
 
 export function checkIntent(analysis: Analysis, intent: Intent): IntentReport {

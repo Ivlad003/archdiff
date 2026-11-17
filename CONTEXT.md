@@ -174,6 +174,10 @@ _Avoid_: status, colour
 A new dependency between layers that the contract does not allow (any, without a contract): what makes a review fail.
 _Avoid_: issue, violation (in a review)
 
+**Impact**:
+What a change to a module or a declaration reaches: its importers and callers by distance, and the tests that reach it.
+_Avoid_: blast radius, dependents (for the whole), usage (taken)
+
 **Messages**:
 What the parts of a program say to each other, as a sequence: every message sent with a type, from its sender's module to the module of the function that handles it.
 _Avoid_: events (for the typed messages), calls
@@ -247,3 +251,7 @@ _Avoid_: prompt, clarification
 **Check**:
 The contract and the commands of the repository, run after an agent run and on request.
 _Avoid_: test (for the whole), gate
+
+**Tool**:
+A question an agent asks archdiff over MCP while it works, answered from the code as it is at the call; it only reads.
+_Avoid_: command (the CLI's), endpoint, function

@@ -34,6 +34,7 @@ The package is `@ivlad003/archdiff` on npm (npm refused the bare name as too clo
 | `archdiff plan <view> [dir] [--json] [--out FILE]` | The task drawn on the saved drawing of a view: new shapes as modules or functions, arrows as imports or calls, deleted shapes as removals, notes — Markdown for an agent | 0 |
 | `archdiff spec [dir] [--json] [--prompt V\|all\|update] [--validate] [--tests [DIR]]` | The specification: list it, print the agent's task, validate it, or write a test skeleton per Gherkin scenario (into `tests/`, or `DIR`) | 0 / 1 |
 | `archdiff web [dir] [--port N] [--host H] [--base REF] [--agent claude\|cursor\|codex\|opencode] [--no-watch]` | The page: views on the left, one Excalidraw canvas (reading, and drawing on demand), and the Markdown, code, coverage and data flow of what is picked; the Chat tab runs the coding agent picked there (`--agent`: the one picked first); without `--port` it takes 7080 or the next free port above it; `--host` binds another interface than localhost; `--no-watch` keeps the page as it is when a file changes | 0 |
+| `archdiff mcp [dir]` | An MCP server on stdin and stdout for a coding agent: the tools `views`, `diagram`, `check`, `may_import`, `impact` and `review`, each answered from the code as it is now and changing nothing ([below](#asked-by-the-agent-the-mcp-server)) | 0 |
 
 Exit code `2` is a wrong invocation or an I/O error. Every command that writes a report takes `--out FILE`: a new file, or one archdiff wrote before (its generated mark, or a command's JSON of the same shape); never a directory or a file of someone else's, though it mentions archdiff.
 
@@ -111,6 +112,51 @@ The agent is picked at the top of the Chat tab, among those installed on this co
 
 **The settings** — *agents & keys…* beside the picker — are yours and no repository's: `~/.archdiff/settings.json`, written for you alone, never `archdiff.json`, so a key cannot land in a commit. An agent is looked for by its name on the PATH and then where its installer puts it for you (`~/.local/bin`, `~/.opencode/bin`, npm's directory on Windows; a server started from a desktop application often has a PATH without them), and the window shows the program started for each, or why none is. Place a program by its path when it is elsewhere, name the model an agent is told to use (`--model` for Claude Code and Cursor, `-m` for OpenCode, the `model` configuration value for Codex), and add agents of your own: a command, the events it prints, its resume flag. Every change is kept at once. On Windows a command npm installed is a batch file (`codex.cmd`), which Node does not start and which could take no task of several lines: archdiff reads it for the script or the program it runs and starts that, the task one argument as it was written; a stopped run ends the processes its agent started. A key is an environment variable named `…_KEY` or `…_TOKEN` (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `CURSOR_API_KEY`…): every agent run gets the keys set there over the environment archdiff was started in; the page is sent only that a key is set and its last four characters, and a key an agent prints is blotted out of the transcript. **OpenRouter**: set `OPENROUTER_API_KEY` and give OpenCode a model `openrouter/<model>`, or tick *through OpenRouter* for Claude Code, which then runs on that key (`ANTHROPIC_BASE_URL=https://openrouter.ai/api`, the key as `ANTHROPIC_AUTH_TOKEN`, Anthropic's own key emptied, as OpenRouter documents it). The settings are read and changed from the computer archdiff runs on and no other, however the server is bound.
 
+## Asked by the agent: the MCP server
+
+`archdiff mcp` serves the same analysis to a coding agent while it works, over the [Model Context Protocol](https://modelcontextprotocol.io) on stdin and stdout: the agent asks a question when it has one, instead of getting pictures in its prompt.
+
+| Tool | Arguments | What it answers |
+| --- | --- | --- |
+| `views` | `kind`, `changed`, `base`, `head` | The list `archdiff views` prints, `key<TAB>title` per line; `kind` keeps one kind (`module`, `calls`…), `changed` the views of the files changed since the base |
+| `diagram` | `view`, the picture options (`depth`, `limit`, `weight`, `hubs`, `packages`, `expand`, `hide`, `overlay`, `changes`, `only`, `changed`, `mermaid`, `lanes`, `types`), `base`, `head`, `heads` | One view by its key (`layers`, `module:src/x.ts`, `calls:src/x.ts#fn`, `cycles`…) as Markdown with Mermaid, as `archdiff diagram` writes it; the options are the one table, by the names the API's query gives them |
+| `check` | none | What `archdiff check` reports: the imports against the contract with their files and lines, what is planned and not built, what is built beyond it |
+| `may_import` | `from`, `to` | Whether the contract lets one module import another, asked before the import is written. Each end is a path (a file still to be written is placed by its path) or a layer's name. *Allowed* (one layer, or an arrow of the contract across the two, which is named), *Not allowed* (with the layers the importer may use), or *Not judged* (a layer the contract does not name, or no contract) |
+| `impact` | `target`, `depth` | Who depends on a module (`src/db/store.ts`) or a function (`src/db/store.ts#saveOrder`): the importers and the callers, and who imports and calls those, up to `depth` steps away (3 unless said), each with the file and line of its import or call; and every test file that reaches it by calls or by imports, however far — the tests to run after the change |
+| `review` | `base`, `head` | The architectural diff of the working tree (or a head) against a base, as `archdiff review` writes it: what was added, removed and changed, and the new dependencies between layers, marked when the contract forbids them |
+
+Every answer is of the code as it is now: a call reads the analysis again (the fact cache keeps that fast), so the agent's own edits are in its next answer. The tools only read — none changes the code, the contract or a drawing. A wrong call is a JSON-RPC error (`-32602`) carrying the message the CLI gives for the same mistake (`diagram: unknown view "nope"`, `diagram: no module "src/none.ts" (archdiff views lists them)`); a tool that ran and failed (a review outside git) answers with the reason, marked `isError`.
+
+Register it once with the agent, which then starts the server itself:
+
+```bash
+claude mcp add archdiff -- npx -y @ivlad003/archdiff mcp   # Claude Code; --scope project writes .mcp.json for the whole team
+codex mcp add archdiff -- npx -y @ivlad003/archdiff mcp    # Codex
+```
+
+or in the agent's own file — Claude Code's `.mcp.json` at the root of the repository, Codex's `~/.codex/config.toml` (or `.codex/config.toml` of a trusted project), OpenCode's `opencode.json`:
+
+```json
+{ "mcpServers": { "archdiff": { "command": "npx", "args": ["-y", "@ivlad003/archdiff", "mcp"] } } }
+```
+
+```toml
+[mcp_servers.archdiff]
+command = "npx"
+args = ["-y", "@ivlad003/archdiff", "mcp"]
+```
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": { "servers": { "archdiff": { "type": "local", "command": ["npx", "-y", "@ivlad003/archdiff", "mcp"] } } }
+}
+```
+
+An OpenCode from before the `servers` key takes the same entry directly under `"mcp"`. With archdiff installed (`npm i -g @ivlad003/archdiff`) the command is `archdiff mcp`, which starts faster than `npx`. The server reads the directory it is started in, which these agents make the repository; `archdiff mcp path/to/repo` names another.
+
+The protocol is written by hand — no SDK, the package keeps its two runtime dependencies: JSON-RPC 2.0, one message per line, `initialize`, `ping`, `tools/list` and `tools/call`, no HTTP transport. It speaks the revisions that open with the `initialize` handshake (2024-11-05 to 2025-11-25); a client of the 2026-07-28 revision, which has no handshake, probes with `server/discover`, is told the method is not found, and falls back to the handshake as that revision prescribes.
+
 ## Layers
 
 Without configuration a module's layer is its top directory, or `src/<dir>` under `src/`. `archdiff.json` at the root names them explicitly:
@@ -177,7 +223,7 @@ The behaviour is specified twice, for tools and for people: `openspec/specs/<cap
 ```bash
 npm install
 npm run typecheck
-npm test          # the CLI and the HTTP API, through the real binary
+npm test          # the CLI, the HTTP API and the MCP server, through the real binary
 npm run test:web  # the page in headless Chrome (playwright-core; skipped without Chrome)
 node bin/archdiff.js web .
 ```

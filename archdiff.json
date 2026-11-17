@@ -22,7 +22,9 @@
       "src/spec.ts",
       "src/scaffold.ts",
       "src/run.ts",
-      "src/gherkin.ts"
+      "src/gherkin.ts",
+      "src/mcp.ts",
+      "src/mcp-tools.ts"
     ],
     "views": [
       "src/views.ts",
@@ -40,7 +42,8 @@
       "src/metrics.ts",
       "src/machines.ts",
       "src/logic.ts",
-      "src/project-map.ts"
+      "src/project-map.ts",
+      "src/impact.ts"
     ],
     "exports": [
       "src/export/**",
