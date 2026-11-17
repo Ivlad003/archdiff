@@ -124,6 +124,11 @@ The system SHALL leave out, with `--hide-lanes a,b`, the named lanes with their 
 
 The system SHALL apply, with `--overlay tests,storages,heat` in any mix, these marks: modules no test imports (orange, "no tests"), storages ("⛁ what it holds"), and a shade by the calls into each shape with the count in its label; with `--changes`, the review's marks (added, removed, changed) over the same picture; `--only-changes` keeps the marked shapes and their neighbours.
 
+#### Scenario: Three overlays at once
+
+- **WHEN** `archdiff diagram layer:lib --overlay tests,storages,heat` runs
+- **THEN** `src/db/store.ts` is labelled "no tests", "⛁ the file system" and "2 calls in", carries the `warning` mark and a heat value, and the reason names all three overlays
+
 ### Requirement: Three overlays are read from git
 
 The system SHALL read, for `--overlay churn`, `coupling` and `ownership` in any mix with the others, the commits of the picture's range — its base (the merge-base of the head with develop, main or master unless named) to its head, on the timeline at a commit up to that commit, and the head's last 200 commits when the range holds none — in one `git log` (merges left out), and lay over the picture: **churn**, every module shaded by how many of those commits changed its file with the count in its label, a layer by its modules together; **coupling**, a line of the kind `cochange` between two modules of the picture whose files changed in one commit at least twice, labelled `×N`, dashed and without an arrowhead in every export, left out of the layout so the shapes stand where they stand without it, at most forty a picture, a commit of more than fifty files counted as churn only; **ownership**, every module labelled `◉ author` — the author of most of the head's last 1000 commits that changed its file, with the share when others changed it too — and filled with that author's tint (the authors of the most modules of the picture each have one, the rest share the last). The reason SHALL name the range and how many commits were read. Outside git, or on a ref git does not know, the picture SHALL be drawn without them and its reason SHALL say why.
@@ -137,11 +142,6 @@ The system SHALL read, for `--overlay churn`, `coupling` and `ownership` in any 
 
 - **WHEN** `archdiff diagram modules --overlay churn` runs in a directory that is no repository
 - **THEN** the picture is drawn and its reason ends with "⚠ the overlays read from git (churn) are not laid over: … is not a git repository"
-
-#### Scenario: Three overlays at once
-
-- **WHEN** `archdiff diagram layer:lib --overlay tests,storages,heat` runs
-- **THEN** `src/db/store.ts` is labelled "no tests", "⛁ the file system" and "2 calls in", carries the `warning` mark and a heat value, and the reason names all three overlays
 
 ### Requirement: The layout is deterministic and lines never cross a shape
 
