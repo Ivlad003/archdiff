@@ -545,17 +545,21 @@ export function listBranches(root: string): { current: string | null; branches: 
   // The branch HEAD names, even before its first commit; none on a detached HEAD.
   const current = git(root, ["symbolic-ref", "--short", "-q", "HEAD"]);
   const head = current.ok && current.out.trim() !== "" ? current.out.trim() : null;
-  const log = git(root, ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)%00%(objectname:short)%00%(committerdate:short)%00%(subject)", "refs/heads", "refs/remotes"]);
+  // One call for all of them: the whole name of a ref says whether it is a local branch, so a repository with a
+  // hundred branches is not asked a hundred times (the server answers nothing else while it waits on git).
+  const log = git(root, ["for-each-ref", "--sort=-committerdate", "--format=%(refname)%00%(refname:short)%00%(objectname:short)%00%(committerdate:short)%00%(subject)", "refs/heads", "refs/remotes"]);
 
   if (!log.ok) throw new Error(log.error);
   const branches: Branch[] = [];
 
   for (const line of log.out.split("\n")) {
     if (line === "") continue;
-    const [name, sha, date, subject] = line.split("\0") as [string, string, string, string];
+    const [ref, name, sha, date, subject] = line.split("\0") as [string, string, string, string, string];
 
-    if (name.endsWith("/HEAD")) continue;
-    branches.push({ name, sha, date, subject, remote: !git(root, ["show-ref", "--verify", "--quiet", `refs/heads/${name}`]).ok, current: name === head });
+    // A remote's own HEAD names its default branch and is none itself (git shortens it to the remote's name, `origin`).
+    if (ref.endsWith("/HEAD")) continue;
+    const remote = !ref.startsWith("refs/heads/");
+    branches.push({ name, sha, date, subject, remote, current: !remote && name === head });
   }
 
   return { current: head, branches };

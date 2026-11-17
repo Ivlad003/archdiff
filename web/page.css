@@ -23,34 +23,41 @@ html,
 body {
   height: 100%;
   margin: 0;
-  font: 13px/1.4 system-ui, sans-serif;
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   color: var(--text);
   background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin bars to scroll by, in the page's colours; what is selected wears the accent. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 html.dark {
-  --border: #37474f;
-  --muted: #90a4ae;
-  --accent: #ce93d8;
-  --bg: #121417;
-  --panel: #1b1f24;
-  --text: #e3e6ea;
-  --soft: #262b31;
-  --hover: #2a2330;
-  --active: #332740;
-  --veil: rgba(27, 31, 36, 0.9);
+  --border: #2a323a;
+  --border-strong: #46515c;
+  --muted: #93a0ad;
+  --accent: #c9a6f5;
+  --accent-strong: #dcc3fa;
+  --on-accent: #1d1230;
+  --bg: #0f1215;
+  --panel: #171b20;
+  --text: #e5e8ec;
+  --soft: #20262d;
+  --hover: #241d31;
+  --active: #302544;
+  --ok: #81c784;
+  --shadow-low: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --ring: 0 0 0 3px rgba(201, 166, 245, 0.25);
+  --veil: rgba(23, 27, 32, 0.9);
   color-scheme: dark;
-}
-
-html.dark button,
-html.dark input,
-html.dark textarea,
-html.dark select,
-html.dark #export-menu summary,
-html.dark #export {
-  background: var(--panel);
-  color: var(--text);
-  border-color: var(--border);
 }
 
 html.dark #transcript,
@@ -72,28 +79,88 @@ body {
   flex-direction: column;
 }
 
+/* The header: one row while the window has room for it, a second row when it has not — a control is never cut off at
+   the window's edge. */
 #top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 6px 8px;
+  min-height: 46px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   white-space: nowrap;
   overflow: hidden;
 }
 
+/* The page's name, behind its mark: two sheets, one over the other — a diff. */
+#top > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+#top > strong::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  margin: 0 5px 5px 0;
+  border-radius: 3px;
+  background: var(--accent);
+  box-shadow: 5px 5px 0 0 color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+#top label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+/* A hair between the groups of the header: the picture's options, the revisions, the page's own switches, the menus. */
+#top .sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
 #top .spacer {
   flex: 1;
 }
 
-/* A long repository path or stats line gives way (ellipsis, the whole in its tooltip); the controls never do. */
+/* A long repository path or stats line gives way (ellipsis, the whole in its hint); the controls never do. Neither
+   asks for room of its own — they take what the row has left — so it is the controls alone that decide when the
+   header takes a second row. */
 #top #root,
 #top #stats {
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 4 1 0;
+  max-width: max-content;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#top #stats {
+  flex-grow: 2;
+}
+
+/* A window with little room left beside the controls: a sliver of a path says nothing, so the path goes, then the
+   numbers (the path is the tab's name too, and both are whole in the wide window). */
+@media (max-width: 1280px) {
+  #top #root {
+    display: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  #top #stats {
+    display: none;
+  }
 }
 
 #top > :not(#root):not(#stats):not(.spacer) {
@@ -115,23 +182,130 @@ body {
   font: inherit;
 }
 
-button {
+/* One look for every control: a button, a menu's own button, a field, a list to pick from. */
+button,
+details.popover > summary {
   border: 1px solid var(--border);
-  border-radius: 4px;
-  background: #fff;
-  padding: 3px 8px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: inherit;
+  padding: 4px 10px;
+  font: inherit;
+  line-height: 18px;
   cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
 }
 
-button:hover {
+details.popover > summary {
+  list-style: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
+details.popover > summary::-webkit-details-marker {
+  display: none;
+}
+
+button:hover:not(:disabled),
+details.popover > summary:hover {
+  border-color: var(--border-strong);
+  background: var(--soft);
+}
+
+button:active:not(:disabled) {
+  background: var(--active);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.active,
+details.popover[open] > summary {
   border-color: var(--accent);
+  background: var(--active);
   color: var(--accent);
 }
 
+/* What a part of the page is there to do: the review, the comparison, the question, the run. */
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 500;
+}
+
+button.primary:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: var(--on-accent);
+}
+
+input[type="text"],
+input[type="search"],
+input[type="number"],
+input[type="password"],
+input:not([type]),
+select,
+textarea {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  padding: 4px 8px;
+  font: inherit;
+  line-height: 18px;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+input[type="text"]:hover,
+input[type="search"]:hover,
+input[type="number"]:hover,
+input[type="password"]:hover,
+input:not([type]):hover,
+select:hover,
+textarea:hover {
+  border-color: var(--border-strong);
+}
+
+input[type="text"]:focus,
+input[type="search"]:focus,
+input[type="number"]:focus,
+input[type="password"]:focus,
+input:not([type]):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--accent);
+}
+
+/* Where the keyboard is, on what is no field: a ring in the accent. */
+button:focus-visible,
+summary:focus-visible,
+a:focus-visible,
+.tree-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 button.icon {
-  padding: 2px 7px;
+  padding: 4px 8px;
   font-size: 14px;
-  line-height: 1.2;
+  line-height: 18px;
 }
 
 .muted {
@@ -147,19 +321,6 @@ button.icon {
   position: relative;
 }
 
-#export-menu summary {
-  list-style: none;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 8px;
-  background: #fff;
-}
-
-#export-menu[open] summary {
-  border-color: var(--accent);
-}
-
 #export {
   /* Fixed, placed by the page under its button (export-menu.ts): the header clips what overflows it. Over an open
      drawer and the tabs on the centre's edges. */
@@ -167,16 +328,17 @@ button.icon {
   z-index: 36;
   display: flex;
   flex-direction: column;
-  min-width: 140px;
-  padding: 4px 0;
-  background: #fff;
+  min-width: 160px;
+  padding: 6px;
+  background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
 }
 
 #export a {
-  padding: 4px 12px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
   color: #212121;
   text-decoration: none;
 }
@@ -380,30 +542,48 @@ body.resizing iframe {
   opacity: 0.55;
 }
 
-
 #search {
-  margin: 8px;
-  padding: 4px 6px;
-  font: inherit;
+  margin: 8px 10px;
 }
 
 #left-mode {
   display: flex;
-  gap: 4px;
-  padding: 8px 8px 0;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 0;
+}
+
+/* The lists or the tree: two halves of one switch. */
+#left-mode .segmented {
+  display: flex;
+  flex: 1;
+  padding: 2px;
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--soft);
 }
 
 #left-mode button {
-  flex: 1;
-  padding: 3px 6px;
-  font: inherit;
   font-size: 12px;
 }
 
-#left-mode button.active {
-  background: var(--active);
+#left-mode .segmented button {
+  flex: 1;
+  padding: 3px 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+#left-mode .segmented button:hover:not(.active) {
+  color: var(--text);
+}
+
+#left-mode .segmented button.active {
+  border-color: var(--border);
+  background: var(--panel);
   color: var(--accent);
-  border-color: var(--accent);
+  box-shadow: var(--shadow-low);
+  font-weight: 500;
 }
 
 /* The files of the picture shown now: a dot before their entries; the toggle cuts the panel to them. */
@@ -413,6 +593,8 @@ body.resizing iframe {
 }
 
 #left-mode #left-picture.active {
+  border-color: var(--accent);
+  background: var(--active);
   color: var(--accent);
 }
 
@@ -477,9 +659,10 @@ body.resizing iframe {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-top: 2px;
-  padding-bottom: 2px;
+  padding-top: 3px;
+  padding-bottom: 3px;
   padding-right: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -497,6 +680,7 @@ body.resizing iframe {
 #views .tree-row.active {
   background: var(--active);
   color: var(--accent);
+  font-weight: 500;
 }
 
 #views .tree-row .caret {
@@ -527,13 +711,14 @@ body.resizing iframe {
 #views {
   list-style: none;
   margin: 0;
-  padding: 0 0 8px;
+  padding: 0 6px 10px;
   overflow: auto;
   flex: 1;
 }
 
 #views li {
-  padding: 3px 12px;
+  padding: 3px 8px;
+  border-radius: var(--radius);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -541,17 +726,20 @@ body.resizing iframe {
 }
 
 #views li.group {
-  margin-top: 6px;
+  margin-top: 10px;
+  padding-bottom: 2px;
   font-weight: 600;
   color: var(--muted);
   cursor: default;
   text-transform: uppercase;
+  letter-spacing: 0.05em;
   font-size: 11px;
 }
 
 #views li.active {
   background: var(--active);
   color: var(--accent);
+  font-weight: 500;
 }
 
 #views li:hover:not(.group) {
@@ -569,11 +757,24 @@ body.resizing iframe {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 10px;
+  min-height: 40px;
+  padding: 5px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* The way back: a button without a frame until the pointer is on it. */
+#title #back {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+#title #back:hover {
+  background: var(--soft);
+  color: var(--text);
 }
 
 /* The title takes its room first; the hint has what is left (none, on a narrow canvas). */
@@ -716,7 +917,7 @@ body[data-as="code"] #legend {
   pointer-events: none;
   background: var(--veil);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius);
 }
 
 /* A picture with nothing to say of itself leaves no empty strip over the canvas. */
@@ -783,7 +984,7 @@ body.legend-off #legend {
   height: 10px;
   border: 1.5px solid #37474f;
   border-radius: 2px;
-  background: #fff;
+  background: var(--panel);
 }
 
 .sw.ellipse {
@@ -810,22 +1011,39 @@ html.dark #legend .ln {
   filter: invert(93%) hue-rotate(180deg);
 }
 
+/* The tabs: names on a line, the one in front underlined in the accent; what copies and what shows the text raw sit at
+   the line's end. A panel too narrow for all of them lets the names give way. */
 #tabs {
   display: flex;
+  align-items: stretch;
+  padding: 0 6px;
   border-bottom: 1px solid var(--border);
 }
 
 #tabs button {
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
   border: 0;
+  border-bottom: 2px solid transparent;
   border-radius: 0;
   background: transparent;
-  padding: 6px;
+  padding: 10px 7px 8px;
+  color: var(--muted);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
 
+#tabs button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
 #tabs button.active {
-  border-bottom: 2px solid var(--accent);
+  border-bottom-color: var(--accent);
+  background: transparent;
   color: var(--accent);
 }
 
@@ -848,16 +1066,19 @@ html.dark #legend .ln {
 }
 
 .prose h1 {
-  font-size: 16px;
-  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  margin: 2px 0 10px;
 }
 
 .prose h2 {
-  font-size: 13px;
-  margin: 14px 0 6px;
+  font-size: 11px;
+  margin: 16px 0 6px;
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
 }
 
 .prose h3 {
@@ -868,6 +1089,7 @@ html.dark #legend .ln {
 .prose p,
 .prose ul {
   margin: 4px 0 8px;
+  line-height: 1.5;
 }
 
 .prose ul {
@@ -893,10 +1115,11 @@ html.dark #legend .ln {
 
 .prose pre {
   background: var(--soft);
-  padding: 8px;
-  border-radius: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
   overflow: auto;
-  font-size: 11px;
+  font-size: 11.5px;
+  line-height: 1.5;
   max-height: 160px;
 }
 
@@ -938,11 +1161,26 @@ html.dark .prose pre.diff .del {
 
 #tabs button.small {
   flex: 0 0 auto;
-  padding: 6px 10px;
+  align-self: center;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius);
   color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+#tabs #copy {
+  margin-left: auto;
+}
+
+#tabs button.small:hover:not(:disabled) {
+  background: var(--soft);
+  color: var(--text);
 }
 
 #tabs button.small.active {
+  background: var(--active);
   color: var(--accent);
 }
 
@@ -955,25 +1193,254 @@ html.dark .prose pre.diff .del {
   display: block;
 }
 
+/* The line over the code that names its file: it stays while the code scrolls under it, and says a file is being read. */
+#code .code-head {
+  position: sticky;
+  top: -10px;
+  left: 0;
+  z-index: 1;
+  margin: -10px -12px 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  white-space: normal;
+}
+
+#reader-code .code-head {
+  margin-bottom: 6px;
+}
+
+/* What is being read anew keeps its place, dimmed, until the answer lands (busy.ts): no blank panel, nothing jumps. A
+   read that ends in a blink never dims: the fade waits a moment first. */
+.loading > :not(.code-head) {
+  opacity: 0.45;
+  transition: opacity 0.15s linear 0.15s;
+}
+
+.loading .code-head::after {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 8px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The hint of a button, a tab or a mark (hints.ts): a bubble beside it, in the page's own look. */
+#hint-bubble {
+  position: fixed;
+  z-index: 100;
+  max-width: 340px;
+  padding: 6px 9px;
+  border-radius: 5px;
+  background: #263238;
+  color: #fff;
+  font: 12px/1.4 system-ui, sans-serif;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+html.dark #hint-bubble {
+  background: #eceff1;
+  color: #1b1f24;
+}
+
+/* The page waits on the server (busy.ts): a bar runs under the header. */
+#busy {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#busy::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  background: var(--accent);
+  animation: busy 1.1s ease-in-out infinite;
+}
+
+@keyframes busy {
+  from {
+    left: -30%;
+  }
+
+  to {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #busy::before {
+    left: 0;
+    width: 100%;
+    animation: none;
+    opacity: 0.6;
+  }
+
+  .loading .code-head::after {
+    animation: none;
+  }
+}
+
 #code .line,
 #reader-code .line {
   display: block;
   white-space: pre;
 }
 
+/* The colours of code (highlight.ts): keywords, strings, comments, numbers, names — the same in the Code tab, the code
+   in the centre and a page's code blocks. */
+/* The page's look in one place: its colours, the roundness of a corner, the shadow of what floats, the ring of what
+   the keyboard is on. Every rule below draws from here, in the light and in the dark. */
+:root {
+  --border: #dde2e8;
+  --border-strong: #b9c2cc;
+  --muted: #5d6b79;
+  --accent: #6a1b9a;
+  --accent-strong: #54157c;
+  --on-accent: #ffffff;
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --text: #1b2026;
+  --soft: #f0f2f5;
+  --hover: #f5eefb;
+  --active: #ece0f8;
+  --ok: #2e7d32;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --left: 280px;
+  --right: 420px;
+  --radius: 6px;
+  --radius-lg: 10px;
+  --shadow-low: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow: 0 8px 24px rgba(16, 24, 40, 0.14), 0 1px 3px rgba(16, 24, 40, 0.08);
+  --ring: 0 0 0 3px rgba(106, 27, 154, 0.18);
+  /* What the page lays over the canvas and lets it show through: the reason's line, the minimap. */
+  --veil: rgba(255, 255, 255, 0.88);
+}
+
+html.dark {
+  --code-keyword: #ff7b72;
+  --code-string: #a5d6ff;
+  --code-comment: #8b949e;
+  --code-number: #79c0ff;
+  --code-title: #d2a8ff;
+  --code-type: #ffa657;
+  --code-tag: #7ee787;
+}
+
+.hljs-keyword,
+.hljs-doctag,
+.hljs-meta .hljs-keyword,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-variable.language_ {
+  color: var(--code-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-meta .hljs-string {
+  color: var(--code-string);
+}
+
+.hljs-comment,
+.hljs-code,
+.hljs-formula,
+.hljs-meta {
+  color: var(--code-comment);
+}
+
+.hljs-comment {
+  font-style: italic;
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-attr,
+.hljs-attribute,
+.hljs-operator,
+.hljs-variable,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--code-number);
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--code-title);
+}
+
+.hljs-type,
+.hljs-built_in,
+.hljs-symbol,
+.hljs-title.class_.inherited__ {
+  color: var(--code-type);
+}
+
+.hljs-name,
+.hljs-quote,
+.hljs-selector-tag,
+.hljs-selector-pseudo,
+.hljs-addition {
+  color: var(--code-tag);
+}
+
+.hljs-deletion {
+  color: var(--code-keyword);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 600;
+}
+
+#code,
+#reader-code {
+  line-height: 1.55;
+}
+
 #code .line .n,
 #reader-code .line .n {
   display: inline-block;
   width: 4ch;
-  margin-right: 1ch;
+  margin-right: 1.5ch;
   text-align: right;
   color: var(--muted);
+  opacity: 0.7;
   user-select: none;
 }
 
+/* The lines of the shape picked: a tint, and a bar at the line's start to find them by when scrolling. */
 #code .line.hit,
 #reader-code .line.hit {
-  background: #fff8e1;
+  background: #fff6d6;
+  box-shadow: inset 3px 0 0 #f0b429;
 }
 
 @media (max-width: 900px) {
@@ -990,7 +1457,7 @@ html.dark .prose pre.diff .del {
 #editor {
   position: absolute;
   inset: 0;
-  background: #fff;
+  background: var(--panel);
 }
 
 #editor[hidden] {
@@ -1057,6 +1524,23 @@ body.editing #empty {
   font-size: 11px;
 }
 
+/* The rows of buttons and fields at the top of the Flow and the Spec tabs: on a line, a field taking what is left,
+   and onto a second line in a narrow panel. */
+#flow .row,
+#spec .row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+#flow .row input,
+#spec .row select {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
 #flow-mocks label {
   display: block;
   margin: 8px 0 4px;
@@ -1079,8 +1563,8 @@ body.editing #empty {
   margin: 6px 0;
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  background: #fff;
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
 .step.storage {
@@ -1141,9 +1625,9 @@ body.editing #empty {
   white-space: pre-wrap;
   word-break: break-word;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: 6px 8px;
-  background: #fff;
+  background: var(--panel);
 }
 
 #transcript .ev {
@@ -1207,7 +1691,7 @@ body.editing #empty {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -1222,20 +1706,6 @@ body.editing #empty {
   position: relative;
 }
 
-#tours-menu summary {
-  list-style: none;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 8px;
-  background: var(--panel);
-  white-space: nowrap;
-}
-
-#tours-menu[open] summary {
-  border-color: var(--accent);
-}
-
 #tours {
   position: fixed;
   z-index: 36;
@@ -1244,11 +1714,11 @@ body.editing #empty {
   gap: 6px;
   min-width: 260px;
   max-width: 420px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
 }
 
 #tours .row {
@@ -1274,7 +1744,7 @@ body.editing #empty {
 }
 
 #tour {
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -1348,7 +1818,7 @@ body.editing #empty {
   color: var(--text);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: 6px;
   resize: vertical;
 }
@@ -1358,7 +1828,7 @@ body.editing #empty {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -1405,12 +1875,12 @@ body.editing #empty {
 }
 
 #git-overlays button:first-child {
-  border-radius: 4px 0 0 4px;
+  border-radius: var(--radius) 0 0 var(--radius);
   margin-left: 0;
 }
 
 #git-overlays button:last-child {
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 #commit-note {
@@ -1457,7 +1927,7 @@ body.editing #empty {
 .prose details {
   margin: 4px 0;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: 2px 8px;
 }
 
@@ -1502,7 +1972,7 @@ body.editing #empty {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -1516,24 +1986,130 @@ body.editing #empty {
   max-width: 220px;
 }
 
-#head-list {
+/* The heads: the ticked ones as chips in the bar, the branches as a list under its button — a row a branch, cut as the
+   reader types. A repository with a hundred branches is a list to search, not a wall of boxes. */
+#head-chips {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
-  max-width: 60vw;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
-#head-list label {
-  white-space: nowrap;
+#head-chips .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 260px;
+  padding: 1px 8px;
+  border-radius: 12px;
+  font: inherit;
   font-size: 12px;
+  background: var(--active);
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-#head-list label.current {
+#head-chips .chip .x {
+  color: var(--muted);
+}
+
+#heads-menu {
+  position: relative;
+}
+
+#heads-box {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(640px, 80vw);
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+#head-filter {
+  font: inherit;
+  padding: 4px 6px;
+}
+
+#head-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(50vh, 420px);
+  overflow: auto;
+}
+
+#head-list .head-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#head-list .head-row:hover,
+#head-list .head-row:focus-within {
+  background: var(--hover);
+}
+
+#head-list .head-row input {
+  flex: none;
+  margin: 0;
+  align-self: center;
+}
+
+#head-list .head-row .name {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#head-list .head-row.current .name {
   font-weight: 600;
 }
 
-#head-list label.remote {
+#head-list .head-row .tag {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 11px;
   color: var(--muted);
+}
+
+#head-list .head-row .when {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+#head-list .head-row .subject {
+  flex: 0 1 38%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#head-list .none {
+  padding: 6px;
+}
+
+#head-count {
+  font-size: 12px;
 }
 
 #tag-suggest {
@@ -1547,8 +2123,8 @@ body.editing #empty {
   min-width: 280px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
   font-size: 12px;
 }
 
@@ -1589,19 +2165,6 @@ body.editing #empty {
   position: relative;
 }
 
-#options-menu summary {
-  list-style: none;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 8px;
-  background: var(--panel);
-}
-
-#options-menu[open] summary {
-  border-color: var(--accent);
-}
-
 #options {
   /* Fixed, placed by the page under its summary: the header clips what overflows it. */
   position: fixed;
@@ -1614,8 +2177,8 @@ body.editing #empty {
   padding: 10px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
   white-space: nowrap;
 }
 
@@ -1627,7 +2190,7 @@ body.editing #empty {
 
 #options fieldset {
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: 4px 8px 6px;
   display: flex;
   flex-direction: column;
@@ -1665,19 +2228,15 @@ html.dark #options input.warn {
   margin: 0 0 10px;
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panel);
+  border-radius: var(--radius);
+  background: var(--soft);
 }
 
 .line-strip button {
-  font: inherit;
   font-size: 12px;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: var(--panel);
 }
 
 /* A neighbour beyond the picture's depth: dashed, as a line the picture does not draw. */
@@ -1703,15 +2262,18 @@ html.dark #options input.warn {
   max-width: calc(100% - 64px);
 }
 
+/* They lie on the picture: a low shadow lifts them off it. */
+#canvas-tools select,
+#canvas-tools button,
+#canvas-tools #lanes-menu summary,
+#canvas-tools #find {
+  box-shadow: var(--shadow-low);
+}
+
 #canvas-tools select,
 #canvas-tools button {
-  font: inherit;
   font-size: 12px;
   padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panel);
-  color: inherit;
   cursor: pointer;
 }
 
@@ -1729,18 +2291,18 @@ html.dark #options input.warn {
 }
 
 #canvas-tools .group button:first-child {
-  border-radius: 4px 0 0 4px;
+  border-radius: var(--radius) 0 0 var(--radius);
   margin-left: 0;
 }
 
 #canvas-tools .group button:last-child {
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 #canvas-tools button.active {
   border-color: var(--accent);
   color: var(--accent);
-  background: var(--panel);
+  background: var(--active);
 }
 
 body.editing #canvas-tools {
@@ -1758,17 +2320,8 @@ body.tools-folded #canvas-tools > :not(#picture):not(#show-as):not(#find):not(#t
 }
 
 #canvas-tools #lanes-menu summary {
-  list-style: none;
-  cursor: pointer;
   font-size: 12px;
   padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panel);
-}
-
-#canvas-tools #lanes-menu[open] summary {
-  border-color: var(--accent);
 }
 
 #lanes {
@@ -1782,12 +2335,12 @@ body.tools-folded #canvas-tools > :not(#picture):not(#show-as):not(#find):not(#t
   min-width: 180px;
   max-height: 320px;
   overflow: auto;
-  margin-top: 4px;
-  padding: 8px 10px;
+  margin-top: 6px;
+  padding: 10px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
   white-space: nowrap;
 }
 
@@ -1798,13 +2351,8 @@ body.tools-folded #canvas-tools > :not(#picture):not(#show-as):not(#find):not(#t
 }
 
 #canvas-tools #find {
-  font: inherit;
   font-size: 12px;
   padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panel);
-  color: inherit;
   width: 150px;
 }
 
@@ -1860,7 +2408,7 @@ body.split.stacked #minimap {
   bottom: 52px;
   z-index: 3;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--veil);
   cursor: pointer;
 }
@@ -1901,7 +2449,7 @@ body.embed #centre {
   margin: 8px 0;
   padding: 8px 10px;
   border: 1px solid var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--panel);
 }
 
@@ -1921,7 +2469,7 @@ body.embed #centre {
   font-size: 12px;
   padding: 3px 10px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -1937,14 +2485,19 @@ body.embed #centre {
   font-size: 12px;
   padding: 3px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--panel);
   color: inherit;
   min-width: 200px;
 }
 
+/* The strip of a shape's neighbours keeps to two rows and scrolls past them: a shape with twenty neighbours does not
+   push the code a hand's breadth down, and the next pick does not pull it back up. */
 #neighbours {
   margin: 6px 8px 0;
+  max-height: 66px;
+  overflow-y: auto;
+  flex: none;
 }
 
 /* ── The selection strip: the shapes picked with Shift or Ctrl, and what to do with them ── */
@@ -1966,7 +2519,7 @@ body.embed #centre {
 }
 
 #selection button.act {
-  border-radius: 4px;
+  border-radius: var(--radius);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -1978,13 +2531,13 @@ body.embed #centre {
   z-index: 40;
   list-style: none;
   margin: 0;
-  padding: 4px 0;
+  padding: 6px;
   min-width: 220px;
   max-width: 360px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
   font-size: 12px;
 }
 
@@ -1993,7 +2546,8 @@ body.embed #centre {
 }
 
 #context-menu li {
-  padding: 5px 12px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -2068,7 +2622,7 @@ body.embed #centre {
 #transcript .answer pre {
   background: var(--soft);
   padding: 6px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   overflow: auto;
   font-size: 11px;
 }
@@ -2176,7 +2730,7 @@ body.embed #centre {
   padding: 4px 8px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   font-size: 11px;
   pointer-events: none;
   z-index: 5;
@@ -2249,31 +2803,58 @@ html.dark .step.playing {
   width: 110px;
 }
 
-/* The agent of the Chat tab: a label and its picker on one line. */
-#agent-row {
+/* The agent of the Chat tab: a label and its picker on one line with the settings' button; what the row has to say of
+   the agents — none found, where one is placed — takes a line of its own under them, however long it is, and never
+   squeezes the picker and the button into a column of letters. */
+#chat #agent-row {
+  flex-wrap: wrap;
   align-items: center;
 }
 
 #agent-pick {
   display: inline-flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+#agent-pick select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#settings-open {
+  flex: none;
+  white-space: nowrap;
+}
+
+#agent-name {
+  flex: 1 1 100%;
+  font-size: 12px;
+}
+
+#agent-name:empty {
+  display: none;
 }
 
 /* The settings window: the agents of this computer and the keys they run with. */
 #settings {
   width: min(780px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
-  padding: 14px 16px;
+  padding: 18px 20px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--panel);
   color: var(--text);
+  box-shadow: var(--shadow);
   overflow: auto;
 }
 
 #settings::backdrop {
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(12, 16, 20, 0.45);
+  backdrop-filter: blur(2px);
 }
 
 #settings-head {
@@ -2289,9 +2870,19 @@ html.dark .step.playing {
   overflow-wrap: anywhere;
 }
 
+#settings-title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
 #settings h3 {
-  margin: 14px 0 4px;
-  font-size: 13px;
+  margin: 18px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 #settings p {
@@ -2376,7 +2967,7 @@ html.dark #settings-note.wrong {
   font: inherit;
   padding: 3px 6px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
 }
 
 #settings .key {
@@ -2395,7 +2986,7 @@ html.dark #settings-note.wrong {
 /* What the last change came to stays in sight, however far the window is scrolled. */
 #settings-note {
   position: sticky;
-  bottom: -14px;
+  bottom: -18px;
   min-height: 1.4em;
   margin: 8px 0 0;
   padding: 6px 0;

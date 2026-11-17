@@ -8,6 +8,7 @@
 
 import { api } from "./api.ts";
 import { element } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { page } from "./page.ts";
 import { currentLink } from "./link.ts";
 import { agentNameOf } from "./chat.ts";
@@ -72,13 +73,13 @@ export async function loadFlow(): Promise<void> {
   lastFlow = flow;
   flowMarkdown = markdown;
   const entryId = entryOf(state.view)!;
-  const input = textarea(`Mock input of ${entryId.slice(entryId.indexOf("#") + 1)} (JSON object: a key per parameter)`, flow.input ?? "", '{"request": {"total": 42}}');
-  const storageFields = flow.storages.map((storage) => ({ id: storage.id, field: textarea(`Mock content of ${storage.module} (${storage.storage})`, storage.content ?? "", '{"rows": [{"id": 1}]}') }));
+  const input = textarea(t("Mock input of {name} (JSON object: a key per parameter)", { name: entryId.slice(entryId.indexOf("#") + 1) }), flow.input ?? "", '{"request": {"total": 42}}');
+  const storageFields = flow.storages.map((storage) => ({ id: storage.id, field: textarea(t("Mock content of {module} ({storage})", { module: storage.module, storage: storage.storage }), storage.content ?? "", '{"rows": [{"id": 1}]}') }));
   mockInput = input;
   mockStorages = storageFields;
   const apply = document.createElement("button");
-  apply.textContent = "apply mocks";
-  apply.title = "Save the mocks with the drawing of this view and carry the values through the steps";
+  apply.textContent = t("apply mocks");
+  apply.title = t("Save the mocks with the drawing of this view and carry the values through the steps");
   apply.addEventListener("click", () => {
     const next: unknown[] = [];
 
@@ -100,7 +101,7 @@ export async function loadFlow(): Promise<void> {
     const name = document.createElement("strong");
     name.textContent = step.name;
     name.style.cursor = "pointer";
-    name.title = "Show the code";
+    name.title = t("Show the code");
     name.addEventListener("click", () => void page.showCode({ id: step.id, kind: "fn", label: step.name, ref: { id: step.id, file: step.module, line: step.line }, x: 0, y: 0, w: 0, h: 0 }));
     head.append(name, "(");
 
@@ -112,7 +113,7 @@ export async function loadFlow(): Promise<void> {
         const value = document.createElement("span");
         value.className = "value";
         value.textContent = ` = ${param.value}`;
-        value.title = `from ${param.from ?? ""}`;
+        value.title = t("from {source}", { source: param.from ?? "" });
         head.append(value);
       }
     }
@@ -120,12 +121,12 @@ export async function loadFlow(): Promise<void> {
     head.append(`)${step.returns ? ` → ${step.returns}` : ""}`);
     const where = document.createElement("div");
     where.className = "where";
-    where.textContent = `${step.module}:${step.line}${step.storage ? ` · storage: ${step.storage}${step.content !== undefined ? ` holds ${step.content}` : ""}` : ""}${step.gaps > 0 ? ` · ${step.gaps} calls not followed` : ""}`;
+    where.textContent = `${step.module}:${step.line}${step.storage ? ` · ${step.content !== undefined ? t("storage: {storage} holds {content}", { storage: step.storage, content: step.content }) : t("storage: {storage}", { storage: step.storage })}` : ""}${step.gaps > 0 ? ` · ${t("{gaps} calls not followed", { gaps: step.gaps })}` : ""}`;
     box.append(head, where);
     flowSteps.append(box);
   }
 
-  if (flow.steps.length === 0) flowSteps.textContent = "No such function in the graph.";
+  if (flow.steps.length === 0) flowSteps.textContent = t("No such function in the graph.");
 }
 
 /** Mocks for the entry and the storages: the agent with the description when there is one, else the types; the fields are filled, not saved. */
@@ -135,14 +136,14 @@ async function generateMocks(): Promise<void> {
 
   if (entryOf(state.view) === null || !mockInput) return;
   note.disabled = true;
-  flowSteps.prepend(Object.assign(document.createElement("div"), { className: "muted", id: "mock-note", textContent: "generating mocks…" }));
+  flowSteps.prepend(Object.assign(document.createElement("div"), { className: "muted", id: "mock-note", textContent: t("generating mocks…") }));
 
   try {
     const result = await api.mocks(state.view, note.value, agentNameOf());
     mockInput.value = JSON.stringify(result.input, null, 2);
 
     for (const { id, field } of mockStorages) if (result.storages[id] !== undefined) field.value = JSON.stringify(result.storages[id], null, 2);
-    element("mock-note").textContent = `mocks from ${result.source}${result.note ? ` (${result.note})` : ""}; apply to carry them through the steps`;
+    element("mock-note").textContent = t("mocks from {source}; apply to carry them through the steps", { source: `${result.source}${result.note ? ` (${result.note})` : ""}` });
   } catch (error) {
     element("mock-note").textContent = error instanceof Error ? error.message : String(error);
   } finally {
@@ -190,7 +191,7 @@ async function runFlowNow(): Promise<void> {
   const button = element<HTMLButtonElement>("flow-run");
   const panel = element<HTMLDivElement>("flow-run-result");
   button.disabled = true;
-  panel.textContent = "running…";
+  panel.textContent = t("running…");
   page.showTab("flow");
 
   try {

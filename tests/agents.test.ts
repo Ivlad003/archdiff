@@ -16,7 +16,7 @@ import { test } from "node:test";
 import { AgentRunner, AGENTS, installedAgents, type AgentRun, type AgentSpec } from "../src/agent.ts";
 import { commandStart, findCommand, shimTarget, userBins } from "../src/agent-command.ts";
 import type { JsonValue } from "../src/json.ts";
-import { agentSpecs, changedSettings, NO_SETTINGS, readSettings, settingsFrom, settingsPath, writeSettings } from "../src/settings.ts";
+import { agentSpecs, changedSettings, NO_SETTINGS, pageLanguage, readSettings, settingsFrom, settingsPath, writeSettings } from "../src/settings.ts";
 import { withTempDir } from "./temp-dir.ts";
 import { fakeCommand, homeOf, startWeb, TEST_BIN, withOwnServer } from "./web-server.ts";
 
@@ -317,3 +317,40 @@ test("Claude Code is given archdiff's own MCP server on the repository, its tool
     for (const left of [placed, `${placed}.cmd`, join(TEST_BIN, "node_modules")]) rmSync(left, { recursive: true, force: true });
   }
 });
+
+test("the language of the page is one of the settings: kept when it is not English, served in the page's first line, changed from the page", () =>
+  withOwnServer(
+    "archdiff-language-",
+    () => undefined,
+    async (origin, dir) => {
+      const env = { ARCHDIFF_HOME: homeOf(dir) };
+      const file = join(homeOf(dir), ".archdiff", "settings.json");
+      // English is what the page speaks unasked: the settings say nothing of it, and a language the page has not is refused.
+      assert.equal(pageLanguage(env), "en");
+      assert.deepEqual(settingsFrom({ language: "en" }), NO_SETTINGS);
+      assert.deepEqual(settingsFrom({ language: "uk" }), { ...NO_SETTINGS, language: "uk" });
+      assert.throws(() => settingsFrom({ language: "tlh" }), /settings: "language" must be one of "en", "uk"/);
+      assert.deepEqual(changedSettings({ ...NO_SETTINGS, language: "uk" }, { keys: { SOME_API_KEY: "k-000000000000" } }), { ...NO_SETTINGS, keys: { SOME_API_KEY: "k-000000000000" }, language: "uk" });
+      assert.deepEqual(changedSettings({ ...NO_SETTINGS, language: "uk" }, { language: "en" }), NO_SETTINGS);
+
+      const page = async (): Promise<string> => (await (await fetch(`${origin}/`)).text()).split("\n")[1]!.trim();
+      const shown = async (): Promise<string> => ((await (await fetch(`${origin}/api/settings`)).json()) as { language: string }).language;
+      assert.equal(await page(), '<html lang="en">');
+      assert.equal(await shown(), "en");
+      // Chosen in the page: kept in the user's file, and the page is served in it from the next request on.
+      const changed = await fetch(`${origin}/api/settings`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ language: "uk" }) });
+      assert.equal(changed.status, 200);
+      assert.equal(((await changed.json()) as { language: string }).language, "uk");
+      assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { language: "uk" });
+      assert.equal(pageLanguage(env), "uk");
+      assert.equal(await page(), '<html lang="uk">');
+      assert.equal(await shown(), "uk");
+      const refused = await fetch(`${origin}/api/settings`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ language: "tlh" }) });
+      assert.equal(refused.status, 400);
+      assert.equal(await page(), '<html lang="uk">');
+      // A file that does not read is no reason for a page in no language.
+      writeFileSync(file, "{ not json");
+      assert.equal(pageLanguage(env), "en");
+      assert.equal(await page(), '<html lang="en">');
+    },
+  ));

@@ -16,6 +16,7 @@
 import { api, type Commit } from "./api.ts";
 import { leaveEdit } from "./canvas.ts";
 import { element, rememberText, rememberedText } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { currentLink, setLink, type Link } from "./link.ts";
 import { notice } from "./title.ts";
 import { offerWalk } from "./walk.ts";
@@ -63,7 +64,7 @@ function setPlaying(on: boolean): void {
   playButton.textContent = on ? "⏸" : "▶";
   playButton.classList.toggle("active", on);
   playButton.setAttribute("aria-pressed", String(on));
-  playButton.title = on ? "Pause at this commit (k)" : "Play: step through the commits of the range by itself, the picture drawn again at each (k)";
+  playButton.title = on ? t("Pause at this commit (k)") : t("Play: step through the commits of the range by itself, the picture drawn again at each (k)");
 }
 
 /** The next commit after the pace picked, once the picture of this one is drawn; at the last commit the play ends. */
@@ -113,14 +114,14 @@ function showPick(mode: Mode, state: Link): void {
   slider.value = String(picked + 1);
   slider.disabled = commits.length === 0;
   playButton.disabled = commits.length === 0;
-  const at = picked === -1 ? "" : `commit ${picked + 1} of ${commits.length} · `;
-  note.textContent = commits.length === 0 ? "no commits between the base and the head" : mode === "review" ? (picked === -1 ? "pick a commit to see its own change" : `${at}this commit against the one before it`) : picked === -1 ? (state.at ? "this commit is not of the range" : "drag the slider or press ▶: the code as it was at each commit") : `${at}the code as it was then, what the commit did marked`;
+  const at = picked === -1 ? "" : `${t("commit {n} of {count}", { n: picked + 1, count: commits.length })} · `;
+  note.textContent = commits.length === 0 ? t("no commits between the base and the head") : mode === "review" ? (picked === -1 ? t("pick a commit to see its own change") : `${at}${t("this commit against the one before it")}`) : picked === -1 ? (state.at ? t("this commit is not of the range") : t("drag the slider or press ▶: the code as it was at each commit")) : `${at}${t("the code as it was then, what the commit did marked")}`;
 }
 
 /** Fills the list with the commits of a range, the whole range first. */
 function fill(listed: readonly Commit[], base: string, head: string | null): void {
   commits = [...listed];
-  commitList.replaceChildren(new Option(`whole range: ${base.slice(0, 10)} → ${head ?? "working tree"} (${commits.length} commits)`, ""));
+  commitList.replaceChildren(new Option(t("whole range: {base} → {head} ({count} commits)", { base: base.slice(0, 10), head: head ?? t("working tree"), count: commits.length }), ""));
 
   for (const commit of commits) commitList.append(new Option(`${commit.short} ${commit.date} ${commit.subject}`, commit.sha));
 }
@@ -201,7 +202,7 @@ function step(by: 1 | -1): void {
   if (commits.length === 0) return;
   setPlaying(false);
 
-  if (by === 1 && picked === commits.length - 1) return notice("the last commit of the range");
+  if (by === 1 && picked === commits.length - 1) return notice(t("the last commit of the range"));
   pick(by === 1 ? picked + 1 : picked <= 0 ? commits.length - 1 : picked - 1);
 }
 
@@ -215,14 +216,17 @@ playButton.addEventListener("click", () => togglePlay());
 // The thumb names the commit it is over while it is dragged; let go, the picture of that commit is drawn.
 slider.addEventListener("input", () => {
   const commit = commits[Number(slider.value) - 1];
-  note.textContent = commit ? `${slider.value} of ${commits.length} · ${commit.short} ${commit.date} ${commit.subject}` : "the whole range";
+  note.textContent = commit ? `${t("{n} of {count}", { n: slider.value, count: commits.length })} · ${commit.short} ${commit.date} ${commit.subject}` : t("the whole range");
 });
 slider.addEventListener("change", () => {
   setPlaying(false);
   pick(Number(slider.value) - 1);
 });
 
-for (const name of Object.keys(SPEEDS)) speedSelect.append(new Option(name, name));
+/** The paces as the select names them, in the page's language; the value kept is the pace's own name. */
+const SPEED_NAMES: Readonly<Record<string, string>> = { slow: t("slow"), normal: t("normal"), fast: t("fast") };
+
+for (const name of Object.keys(SPEEDS)) speedSelect.append(new Option(SPEED_NAMES[name] ?? name, name));
 speedSelect.value = rememberedText(SPEED_KEY) ?? "normal";
 
 if (speedSelect.value === "") speedSelect.value = "normal";

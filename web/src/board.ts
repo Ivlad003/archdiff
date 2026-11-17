@@ -12,6 +12,7 @@
 import type { Board } from "./api.ts";
 import { leaveEdit } from "./canvas.ts";
 import { element } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { revealDetails } from "./layout.ts";
 import { currentLink, setLink, type Link } from "./link.ts";
 import { page } from "./page.ts";
@@ -46,17 +47,17 @@ export function fillBoardBar(state: Link, board: Board | null): void {
   if (!onBoard(state.view)) return;
   const groups = board?.groups ?? [];
   keys = [BOARD, ...groups.map((group) => group.key)];
-  steps.replaceChildren(new Option(`the whole board: ${groups.length} ${groups.length === 1 ? "group" : "groups"}`, BOARD));
+  steps.replaceChildren(new Option(groups.length === 1 ? t("the whole board: {count} group", { count: groups.length }) : t("the whole board: {count} groups", { count: groups.length }), BOARD));
 
-  for (const [i, group] of groups.entries()) steps.append(new Option(`${i + 1} of ${groups.length} · ${group.label} — ${group.modules.length} ${group.modules.length === 1 ? "module" : "modules"}`, group.key));
+  for (const [i, group] of groups.entries()) steps.append(new Option(`${t("{n} of {count}", { n: i + 1, count: groups.length })} · ${group.label} — ${group.modules.length === 1 ? t("{count} module", { count: group.modules.length }) : t("{count} modules", { count: group.modules.length })}`, group.key));
 
   // A group the working tree no longer changes (committed, put back while its picture was open): named, to step on from.
-  if (!keys.includes(state.view)) steps.prepend(Object.assign(new Option(`${state.view.slice(BOARD.length + 1)} — no longer changed`, state.view), { disabled: true }));
+  if (!keys.includes(state.view)) steps.prepend(Object.assign(new Option(t("{group} — no longer changed", { group: state.view.slice(BOARD.length + 1) }), state.view), { disabled: true }));
   steps.value = state.view;
   const at = keys.indexOf(state.view);
   element<HTMLButtonElement>("board-prev").disabled = at === 0;
   element<HTMLButtonElement>("board-next").disabled = at === keys.length - 1;
-  note.textContent = board === null ? "" : `against ${board.base} · ${board.files} ${board.files === 1 ? "source file" : "source files"} changed`;
+  note.textContent = board === null ? "" : board.files === 1 ? t("against {base} · {count} source file changed", { base: board.base, count: board.files }) : t("against {base} · {count} source files changed", { base: board.base, count: board.files });
 
   if (stepped) {
     stepped = false;
@@ -78,7 +79,7 @@ function step(by: 1 | -1): void {
   // From a group that is gone: on to the first group, back to the board.
   const next = at === -1 ? (by === 1 && keys.length > 1 ? 1 : 0) : at + by;
 
-  if (next < 0 || next >= keys.length) return notice(by === 1 ? "the last group of the walk" : "the whole board: the walk starts here");
+  if (next < 0 || next >= keys.length) return notice(by === 1 ? t("the last group of the walk") : t("the whole board: the walk starts here"));
   open(keys[next]!);
 }
 

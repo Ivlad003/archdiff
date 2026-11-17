@@ -13,6 +13,12 @@
 // widen and give way to the canvas is layout.ts's; an editor that hosts
 // the page is told the place of the code shown (host.ts) and opens it.
 //
+// Code is shown in the colours of its language (highlight.ts), under a
+// line that names the file and stays while the code scrolls. A file being
+// read says so in that line at once, the code before it dimmed in its
+// place, and the Code tab comes to the front at the press, not when the
+// answer lands: nothing jumps a moment later.
+//
 // Entry points: `showTab`, `renderMarkdown`, `setMarkdown`, `showCode`,
 // `showCodeAt`, `renderCode`, `CodeSpot`, `copyText`, `setPicturePage`,
 // `showPicturePage`, `picturePageMarkdown`, `markdownPanel`, `loadCoverage`.
@@ -20,10 +26,13 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { api, type Shape } from "./api.ts";
+import { loading } from "./busy.ts";
 import { transcript } from "./chat.ts";
-import { element, remember, rememberList, remembered, rememberedList } from "./dom.ts";
+import { element, h, remember, rememberList, remembered, rememberedList } from "./dom.ts";
 import { flowText } from "./flow-tab.ts";
+import { highlightBlock, highlightedLines, languageOf } from "./highlight.ts";
 import { hosted, tellHost } from "./host.ts";
+import { t } from "./i18n.ts";
 import { revealDetails } from "./layout.ts";
 import { codeHead, currentLink, refsOf, setLink, showsChange } from "./link.ts";
 import { fnView, functionsOf, isFilePath } from "./modules.ts";
@@ -87,7 +96,7 @@ function linkNames(target: HTMLElement): void {
 
     if (!isFilePath(name) || !keys.has(`module:${moduleOfId(name)}`)) continue;
     strong.classList.add("link");
-    strong.title = name.includes("#") ? "Open the function's view" : "Open the module's view";
+    strong.title = name.includes("#") ? t("Open the function's view") : t("Open the module's view");
     strong.addEventListener("click", () => setLink({ ...currentLink(), view: name.includes("#") ? fnView(name, keys) : `module:${name}` }));
   }
 }
@@ -106,7 +115,7 @@ function unfoldModules(target: HTMLElement): void {
     const caret = document.createElement("span");
     caret.className = "fold";
     caret.textContent = "▸";
-    caret.title = "The module's functions";
+    caret.title = t("The module's functions");
     item.prepend(caret);
     let list: HTMLUListElement | null = null;
     caret.addEventListener("click", () => {
@@ -119,12 +128,12 @@ function unfoldModules(target: HTMLElement): void {
 
       list = document.createElement("ul");
       list.className = "fns";
-      list.append(Object.assign(document.createElement("li"), { className: "muted", textContent: "loading…" }));
+      list.append(Object.assign(document.createElement("li"), { className: "muted", textContent: t("loading…") }));
       item.append(list);
       caret.textContent = "▾";
       void functionsOf(path).catch(() => null).then((functions) => {
         if (functions === null) {
-          list!.replaceChildren(Object.assign(document.createElement("li"), { className: "muted", textContent: "could not read its functions" }));
+          list!.replaceChildren(Object.assign(document.createElement("li"), { className: "muted", textContent: t("could not read its functions") }));
 
           return;
         }
@@ -133,12 +142,12 @@ function unfoldModules(target: HTMLElement): void {
           const name = document.createElement("strong");
           name.className = "link";
           name.textContent = fn.name;
-          name.title = "Open the function's view";
+          name.title = t("Open the function's view");
           name.addEventListener("click", () => setLink({ ...currentLink(), view: fnView(fn.id, keys) }));
           const at = document.createElement("code");
           at.className = "link";
           at.textContent = `${path}:${fn.line}`;
-          at.title = "Show the code";
+          at.title = t("Show the code");
           at.addEventListener("click", () => void showCodeAt({ file: path, line: fn.line, mark: true }));
           const row = document.createElement("li");
           row.append(name, " — ", at);
@@ -146,7 +155,7 @@ function unfoldModules(target: HTMLElement): void {
           return row;
         }));
 
-        if (functions.length === 0) list!.append(Object.assign(document.createElement("li"), { className: "muted", textContent: "no function of its own" }));
+        if (functions.length === 0) list!.append(Object.assign(document.createElement("li"), { className: "muted", textContent: t("no function of its own") }));
       });
     });
   }
@@ -156,6 +165,11 @@ export function showTab(name: string): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>("#tabs button")) button.classList.toggle("active", button.dataset["tab"] === name);
 
   for (const panel of document.querySelectorAll<HTMLElement>(".panel")) panel.classList.toggle("active", panel.id === name);
+
+  // A place shown while the Code tab was behind another is scrolled to now that the tab is in sight.
+  if (name === "code" && toReveal?.isConnected) toReveal.scrollIntoView({ block: "center" });
+
+  if (name === "code") toReveal = null;
 }
 
 for (const button of document.querySelectorAll<HTMLButtonElement>("#tabs button")) {
@@ -214,8 +228,8 @@ element<HTMLButtonElement>("copy").addEventListener("click", () => {
   const text = activeText();
 
   void copyText(text).then((done) => {
-    button.textContent = done ? `copied ${text.length > 999 ? `${Math.round(text.length / 1000)}k` : text.length}` : "copy failed";
-    setTimeout(() => (button.textContent = "copy"), 1500);
+    button.textContent = done ? t("copied {size}", { size: text.length > 999 ? `${Math.round(text.length / 1000)}k` : text.length }) : t("copy failed");
+    setTimeout(() => (button.textContent = t("copy")), 1500);
   });
 });
 
@@ -242,7 +256,7 @@ export function renderMarkdown(target: HTMLElement, markdown: string, navigation
     const pre = code.parentElement!;
     const details = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "Mermaid source";
+    summary.textContent = t("Mermaid source");
     details.append(summary);
     pre.replaceWith(details);
     details.append(pre);
@@ -253,6 +267,9 @@ export function renderMarkdown(target: HTMLElement, markdown: string, navigation
     code.parentElement!.classList.add("diff");
     code.replaceChildren(...(code.textContent ?? "").split("\n").map((line) => Object.assign(document.createElement("span"), { className: line.startsWith("@@") ? "hunk" : /^(\+\+\+|---|index )/.test(line) ? "file" : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "same", textContent: `${line}\n` })));
   }
+
+  // Code of a language the block names is read in that language's colours.
+  for (const code of target.querySelectorAll<HTMLElement>("pre > code[class*='language-']:not(.language-mermaid):not(.language-diff)")) highlightBlock(code);
 
   // A picture's page as a navigation: folding sections, names that open views, bullets that unfold a module's functions.
   if (navigation) {
@@ -269,7 +286,7 @@ export function renderMarkdown(target: HTMLElement, markdown: string, navigation
 
     if (match && isSourceFile(match[1]!) && page.nodes().size > 0) {
       code.classList.add("link");
-      code.title = "Show the code";
+      code.title = t("Show the code");
       code.addEventListener("click", () => void showCode({ id: text, kind: "module", label: text, ref: { file: match[1]!, line: match[2] ? Number(match[2]) : 1 }, x: 0, y: 0, w: 0, h: 0 }));
     }
 
@@ -277,7 +294,7 @@ export function renderMarkdown(target: HTMLElement, markdown: string, navigation
     // changes laid over, so a function's flowchart comes with the marks of what the change did to it.
     if (!match && text.includes(":") && parseView(text)?.subject && page.nodes().size > 0) {
       code.classList.add("link");
-      code.title = "Open this view";
+      code.title = t("Open this view");
       code.addEventListener("click", () => {
         const link = currentLink();
         setLink({ ...link, view: text, changes: link.changes || showsChange(link) });
@@ -319,6 +336,8 @@ export function picturePageMarkdown(): string {
 
 /** The files each code element has asked for: only the newest one is drawn in it. */
 const codeLoads = new WeakMap<HTMLElement, number>();
+/** The line of the Code tab to scroll to once the tab is in sight: a place shown while another tab was in front. */
+let toReveal: HTMLElement | null = null;
 
 /** A place in the code to show: the file, the lines of it to mark (`mark`: a declaration's lines; a module shows whole). */
 export interface CodeSpot {
@@ -345,12 +364,18 @@ function spotOf(node: Shape): CodeSpot | null {
  * the first marked line comes back, for the caller to scroll to. A file asked for after this one draws instead: the
  * code of the spot asked last, however slow the first was. Null when the file could not be read: the element says so.
  * On a picture of a change the file wears the change: the lines that came are tinted, the lines that went stand where
- * they stood, struck out and without a number — the diff read in its place, not beside it.
+ * they stood, struck out and without a number — the diff read in its place, not beside it. While the file is read
+ * the element's first line names it as coming and the code it held stays, dimmed; the code is in its language's colours.
  */
 export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<HTMLElement | null> {
   const { file } = spot;
   const mine = (codeLoads.get(target) ?? 0) + 1;
   codeLoads.set(target, mine);
+  const from = spot.line ?? 1;
+  const place = `${file}${from > 1 ? `:${from}` : ""}`;
+  const head = target.querySelector<HTMLElement>(":scope > .code-head") ?? target.insertBefore(h("div", { class: "code-head muted" }), target.firstChild);
+  head.textContent = t("reading {place}…", { place });
+  loading(target, true);
 
   let text: string;
   const link = currentLink();
@@ -361,6 +386,7 @@ export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<H
     text = await api.file(file, codeHead(link));
   } catch (error) {
     if (mine !== codeLoads.get(target)) return null;
+    loading(target, false);
     target.textContent = error instanceof Error ? error.message : String(error);
     delete target.dataset["text"];
 
@@ -371,12 +397,13 @@ export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<H
 
   if (mine !== codeLoads.get(target)) return null;
 
-  const from = spot.line ?? 1;
+  loading(target, false);
   const to = spot.endLine ?? from;
   const mark = spot.mark === true;
   target.replaceChildren();
   target.dataset["text"] = text;
   const lines = text.split("\n");
+  const coloured = highlightedLines(text, languageOf(file));
   let first: HTMLElement | null = null;
   const came = new Set<number>();
   const went = new Map<number, string[]>();
@@ -407,7 +434,7 @@ export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<H
     const number = document.createElement("span");
     number.className = "n";
     number.textContent = String(i + 1);
-    line.append(number, lines[i] ?? "");
+    line.append(number, ...(coloured?.[i] ?? [lines[i] ?? ""]));
     target.append(line);
 
     if (i + 1 === from) first = line;
@@ -416,50 +443,65 @@ export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<H
   // Lines gone from the end of the file stand after its last line.
   for (const at of [...went.keys()].filter((key) => key > lines.length).sort((a, b) => a - b)) gone(at);
   const removed = [...went.values()].reduce((sum, each) => sum + each.length, 0);
-  const since = diff?.since ? ` — since ${diff.since}: ${came.size === 0 && removed === 0 ? "this file is as it was" : `+${came.size} −${removed} ${came.size + removed === 1 ? "line" : "lines"}`}` : "";
-  target.prepend(Object.assign(document.createElement("div"), { className: "muted", textContent: `${file}${from > 1 ? `:${from}` : ""}${since}` }));
+  const since = diff?.since ? ` — ${t("since {since}:", { since: diff.since })} ${came.size === 0 && removed === 0 ? t("this file is as it was") : came.size + removed === 1 ? t("+{added} −{removed} line", { added: came.size, removed }) : t("+{added} −{removed} lines", { added: came.size, removed })}` : "";
+  target.prepend(h("div", { class: "code-head muted" }, `${place}${since}`));
 
   return first;
 }
 
-/** The code of a shape on the Code tab: the file with the shape's lines marked and scrolled into view; a shape of no file empties the tab. */
-export async function showCode(node: Shape): Promise<void> {
+/**
+ * The code of a shape on the Code tab: the file with the shape's lines marked and scrolled into view; a shape of no
+ * file (a layer, a directory, a package) leaves the tab saying so. With `front` false the tab is filled where it is.
+ */
+export async function showCode(node: Shape, front = true): Promise<void> {
   const spot = spotOf(node);
 
   if (!spot) {
-    // Nothing to copy either: the last file's text would pass for this shape's.
-    codePanel.textContent = "";
+    // Nothing to copy either: the last file's text would pass for this shape's. A newer place asked for is not this one's.
+    codeLoads.set(codePanel, (codeLoads.get(codePanel) ?? 0) + 1);
+    loading(codePanel, false);
+    codePanel.replaceChildren(h("div", { class: "muted" }, t("{shape} stands for no single file: there is no code to show for it. Its page is on the Markdown tab.", { shape: node.label.split("\n")[0]! })));
     delete codePanel.dataset["text"];
+    toReveal = null;
 
     return;
   }
 
-  await showCodeAt(spot);
+  await showCodeAt(spot, front);
 }
 
 /** The places asked for on the Code tab so far: a host is told of the one asked for last. */
 let placesAsked = 0;
 
-/** The code of a spot on the Code tab, scrolled to its first marked line; an editor that hosts the page (host.ts) is told the place and opens it. */
-export async function showCodeAt(spot: CodeSpot): Promise<void> {
+/**
+ * The code of a spot on the Code tab, scrolled to its first marked line; an editor that hosts the page (host.ts) is
+ * told the place and opens it. The tab comes to the front at once, naming the file being read — not when the file
+ * lands, which on a big repository is a moment later and reads as a jump. With `front` false (a command of the Chat
+ * tab picked the shape) the tab is filled behind the one in front, and scrolls to the place when it is opened.
+ */
+export async function showCodeAt(spot: CodeSpot, front = true): Promise<void> {
   const mine = ++placesAsked;
-  const first = await renderCode(codePanel, spot);
 
-  // No file, or one that could not be read: the panel says so where it is, without coming to the front.
-  if (codePanel.dataset["text"] === undefined) return;
-
-  if (hosted) {
-    const head = codeHead(currentLink());
-
-    // The editor opens the place itself, and the tab holds the code without coming to the front. A place a newer one
-    // overtook while its file was read is not told: the editor would open it over the one asked for last.
-    if (mine === placesAsked) tellHost({ type: "archdiff:open", file: spot.file, line: spot.line ?? 1, ...(spot.endLine === undefined ? {} : { endLine: spot.endLine }), ...(head === null ? {} : { head }) });
-  } else {
+  // An editor that hosts the page opens the place itself: the tab holds the code without coming to the front.
+  if (front && !hosted) {
     showTab("code");
     revealDetails();
   }
 
-  first?.scrollIntoView({ block: "center" });
+  const first = await renderCode(codePanel, spot);
+
+  // A file that could not be read: the panel says so.
+  if (codePanel.dataset["text"] === undefined || mine !== placesAsked) return;
+
+  if (hosted) {
+    const head = codeHead(currentLink());
+
+    // A place a newer one overtook while its file was read is not told: the editor would open it over the one asked for last.
+    tellHost({ type: "archdiff:open", file: spot.file, line: spot.line ?? 1, ...(spot.endLine === undefined ? {} : { endLine: spot.endLine }), ...(head === null ? {} : { head }) });
+  }
+
+  if (codePanel.classList.contains("active")) first?.scrollIntoView({ block: "center" });
+  else toReveal = first;
 }
 
 /** The coverage report of the analysis: what it read, what it could not, and why. */

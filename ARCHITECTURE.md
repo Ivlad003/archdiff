@@ -20,6 +20,7 @@ flowchart LR
   subgraph n_page["page — the browser page (web/src), built by esbuild"]
     n_web_src_app_ts["web/src/app.ts<br>the page: the current picture, drawn again when the link or the code changes; the panels, the picking, the toolbar and the keys in modules beside it; reads only the types of the diagram"]
     n_web_src_project_map_ts["web/src/project-map.ts<br>the project map: the repository as dots laid out by forces"]
+    n_web_src_i18n_uk_ts["web/src/i18n-uk.ts<br>the page's words in Ukrainian, each under the English the page is written in"]
   end
   subgraph n_edge["edge — what a command reads from git and the files, and the processes it runs"]
     n_src_picture_ts["src/picture.ts<br>the picture of a view: what it reads at the edge, drawn, placed at the saved drawing, stamped, as Markdown"]
@@ -99,6 +100,7 @@ flowchart LR
     n_tests_extract_test_ts["tests/extract.test.ts<br>the language frontends on snippets"]
     n_tests_mcp_test_ts["tests/mcp.test.ts<br>the MCP server through its real stdin and stdout"]
     n_tests_pr_comment_test_ts["tests/pr-comment.test.ts<br>the body of the pull request's comment: a change, no change, a failing check, a report over the limit"]
+    n_tests_unit_test_ts["tests/unit.test.ts<br>the tables and the pure functions by themselves: the options, the keys of the views, the page's Ukrainian held to every text the modules say"]
   end
   subgraph n_scripts["scripts — build, pack, and the body of the action's comment"]
     n_scripts_build_web_mjs["scripts/build-web.mjs<br>bundles the page into dist/web"]
@@ -206,6 +208,7 @@ flowchart LR
   n_scripts_copy_wasm_mjs --> n_src_extract_grammars_ts
   n_tests_pr_comment_test_ts --> n_scripts_pr_comment_ts
   n_tests_pr_comment_test_ts --> n_src_diff_ts
+  n_tests_unit_test_ts --> n_web_src_i18n_uk_ts
   n_vscode_src_extension_ts --> n_vscode_src_command_ts
   n_vscode_src_extension_ts --> n_vscode_src_runner_ts
   n_vscode_src_extension_ts --> n_vscode_src_views_ts
@@ -214,6 +217,6 @@ flowchart LR
   n_vscode_src_runner_ts --> n_vscode_src_command_ts
 ```
 
-The page (`web/src`) imports the Node-free vocabularies of the core, bundled into it — the table of picture options (`src/options.ts`), the kinds of view with their keys (`src/view-keys.ts`) and what a shape stands for and opens (`src/shape-keys.ts`, which the Excalidraw export shares), the looks of the shapes and lines (`src/looks.ts`, which the exports draw by too), and through `view-keys.ts` whether a path is a source file (`src/languages.ts`) — and only types from `src/diagram.ts` and `src/scene.ts`, which erase at build time. Tests import whatever they test. `src/routes/context.ts` imports the `ServeOptions` type back from `server.ts`: a type, inside one layer.
+The page (`web/src`) imports the Node-free vocabularies of the core, bundled into it — the table of picture options (`src/options.ts`), the kinds of view with their keys (`src/view-keys.ts`) and what a shape stands for and opens (`src/shape-keys.ts`, which the Excalidraw export shares), the looks of the shapes and lines (`src/looks.ts`, which the exports draw by too), and through `view-keys.ts` whether a path is a source file (`src/languages.ts`), the languages the page speaks (`src/page-language.ts`, which the settings share) — and only types from `src/diagram.ts` and `src/scene.ts`, which erase at build time. Tests import whatever they test. `src/routes/context.ts` imports the `ServeOptions` type back from `server.ts`: a type, inside one layer.
 
 The VS Code extension (`vscode/`, a package of its own that is no part of the npm package) has no arrow to any other layer, and none may appear: it runs whichever archdiff the workspace has, as a process (`archdiff web`, `archdiff check --json`), and reads what that prints and serves — never this repository's modules. What it relies on is the command line, the answer of `GET /api/diagram` and the page's message to its host (`web/src/host.ts`), which its tests run against the archdiff around them.

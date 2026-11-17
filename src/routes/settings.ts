@@ -1,5 +1,6 @@
 // The routes of the user's settings: the agents as this computer has them
-// and as the settings place them, and the keys the agents run with. The
+// and as the settings place them, the keys the agents run with, and the
+// language the page speaks. The
 // settings hold keys and name programs to start, so they are read and
 // changed from this computer alone, however the server is bound; a key's
 // value goes in and never comes back — the page is told that a key is
@@ -36,6 +37,7 @@ function shown(ctx: RouteContext, settings: Settings, broken: string | null): un
   return {
     file: settingsPath(),
     problem: broken,
+    language: settings.language ?? "en",
     agents: ctx.agents().map(({ spec, installed, path, problem: why }) => {
       const builtIn = isAgentName(spec.name);
       const choice = builtIn ? (settings.agents[spec.name as keyof Settings["agents"]] ?? {}) : {};

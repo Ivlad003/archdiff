@@ -217,3 +217,48 @@ Feature: The page
     When I type "/select routes nowhere"
     Then routes is picked and the transcript says no shape is named nowhere
     And the Chat tab is still in front once the page of routes is filled
+
+  Scenario: The heads of a review are a list to search
+    Given a repository with forty-two branches, twenty of them on the remote alone, and the page open on "review"
+    Then the bar holds the chip of the working tree and the list of the heads is folded away
+    When I open "branches" and type "count orders", the words of one branch's last commit
+    Then the list holds that branch alone and says "1 of 43 heads · 1 ticked"
+    When I press Enter
+    Then the branch is ticked and its chip joins the bar
+    When I press the chip of the working tree and then "compare"
+    Then the review of the branch is drawn and the list is folded away
+
+  Scenario: The Code tab comes at the press, in the colours of the code
+    Given the page open on the module "src/lib/orders.ts", the server holding its file back
+    When I tap the module's shape
+    Then the Code tab is in front and reads "reading src/lib/orders.ts…", and a bar runs under the header
+    When the file lands
+    Then the tab names "src/lib/orders.ts" over its code, with "export", "function" and "return" marked as keywords
+    And the lines joined are the file's own text
+    When I tap the layer "lib" on the layers
+    Then its page is in front and the Code tab says the layer stands for no single file
+
+  Scenario: A hint says what a button or a tab is for
+    Given the page open on "layers"
+    When the pointer rests on "fit"
+    Then a bubble under the button reads "Fit the diagram to the window (0)", inside the window
+    And the button has no title of its own while the bubble shows
+    When the pointer rests on the Coverage tab
+    Then the bubble says what the analysis read and what it could not, and "fit" has its title back
+    When I press the mouse
+    Then the bubble is gone
+
+  Scenario: The header takes a second row in a narrow window
+    Given the page open on "layers" in a window 1900 pixels wide
+    When the window is 820 pixels wide
+    Then the header has more than one row and no control of it is beyond the window's edge
+
+  Scenario: The page speaks the language of the user's settings
+    Given the settings hold the language "uk" and the page is open on "layers"
+    Then "fit" reads "вмістити", its hint is in Ukrainian, and the page of the layers is headed "Layers"
+    When I walk the tree, the tabs, the menus, a review, the chat's commands and the settings window
+    Then the page left no text of its own untranslated
+    When I pick "English" in the settings window
+    Then the page is drawn again in English at the same link, and the settings file holds no language
+    When I pick "Українська"
+    Then the page is in Ukrainian again and the settings file holds the language "uk"

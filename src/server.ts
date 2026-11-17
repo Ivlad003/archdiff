@@ -33,7 +33,7 @@ import { routes as gitRoutes } from "./routes/git.ts";
 import { routes as specRoutes } from "./routes/spec.ts";
 import { routes as settingsRoutes } from "./routes/settings.ts";
 import { routes as toursRoutes } from "./routes/tours.ts";
-import { agentSpecs, NO_SETTINGS, readSettings } from "./settings.ts";
+import { agentSpecs, NO_SETTINGS, pageLanguage, readSettings } from "./settings.ts";
 
 export interface ServeOptions {
   /** The port to bind; null: the first free port from DEFAULT_PORT up. */
@@ -317,6 +317,14 @@ function sendStatic(web: string, path: string, response: ServerResponse): void {
   const extension = file.slice(file.lastIndexOf("."));
 
   if (!full.startsWith(web) || !existsSync(full) || !(extension in STATIC_TYPES)) return problem(response, 404, "not found");
+
+  if (file === "index.html") {
+    // The page is served in the language the user's settings name: it knows it before it draws a word.
+    const language = pageLanguage();
+    const page = readFileSync(full, "utf8");
+
+    return send(response, 200, STATIC_TYPES[extension]!, language === "en" ? page : page.replace('<html lang="en">', `<html lang="${language}">`));
+  }
 
   return send(response, 200, STATIC_TYPES[extension]!, readFileSync(full));
 }

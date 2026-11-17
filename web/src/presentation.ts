@@ -12,6 +12,7 @@
 
 import type { Diagram } from "./api.ts";
 import { element } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { currentLink, presentationOf, type Link, type Presentation } from "./link.ts";
 import { page } from "./page.ts";
 import { picturePageMarkdown, renderCode, renderMarkdown, type CodeSpot } from "./panel.ts";
@@ -30,7 +31,7 @@ async function loadThree(box: HTMLElement): Promise<ThreeModule | null> {
   try {
     three = await import("./three-view.ts");
   } catch (error) {
-    box.replaceChildren(Object.assign(document.createElement("div"), { className: "note", textContent: `3D could not be loaded: ${error instanceof Error ? error.message : String(error)}` }));
+    box.replaceChildren(Object.assign(document.createElement("div"), { className: "note", textContent: t("3D could not be loaded: {error}", { error: error instanceof Error ? error.message : String(error) }) }));
   }
 
   return three;
@@ -104,7 +105,7 @@ export async function applyPresentation(state: Link, diagram: Diagram | null): P
 
   if (!node) {
     note.hidden = false;
-    note.textContent = "This view has no file of its own, so its page is shown instead. Double-tap a shape on the canvas or in 3D for its own view, then show that as code.";
+    note.textContent = t("This view has no file of its own, so its page is shown instead. Double-tap a shape on the canvas or in 3D for its own view, then show that as code.");
     body.hidden = false;
     renderMarkdown(body, picturePageMarkdown(), true);
 

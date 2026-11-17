@@ -15,7 +15,8 @@ export async function withTempDir(prefix: string, body: (dir: string) => void | 
   try {
     await body(dir);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    // A server just stopped may have a git of its own still ending in the directory: Windows refuses the removal for a moment.
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 

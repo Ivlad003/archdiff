@@ -17,6 +17,7 @@
 import { api, type Tour, type TourStep } from "./api.ts";
 import { leaveEdit } from "./canvas.ts";
 import { element, h } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { currentLink, setLink, stepHash, type Link } from "./link.ts";
 import { page } from "./page.ts";
 import { copyText } from "./panel.ts";
@@ -103,9 +104,9 @@ export function showTourBar(link: Link): void {
   const count = tour?.steps.length ?? 0;
   const shown = tour?.steps[link.step - 1] ?? null;
   element("tour-title").textContent = tour?.title ?? link.tour;
-  steps.replaceChildren(...(count === 0 ? [new Option("no steps yet", "0")] : (tour?.steps ?? []).map((each, i) => new Option(`${i + 1} of ${count}${firstLine(each.note) ? ` · ${firstLine(each.note)}` : ""}`, String(i + 1)))));
+  steps.replaceChildren(...(count === 0 ? [new Option(t("no steps yet"), "0")] : (tour?.steps ?? []).map((each, i) => new Option(`${t("{n} of {count}", { n: i + 1, count })}${firstLine(each.note) ? ` · ${firstLine(each.note)}` : ""}`, String(i + 1)))));
 
-  if (count > 0 && !shown) steps.prepend(new Option("pick a step", "0"));
+  if (count > 0 && !shown) steps.prepend(new Option(t("pick a step"), "0"));
   steps.value = shown ? String(link.step) : "0";
   steps.disabled = count === 0;
   element<HTMLButtonElement>("tour-prev").disabled = !shown || link.step <= 1;
@@ -114,7 +115,7 @@ export function showTourBar(link: Link): void {
   for (const id of ["tour-edit", "tour-remove", "tour-link"]) element<HTMLButtonElement>(id).disabled = !shown;
   noteBox.hidden = !shown || writing !== null;
 
-  if (shown) page.renderMarkdown(noteBox, shown.note.trim() === "" ? "_No note for this step._" : shown.note);
+  if (shown) page.renderMarkdown(noteBox, shown.note.trim() === "" ? t("_No note for this step._") : shown.note);
   showState(link);
 }
 
@@ -122,7 +123,7 @@ export function showTourBar(link: Link): void {
 function showState(link: Link): void {
   const count = tour?.steps.length ?? 0;
   const shown = tour?.steps[link.step - 1] ?? null;
-  state.textContent = count === 0 ? "recording: add step keeps the picture shown, its selection and a note" : !shown ? "" : stepHash(link) === shown.link ? "" : `away from step ${link.step}: ‹ › or the list lead back`;
+  state.textContent = count === 0 ? t("recording: add step keeps the picture shown, its selection and a note") : !shown ? "" : stepHash(link) === shown.link ? "" : t("away from step {step}: ‹ › or the list lead back", { step: link.step });
 }
 
 /** Once a picture is drawn: the shapes of a step just opened are selected, and the bar says whether the picture is the step's. */
@@ -165,7 +166,7 @@ function step(by: 1 | -1): void {
   // Off the tour's steps (a link that names none): on to the first.
   const next = link.step === 0 ? 1 : link.step + by;
 
-  if (next < 1 || next > tour.steps.length) return notice(by === 1 ? "the last step of the tour" : "the first step of the tour");
+  if (next < 1 || next > tour.steps.length) return notice(by === 1 ? t("the last step of the tour") : t("the first step of the tour"));
   open(next);
 }
 
@@ -175,7 +176,7 @@ function step(by: 1 | -1): void {
 function showEditor(what: "add" | "note" | null): void {
   writing = what;
   editor.hidden = what === null;
-  element<HTMLButtonElement>("tour-keep").textContent = what === "note" ? "keep the note" : "keep the step";
+  element<HTMLButtonElement>("tour-keep").textContent = what === "note" ? t("keep the note") : t("keep the step");
 
   if (what === null) return;
   noteBox.hidden = true;
@@ -223,7 +224,7 @@ async function keep(): Promise<void> {
   showEditor(null);
   // The new step is the one shown: its address, and its selection back once the picture is drawn again.
   entered = { name: link.tour, step: at + 1 };
-  notice(`step ${at + 1} of ${all.length} kept in the tour ${link.tour}`);
+  notice(t("step {step} of {count} kept in the tour {tour}", { step: at + 1, count: all.length, tour: link.tour }));
   setLink({ ...link, step: at + 1 });
 }
 
@@ -232,7 +233,7 @@ async function remove(): Promise<void> {
   const link = currentLink();
   const all = [...(tour?.steps ?? [])];
 
-  if (link.tour === null || !all[link.step - 1] || !confirm(`Take step ${link.step} out of the tour ${tour?.title ?? link.tour}?`)) return;
+  if (link.tour === null || !all[link.step - 1] || !confirm(t("Take step {step} out of the tour {tour}?", { step: link.step, tour: tour?.title ?? link.tour }))) return;
   all.splice(link.step - 1, 1);
 
   if (!(await save(link.tour, tour?.title ?? link.tour, all))) return;
@@ -259,7 +260,7 @@ element<HTMLButtonElement>("tour-link").addEventListener("click", () => {
   const link = currentLink();
 
   if (link.tour === null) return;
-  void copyText(`${location.origin}${location.pathname}#tour=${encodeURIComponent(link.tour)}&step=${link.step}`).then((done) => notice(done ? `the link to step ${link.step} is copied: tour=${link.tour}&step=${link.step}` : "the link could not be copied"));
+  void copyText(`${location.origin}${location.pathname}#tour=${encodeURIComponent(link.tour)}&step=${link.step}`).then((done) => notice(done ? `${t("the link to step {step} is copied:", { step: link.step })} tour=${link.tour}&step=${link.step}` : t("the link could not be copied")));
 });
 // Leaving the tour keeps the picture: the link says the same without the tour.
 element<HTMLButtonElement>("tour-end").addEventListener("click", () => {
@@ -271,7 +272,7 @@ element("tour-title").addEventListener("click", () => {
   const link = currentLink();
 
   if (link.tour === null || !tour) return;
-  const title = prompt("The title of the tour", tour.title);
+  const title = prompt(t("The title of the tour"), tour.title);
 
   if (title !== null && title.trim() !== "") void save(link.tour, title.trim(), tour.steps).then(() => showTourBar(currentLink()));
 });
@@ -302,15 +303,15 @@ async function listTours(): Promise<void> {
         h(
           "div",
           { class: "row" },
-          h("button", { class: "play", title: `Play the tour from its first step (${each.name})`, dataset: { tour: each.name }, on: { click: () => play(each.name, each.steps) } }, `▶ ${each.title} · ${each.steps} ${each.steps === 1 ? "step" : "steps"}`),
+          h("button", { class: "play", title: t("Play the tour from its first step ({name})", { name: each.name }), dataset: { tour: each.name }, on: { click: () => play(each.name, each.steps) } }, `▶ ${each.title} · ${each.steps === 1 ? t("{count} step", { count: each.steps }) : t("{count} steps", { count: each.steps })}`),
           h(
             "button",
             {
               class: "icon",
-              title: "Remove the tour: its file is deleted",
+              title: t("Remove the tour: its file is deleted"),
               on: {
                 click: () => {
-                  if (confirm(`Remove the tour ${each.title}? Its file ${directory}/${each.name}.json is deleted.`)) void api.removeTour(each.name).then(() => listTours());
+                  if (confirm(t("Remove the tour {title}? Its file {directory}/{name}.json is deleted.", { title: each.title, directory, name: each.name }))) void api.removeTour(each.name).then(() => listTours());
                 },
               },
             },
@@ -319,7 +320,7 @@ async function listTours(): Promise<void> {
         ),
       ),
     );
-    note.textContent = tours.length === 0 ? `no tours yet in ${directory}/` : `kept in ${directory}/`;
+    note.textContent = tours.length === 0 ? t("no tours yet in {directory}/", { directory }) : t("kept in {directory}/", { directory });
   } catch (error) {
     list.replaceChildren();
     note.textContent = error instanceof Error ? error.message : String(error);
@@ -332,7 +333,7 @@ async function record(): Promise<void> {
   const name = field.value.trim();
 
   if (!NAME.test(name)) {
-    element("tours-note").textContent = "a name of letters, digits, . - _ (it is the file's name)";
+    element("tours-note").textContent = t("a name of letters, digits, . - _ (it is the file's name)");
 
     return;
   }

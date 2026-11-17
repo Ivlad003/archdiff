@@ -11,6 +11,7 @@
 
 import { findShapes } from "./chains.ts";
 import { element } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { clearNotice, notice } from "./title.ts";
 import { OVERVIEWS, PRESENTATIONS, currentLink, detailPresets, presentationOf, setLink, type Detail, type Link, type Presentation } from "./link.ts";
 import { updateMinimap, toggleMinimap } from "./minimap.ts";
@@ -66,14 +67,14 @@ export function renderCanvasTools(state: Link): void {
 
   if (siblings.length > 0) {
     const group = document.createElement("optgroup");
-    group.label = "this subject";
+    group.label = t("this subject");
 
     for (const sibling of siblings) group.append(new Option(sibling.label, sibling.key, false, sibling.key === state.view));
     picture.append(group);
   }
 
   const overview = document.createElement("optgroup");
-  overview.label = "overview";
+  overview.label = t("overview");
 
   for (const [key, label] of OVERVIEWS) overview.append(new Option(label, key, false, key === state.view));
   picture.append(overview);
@@ -90,13 +91,13 @@ export function renderCanvasTools(state: Link): void {
   for (const id of ["depth-less", "depth-more"]) {
     const button = element<HTMLButtonElement>(id);
     button.disabled = !stepped;
-    button.title = stepped ? "One step less or more from the subject (no ceiling: past 12 the picture warns)" : "This view does not go a depth from a subject";
+    button.title = stepped ? t("One step less or more from the subject (no ceiling: past 12 the picture warns)") : t("This view does not go a depth from a subject");
   }
 
   element<HTMLButtonElement>("tool-mix").classList.toggle("active", tools.mix);
   element<HTMLButtonElement>("tool-dim").classList.toggle("active", tools.dim);
   element<HTMLButtonElement>("mix-clear").hidden = state.expand.length === 0;
-  element<HTMLButtonElement>("mix-clear").textContent = `close opened (${state.expand.length})`;
+  element<HTMLButtonElement>("mix-clear").textContent = t("close opened ({count})", { count: state.expand.length });
   element<HTMLButtonElement>("tool-split").classList.toggle("active", document.body.classList.contains("split"));
   element<HTMLButtonElement>("tool-project").classList.toggle("active", projectMapOpen());
   renderLanes(state);
@@ -126,7 +127,7 @@ export function toggleTool(name: "mix" | "dim"): void {
   renderCanvasTools(currentLink());
 
   if (!tools[name]) clearNotice();
-  else notice(name === "mix" ? "mix: tap a module to open it in place; tap its rest shape to close it" : "dim: tap a shape to dim all but its neighbours; tap nothing to clear");
+  else notice(name === "mix" ? t("mix: tap a module to open it in place; tap its rest shape to close it") : t("dim: tap a shape to dim all but its neighbours; tap nothing to clear"));
 }
 
 /** Opens or closes the second picture beside the canvas: the same page, embedded, starting from the current link. Needs the canvas. */
@@ -201,7 +202,7 @@ findInput.addEventListener("input", () => {
   page.canvas()?.highlight(findInput.value.trim() === "" ? selection() : hits.slice(0, 20).map((node) => node.id));
 
   if (findInput.value.trim() === "") clearNotice();
-  else notice(`${hits.length} ${hits.length === 1 ? "shape matches" : "shapes match"}`);
+  else notice(hits.length === 1 ? t("{count} shape matches", { count: hits.length }) : t("{count} shapes match", { count: hits.length }));
 });
 findInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
@@ -216,7 +217,7 @@ findInput.addEventListener("keydown", (event) => {
       const entry = subjects.find((candidate) => candidate.key.slice(candidate.key.indexOf(":") + 1).toLowerCase() === needle) ?? subjects.find((candidate) => candidate.key.toLowerCase().includes(needle));
 
       if (entry) {
-        notice(`not in this picture: opening ${entry.key}`);
+        notice(t("not in this picture: opening {view}", { view: entry.key }));
         setLink({ ...currentLink(), view: entry.key });
       }
     }

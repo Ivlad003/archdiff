@@ -12,6 +12,14 @@ import { pictureQueryText, type PictureOptions } from "../../src/options.ts";
 export type { ViewEntry } from "../../src/view-keys.ts";
 import type { Board } from "../../src/diagram.ts";
 import type { ViewEntry } from "../../src/view-keys.ts";
+import type { PageLanguage } from "../../src/page-language.ts";
+import { waitingOn } from "./busy.ts";
+import { t } from "./i18n.ts";
+
+/** A request to the server: the bar under the header runs while it waits (busy.ts). */
+function request(input: string, init?: RequestInit): Promise<Response> {
+  return waitingOn(fetch(input, init));
+}
 
 export interface ViewsResponse {
   root: string;
@@ -33,7 +41,7 @@ export interface ViewsResponse {
 
 /** A JSON POST to the server; an `error` in the answer or a failed status throws its text. */
 async function post<T>(path: string, payload: unknown): Promise<T> {
-  const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+  const response = await request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
   const body = (await response.json()) as T | { error: string };
 
   if (!response.ok || (typeof body === "object" && body !== null && "error" in body)) throw new Error(typeof body === "object" && body !== null && "error" in body ? String(body.error) : response.statusText);
@@ -43,7 +51,7 @@ async function post<T>(path: string, payload: unknown): Promise<T> {
 
 /** A JSON GET from the server; a failed status throws the `error` of the answer. */
 async function get<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  const response = await request(url);
   const body = (await response.json()) as T | { error: string };
 
   if (!response.ok) throw new Error(typeof body === "object" && body && "error" in body ? body.error : response.statusText);
@@ -170,6 +178,8 @@ export interface SettingsAgent {
 /** The user's settings as the server shows them: never a key's value, only that it is set and its last characters. */
 export interface SettingsView {
   file: string;
+  /** The language the page speaks. */
+  language: PageLanguage;
   /** Why the file does not read as settings (written by hand, broken); null when it does. */
   problem: string | null;
   agents: SettingsAgent[];
@@ -182,7 +192,7 @@ export const api = {
   tags: (q: string) => get<{ tags: { tag: string; title: string }[] }>(`/api/tags?q=${encodeURIComponent(q)}`),
   /** The context of the tags in `text`; `query` is the picture's options, for `@view:` (the picture as the page shows it). */
   expand: async (text: string, query = ""): Promise<string> => {
-    const response = await fetch("/api/expand", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, query }) });
+    const response = await request("/api/expand", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, query }) });
     const body = (await response.json()) as { context: string } | { error: string };
 
     if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : response.statusText);
@@ -190,7 +200,7 @@ export const api = {
     return body.context;
   },
   mocks: async (view: string, description: string, agent: string | null): Promise<{ source: string; note?: string; input: Record<string, unknown>; storages: Record<string, unknown> }> => {
-    const response = await fetch("/api/flow/mocks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, description, agent }) });
+    const response = await request("/api/flow/mocks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, description, agent }) });
     const body = (await response.json()) as { source: string; note?: string; input: Record<string, unknown>; storages: Record<string, unknown> } | { error: string };
 
     if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : response.statusText);
@@ -228,20 +238,20 @@ export const api = {
   /** The user's settings: the agents of this computer and the keys; refused when asked from another computer. */
   settings: () => get<SettingsView>("/api/settings"),
   /** Changes the settings: `agents` and `custom` replace what was there, each of `keys` is set (a string) or forgotten (null); the settings after it. */
-  changeSettings: (change: { agents?: Record<string, { command: string; model: string; openrouter: boolean }>; custom?: { name: string; command: string[]; protocol: string; resume: string | null }[]; keys?: Record<string, string | null> }) => post<SettingsView>("/api/settings", change),
+  changeSettings: (change: { agents?: Record<string, { command: string; model: string; openrouter: boolean }>; custom?: { name: string; command: string[]; protocol: string; resume: string | null }[]; keys?: Record<string, string | null>; language?: PageLanguage }) => post<SettingsView>("/api/settings", change),
   /** The agents the Chat tab may offer, whether each is installed here, and the one picked first. */
   agents: () => get<{ agents: { name: string; label: string; installed: boolean }[]; default: string | null }>("/api/agents"),
   check: () => get<{ exists: boolean; ok: boolean; markdown: string }>("/api/check"),
   plan: (view: string) => get<{ markdown: string; drawn: boolean; plan: { added: unknown[]; edges: unknown[]; removed: unknown[]; notes: string[] } }>(`/api/plan?view=${encodeURIComponent(view)}`),
   runAgent: async (view: string, prompt: string, resume: string | null, agent: string | null): Promise<{ id: string; agent: string; task: string }> => {
-    const response = await fetch("/api/agent/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, prompt, resume, agent }) });
+    const response = await request("/api/agent/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view, prompt, resume, agent }) });
     const body = (await response.json()) as { id: string; agent: string; task: string } | { error: string };
 
     if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : response.statusText);
 
     return body;
   },
-  stopAgent: (id: string) => fetch(`/api/agent/stop?id=${encodeURIComponent(id)}`, { method: "POST" }),
+  stopAgent: (id: string) => request(`/api/agent/stop?id=${encodeURIComponent(id)}`, { method: "POST" }),
   /** The contract and the checks of archdiff.json, run now; the events as the transcript shows them. */
   runChecks: () => post<{ results: { command: string; ok: boolean; output: string }[]; events: { kind: string; text: string }[] }>("/api/checks", {}),
   /** Streams the events of a run; returns the closer. */
@@ -269,7 +279,7 @@ export const api = {
   /** The picture of a view with the link's options and refs: the canvas's scene, the diagram, its Markdown, what a review found. */
   scene: (view: string, options: PictureOptions, refs: Refs) => get<SceneResponse>(`/api/scene?view=${encodeURIComponent(view)}${pictureQueryText(options)}${refsQuery(refs)}`),
   saveDrawing: async (view: string, elements: unknown[], mocks: unknown[]): Promise<{ saved: string }> => {
-    const response = await fetch(`/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
+    const response = await request(`/api/drawing?view=${encodeURIComponent(view)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ elements, mocks }) });
     const body = (await response.json()) as { saved: string } | { error: string };
 
     if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : response.statusText);
@@ -297,9 +307,9 @@ export const api = {
   shape: (view: string, id: string, options: PictureOptions, refs: Refs) => get<{ markdown: string }>(`/api/shape?view=${encodeURIComponent(view)}&id=${encodeURIComponent(id)}${pictureQueryText(options)}${refsQuery(refs)}`),
   /** A file of the code at `head` (null: the working tree's). */
   file: async (path: string, head: string | null = null): Promise<string> => {
-    const response = await fetch(`/api/file?path=${encodeURIComponent(path)}${headQuery("&", head)}`);
+    const response = await request(`/api/file?path=${encodeURIComponent(path)}${headQuery("&", head)}`);
 
-    if (!response.ok) throw new Error(`cannot read ${path}`);
+    if (!response.ok) throw new Error(t("cannot read {path}", { path }));
 
     return response.text();
   },

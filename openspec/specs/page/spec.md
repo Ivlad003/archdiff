@@ -357,7 +357,7 @@ The system SHALL remember in the browser, and only there, the zoom and place of 
 
 ### Requirement: The settings window
 
-The system SHALL open, from *agents & keys…* beside the Chat tab's picker, a window over the page with the user's settings and the file they are kept in: every agent with the program started for it or why it cannot run; for a built-in agent a field for its program and one for its model, and for Claude Code a box *through OpenRouter*; an agent of the user's own added by a name, a command typed as one line (a word with spaces in double quotes), the protocol and the resume flag, and removed by a button; the keys by name with their last characters, a key set by its name and value and forgotten by a button. Every change SHALL be sent at once and the window drawn again from the answer, the field in use keeping the focus; what is refused SHALL be said in the window with nothing changed, and the picker SHALL read the agents again after a change. A key's value SHALL leave its field once it is kept and SHALL appear nowhere on the page. While the window is open the keys of the page SHALL not act; Escape, ✕ and a press beside the window SHALL close it.
+The system SHALL open, from the ⚙ of the header and from *agents & keys…* beside the Chat tab's picker, a window over the page with the user's settings and the file they are kept in: the language of the page; every agent with the program started for it or why it cannot run; for a built-in agent a field for its program and one for its model, and for Claude Code a box *through OpenRouter*; an agent of the user's own added by a name, a command typed as one line (a word with spaces in double quotes), the protocol and the resume flag, and removed by a button; the keys by name with their last characters, a key set by its name and value and forgotten by a button. Every change SHALL be sent at once and the window drawn again from the answer, the field in use keeping the focus; what is refused SHALL be said in the window with nothing changed, and the picker SHALL read the agents again after a change. A key's value SHALL leave its field once it is kept and SHALL appear nowhere on the page. While the window is open the keys of the page SHALL not act; Escape, ✕ and a press beside the window SHALL close it.
 
 #### Scenario: An agent of the user's own
 
@@ -373,6 +373,81 @@ The system SHALL open, from *agents & keys…* beside the Chat tab's picker, a w
 
 - **WHEN** the window is open and the reader presses "f"
 - **THEN** the panels stay as they are, and Escape closes the window
+
+#### Scenario: The window opens at the press
+
+- **WHEN** the reader presses the ⚙ of the header while the server is still looking for the agents' programs
+- **THEN** the window is open at once, what it holds dimmed, and is filled when the answer lands
+
+### Requirement: The page speaks the reader's language
+
+The system SHALL speak English or Ukrainian. The language SHALL be one of the user's settings (`language`, kept only when it is not English), chosen in the settings window from the languages under their own names, and the server SHALL serve the page in it (`<html lang>`), so the page draws its first word in it; a change SHALL draw the page again at the same link. The page's own words SHALL be translated — what index.html holds, what the modules say, the answers and the help of the chat's commands, the groups of the views list, the editor's interface — and what archdiff writes about the code (a picture's page, the names on the canvas, the titles of the views) SHALL stay as the command line prints it. A text without a translation SHALL show in English.
+
+#### Scenario: Ukrainian from the first word
+
+- **WHEN** the settings hold `"language": "uk"` and the reader opens the page
+- **THEN** the *fit* button reads "вмістити" with its hint in Ukrainian, the page of the layers is still headed "Layers", and after a walk through the tabs, the menus, a review and the settings no text of the page's own was left untranslated
+
+#### Scenario: The language is changed in the settings window
+
+- **WHEN** the reader picks "English" in the window of a page in Ukrainian
+- **THEN** the page is drawn again in English at the same link, and the settings file holds no language
+
+### Requirement: Hints say what a control is for
+
+The system SHALL show what a button, a tab or a mark is for — its `title` — in a bubble beside it a moment after the pointer rests on it or the keyboard comes to it, at once when a hint was showing just before, placed inside the window; while the bubble shows, the element's `title` SHALL be put aside, so the browser's own tooltip does not show over it, and come back as the bubble goes. A press, a key or a scroll SHALL send the bubble away. Every tab and every control of the page SHALL have a hint, and the dot of a file of the picture SHALL say what it marks.
+
+#### Scenario: A hint under a button
+
+- **WHEN** the pointer rests on *fit*
+- **THEN** a bubble under the button reads "Fit the diagram to the window (0)", inside the window, and the button has no `title` until the bubble goes
+
+#### Scenario: The dot says what it is
+
+- **WHEN** the tree lists the files of the picture
+- **THEN** the dot of each says "● this file is in the picture on the canvas now", and an entry of the lists says it after its title and its key
+
+### Requirement: The Code tab comes at the press, in the colours of the code
+
+The system SHALL, on a tap on a shape, bring to the front at once the tab the pick is read on — the Code tab for a shape of a file, the Markdown tab for a shape of none or in an editor that hosts the page — and read the shape's page and its file side by side; a tab being read SHALL keep what it held, dimmed, and the Code tab SHALL name the file being read in a line that stays at its top while the code scrolls. The code SHALL be shown in the colours of its language (by the file's extension; a language the page has no colours for, or a very long file, stays plain), the text of every line and what is copied being the file's own. A shape of no single file SHALL say so on the Code tab. While the page waits on the server for longer than a blink, a bar SHALL run under the header. A page or a file that lands after a newer pick SHALL be dropped. The strip of a shape's neighbours SHALL keep to two rows.
+
+#### Scenario: A file that is slow to come
+
+- **WHEN** the reader taps the shape of `src/lib/orders.ts` and the server holds its file back
+- **THEN** the Code tab is in front and reads "reading src/lib/orders.ts…", the bar under the header runs, and when the file lands the line reads "src/lib/orders.ts" with nothing else moved
+
+#### Scenario: The colours of the language
+
+- **WHEN** the file is shown
+- **THEN** `export`, `function` and `return` are marked as keywords, and the lines joined are the file's text
+
+#### Scenario: A shape of no file
+
+- **WHEN** the reader taps the layer `lib`
+- **THEN** its page is in front on the Markdown tab, and the Code tab says the layer stands for no single file
+
+### Requirement: The heads of a review are a list to search
+
+The system SHALL show the heads of the branch bar as a list under a button: the working tree first, then every branch as a row with its name, whether it is a remote one or the one checked out, and the day and the subject of its last commit. Typing in the list's field SHALL leave the rows that hold every word typed in the name or the subject, Enter SHALL tick the first row left, Escape SHALL clear the field, and a count SHALL say how many rows are left and how many are ticked. The ticked heads SHALL stand in the bar as chips, a press on one unticking it. The base SHALL be picked among the local and the remote branches, each under its heading. A remote's own HEAD SHALL not be listed as a branch.
+
+#### Scenario: One branch among forty
+
+- **WHEN** the repository has forty-two branches and the reader types "count orders", the words of one branch's last commit
+- **THEN** the list holds that branch alone and says "1 of 43 heads · 1 ticked"; Enter ticks it and its chip joins the working tree's in the bar
+
+#### Scenario: One head is its review
+
+- **WHEN** the reader unticks the working tree by its chip and presses *compare*
+- **THEN** the review of that branch is drawn, the list is folded away and the bar holds the branch's chip
+
+### Requirement: The header keeps every control in the window
+
+The system SHALL lay the header's controls on a second row when the window is too narrow for one, never cutting a control off at the window's edge; the repository's path and the numbers SHALL give way first, and be left out in a narrow window.
+
+#### Scenario: A narrow window
+
+- **WHEN** the window is 820 pixels wide
+- **THEN** the header has two rows and every control of it is inside the window
 
 ### Requirement: The page tells an editor that hosts it which code to open
 

@@ -8,6 +8,7 @@
 import { api } from "./api.ts";
 import { agentNameOf, runState, runTask, taskField } from "./chat.ts";
 import { element } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { page } from "./page.ts";
 import { currentLink } from "./link.ts";
 
@@ -31,9 +32,9 @@ export async function loadSpecs(): Promise<void> {
     const { initialised, specs } = await api.specs();
     list.replaceChildren();
 
-    for (const spec of specs) list.append(new Option(`${spec.kind === "openspec" ? "spec" : "feature"}: ${spec.title}`, spec.path, false, spec.path === picked));
+    for (const spec of specs) list.append(new Option(spec.kind === "openspec" ? t("spec: {title}", { title: spec.title }) : t("feature: {title}", { title: spec.title }), spec.path, false, spec.path === picked));
     list.hidden = specs.length === 0;
-    state.textContent = specs.length === 0 ? (initialised ? "no specs yet: spec this view, or review all" : "no openspec/ yet: the first run creates it") : `${specs.length} files`;
+    state.textContent = specs.length === 0 ? (initialised ? t("no specs yet: spec this view, or review all") : t("no openspec/ yet: the first run creates it")) : t("{count} files", { count: specs.length });
 
     if (specs.length > 0) await showSpec(list.value);
     else {
@@ -73,7 +74,7 @@ async function specTask(mode: "generate" | "update"): Promise<void> {
     page.showTab("chat");
 
     if (agentNameOf()) runTask(markdown, null);
-    else runState.textContent = "no agent: the task is in the box; start web with --agent claude to run it, or copy it";
+    else runState.textContent = t("no agent: the task is in the box; start web with --agent claude to run it, or copy it");
   } catch (error) {
     state.textContent = error instanceof Error ? error.message : String(error);
   }
@@ -83,11 +84,11 @@ element<HTMLButtonElement>("spec-generate").addEventListener("click", () => void
 element<HTMLButtonElement>("spec-update").addEventListener("click", () => void specTask("update"));
 element<HTMLButtonElement>("spec-validate").addEventListener("click", () => {
   const state = element<HTMLSpanElement>("spec-state");
-  state.textContent = "validating…";
+  state.textContent = t("validating…");
   void api
     .validateSpecs()
     .then((result) => {
-      state.textContent = result.ok ? "valid" : "problems";
+      state.textContent = result.ok ? t("valid") : t("problems");
       element<HTMLDivElement>("spec-text").replaceChildren(Object.assign(document.createElement("pre"), { textContent: result.output }));
       specText = result.output;
     })

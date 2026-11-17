@@ -11,6 +11,7 @@
 // Entry points: `showOptions`, `applyOptions`, `toggleOptions`.
 
 import { element } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { notice, noticeAfterLoad } from "./title.ts";
 import { PRESETS, currentLink, forgetDefaults, rememberDefaults, setLink, type Link } from "./link.ts";
 import { page } from "./page.ts";
@@ -47,9 +48,9 @@ export function showOptions(state: Link): void {
   const own = kind !== undefined && usesDepth(kind) ? defaultDepth(kind) : null;
   const warning = own === null ? null : depthWarning(state.depth);
   depthInput.value = state.depth === null ? "" : String(state.depth);
-  depthInput.placeholder = own === null ? "not used here" : `auto (${own})`;
+  depthInput.placeholder = own === null ? t("not used here") : t("auto ({depth})", { depth: own });
   depthInput.classList.toggle("warn", warning !== null);
-  depthInput.title = warning ?? (own === null ? "This view does not go a depth from a subject" : `How far from the subject the picture goes; ${own} by default`);
+  depthInput.title = warning ?? (own === null ? t("This view does not go a depth from a subject") : t("How far from the subject the picture goes; {depth} by default", { depth: own }));
   packagesInput.checked = state.packages;
   changesInput.checked = state.changes;
   limitInput.value = state.limit === null ? "" : String(state.limit);
@@ -65,7 +66,7 @@ export function showOptions(state: Link): void {
     const only = isMermaidStyle(option.value) ? MERMAID_ONLY_FOR[option.value] : undefined;
     const other = only !== undefined && (kind === undefined || !only.kinds.includes(kind));
     option.disabled = other && option.value !== state.mermaid;
-    option.title = other ? `draws ${only.what} only` : "";
+    option.title = other ? t("draws {what} only", { what: only.what }) : "";
   }
 
   mermaidSelect.value = state.mermaid;
@@ -147,12 +148,12 @@ document.addEventListener("pointerdown", (event) => {
 element<HTMLButtonElement>("options-default").addEventListener("click", () => {
   const now = currentLink();
   // The reload that follows clears the line: the notice comes once the picture is drawn.
-  noticeAfterLoad(rememberDefaults(now) ? "options remembered as the defaults of this browser" : "no storage: the options last this page");
+  noticeAfterLoad(rememberDefaults(now) ? t("options remembered as the defaults of this browser") : t("no storage: the options last this page"));
   applyOptions(now);
 });
 element<HTMLButtonElement>("options-reset").addEventListener("click", () => {
   forgetDefaults();
-  noticeAfterLoad("every option back to the built-in one; the remembered defaults are forgotten");
+  noticeAfterLoad(t("every option back to the built-in one; the remembered defaults are forgotten"));
   // Every option of the picture, the ones of the toolbar and the lanes menu too (opened modules, hidden lanes, type-only imports).
   applyOptions({ ...currentLink(), ...DEFAULT_PICTURE_OPTIONS });
 });

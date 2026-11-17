@@ -18,6 +18,7 @@
 
 import type { ViewEntry } from "./api.ts";
 import { h, rememberList, rememberedList } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { currentLink, setLink } from "./link.ts";
 import { fnView, functionsOf, knownFunctions } from "./modules.ts";
 import { parseView, subjectFile } from "../../src/view-keys.ts";
@@ -169,7 +170,8 @@ export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needl
       });
     }
 
-    line.append(toggle, h("span", { class: "icon" }, spec.icon), h("span", { class: "label" }, spec.label));
+    // The dot of a file of the picture says what it is by itself: the question a violet dot raises is answered where it is.
+    line.append(toggle, h("span", { class: "icon", ...(spec.marked ? { title: t("● this file is in the picture on the canvas now") } : {}) }, spec.icon), h("span", { class: "label" }, spec.label));
 
     if (spec.onTap) line.addEventListener("click", spec.onTap);
     else if (spec.onCaret) line.addEventListener("click", spec.onCaret);
@@ -195,7 +197,7 @@ export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needl
         const isOpen = open.has(entry.key);
         const own = knownFunctions(entry.path);
         const marked = inPicture.has(entry.path);
-        list.append(row({ depth, caret: isOpen ? "▾" : "▸", icon: marked ? "●" : "▫", label: entry.label, active: now.module === entry.path && now.fn === null, marked, title: `${entry.path}${marked ? " — in the picture shown now" : ""} — tap for the module's view, the caret for its functions`, onTap: () => openView(entry.view), onCaret: () => {
+        list.append(row({ depth, caret: isOpen ? "▾" : "▸", icon: marked ? "●" : "▫", label: entry.label, active: now.module === entry.path && now.fn === null, marked, title: `${entry.path}${marked ? ` — ${t("in the picture shown now")}` : ""} — ${t("tap for the module's view, the caret for its functions")}`, onTap: () => openView(entry.view), onCaret: () => {
           failed.delete(entry.path);
           toggle(entry.key);
         } }));
@@ -204,15 +206,15 @@ export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needl
 
         if (own === undefined) loadFunctions(entry.path, redraw);
 
-        if (own === undefined) list.append(row({ depth: depth + 1, caret: null, icon: failed.has(entry.path) ? "!" : "…", label: failed.has(entry.path) ? "could not read its functions (press the caret again)" : "loading", title: "" }));
-        else if (own.length === 0) list.append(row({ depth: depth + 1, caret: null, icon: "·", label: "no function of its own", title: "" }));
-        else for (const fn of own) list.append(row({ depth: depth + 1, caret: null, icon: "ƒ", label: fn.name, active: now.fn === fn.id, title: `${fn.id}:${fn.line} — its call tree, its logic or everything joined to it`, onTap: () => openView(fnView(fn.id, keys)) }));
+        if (own === undefined) list.append(row({ depth: depth + 1, caret: null, icon: failed.has(entry.path) ? "!" : "…", label: failed.has(entry.path) ? t("could not read its functions (press the caret again)") : t("loading"), title: "" }));
+        else if (own.length === 0) list.append(row({ depth: depth + 1, caret: null, icon: "·", label: t("no function of its own"), title: "" }));
+        else for (const fn of own) list.append(row({ depth: depth + 1, caret: null, icon: "ƒ", label: fn.name, active: now.fn === fn.id, title: `${fn.id}:${fn.line} — ${t("its call tree, its logic or everything joined to it")}`, onTap: () => openView(fnView(fn.id, keys)) }));
         continue;
       }
 
       // With a filter or a cut list every folder on the way to a match is open; without one, the ones the reader opened.
       const isOpen = needle !== "" || picture !== null || cut || open.has(entry.key);
-      list.append(row({ depth, caret: isOpen ? "▾" : "▸", icon: entry.kind === "layer" ? "▣" : "▭", label: entry.label, active: entry.view !== null && entry.view === link.view, title: entry.kind === "layer" ? `layer ${entry.label} — tap for its picture, the caret to fold it` : `${entry.label} ${entry.view ? "— tap for the directory's picture, " : "— no picture of its own, "}the caret to fold it`, ...(entry.view === null ? {} : { onTap: () => openView(entry.view!) }), onCaret: () => toggle(entry.key) }));
+      list.append(row({ depth, caret: isOpen ? "▾" : "▸", icon: entry.kind === "layer" ? "▣" : "▭", label: entry.label, active: entry.view !== null && entry.view === link.view, title: entry.kind === "layer" ? t("layer {name} — tap for its picture, the caret to fold it", { name: entry.label }) : entry.view ? t("{name} — tap for the directory's picture, the caret to fold it", { name: entry.label }) : t("{name} — no picture of its own, the caret to fold it", { name: entry.label }), ...(entry.view === null ? {} : { onTap: () => openView(entry.view!) }), onCaret: () => toggle(entry.key) }));
 
       if (isOpen) draw(entry.children, depth + 1);
     }
@@ -220,5 +222,5 @@ export function renderTree(list: HTMLElement, views: readonly ViewEntry[], needl
 
   draw(tree, 0);
 
-  if (list.childElementCount === 0) list.append(h("li", { class: "muted" }, picture !== null && picture.size === 0 ? "no file in the picture yet" : needle === "" ? "no modules" : "nothing matches"));
+  if (list.childElementCount === 0) list.append(h("li", { class: "muted" }, picture !== null && picture.size === 0 ? t("no file in the picture yet") : needle === "" ? t("no modules") : t("nothing matches")));
 }

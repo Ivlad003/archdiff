@@ -27,6 +27,7 @@
 
 import { api } from "./api.ts";
 import { element, h } from "./dom.ts";
+import { t, translated } from "./i18n.ts";
 import { revealDetails } from "./layout.ts";
 import { page } from "./page.ts";
 import { readOnlyView, setLink, currentLink } from "./link.ts";
@@ -60,7 +61,7 @@ function row(kind: string, text: string): HTMLDivElement {
 
 /** An agent's text as the transcript shows it: a tour it wrote is played on the page, and its JSON is no reading. */
 function readable(text: string): string {
-  return text.replace(/```archdiff-tour[ \t]*\r?\n[\s\S]*?```/g, "_The tour is on the page: the bar under the title steps through it._");
+  return text.replace(/```archdiff-tour[ \t]*\r?\n[\s\S]*?```/g, t("_The tour is on the page: the bar under the title steps through it._"));
 }
 
 /** The answer of the turn, rendered as Markdown under its folded steps. */
@@ -69,7 +70,7 @@ function showAnswer(text: string): void {
   turn.answered = true;
   turn.answer.className = "answer ev result";
   page.renderMarkdown(turn.answer, readable(text));
-  turn.summary.textContent = `${turn.count} ${turn.count === 1 ? "step" : "steps"} (tools, thoughts) — click to unfold`;
+  turn.summary.textContent = turn.count === 1 ? t("{count} step (tools, thoughts) — click to unfold", { count: turn.count }) : t("{count} steps (tools, thoughts) — click to unfold", { count: turn.count });
 }
 
 /**
@@ -81,7 +82,7 @@ function showAnswer(text: string): void {
  */
 function appendEvent(kind: string, text: string): void {
   if (kind === "you") {
-    const summary = h("summary", {}, "working…");
+    const summary = h("summary", {}, t("working…"));
     const steps = h("details", { class: "steps" }, summary);
     const answer = h("div", { class: "answer" });
     transcript.append(row("you", text), steps, answer);
@@ -93,7 +94,7 @@ function appendEvent(kind: string, text: string): void {
     turn.steps.append(row(kind, kind === "text" ? readable(text) : text));
     turn.count++;
     const line = text.split("\n")[0] ?? "";
-    turn.summary.textContent = `${turn.count} ${turn.count === 1 ? "step" : "steps"} · ${line.length > 90 ? `${line.slice(0, 90)}…` : line}`;
+    turn.summary.textContent = `${turn.count === 1 ? t("{count} step", { count: turn.count }) : t("{count} steps", { count: turn.count })} · ${line.length > 90 ? `${line.slice(0, 90)}…` : line}`;
 
     if (kind === "text") turn.lastText = text;
   } else {
@@ -109,13 +110,13 @@ function appendEvent(kind: string, text: string): void {
 export async function runChecksNow(): Promise<void> {
   const button = element<HTMLButtonElement>("checks");
   button.disabled = true;
-  runState.textContent = "running the checks…";
+  runState.textContent = t("running the checks…");
 
   try {
     const { events } = await api.runChecks();
 
     for (const event of events) appendEvent(event.kind, event.text);
-    runState.textContent = events.length === 0 ? "no checks: no ARCHITECTURE.md and no \"checks\" in archdiff.json" : events.every((event) => event.text.startsWith("✔")) ? "every check passed" : "a check failed; see the transcript";
+    runState.textContent = events.length === 0 ? t("no checks: no ARCHITECTURE.md and no \"checks\" in archdiff.json") : events.every((event) => event.text.startsWith("✔")) ? t("every check passed") : t("a check failed; see the transcript");
     page.showTab("chat");
   } catch (error) {
     showRunError(error);
@@ -214,17 +215,17 @@ function playExplained(text: string, run: { done: Set<string>; queue: Promise<vo
   if (!found) return;
   run.toured = true;
 
-  if ("problem" in found) return void transcript.append(row("do failed", `↳ the tour is not played — ${found.problem}`));
+  if ("problem" in found) return void transcript.append(row("do failed", t("↳ the tour is not played — {problem}", { problem: found.problem })));
   const { title, steps } = found.tour;
   const name = explainedName(title, Date.now());
   const kept = steps.map((step) => ({ link: new URLSearchParams({ view: step.view }).toString(), select: step.select, note: step.note, ...(step.path ? { path: true as const } : {}) }));
   run.queue = run.queue.then(() =>
     api.saveTour(name, title, kept).then(
       () => {
-        transcript.append(row("do", `↳ the tour "${title}" is played: ${steps.length} ${steps.length === 1 ? "step" : "steps"}, ‹ and › under the title step through them; it is kept in the tours menu`));
+        transcript.append(row("do", steps.length === 1 ? t("↳ the tour \"{title}\" is played: {count} step, ‹ and › under the title step through them; it is kept in the tours menu", { title, count: steps.length }) : t("↳ the tour \"{title}\" is played: {count} steps, ‹ and › under the title step through them; it is kept in the tours menu", { title, count: steps.length })));
         location.hash = `tour=${encodeURIComponent(name)}&step=1`;
       },
-      (error: unknown) => void transcript.append(row("do failed", `↳ the tour is not played — ${error instanceof Error ? error.message : String(error)}`)),
+      (error: unknown) => void transcript.append(row("do failed", t("↳ the tour is not played — {problem}", { problem: error instanceof Error ? error.message : String(error) }))),
     ),
   );
 }
@@ -244,13 +245,13 @@ export function explain(subjects: { tag: string; label: string }[], words = ""):
   const picture = readOnlyView(state.view) ? `the picture \`${state.view}\`` : `the picture I am looking at: @view:${state.view}`;
   const what = [words.trim(), shapes === "" ? "" : `these shapes: ${shapes}`, words.trim() === "" && shapes === "" ? picture : `It is on ${picture}`].filter((part) => part !== "").join(". ");
   const prompt = explainPrompt(what);
-  const shown = `explain: ${words.trim() !== "" ? words.trim() : subjects.length > 0 ? subjects.map((subject) => subject.label).join(", ") : "this picture"}`;
+  const shown = words.trim() !== "" ? t("explain: {what}", { what: words.trim() }) : subjects.length > 0 ? t("explain: {what}", { what: subjects.map((subject) => subject.label).join(", ") }) : t("explain: this picture");
 
   if (agentName) return runTask(prompt, null, shown);
-  runState.textContent = "no agent: writing the task of the explanation into the task box…";
+  runState.textContent = t("no agent: writing the task of the explanation into the task box…");
   void withContext(prompt).then((text) => {
     taskField.value = text;
-    runState.textContent = "no agent picked: the task of the explanation is in the box — pick an agent above to have its tour played here";
+    runState.textContent = t("no agent picked: the task of the explanation is in the box — pick an agent above to have its tour played here");
   });
 }
 
@@ -267,10 +268,10 @@ function renderAskAbout(): void {
   box.hidden = askSubjects.length === 0;
 
   if (box.hidden) return;
-  box.append("about: ");
+  box.append(`${t("about:")} `);
 
   for (const subject of askSubjects) {
-    box.append(h("span", { class: "chip", title: subject.tag }, subject.label, h("button", { title: "Leave it out", on: { click: () => {
+    box.append(h("span", { class: "chip", title: subject.tag }, subject.label, h("button", { title: t("Leave it out"), on: { click: () => {
       askSubjects = askSubjects.filter((each) => each.tag !== subject.tag);
       renderAskAbout();
     } } }, "×")));
@@ -313,15 +314,15 @@ function askQuestion(): void {
   askInput.value = "";
 
   if (agentName) {
-    runTask(prompt, null, `${question}${askSubjects.length > 0 ? ` (about ${askSubjects.map((subject) => subject.label).join(", ")})` : ""}${picture ? " (with the picture)" : ""}`);
+    runTask(prompt, null, `${question}${askSubjects.length > 0 ? ` (${t("about {subjects}", { subjects: askSubjects.map((subject) => subject.label).join(", ") })})` : ""}${picture ? ` (${t("with the picture")})` : ""}`);
 
     return;
   }
 
-  runState.textContent = "no agent: writing the question with its context into the task box…";
+  runState.textContent = t("no agent: writing the question with its context into the task box…");
   void withContext(prompt).then((text) => {
     taskField.value = text;
-    runState.textContent = "no agent: the question with its context is in the task box — copy it to your assistant (start web with --agent claude to ask here)";
+    runState.textContent = t("no agent: the question with its context is in the task box — copy it to your assistant (start web with --agent claude to ask here)");
   });
 }
 
@@ -379,7 +380,7 @@ async function showSuggestions(field: HTMLTextAreaElement | HTMLInputElement): P
   }
 
   // The commands whose name starts as typed, from the table; the tags from the server.
-  const tags = at.command ? CHAT_COMMANDS.filter((command) => command.name.startsWith(at.query)).slice(0, 14).map((command) => ({ tag: `/${command.name}`, title: `${command.args ? ` ${command.args} ` : " "}— ${command.does}` })) : (await api.tags(at.query)).tags;
+  const tags = at.command ? CHAT_COMMANDS.filter((command) => command.name.startsWith(at.query)).slice(0, 14).map((command) => ({ tag: `/${command.name}`, title: `${command.args ? ` ${command.args} ` : " "}— ${translated(command.does)}` })) : (await api.tags(at.query)).tags;
   suggest.replaceChildren();
   suggestFor = field;
   suggestIndex = 0;
@@ -452,7 +453,7 @@ async function readTask(): Promise<void> {
   const { markdown, drawn } = await api.plan(state.view);
   taskField.value = markdown;
   runButton.disabled = !agentName;
-  runState.textContent = drawn ? "" : "no drawing saved for this view: edit, draw, save";
+  runState.textContent = drawn ? "" : t("no drawing saved for this view: edit, draw, save");
 }
 
 /** The question box: a fenced ```archdiff-question block in the agent's text, rendered as the question and its options; an answer resumes the session. */
@@ -488,7 +489,7 @@ function showQuestion(text: string, run: { sessionId: string | null }): boolean 
     // given meanwhile is kept and sent when the turn ends, to the session it has then — not refused and lost.
     if (running) {
       queuedAnswer = reply;
-      runState.textContent = `the answer goes to ${currentRun ? labelOf(currentRun.agent) : "the agent"} as soon as this turn ends`;
+      runState.textContent = t("the answer goes to {agent} as soon as this turn ends", { agent: currentRun ? labelOf(currentRun.agent) : t("the agent") });
 
       return;
     }
@@ -504,7 +505,7 @@ function showQuestion(text: string, run: { sessionId: string | null }): boolean 
   }
 
   const other = document.createElement("input");
-  other.placeholder = "another answer (Enter)";
+  other.placeholder = t("another answer (Enter)");
   other.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && other.value.trim() !== "") answer(other.value.trim());
     event.stopPropagation();
@@ -542,13 +543,13 @@ export async function agentCommand(command: "code" | "diagram" | "doc", argument
     const canvas = page.canvas();
 
     if (canvas && page.mode() === "edit") await api.saveDrawing(state.view, canvas.scene(), page.mocks());
-    runState.textContent = "folding the drawing into the contract…";
+    runState.textContent = t("folding the drawing into the contract…");
     const result = await api.code(state.view);
     taskField.value = result.markdown;
-    runState.textContent = result.planned === 0 ? "the contract is built already; the task has nothing to build" : `${result.planned} planned items in the contract`;
+    runState.textContent = result.planned === 0 ? t("the contract is built already; the task has nothing to build") : t("{planned} planned items in the contract", { planned: result.planned });
 
     if (result.planned > 0 && agentName) runTask(result.markdown, null);
-    else if (!agentName) runState.textContent = "no agent picked: the task is in the box; pick an agent above to run it";
+    else if (!agentName) runState.textContent = t("no agent picked: the task is in the box; pick an agent above to run it");
 
     return;
   }
@@ -557,7 +558,7 @@ export async function agentCommand(command: "code" | "diagram" | "doc", argument
   taskField.value = ask;
 
   if (agentName) runTask(ask, null);
-  else runState.textContent = "no agent: start web with --agent claude to run it";
+  else runState.textContent = t("no agent: start web with --agent claude to run it");
 }
 
 /** Runs `written` on the agent; `shown` is what the transcript's own row says when the prompt wraps a shorter question. */
@@ -572,7 +573,7 @@ function setRunning(next: boolean, resumable = false): void {
 
 /** A run is going: the run's line says so, and the caller starts nothing. */
 function busy(): boolean {
-  if (running) runState.textContent = `${currentRun ? labelOf(currentRun.agent) : "the agent"} is still running: stop it, or wait for its answer`;
+  if (running) runState.textContent = t("{agent} is still running: stop it, or wait for its answer", { agent: currentRun ? labelOf(currentRun.agent) : t("the agent") });
 
   return running;
 }
@@ -590,7 +591,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
   element<HTMLDivElement>("question").hidden = true;
   const state = currentLink();
   setRunning(true);
-  runState.textContent = `running ${labelOf(agentName)}…`;
+  runState.textContent = t("running {agent}…", { agent: labelOf(agentName) });
 
   if (!resume) {
     transcript.replaceChildren();
@@ -605,7 +606,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
     // A follow-up resumes the session with the agent that holds it, whichever is picked now.
     .then((prompt) => api.runAgent(state.view, prompt, resume, resume ? (currentRun?.agent ?? agentName) : agentName))
     .then(({ id, task, agent }) => {
-      runState.textContent = `running ${labelOf(agent)} (${id}); task saved to ${task}`;
+      runState.textContent = t("running {agent} ({id}); task saved to {task}", { agent: labelOf(agent), id, task });
       const run = { id, sessionId: resume, stopped: false, agent, close: () => {} };
       const shownByAgent = { done: new Set<string>(), queue: Promise.resolve(), toured: false };
       currentRun = run;
@@ -639,7 +640,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
         () => {
           setRunning(false, run.sessionId !== null);
           const who = labelOf(run.agent);
-          runState.textContent = run.stopped ? `${who} stopped; the diagram is reloaded with what it changed` : element<HTMLDivElement>("question").hidden ? `${who} finished; the diagram is reloaded — compare with review, check against the contract` : `${who} asks a question`;
+          runState.textContent = run.stopped ? t("{who} stopped; the diagram is reloaded with what it changed", { who }) : element<HTMLDivElement>("question").hidden ? t("{who} finished; the diagram is reloaded — compare with review, check against the contract", { who }) : t("{who} asks a question", { who });
           page.canvas()?.highlight([]);
           // The agent changed the code: the live diagram and the page.views() follow.
           void page.loadViews().then(() => page.load());
@@ -669,12 +670,12 @@ const documentGo = async (): Promise<void> => {
 
   if (text === "") return;
   const state = element<HTMLSpanElement>("document-state");
-  state.textContent = "writing the architecture…";
+  state.textContent = t("writing the architecture…");
   element<HTMLButtonElement>("document-go").disabled = true;
 
   try {
     const result = await api.intentFromDocument(text, agentName);
-    state.textContent = `${result.file}: ${result.layers} layers, ${result.modules} modules, ${result.edges} imports (from ${result.source})`;
+    state.textContent = t("{file}: {layers} layers, {modules} modules, {edges} imports (from {source})", { file: result.file, layers: result.layers, modules: result.modules, edges: result.edges, source: result.source });
     element<HTMLTextAreaElement>("document").hidden = true;
     element<HTMLDivElement>("document-row").hidden = true;
     setLink({ ...currentLink(), view: "intent" });
@@ -741,14 +742,14 @@ let anyInstalled = false;
 
 /** An agent's label (Claude Code, Codex…), its name when the page does not know it. */
 function labelOf(name: string | null): string {
-  return name === null ? "the agent" : (agentLabels.get(name) ?? name);
+  return name === null ? t("the agent") : (agentLabels.get(name) ?? name);
 }
 
 /** The agent picked: the run button usable only with one, and a word beside the picker when there is none. */
 export function setAgentName(name: string | null): void {
   agentName = name;
   runButton.disabled = !name;
-  element("agent-name").textContent = name ? "" : anyInstalled ? "no agent picked: the tasks are only written" : "no agent found: Claude Code, Cursor, Codex or OpenCode runs the tasks — place one in the settings";
+  element("agent-name").textContent = name ? "" : anyInstalled ? t("no agent picked: the tasks are only written") : t("no agent found: Claude Code, Cursor, Codex or OpenCode runs the tasks — place one in the settings");
 }
 
 const agentSelect = element<HTMLSelectElement>("agent-select");
@@ -774,9 +775,9 @@ export async function loadAgents(): Promise<void> {
     ...offered.agents.map((agent) => {
       agentLabels.set(agent.name, agent.label);
 
-      return h("option", { value: agent.name, disabled: !agent.installed, title: agent.installed ? "" : "not found on this computer: the settings say why, and place it" }, agent.installed ? agent.label : `${agent.label} — not installed`);
+      return h("option", { value: agent.name, disabled: !agent.installed, title: agent.installed ? "" : t("not found on this computer: the settings say why, and place it") }, agent.installed ? agent.label : t("{label} — not installed", { label: agent.label }));
     }),
-    h("option", { value: "" }, "none: write the tasks only"),
+    h("option", { value: "" }, t("none: write the tasks only")),
   );
   let remembered: string | null = null;
 
@@ -797,13 +798,13 @@ export function pickAgent(name: string): string {
   const asked = name.trim().toLowerCase();
   const option = [...agentSelect.options].find((each) => (asked === "none" ? each.value === "" : each.value.toLowerCase() === asked || (agentLabels.get(each.value) ?? "").toLowerCase() === asked));
 
-  if (!option) throw new Error(`agent: one of ${[...agentSelect.options].map((each) => each.value || "none").join(", ")}`);
+  if (!option) throw new Error(t("agent: one of {names}", { names: [...agentSelect.options].map((each) => each.value || "none").join(", ") }));
 
-  if (option.disabled) throw new Error(`${labelOf(option.value)} cannot run here: the settings say why (/settings)`);
+  if (option.disabled) throw new Error(t("{agent} cannot run here: the settings say why (/settings)", { agent: labelOf(option.value) }));
   agentSelect.value = option.value;
   agentSelect.dispatchEvent(new Event("change"));
 
-  return option.value === "" ? "No agent: the tasks are only written." : `The tasks and the questions go to ${labelOf(option.value)}.`;
+  return option.value === "" ? t("No agent: the tasks are only written.") : t("The tasks and the questions go to {agent}.", { agent: labelOf(option.value) });
 }
 
 agentSelect.addEventListener("change", () => {

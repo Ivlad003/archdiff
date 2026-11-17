@@ -21,6 +21,7 @@
 // `toggleTools`, `closePopovers`, `popoverOpen`.
 
 import { element, remember, rememberText, remembered, rememberedText } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { page } from "./page.ts";
 
 export type Side = "left" | "right";
@@ -79,7 +80,7 @@ export function panelShown(side: Side): boolean {
 
 /** The buttons that fold a panel say what a press does now, and the header's whether the panel is there. */
 function sync(): void {
-  const names: Record<Side, [what: string, key: string]> = { left: ["the views", "Ctrl+B"], right: ["the details", "Ctrl+]"] };
+  const names: Record<Side, [what: string, key: string]> = { left: [t("the views"), "Ctrl+B"], right: [t("the details"), "Ctrl+]"] };
 
   for (const side of ["left", "right"] as const) {
     const shown = panelShown(side);
@@ -87,7 +88,7 @@ function sync(): void {
     const tab = element<HTMLButtonElement>(`edge-${side}`);
     // The arrow points where the panel's edge goes.
     tab.textContent = (side === "left") === shown ? "‹" : "›";
-    tab.title = `${shown ? "Hide" : "Show"} ${what} (${key})`;
+    tab.title = `${shown ? t("Hide") : t("Show")} ${what} (${key})`;
     tab.setAttribute("aria-expanded", String(shown));
     element<HTMLButtonElement>(`toggle-${side}`).setAttribute("aria-pressed", String(shown));
   }
@@ -225,7 +226,7 @@ function arrangeTools(): void {
   const button = element<HTMLButtonElement>("tools-fold");
   button.classList.toggle("active", !folded);
   button.setAttribute("aria-expanded", String(!folded));
-  button.textContent = folded ? "tools ▸" : "tools ◂";
+  button.textContent = folded ? t("tools ▸") : t("tools ◂");
 
   if (changed) refit();
 }

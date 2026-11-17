@@ -6,6 +6,7 @@
 // Entry points: `siblingViews`, `crumbsOf`.
 
 import type { ViewEntry } from "./api.ts";
+import { t } from "./i18n.ts";
 import { crumbTemplate, parseView } from "../../src/view-keys.ts";
 
 export function siblingViews(key: string): { label: string; key: string }[] {
@@ -17,12 +18,12 @@ export function siblingViews(key: string): { label: string; key: string }[] {
   const of = (kind: string, label: string): { label: string; key: string } => ({ label, key: `${kind}:${subject}` });
 
   // A function's pictures: its calls, their order, its way to the storages, everything joined to it, what a change to it reaches, its logic, its cycle.
-  if (subject.includes("#") && ["calls", "sequence", "path", "cycle", "focus", "impact", "logic"].includes(view.kind)) return [of("calls", "call tree"), of("sequence", "sequence of calls"), of("path", "path to the storages"), of("focus", "focus: everything joined to it"), of("impact", "impact: what a change to it reaches"), of("logic", "logic: the flowchart and its rules"), of("cycle", "its call cycle")];
+  if (subject.includes("#") && ["calls", "sequence", "path", "cycle", "focus", "impact", "logic"].includes(view.kind)) return [of("calls", t("call tree")), of("sequence", t("sequence of calls")), of("path", t("path to the storages")), of("focus", t("focus: everything joined to it")), of("impact", t("impact: what a change to it reaches")), of("logic", t("logic: the flowchart and its rules")), of("cycle", t("its call cycle"))];
 
   // A module's pictures (a classes view of one file is one of them).
-  if (["module", "inside", "usage", "cycle", "focus", "impact"].includes(view.kind) || (view.kind === "classes" && /\.[a-z]+$/.test(subject))) return [of("module", "dependencies"), of("inside", "inside: functions and calls"), of("focus", "focus: everything joined to it"), of("impact", "impact: what a change to it reaches"), of("classes", "classes: fields and methods"), of("usage", "usage: who uses its exports"), of("cycle", "its import cycle")];
+  if (["module", "inside", "usage", "cycle", "focus", "impact"].includes(view.kind) || (view.kind === "classes" && /\.[a-z]+$/.test(subject))) return [of("module", t("dependencies")), of("inside", t("inside: functions and calls")), of("focus", t("focus: everything joined to it")), of("impact", t("impact: what a change to it reaches")), of("classes", t("classes: fields and methods")), of("usage", t("usage: who uses its exports")), of("cycle", t("its import cycle"))];
 
-  if (view.kind === "dir" || view.kind === "classes") return [of("dir", "modules of the directory"), of("classes", "classes of the directory")];
+  if (view.kind === "dir" || view.kind === "classes") return [of("dir", t("modules of the directory")), of("classes", t("classes of the directory"))];
 
   return [];
 }

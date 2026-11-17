@@ -164,6 +164,20 @@ The system SHALL keep the user's settings in `<home>/.archdiff/settings.json` (`
 - **WHEN** a change sets `NODE_OPTIONS` among the keys
 - **THEN** the change is refused with 400, the message says a key is named `…_KEY` or `…_TOKEN`, and nothing is written
 
+### Requirement: The language of the page is one of the user's settings
+
+The system SHALL keep the language the page speaks in the user's settings (`language`: `en` or `uk`), written only when it is not English, and refuse any other; `GET /api/settings` SHALL say it, `POST /api/settings` SHALL change it, and the page SHALL be served with it as its `<html lang>`. A settings file that does not read SHALL leave the page in English.
+
+#### Scenario: Ukrainian is chosen
+
+- **WHEN** a change sets the language to `uk`
+- **THEN** the settings file holds `"language": "uk"`, the settings say `uk`, and the page's second line is `<html lang="uk">`
+
+#### Scenario: A language the page has not
+
+- **WHEN** a change sets the language to `tlh`
+- **THEN** the change is refused with 400 and the page is served as before
+
 #### Scenario: A request from another computer
 
 - **WHEN** the server is bound to every address and the settings are asked for through another address than this computer's own

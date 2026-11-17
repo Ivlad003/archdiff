@@ -15,10 +15,13 @@
 // `givePlaceBack`, `selection`, `lastPicked`, `tools`, `labelOf`.
 
 import { api, type Shape } from "./api.ts";
+import { loading } from "./busy.ts";
 import { chainBetween, chainFrom, neighbourhoodOf } from "./chains.ts";
 import { askAbout, explain } from "./chat.ts";
 import { h, element } from "./dom.ts";
 import { VIEW_LINK, type PickedLine } from "./editor.tsx";
+import { hosted } from "./host.ts";
+import { t } from "./i18n.ts";
 import { detailsCover, onDetailsClosed, releaseDetails, revealDetails } from "./layout.ts";
 import { currentLink, refsOf, setLink } from "./link.ts";
 import { closeMenu } from "./menu.ts";
@@ -54,22 +57,40 @@ export function labelOf(id: string): string {
 
 // ── A shape's page ───────────────────────────────────────────────────────────
 
-/** The page of a shape (as the server writes it for the picture shown), its neighbours and its code; null: the picture's page. */
-/** The shape pages asked for: a page that comes after a newer pick is dropped, so the panel is the last shape's. */
+/** The pages asked for (a shape's, a line's): a page that comes after a newer pick is dropped, so the panel is the last pick's. */
 let pageLoads = 0;
 
+/** Another page takes the Markdown tab now (a chain, a selection, a new picture): one still being read is dropped when it comes. */
+function dropPageLoad(): void {
+  pageLoads++;
+  loading(markdownPanel, false);
+}
+
+/**
+ * The page of a shape (as the server writes it for the picture shown), its neighbours and its code; null: the
+ * picture's page. What the picture itself knows is shown at the press — the neighbours' strip, and the tab the pick
+ * is read on in front: the Code tab for a shape of a file, the Markdown tab for one of none — and the page and the
+ * code are read side by side, each dimmed until it lands. Nothing moves a second time when the answers come.
+ */
 async function showNode(id: string | null, front = true): Promise<void> {
   const mine = ++pageLoads;
   const state = currentLink();
   const node = id === null ? null : page.nodes().get(id);
 
   if (!node) {
+    loading(markdownPanel, false);
     showPicturePage();
     renderNeighbours(null);
 
     return;
   }
 
+  renderNeighbours(node);
+  const code = showCode(node, front);
+
+  // A shape of no file is read on its page; so is every shape in an editor, which opens the code itself.
+  if (front && (!node.ref?.file || hosted)) showTab("markdown");
+  loading(markdownPanel, true);
   let markdown: string;
 
   try {
@@ -87,7 +108,7 @@ async function showNode(id: string | null, front = true): Promise<void> {
   if (state.view === "review" && file) {
     try {
       const { commits } = await api.fileHistory(file);
-      markdown += `${node.kind === "module" ? "" : `\n\n_${node.diff ?? "context"} in this change._`}${commits.length > 0 ? `\n\n## Commits that touched it\n\n${commits.map((commit) => `- \`${commit.short}\` ${commit.date} ${commit.author}: ${commit.subject}`).join("\n")}` : ""}\n`;
+      markdown += `${node.kind === "module" ? "" : `\n\n${t("_{mark} in this change._", { mark: node.diff ?? "context" })}`}${commits.length > 0 ? `\n\n${t("## Commits that touched it")}\n\n${commits.map((commit) => `- \`${commit.short}\` ${commit.date} ${commit.author}: ${commit.subject}`).join("\n")}` : ""}\n`;
     } catch {
       // Outside git: the shape's page alone.
     }
@@ -96,10 +117,8 @@ async function showNode(id: string | null, front = true): Promise<void> {
   }
 
   setMarkdown(markdownPanel, markdown);
-
-  if (front) showTab("markdown");
-  renderNeighbours(node);
-  await showCode(node);
+  loading(markdownPanel, false);
+  await code;
 }
 
 /** The lines of the picture that leave a shape (out) or come into it (into), between shapes the picture shows. */
@@ -138,7 +157,7 @@ function renderNeighbours(node: Shape | null): void {
     h(
       "button",
       {
-        title: `${arrow === "→" ? "imported or called by this shape" : "imports or calls this shape"}: click picks it here, Shift+click opens its own view, ← → walk the neighbours`,
+        title: arrow === "→" ? t("imported or called by this shape: click picks it here, Shift+click opens its own view, ← → walk the neighbours") : t("imports or calls this shape: click picks it here, Shift+click opens its own view, ← → walk the neighbours"),
         on: {
           click: (event) => {
             if (!event.shiftKey) return pickShape(id);
@@ -152,9 +171,9 @@ function renderNeighbours(node: Shape | null): void {
       `${arrow} ${labelOf(id)}`,
     );
 
-  if (into.length > 0) strip.append(h("span", { class: "muted" }, `${into.length} in:`), ...into.slice(0, 12).map((edge) => chip(edge.from, "←")));
+  if (into.length > 0) strip.append(h("span", { class: "muted" }, t("{count} in:", { count: into.length })), ...into.slice(0, 12).map((edge) => chip(edge.from, "←")));
 
-  if (out.length > 0) strip.append(h("span", { class: "muted" }, `${out.length} out:`), ...out.slice(0, 12).map((edge) => chip(edge.to, "→")));
+  if (out.length > 0) strip.append(h("span", { class: "muted" }, t("{count} out:", { count: out.length })), ...out.slice(0, 12).map((edge) => chip(edge.to, "→")));
 
   if (!beyond) return;
   // A neighbour the picture does not draw opens its own picture: a function its calls, a module (or a module's top level) its dependencies.
@@ -163,7 +182,7 @@ function renderNeighbours(node: Shape | null): void {
       "button",
       {
         class: "beyond",
-        title: `${id}: ${side === "before" ? "imports or calls this shape" : "imported or called by this shape"} beyond this picture — click opens its own picture, Shift+click everything joined to it`,
+        title: side === "before" ? t("{id}: imports or calls this shape beyond this picture — click opens its own picture, Shift+click everything joined to it", { id }) : t("{id}: imported or called by this shape beyond this picture — click opens its own picture, Shift+click everything joined to it", { id }),
         on: { click: (event) => setLink({ ...currentLink(), view: event.shiftKey ? `focus:${id}` : id.includes("#") ? `calls:${id}` : `module:${id}` }) },
       },
       side === "before" ? `◂ ${outsideLabel(id)}` : `${outsideLabel(id)} ▸`,
@@ -173,9 +192,9 @@ function renderNeighbours(node: Shape | null): void {
     const { count, ids } = beyond[side];
 
     if (count === 0) continue;
-    strip.append(h("span", { class: "muted", title: "Past the depth of this picture: the next step of depth, or the shape's focus view, draws them" }, side === "before" ? `beyond ◂ ${count}:` : `beyond ${count} ▸:`), ...ids.slice(0, 8).map((id) => outside(id, side)));
+    strip.append(h("span", { class: "muted", title: t("Past the depth of this picture: the next step of depth, or the shape's focus view, draws them") }, side === "before" ? t("beyond ◂ {count}:", { count }) : t("beyond {count} ▸:", { count })), ...ids.slice(0, 8).map((id) => outside(id, side)));
 
-    if (count > Math.min(8, ids.length)) strip.append(h("span", { class: "muted" }, `+${count - Math.min(8, ids.length)} more (the Markdown lists them)`));
+    if (count > Math.min(8, ids.length)) strip.append(h("span", { class: "muted" }, t("+{count} more (the Markdown lists them)", { count: count - Math.min(8, ids.length) })));
   }
 }
 
@@ -236,14 +255,14 @@ function renderSelection(): void {
   strip.hidden = selected.length < 2;
 
   if (strip.hidden) return;
-  strip.append(h("span", { class: "muted" }, `${selected.length} selected:`));
+  strip.append(h("span", { class: "muted" }, t("{count} selected:", { count: selected.length })));
 
-  for (const id of selected) strip.append(h("button", { class: "chip", title: "Centre on it; Shift+click takes it out of the selection", on: { click: (event) => (event.shiftKey ? toggleSelected(id) : page.canvas()?.centreOn(id)) } }, labelOf(id)));
+  for (const id of selected) strip.append(h("button", { class: "chip", title: t("Centre on it; Shift+click takes it out of the selection"), on: { click: (event) => (event.shiftKey ? toggleSelected(id) : page.canvas()?.centreOn(id)) } }, labelOf(id)));
   strip.append(
-    h("button", { class: "act", title: "Ask the agent about the selected shapes (the Chat tab): their code and calls go along as context", on: { click: () => askSelected() } }, "ask about them"),
-    h("button", { class: "act", title: "Have the agent explain the selected shapes as a tour: steps through the pictures, each with what it shows and why", on: { click: () => explainSelected() } }, "explain"),
-    h("button", { class: "act", title: "Dim everything but the selected shapes and their neighbours", on: { click: () => page.canvas()?.dim([...new Set(selected.flatMap((id) => neighbourhoodOf(page.edges(), id)))]) } }, "dim others"),
-    h("button", { class: "act", title: "Clear the selection (Esc)", on: { click: () => select([]) } }, "clear"),
+    h("button", { class: "act", title: t("Ask the agent about the selected shapes (the Chat tab): their code and calls go along as context"), on: { click: () => askSelected() } }, t("ask about them")),
+    h("button", { class: "act", title: t("Have the agent explain the selected shapes as a tour: steps through the pictures, each with what it shows and why"), on: { click: () => explainSelected() } }, t("explain")),
+    h("button", { class: "act", title: t("Dim everything but the selected shapes and their neighbours"), on: { click: () => page.canvas()?.dim([...new Set(selected.flatMap((id) => neighbourhoodOf(page.edges(), id)))]) } }, t("dim others")),
+    h("button", { class: "act", title: t("Clear the selection (Esc)"), on: { click: () => select([]) } }, t("clear")),
   );
 }
 
@@ -280,6 +299,7 @@ export function select(ids: string[], centre = false, front = true): void {
 
 /** A new picture, or a new pick: nothing selected yet, and no neighbours of a shape shown (the page is the caller's to show). */
 export function resetSelection(): void {
+  dropPageLoad();
   selected = [];
   // The arrow keys walk from a shape of this picture, never from one the last picture had.
   picked = null;
@@ -294,9 +314,10 @@ export function toggleSelected(id: string): void {
 
 /** The page of several selected shapes: what each is, and the lines among them in this picture. */
 function showSelection(front = true): void {
+  dropPageLoad();
   const nodes = page.nodes();
   const lines = [
-    `# ${selected.length} shapes selected`,
+    t("# {count} shapes selected", { count: selected.length }),
     "",
     ...selected.map((id) => {
       const node = nodes.get(id)!;
@@ -305,7 +326,7 @@ function showSelection(front = true): void {
     }),
   ];
   const among = page.edges().filter((edge) => selected.includes(edge.from) && selected.includes(edge.to) && edge.kind !== "lifeline");
-  lines.push("", `## Lines among them (${among.length})`, "", ...(among.length === 0 ? ["none in this picture"] : among.map((edge) => `- ${labelOf(edge.from)} → **${labelOf(edge.to)}**${edge.kind === "dependency" ? "" : ` (${edge.kind})`}`)), "", "_Shift+tap or Ctrl+tap adds or removes a shape; **ask about them** sends them to the agent; **dim others** keeps their neighbourhood._");
+  lines.push("", t("## Lines among them ({count})", { count: among.length }), "", ...(among.length === 0 ? [t("none in this picture")] : among.map((edge) => `- ${labelOf(edge.from)} → **${labelOf(edge.to)}**${edge.kind === "dependency" ? "" : ` (${edge.kind})`}`)), "", t("_Shift+tap or Ctrl+tap adds or removes a shape; **ask about them** sends them to the agent; **dim others** keeps their neighbourhood._"));
   setMarkdown(markdownPanel, `${lines.join("\n")}\n`);
 
   if (front) showTab("markdown");
@@ -336,19 +357,20 @@ export function showPath(ids: readonly string[]): void {
   const on = ids.filter((id) => page.nodes().has(id));
 
   if (on.length < 2) return select([...on], true, false);
+  dropPageLoad();
   selected = [...on];
   renderSelection();
   revealDetails();
   const edges = page.edges();
   const lit = new Set<string>(on);
-  const lines = [`# Path: ${on.map(labelOf).join(" → ")}`, ""];
+  const lines = [t("# Path: {shapes}", { shapes: on.map(labelOf).join(" → ") }), ""];
   let walked = 0;
 
   for (let i = 0; i + 1 < on.length; i++) {
     const chain = chainBetween(edges, on[i]!, on[i + 1]!, true) ?? chainBetween(edges, on[i]!, on[i + 1]!, false);
 
     if (!chain) {
-      lines.push(`- no chain of lines joins ${labelOf(on[i]!)} and ${labelOf(on[i + 1]!)} in this picture`);
+      lines.push(t("- no chain of lines joins {from} and {to} in this picture", { from: labelOf(on[i]!), to: labelOf(on[i + 1]!) }));
       continue;
     }
 
@@ -367,14 +389,15 @@ export function showPath(ids: readonly string[]): void {
 
 /** Lights the shortest chain of lines between two shapes and writes it to the Markdown panel. */
 function showChain(from: string, to: string, front = true): void {
+  dropPageLoad();
   const edges = page.edges();
   const directed = chainBetween(edges, from, to, true);
   const chain = directed ?? chainBetween(edges, from, to, false);
-  const title = `# Chain: ${labelOf(from)} → ${labelOf(to)}`;
+  const title = t("# Chain: {from} → {to}", { from: labelOf(from), to: labelOf(to) });
 
   if (!chain) {
     page.canvas()?.highlight([from, to]);
-    setMarkdown(markdownPanel, `${title}\n\nNo chain of lines joins them in this picture, in either direction.\n`);
+    setMarkdown(markdownPanel, `${title}\n\n${t("No chain of lines joins them in this picture, in either direction.")}\n`);
 
     if (front) showTab("markdown");
 
@@ -390,7 +413,7 @@ function showChain(from: string, to: string, front = true): void {
   }
 
   page.canvas()?.highlight([...ids]);
-  const lines = [title, "", `${chain.length} ${chain.length === 1 ? "line" : "lines"}${directed ? "" : ", read against the arrows where needed"}:`, ""];
+  const lines = [title, "", `${chain.length === 1 ? t("{count} line", { count: chain.length }) : t("{count} lines", { count: chain.length })}${directed ? "" : t(", read against the arrows where needed")}:`, ""];
 
   for (const [i, step] of chain.entries()) lines.push(`${i + 1}. ${labelOf(step.edge.from)} → **${labelOf(step.edge.to)}**${step.edge.kind === "dependency" ? "" : ` (${step.edge.kind})`}`);
   setMarkdown(markdownPanel, `${lines.join("\n")}\n`);
@@ -415,6 +438,10 @@ export async function showEdge(lines: PickedLine[], follow: boolean): Promise<vo
   const chain = follow ? chainFrom(page.edges(), line) : null;
   revealDetails();
   page.canvas()?.highlight(chain ? [...chain.lineIds, ...chain.nodeIds] : [...new Set(lines.flatMap((each) => [each.id, each.from, each.to]))]);
+  // A line is read on its page: the tab comes at the press, dimmed until the page lands; a pick made meanwhile takes it.
+  const mine = ++pageLoads;
+  showTab("markdown");
+  loading(markdownPanel, true);
   let markdown: string;
 
   try {
@@ -423,12 +450,15 @@ export async function showEdge(lines: PickedLine[], follow: boolean): Promise<vo
     markdown = error instanceof Error ? error.message : String(error);
   }
 
+  if (mine !== pageLoads) return;
+  loading(markdownPanel, false);
+
   if (chain) {
     const reached = chain.nodeIds.slice(2);
-    markdown += `\n## Chain onward (${chain.hops.length} lines, ${reached.length} shapes)\n\n`;
-    markdown += chain.hops.length === 0 ? "Nothing leads on from here in this view.\n" : chain.hops.map((hop) => `- ${"  ".repeat(hop.depth - 1)}${labelOf(hop.edge.from)} → **${labelOf(hop.edge.to)}**${hop.edge.kind === "dependency" ? "" : ` (${hop.edge.kind})`}${codeSpanOf(hop.edge.to)}`).join("\n");
+    markdown += `\n${t("## Chain onward ({lines} lines, {shapes} shapes)", { lines: chain.hops.length, shapes: reached.length })}\n\n`;
+    markdown += chain.hops.length === 0 ? `${t("Nothing leads on from here in this view.")}\n` : chain.hops.map((hop) => `- ${"  ".repeat(hop.depth - 1)}${labelOf(hop.edge.from)} → **${labelOf(hop.edge.to)}**${hop.edge.kind === "dependency" ? "" : ` (${hop.edge.kind})`}${codeSpanOf(hop.edge.to)}`).join("\n");
 
-    if (chain.lineIds.length >= 300) markdown += "\n- … cut at 300 lines";
+    if (chain.lineIds.length >= 300) markdown += `\n${t("- … cut at 300 lines")}`;
     markdown += "\n";
   }
 
@@ -438,20 +468,19 @@ export async function showEdge(lines: PickedLine[], follow: boolean): Promise<vo
   const strip = h("div", { class: "line-strip" });
 
   if (lines.length > 1) {
-    strip.append(h("span", { class: "muted" }, `${lines.length} lines under the tap:`));
+    strip.append(h("span", { class: "muted" }, t("{count} lines under the tap:", { count: lines.length })));
 
     for (const each of lines) {
-      const button = h("button", { title: `Show this line (${each.kind})`, on: { click: () => void showEdge([each, ...lines.filter((other) => other.id !== each.id)], false) } }, `${labelOf(each.from)} → ${labelOf(each.to)}`);
+      const button = h("button", { title: t("Show this line ({kind})", { kind: each.kind }), on: { click: () => void showEdge([each, ...lines.filter((other) => other.id !== each.id)], false) } }, `${labelOf(each.from)} → ${labelOf(each.to)}`);
       button.classList.toggle("active", each.id === line.id);
       strip.append(button);
     }
   }
 
-  const followButton = h("button", { title: follow ? "Light only this line again" : "Light every line and shape the arrows lead on to from here (Shift+tap does the same)", on: { click: () => void showEdge(lines, !follow) } }, follow ? "stop following" : "follow →");
+  const followButton = h("button", { title: follow ? t("Light only this line again") : t("Light every line and shape the arrows lead on to from here (Shift+tap does the same)"), on: { click: () => void showEdge(lines, !follow) } }, follow ? t("stop following") : t("follow →"));
   followButton.classList.toggle("active", follow);
   strip.append(followButton);
   markdownPanel.prepend(strip);
-  showTab("markdown");
 }
 
 // ── The walk with the arrow keys ─────────────────────────────────────────────
@@ -552,5 +581,5 @@ export function openShape(id: string, link: string | null = null): void {
   const key = deeperView(id, link);
 
   if (key) setLink({ ...currentLink(), view: key });
-  else notice(`${labelOf(id)}: nothing opens from this shape — a tap shows it on the right, a right click lists its other pictures`);
+  else notice(t("{shape}: nothing opens from this shape — a tap shows it on the right, a right click lists its other pictures", { shape: labelOf(id) }));
 }

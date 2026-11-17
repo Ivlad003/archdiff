@@ -7,6 +7,7 @@
 
 import { api } from "./api.ts";
 import { element, h } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { refsOf, type Link } from "./link.ts";
 import type { MermaidStyle } from "../../src/options.ts";
 import { mermaidTypesOf, parseView, type ViewKind } from "../../src/view-keys.ts";
@@ -14,7 +15,7 @@ import { mermaidTypesOf, parseView, type ViewKind } from "../../src/view-keys.ts
 const FORMATS = ["mermaid", "drawio", "excalidraw", "archimate", "json"] as const;
 
 /** How the menu names a Mermaid type that reads better than the default for some kinds of view (the table of kinds says which). */
-const MERMAID_LABELS: Partial<Record<MermaidStyle, string>> = { quadrant: "mermaid: quadrant chart", c4: "mermaid: C4 context", pie: "mermaid: pie of modules", mindmap: "mermaid: mindmap" };
+const MERMAID_LABELS: Partial<Record<MermaidStyle, string>> = { quadrant: "mermaid: quadrant chart", c4: "mermaid: C4 context", pie: t("mermaid: pie of modules"), mindmap: "mermaid: mindmap" };
 
 /** The Mermaid types the kind offers besides the default, each with its label. */
 function mermaidStylesOf(kind: ViewKind | undefined): [MermaidStyle, string][] {
@@ -26,13 +27,13 @@ export function renderExports(state: Link): void {
   links.replaceChildren();
   const refs = refsOf(state);
 
-  for (const format of FORMATS) links.append(h("a", { href: api.exportUrl(state.view, format, state, refs), title: `Download the diagram as ${format}` }, format === "mermaid" && state.mermaid !== "auto" ? `mermaid (${state.mermaid})` : format));
+  for (const format of FORMATS) links.append(h("a", { href: api.exportUrl(state.view, format, state, refs), title: t("Download the diagram as {format}", { format }) }, format === "mermaid" && state.mermaid !== "auto" ? `mermaid (${state.mermaid})` : format));
 
   for (const [style, label] of mermaidStylesOf(parseView(state.view)?.kind)) links.append(h("a", { href: api.exportUrl(state.view, "mermaid", { ...state, mermaid: style }, refs) }, label));
   const view = parseView(state.view);
 
   // An APIs picture downloads as a Postman collection too: every family's operations, or the one family the picture is of.
-  if (view?.kind === "apis") links.append(h("a", { href: api.postmanUrl(view.subject !== null && !/[/.]/.test(view.subject) ? view.subject : null, refs.head), title: "Download the operations as a Postman collection" }, "postman collection"));
+  if (view?.kind === "apis") links.append(h("a", { href: api.postmanUrl(view.subject !== null && !/[/.]/.test(view.subject) ? view.subject : null, refs.head), title: t("Download the operations as a Postman collection") }, t("postman collection")));
 }
 
 // A pick in the menu downloads; the menu closes behind it.

@@ -1,5 +1,6 @@
 // The user's settings: which program each agent is, the model it is told
-// to use, the agents of the user's own, and the keys the agents run with.
+// to use, the agents of the user's own, the keys the agents run with, and
+// the language the page speaks (page-language.ts).
 // They are the user's and no repository's — a key must not land in a
 // commit — so they are kept in `<home>/.archdiff/settings.json`, written
 // for the user alone, and never in archdiff.json. The page's settings
@@ -10,7 +11,8 @@
 //     "agents": { "claude": { "command": "C:\\tools\\claude.exe", "model": "sonnet", "openrouter": true },
 //                 "opencode": { "model": "openrouter/anthropic/claude-sonnet-4.5" } },
 //     "custom": [{ "name": "mine", "command": ["node", "agent.mjs"], "protocol": "stream-json", "resume": "--resume" }],
-//     "keys": { "OPENROUTER_API_KEY": "sk-or-…" }
+//     "keys": { "OPENROUTER_API_KEY": "sk-or-…" },
+//     "language": "uk"
 //   }
 //
 // A key is an environment variable named `…_KEY` or `…_TOKEN`: every
@@ -20,14 +22,15 @@
 // `openrouter` is set, by the three variables OpenRouter documents.
 //
 // Entry points: `readSettings`, `writeSettings`, `settingsPath`,
-// `changedSettings`, `agentSpecs`, `NO_SETTINGS`, `KNOWN_KEYS`,
-// `OPENROUTER_KEY`.
+// `changedSettings`, `agentSpecs`, `pageLanguage`, `NO_SETTINGS`,
+// `KNOWN_KEYS`, `OPENROUTER_KEY`.
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AGENTS, isAgentName, PROTOCOLS, type AgentName, type AgentProtocol, type AgentSpec } from "./agent.ts";
 import { userHome } from "./home.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonObject, type JsonValue } from "./json.ts";
+import { isPageLanguage, PAGE_LANGUAGES, type PageLanguage } from "./page-language.ts";
 import { attempt, type Result } from "./result.ts";
 
 /** What the settings say of a built-in agent: its program when it is not found by its name, its model, and (Claude Code) whether it goes through OpenRouter. */
@@ -49,6 +52,8 @@ export interface Settings {
   agents: Partial<Record<AgentName, AgentChoice>>;
   custom: OwnAgent[];
   keys: Record<string, string>;
+  /** The language the page speaks, when it is not English (the one it speaks unasked). */
+  language?: PageLanguage;
 }
 
 export const NO_SETTINGS: Settings = { agents: {}, custom: [], keys: {} };
@@ -147,7 +152,18 @@ export function settingsFrom(value: JsonValue): Settings {
     keys[name] = key;
   }
 
-  return { agents, custom, keys };
+  const language = value["language"] ?? "en";
+
+  if (!isPageLanguage(language)) throw new Error(`settings: "language" must be one of ${Object.keys(PAGE_LANGUAGES).map((each) => `"${each}"`).join(", ")}`);
+
+  return { agents, custom, keys, ...(language === "en" ? {} : { language }) };
+}
+
+/** The language the page speaks for this user: the settings', English without one or with a file that does not read. */
+export function pageLanguage(env: NodeJS.ProcessEnv = process.env): PageLanguage {
+  const read = readSettings(env);
+
+  return read.ok ? (read.value.language ?? "en") : "en";
 }
 
 /** The settings of this user; none when there is no file; a problem naming the file when it cannot be read as settings. */
@@ -170,6 +186,8 @@ export function writeSettings(settings: Settings, env: NodeJS.ProcessEnv = proce
   if (settings.custom.length > 0) kept["custom"] = settings.custom as unknown as JsonValue;
 
   if (Object.keys(settings.keys).length > 0) kept["keys"] = settings.keys;
+
+  if (settings.language) kept["language"] = settings.language;
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, `${JSON.stringify(kept, null, 2)}\n`, { mode: 0o600 });
   // A file that was there keeps the mode it had: it is the user's alone from now on (Windows keeps it by the profile's own rights).
@@ -177,8 +195,8 @@ export function writeSettings(settings: Settings, env: NodeJS.ProcessEnv = proce
 }
 
 /**
- * The settings after a change from the page: `agents` and `custom` replace what was there when they are given;
- * each key of `keys` is set (a string) or forgotten (null), the others stay — the page never holds a key's value.
+ * The settings after a change from the page: `agents`, `custom` and `language` replace what was there when they are
+ * given; each key of `keys` is set (a string) or forgotten (null), the others stay — the page never holds a key's value.
  * Throws naming the field that is wrong, with nothing changed.
  */
 export function changedSettings(current: Settings, change: JsonValue): Settings {
@@ -190,7 +208,7 @@ export function changedSettings(current: Settings, change: JsonValue): Settings 
     else keys[name] = key;
   }
 
-  return settingsFrom({ agents: change["agents"] ?? (current.agents as JsonObject), custom: change["custom"] ?? (current.custom as unknown as JsonValue), keys });
+  return settingsFrom({ agents: change["agents"] ?? (current.agents as JsonObject), custom: change["custom"] ?? (current.custom as unknown as JsonValue), keys, language: change["language"] ?? current.language ?? "en" });
 }
 
 /**

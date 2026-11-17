@@ -23,6 +23,7 @@ import "@excalidraw/excalidraw/index.css";
 import { useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { SceneElement } from "../../src/scene.ts";
+import { language } from "./i18n.ts";
 
 export interface CanvasEvents {
   /**
@@ -275,7 +276,7 @@ function CanvasView({ elements, events, mounted, onApi, modeState }: CanvasProps
         }
       }}
       UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: true, toggleTheme: false, clearCanvas: false, changeViewBackgroundColor: false } }}
-      langCode="en"
+      langCode={language === "uk" ? "uk-UA" : "en"}
     />
   );
 }

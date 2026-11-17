@@ -16,6 +16,7 @@
 
 import { api, type ProjectMap } from "./api.ts";
 import { element, h } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { page } from "./page.ts";
 import { codeHead, presentationOf, setLink, currentLink } from "./link.ts";
 
@@ -320,7 +321,7 @@ function draw(): void {
     const node = data.nodes.find((candidate) => candidate.id === hover)!;
     const dot = byId.get(hover)!;
     tip.hidden = false;
-    tip.textContent = `${node.label} — ${node.layer}${node.modules ? `, ${node.modules} modules` : ""}, ${node.lines} lines, ${node.fns} functions, ${neighbours.get(hover)?.size ?? 0} joined · click opens, Shift+click focuses, double click goes inside`;
+    tip.textContent = `${node.label} — ${node.layer}${node.modules ? `, ${t("{count} modules", { count: node.modules })}` : ""}, ${t("{lines} lines, {fns} functions, {joined} joined · click opens, Shift+click focuses, double click goes inside", { lines: node.lines, fns: node.fns, joined: neighbours.get(hover)?.size ?? 0 })}`;
     tip.style.left = `${Math.min(sx(dot.x) + 14, box.width - 320)}px`;
     tip.style.top = `${sy(dot.y) + 14}px`;
   } else tip.hidden = true;
@@ -376,7 +377,7 @@ function renderLayers(): void {
   chips.replaceChildren();
 
   for (const [i, layer] of data.layers.entries()) {
-    const chip = h("button", { class: hiddenLayers.has(layer) ? "chip off" : "chip", title: hiddenLayers.has(layer) ? `Show the ${layer} layer` : `Hide the ${layer} layer`, on: { click: () => {
+    const chip = h("button", { class: hiddenLayers.has(layer) ? "chip off" : "chip", title: hiddenLayers.has(layer) ? t("Show the {layer} layer", { layer }) : t("Hide the {layer} layer", { layer }), on: { click: () => {
       if (hiddenLayers.has(layer)) hiddenLayers.delete(layer);
       else hiddenLayers.add(layer);
       renderLayers();
@@ -386,7 +387,7 @@ function renderLayers(): void {
   }
 
   const counted = data.nodes.length;
-  element<HTMLSpanElement>("map-note").textContent = `${counted} ${data.directoryDepth === null ? "modules" : "directories"}, ${data.edges.length} imports${data.directoryDepth === null ? "" : " (folded: the repository is big)"}`;
+  element<HTMLSpanElement>("map-note").textContent = data.directoryDepth === null ? t("{count} modules, {imports} imports", { count: counted, imports: data.edges.length }) : t("{count} directories, {imports} imports (folded: the repository is big)", { count: counted, imports: data.edges.length });
 }
 
 /** The head whose code the map holds (the link's, or the working tree's). */

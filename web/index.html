@@ -17,7 +17,7 @@
       <span id="stats" class="muted"></span>
       <span class="spacer"></span>
       <details id="options-menu" class="popover">
-        <summary title="Depth, folding, packages, overlays, the Mermaid type: the options of every picture (o)">⚙ options</summary>
+        <summary title="Depth, folding, packages, overlays, the Mermaid type: the options of every picture (o)">options ▾</summary>
         <div id="options">
           <label title="How far from the subject the picture goes; no ceiling, past 12 the picture says it may be big">depth <input id="depth" type="number" min="0" value="" placeholder="auto" /></label>
           <label title="Who is reading: sets the options below at once">preset
@@ -64,11 +64,14 @@
         </div>
       </details>
       <button id="fit" title="Fit the diagram to the window (0)">fit</button>
-      <label>base <input id="base" type="text" placeholder="merge-base" size="10" /></label>
+      <span class="sep"></span>
+      <label title="What a review compares the head against: a branch, a tag or a commit; empty: where the head left the default branch (the merge-base)">base <input id="base" type="text" placeholder="merge-base" size="10" /></label>
       <label title="The code the page shows: a branch, a tag or a commit, read from git without a checkout; empty: the working tree. [ and ] step through the branches; review compares it against the base">head <input id="head" type="text" list="head-refs" placeholder="working tree" size="12" /></label>
       <datalist id="head-refs"></datalist>
-      <button id="review" title="The architectural diff of head (the working tree, or a ref) against the base; opens the branch bar">review</button>
+      <button id="review" class="primary" title="The architectural diff of head (the working tree, or a ref) against the base; opens the branch bar">review</button>
+      <span class="sep"></span>
       <button id="theme" class="icon" title="Light or dark">◐</button>
+      <button id="settings-top" class="icon" title="Settings: the language of the page, the coding agents and the keys they run with">⚙</button>
       <button id="edit" title="Move shapes, draw with the pencil, write notes; saved to .archdiff/layouts/ (e)">✎ edit</button>
       <span id="edit-tools" hidden>
         <button id="save" title="Save the drawing to .archdiff/layouts/<view>.json (Ctrl+S)">save</button>
@@ -97,8 +100,10 @@
     <main>
       <aside id="left">
         <div id="left-mode">
+          <span class="segmented">
           <button data-left="views" class="active" title="The views as lists: the overviews, the layers, the directories, the entry points, the modules… (t switches)">views</button>
           <button data-left="tree" title="The repository as a folder tree: the layers, their directories, the modules, a module's functions; a tap opens the entry's view as the centre shows views (t switches)">tree</button>
+          </span>
           <button id="left-picture" class="toggle" title="The files of the picture shown now carry a dot; press to list them alone">● in picture</button>
         </div>
         <input id="search" type="search" placeholder="filter views (v)" title="Type a layer, a module or a function to filter the views (v)" />
@@ -119,8 +124,16 @@
         <div id="branches" hidden>
           <label>base <select id="base-select" title="The branch every head is compared against (develop, main or master by default)"></select></label>
           <span class="muted">heads:</span>
-          <span id="head-list" title="Tick two or more to compare several branches at once"></span>
-          <button id="compare" title="Compare the ticked heads against the base">compare</button>
+          <span id="head-chips" title="The heads ticked: one is its review against the base, two or more are compared; a press on one unticks it"></span>
+          <details id="heads-menu" class="popover">
+            <summary title="The branches of the repository as a list: type to find one, tick the heads to review or compare">branches ▾</summary>
+            <div id="heads-box">
+              <input id="head-filter" type="search" placeholder="find a branch" title="Type a part of a branch's name or of its last commit's subject; several words must all be there. Enter ticks the first one found, Esc clears" />
+              <div id="head-list"></div>
+              <div id="head-count" class="muted"></div>
+            </div>
+          </details>
+          <button id="compare" class="primary" title="Review the ticked head against the base, or compare the ticked heads when there are several">compare</button>
           <span id="compare-note" class="muted"></span>
         </div>
         <div id="tour" hidden>
@@ -139,7 +152,7 @@
           <div id="tour-note" class="prose"></div>
           <div id="tour-editor" hidden>
             <textarea id="tour-text" placeholder="A note for this step, in Markdown: what to look at here, and why (Ctrl+Enter keeps it)"></textarea>
-            <div class="row"><button id="tour-keep">keep the step</button><button id="tour-cancel">cancel</button></div>
+            <div class="row"><button id="tour-keep" class="primary" title="Keep the step with this note (Ctrl+Enter)">keep the step</button><button id="tour-cancel" title="Leave the step as it was">cancel</button></div>
           </div>
         </div>
         <div id="board" hidden>
@@ -196,7 +209,7 @@
           <div id="project-map" hidden>
             <div id="project-map-bar">
               <strong>project map</strong>
-              <input id="map-search" type="search" placeholder="find a module" />
+              <input id="map-search" type="search" placeholder="find a module" title="Type a part of a module's path: the matching dots stay lit" />
               <span id="map-layers"></span>
               <span id="map-note" class="muted"></span>
               <button id="map-fit" class="small" title="Fit the whole map">fit</button>
@@ -214,9 +227,9 @@
       <aside id="right">
         <div id="resize-right" class="resizer" title="Drag to make the details wider or narrower; far to the right folds them away; a double click gives them the width they came with"></div>
         <nav id="tabs">
-          <button data-tab="markdown" class="active">Markdown</button>
-          <button data-tab="code">Code</button>
-          <button data-tab="coverage">Coverage</button>
+          <button data-tab="markdown" class="active" title="The page of the picture, or of what is picked on it — a shape, a line, a selection: what it is, what it imports and calls, what the change did to it">Markdown</button>
+          <button data-tab="code" title="The code of the shape picked: its file with the shape's lines marked; on a review, with the lines the change added and took away">Code</button>
+          <button data-tab="coverage" title="What the analysis read and what it could not: the imports and calls it did not resolve, and why">Coverage</button>
           <button data-tab="flow" id="flow-tab" title="The data flow from this entry point, with mock inputs and storages (no code is run)">Flow</button>
           <button data-tab="chat" id="chat-tab" title="The task drawn on this view, and the agent that does it">Chat</button>
           <button data-tab="spec" id="spec-tab" title="The specification of the repository: OpenSpec specs and Gherkin features, written by the agent from the code">Spec</button>
@@ -232,7 +245,7 @@
           <div id="ask-row" class="row">
             <input id="ask" type="text" placeholder="ask about this picture or the selected shapes — or / for a command (Enter)" title="A question for the agent, answered without changing any file: the picture (or the selected shapes) goes along as context. A line that starts with a slash is a command of the page — /view, /as 3d, /mix, /grep, /diff, /review…; /help lists them, and they run with or without an agent" />
             <label title="Send the current picture (its Markdown and Mermaid) with the question"><input id="ask-picture" type="checkbox" checked /> this picture</label>
-            <button id="ask-go" title="Ask (Enter)">ask</button>
+            <button id="ask-go" class="primary" title="Ask (Enter)">ask</button>
           </div>
           <div id="ask-about" class="muted" hidden></div>
           <div class="row" id="agent-row">
@@ -242,7 +255,7 @@
           </div>
           <details id="chat-help" class="help"><summary>how the chat works</summary><p class="muted">Draw the change on this view (✎ edit: a shape with a name is a new module or function, an arrow is an import or a call, a deleted shape is a removal, text is a note), save, then <em>code this</em>: the drawing goes into ARCHITECTURE.md (the contract) and the agent builds it. <em>improve the diagram</em> asks the agent to review the contract; <em>from document</em> turns a design note into it. The agent may ask you a question with options. Nothing runs by itself.</p></details>
           <div class="row buttons">
-            <button id="code-this" title="Fold the drawing of this view into ARCHITECTURE.md and have the agent build what is not built yet (/code)">code this</button>
+            <button id="code-this" class="primary" title="Fold the drawing of this view into ARCHITECTURE.md and have the agent build what is not built yet (/code)">code this</button>
             <button id="improve-diagram" title="Ask the agent to review ARCHITECTURE.md: names, missing links, layers, what the document leaves open (/diagram)">improve the diagram</button>
             <button id="from-document" title="Paste a design note, an ISD or a spec; the agent writes the architecture from it (/doc)">from document</button>
             <button id="plan" class="small" title="Only read the task from the drawing, without touching the contract">read the task</button>
@@ -251,21 +264,21 @@
           </div>
           <textarea id="document" hidden placeholder="Paste the document here (a design note, an ISD, a spec in prose, or Markdown with a Mermaid flowchart), then press Ctrl+Enter or the button below."></textarea>
           <div id="document-row" class="row" hidden>
-            <button id="document-go">architecture from this document</button>
+            <button id="document-go" class="primary" title="Have the agent write ARCHITECTURE.md from the document pasted above (Ctrl+Enter)">architecture from this document</button>
             <span id="document-state" class="muted"></span>
           </div>
           <textarea id="task" placeholder="The task appears here; edit it before running. Type @ to name a module, function, layer, directory, flow or type: it is sent to the agent with its context."></textarea>
           <ul id="tag-suggest" hidden></ul>
           <div class="row">
-            <button id="run" disabled>run</button>
-            <button id="stop" disabled>stop</button>
+            <button id="run" class="primary" disabled title="Hand the task above to the agent picked: it works in the repository, and what it does is listed below as it goes">run</button>
+            <button id="stop" disabled title="Stop the agent's run; what it has written so far stays">stop</button>
             <span id="run-state" class="muted"></span>
           </div>
           <div id="transcript"></div>
           <div id="question" hidden></div>
           <details id="tasks-box"><summary class="muted">previous tasks</summary><ul id="tasks"></ul></details>
           <div class="row">
-            <input id="followup" type="text" placeholder="a follow-up message to the agent (Enter)" disabled />
+            <input id="followup" type="text" placeholder="a follow-up message to the agent (Enter)" title="Once a run has ended: one more message into the same session of the agent, which remembers the task" disabled />
           </div>
         </div>
         <div id="spec" class="panel prose">
@@ -282,7 +295,7 @@
         <div id="flow" class="panel prose">
           <details id="flow-help" class="help"><summary>what the flow shows</summary><p class="muted">Open a call flow (an entry point) to see its data flow: the steps in call order with their parameter and return types. Attach a mock input and mock storages; values are carried to parameters and properties of the same name. Nothing is run.</p></details>
           <div class="row">
-            <input id="mock-description" type="text" placeholder="describe the scenario (optional): an order of 42 with no customer…" />
+            <input id="mock-description" type="text" placeholder="describe the scenario (optional): an order of 42 with no customer…" title="What the mocks should stand for, in a sentence: the agent writes the mock input and storages for it" />
             <button id="mock-generate" title="Mocks for the entry and the storages: from the agent with this description, else from the types">generate mocks</button>
             <button id="flow-play" title="Play the predicted steps on the diagram, one by one (▶)">▶ play</button>
             <button id="flow-run" title="Run the entry for real with the storages mocked (TypeScript/JavaScript, no writes, no network): the functions entered light up green, the predicted ones it never reached grey">▶ run</button>
@@ -296,10 +309,15 @@
     <dialog id="settings" aria-labelledby="settings-title">
       <div id="settings-head">
         <strong id="settings-title">Settings</strong>
-        <span id="settings-file" class="muted" title="Where the settings are kept: your own file on this computer, outside every repository"></span>
+        <span id="settings-file" class="muted" data-keep title="Where the settings are kept: your own file on this computer, outside every repository"></span>
         <button id="settings-close" class="icon" title="Close (Esc)">✕</button>
       </div>
       <p id="settings-problem" hidden></p>
+      <h3>Language</h3>
+      <div class="row">
+        <select id="settings-language" title="The language the page speaks; the page is drawn again in it"></select>
+        <span class="muted">The buttons, the hints and the notes of the page. What archdiff writes about the code — a picture's page, the names on the canvas — stays as the command line prints it.</span>
+      </div>
       <h3>Agents</h3>
       <p class="muted">The coding agents the Chat tab runs. One that is found by its name needs nothing here. Place its program when it is somewhere else, and name a model when its own is not the one you want. Every change is kept at once.</p>
       <div id="settings-agents"></div>
@@ -315,7 +333,7 @@
             <option value="opencode">opencode</option>
           </select>
           <input id="own-resume" type="text" placeholder="resume flag" size="10" title="The flag a follow-up names the session by (--resume); empty: it cannot resume" />
-          <button id="own-add">add</button>
+          <button id="own-add" title="Add this agent to the settings">add</button>
         </div>
       </details>
       <h3>Keys</h3>
@@ -325,7 +343,7 @@
         <input id="key-name" type="text" list="key-names" placeholder="OPENROUTER_API_KEY" size="26" title="The name of the environment variable" />
         <datalist id="key-names"></datalist>
         <input id="key-value" class="wide" type="password" placeholder="the key" autocomplete="off" />
-        <button id="key-set">set</button>
+        <button id="key-set" title="Keep this key in the settings (Enter)">set</button>
       </div>
       <p id="settings-note" class="muted" role="status"></p>
     </dialog>

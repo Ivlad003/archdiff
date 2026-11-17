@@ -6,7 +6,14 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { withTempDir } from "./temp-dir.ts";
+import { listBranches } from "../src/git.ts";
+import { isPageLanguage, PAGE_LANGUAGES } from "../src/page-language.ts";
+import { plural } from "../web/src/i18n-plural.ts";
+import { UK } from "../web/src/i18n-uk.ts";
 import { DEFAULT_PICTURE_OPTIONS, DEEP_DEPTH, depthWarning, pictureOptionsHelp, pictureQueryText, readEachPictureOption, readPictureOptions, writePictureParams, type PictureOptions } from "../src/options.ts";
 import { components, cycleThrough, stronglyConnected } from "../src/scc.ts";
 import { firstMatchingGlob, matchesGlob } from "../src/glob.ts";
@@ -14,7 +21,7 @@ import { attempt, ok, wrong } from "../src/result.ts";
 import { OVERVIEW_GROUP, VIEW_KINDS, listGroup, listGroups, overviews, parseView, subjectFile, tagOf, viewsOfFiles, type ViewEntry, type ViewKind } from "../src/view-keys.ts";
 import { collectionOf, matchRequests, pathSegments, routesOf, type Route } from "../src/collections.ts";
 import { SCAPI_TABLE } from "../src/scapi-table.ts";
-import { agentCommands, CHAT_COMMANDS, commandsHelp, doCommands, parseCommandLine } from "../src/chat-commands.ts";
+import { agentCommands, CHAT_COMMANDS, commandsHelp, doCommands, HELP_TEXTS, parseCommandLine } from "../src/chat-commands.ts";
 import { explainedName, explainPrompt, tourInAnswer, TOUR_BLOCK } from "../src/explain.ts";
 import { AGENT_PROTOCOL } from "../src/intent.ts";
 
@@ -558,4 +565,69 @@ test("an explanation is asked for as a tour and read from the agent's answer: it
   assert.equal(explainedName("How an order is placed!", 1_000_000), "explained-how-an-order-is-placed-lfls");
   assert.equal(explainedName("…", 36), "explained-tour-10");
   assert.match(explainedName("A very long title that goes on and on and on and on past the room a file name has", 1), /^explained-[a-z0-9-]{1,40}-1$/);
+});
+
+test("the branches are listed with one question to git: a local one, a remote one and the one checked out told apart by their refs", () =>
+  withTempDir("archdiff-branches-", (dir) => {
+    const git = (...args: string[]): void => {
+      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(dir, "a.txt"), "a\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "the first");
+    git("branch", "feature/x");
+    // A branch of the remote's alone, one the remote and the checkout both have, and the remote's own HEAD, which is no branch.
+    git("update-ref", "refs/remotes/origin/fix/y", "HEAD");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    const { current, branches } = listBranches(dir);
+    assert.equal(current, "main");
+    assert.deepEqual(branches.map((branch) => [branch.name, branch.remote, branch.current]).sort(), [
+      ["feature/x", false, false],
+      ["main", false, true],
+      ["origin/fix/y", true, false],
+      ["origin/main", true, false],
+    ]);
+    assert.ok(branches.every((branch) => /^[0-9a-f]{7,}$/.test(branch.sha) && /^\d{4}-\d\d-\d\d$/.test(branch.date) && branch.subject === "the first"), JSON.stringify(branches));
+  }));
+
+test("the page's Ukrainian holds every text the modules say, each once, and nothing nobody says", () => {
+  const sources = join(import.meta.dirname, "..", "web", "src");
+  const said = new Map<string, string>();
+  const loose: string[] = [];
+
+  for (const file of readdirSync(sources).filter((name) => /\.tsx?$/.test(name) && !name.startsWith("i18n"))) {
+    const text = readFileSync(join(sources, file), "utf8");
+
+    // A text is named by its English, written where it is said: `t("…")` and nothing else — no variable, no template.
+    for (const call of text.matchAll(/(?<![\w.$])t\(\s*("(?:[^"\\\n]|\\.)*")?/g)) {
+      if (call[1] === undefined) loose.push(`${file}: ${text.slice(call.index, call.index + 60).split("\n")[0]}`);
+      else said.set(JSON.parse(call[1]) as string, file);
+    }
+  }
+
+  assert.deepEqual(loose, [], "t() takes a text written in double quotes");
+  // The texts the page shares with the command line and says through `translated`: the groups of the views list, the help of the chat's commands.
+  const shared = [...listGroups(), ...CHAT_COMMANDS.map((command) => command.does), ...Object.values(HELP_TEXTS)];
+
+  for (const each of shared) said.set(each, "src");
+  assert.ok(said.size > 200, `only ${said.size} texts found: the pattern reads the sources`);
+  assert.deepEqual([...said].filter(([key]) => !Object.hasOwn(UK, key)).map(([key, file]) => `${file}: ${key}`), [], "said by a module, with no Ukrainian");
+
+  // What the table holds beyond the modules' texts is what index.html says (its hints, labels and notes), as the page
+  // itself would read it: an entry found in neither is one nobody says any more.
+  const html = readFileSync(join(sources, "..", "index.html"), "utf8").replace(/\s+/g, " ");
+  const plain = html.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+  assert.deepEqual(Object.keys(UK).filter((key) => !said.has(key) && !html.includes(key) && !plain.includes(key)), [], "in the table, said by nobody");
+
+  // A text and its translation name the same values.
+  const marks = (text: string): string => [...text.matchAll(/\{(\w+)\}/g)].map((mark) => mark[1]).sort().join(",");
+  assert.deepEqual(Object.entries(UK).filter(([key, value]) => typeof value === "string" && marks(key) !== marks(value)).map(([key]) => key), [], "the marks of a translation are its text's");
+
+  // A count picks the word's form: one, a few, many — and the teens are many.
+  assert.deepEqual([1, 2, 5, 11, 12, 21, 22, 25, 101, 111, 0].map((n) => plural(n, "файл", "файли", "файлів")), ["файл", "файли", "файлів", "файлів", "файлів", "файл", "файли", "файлів", "файл", "файлів", "файлів"]);
+  assert.deepEqual(Object.keys(PAGE_LANGUAGES), ["en", "uk"]);
+  assert.ok(isPageLanguage("uk") && !isPageLanguage("UK") && !isPageLanguage("toString") && !isPageLanguage(null));
 });

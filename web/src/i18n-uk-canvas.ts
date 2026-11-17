@@ -1,0 +1,241 @@
+// The page's words in Ukrainian said by the modules of the canvas and the navigation (the title, the views, the tree, the toolbar, the legend, the menus, the map):
+// each under the English the module writes (`t("…")`, i18n.ts), grouped by
+// module. A text with a number in it is a function where the Ukrainian word
+// turns on the number (`plural`). Joined into the one table by i18n-uk.ts.
+//
+// Entry point: `UK_CANVAS`.
+
+import { plural } from "./i18n-plural.ts";
+
+type Values = Readonly<Record<string, string | number>>;
+
+export const UK_CANVAS: Readonly<Record<string, string | ((values: Values) => string)>> = {
+  // ── app.ts ─────────────────────────────────────────────────────────────────
+  "Nothing to draw here": "Тут нічого малювати",
+  "the picture has no shapes": "на діаграмі немає фігур",
+  "⚠ ignored in the link: {problem}": "⚠ проігноровано в посиланні: {problem}",
+  "This picture could not be drawn": "Цю діаграму не вдалося намалювати",
+  "{path} changed; the drawing stays until you leave the editor": "{path} змінено; малюнок лишається, доки ви не вийдете з редактора",
+  "{path} changed — reloaded": "{path} змінено — перезавантажено",
+  "The repository could not be read": "Не вдалося прочитати репозиторій",
+
+  // ── title.ts ───────────────────────────────────────────────────────────────
+  "nothing would break": "нічого не зламається",
+  "1 head adds a layer dependency": "1 head додає залежність між шарами",
+  "{warnings} heads add a layer dependency": "{warnings} heads додають залежність між шарами",
+  "1 new layer dependency": "1 нова залежність між шарами",
+  "{count} new layer dependencies": (v) => `${v.count} ${plural(v.count, "нова залежність", "нові залежності", "нових залежностей")} між шарами`,
+  "1 source file changed": "змінено 1 файл коду",
+  "{count} source files changed": (v) => `змінено ${v.count} ${plural(v.count, "файл", "файли", "файлів")} коду`,
+  "against ARCHITECTURE.md": "всупереч ARCHITECTURE.md",
+  "allowed by ARCHITECTURE.md": "ARCHITECTURE.md це дозволяє",
+  "drawn by hand": "намальовано вручну",
+  "bigger than the canvas even at the smallest zoom: it starts from its beginning; drag along it or use the minimap": "більша за полотно навіть у найменшому масштабі: показано від її початку; тягніть уздовж неї або скористайтеся мінікартою",
+
+  // ── navigation.ts ──────────────────────────────────────────────────────────
+  "call tree": "дерево викликів",
+  "sequence of calls": "послідовність викликів",
+  "path to the storages": "шлях до сховищ",
+  "focus: everything joined to it": "фокус: усе, що з цим пов'язане",
+  "impact: what a change to it reaches": "вплив: що зачепить зміна",
+  "logic: the flowchart and its rules": "логіка: блок-схема та її правила",
+  "its call cycle": "цикл викликів",
+  "dependencies": "залежності",
+  "inside: functions and calls": "усередині: функції та виклики",
+  "classes: fields and methods": "класи: поля та методи",
+  "usage: who uses its exports": "використання: хто використовує експорти",
+  "its import cycle": "цикл імпортів",
+  "modules of the directory": "модулі теки",
+  "classes of the directory": "класи теки",
+
+  // ── views-list.ts ──────────────────────────────────────────────────────────
+  "● {count} in picture": "● {count} на діаграмі",
+  "… {count} more: type to filter": "… ще {count}: введіть текст, щоб відфільтрувати",
+  "not following the code: {problem}": "код не відстежується: {problem}",
+  "{files} changed since {since}": "змінено {files} від {since}",
+  "at {head}": "на {head}",
+  "{files} files · {fns} functions · {deps} imports · {calls} calls · {gaps} gaps · {ms} ms": (v) =>
+    `${v.files} ${plural(v.files, "файл", "файли", "файлів")} · ${v.fns} ${plural(v.fns, "функція", "функції", "функцій")} · ${v.deps} ${plural(v.deps, "імпорт", "імпорти", "імпортів")} · ${v.calls} ${plural(v.calls, "виклик", "виклики", "викликів")} · ${v.gaps} ${plural(v.gaps, "прогалина", "прогалини", "прогалин")} · ${v.ms} мс`,
+
+  // ── tree.ts ────────────────────────────────────────────────────────────────
+  "in the picture shown now": "на показаній зараз діаграмі",
+  "tap for the module's view, the caret for its functions": "клік — подання модуля, стрілка — його функції",
+  "could not read its functions (press the caret again)": "не вдалося прочитати його функції (натисніть стрілку ще раз)",
+  "loading": "завантаження",
+  "no function of its own": "власних функцій немає",
+  "its call tree, its logic or everything joined to it": "дерево викликів, логіка або все, що з нею пов'язане",
+  "layer {name} — tap for its picture, the caret to fold it": "шар {name} — клік відкриває його діаграму, стрілка згортає",
+  "{name} — tap for the directory's picture, the caret to fold it": "{name} — клік відкриває діаграму теки, стрілка згортає",
+  "{name} — no picture of its own, the caret to fold it": "{name} — власної діаграми немає, стрілка згортає",
+  "no file in the picture yet": "на діаграмі ще немає файлів",
+  "no modules": "модулів немає",
+  "nothing matches": "нічого не знайдено",
+
+  // ── toolbar.ts ─────────────────────────────────────────────────────────────
+  "this subject": "цей предмет",
+  "overview": "огляд",
+  "One step less or more from the subject (no ceiling: past 12 the picture warns)": "На крок менше або більше від предмета (межі немає: після 12 діаграма попереджає)",
+  // Said by options-panel.ts too, of the depth field.
+  "This view does not go a depth from a subject": "Це подання не йде вглиб від предмета",
+  "close opened ({count})": "закрити розкриті ({count})",
+  "mix: tap a module to open it in place; tap its rest shape to close it": "мікс: клік по модулю розкриває його на місці; клік по фігурі його решти закриває",
+  "dim: tap a shape to dim all but its neighbours; tap nothing to clear": "приглушення: клік по фігурі приглушує все, крім її сусідів; клік по порожньому знімає",
+  "{count} shape matches": (v) => `${v.count} ${plural(v.count, "фігура збігається", "фігури збігаються", "фігур збігається")}`,
+  "{count} shapes match": (v) => `${v.count} ${plural(v.count, "фігура збігається", "фігури збігаються", "фігур збігається")}`,
+  "not in this picture: opening {view}": "на цій діаграмі немає: відкривається {view}",
+
+  // ── legend.ts ──────────────────────────────────────────────────────────────
+  "layer": "шар",
+  "A layer: a named set of modules that depend on other layers in one direction": "Шар: іменований набір модулів, що залежать від інших шарів в одному напрямку",
+  "workspace package": "пакунок workspace",
+  "A package of the repository's own workspace": "Пакунок із власного workspace репозиторію",
+  "module": "модуль",
+  "A module: a source file": "Модуль: файл коду",
+  "participant": "учасник",
+  "A module at the top of a sequence, with its lifeline under it": "Модуль угорі послідовності, під ним — його лінія життя",
+  "entry point": "точка входу",
+  "A declaration execution starts from": "Оголошення, з якого починається виконання",
+  "function": "функція",
+  "A function, a method or a class": "Функція, метод або клас",
+  "class": "клас",
+  "A class or an interface, with its fields and methods": "Клас або інтерфейс із його полями та методами",
+  "package": "пакунок",
+  "A package or a built-in the code imports": "Пакунок або вбудований модуль, який імпортує код",
+  "event": "подія",
+  "An event: emitted, or listened to": "Подія: її надсилають або слухають",
+  "machine": "автомат",
+  "A state machine": "Автомат станів",
+  "state": "стан",
+  "A state of a machine": "Стан автомата",
+  "cell": "клітинка",
+  "A cell of a table or a bar of a chart: darker, more": "Клітинка таблиці або стовпчик графіка: що темніше, то більше",
+  "guard": "умова",
+  "The calls made under one condition or in one loop": "Виклики, зроблені за однієї умови або в одному циклі",
+  "branch": "розгалуження",
+  "A branch of a function's logic: an if, a switch, a loop, a try": "Розгалуження логіки функції: if, switch, цикл, try",
+  "step": "крок",
+  "One or two plain statements of a function": "Один-два прості оператори функції",
+  "exit": "вихід",
+  "Where a path through a function ends: a return, a throw, the end of the body": "Де закінчується шлях через функцію: return, throw, кінець тіла",
+  "not followed": "не простежено",
+  "A call the analysis could not follow": "Виклик, який аналіз не зміг простежити",
+  "… more": "… ще",
+  "The shapes a big picture folds away; the Markdown lists them all": "Фігури, які велика діаграма згортає; у Markdown перелічено всі",
+  "A → B: A imports B": "A → B: A імпортує B",
+  "An import: the left imports the right": "Імпорт: ліве імпортує праве",
+  "A calls B": "A викликає B",
+  "A call the analysis followed to its target": "Виклик, який аналіз простежив до цілі",
+  "passed as a value": "передано як значення",
+  "A function passed as a value: it may be called": "Функція, передана як значення: її можуть викликати",
+  "message": "повідомлення",
+  "One call of a sequence, in order from the top": "Один виклик послідовності, по порядку згори",
+  "next step": "наступний крок",
+  "The next step of a function's logic, labelled with the branch taken": "Наступний крок логіки функції, підписаний обраною гілкою",
+  "changed together": "змінювалися разом",
+  "Two files the commits of the range changed together at least twice (the coupling overlay)": "Два файли, які коміти діапазону змінювали разом щонайменше двічі (накладання «спільні зміни»)",
+  "added": "додано",
+  "removed": "прибрано",
+  "changed": "змінено",
+  "planned": "заплановано",
+  "{mark}: what the change, or the contract, says of the shape or the line": "{mark}: що зміна або контракт каже про фігуру чи лінію",
+  "types only": "лише типи",
+  "Only types cross the line (import type): no dependency at run time": "Лінію перетинають лише типи (import type): під час виконання залежності немає",
+
+  // ── layout.ts ──────────────────────────────────────────────────────────────
+  "the views": "подання",
+  "the details": "деталі",
+  "Hide": "Сховати",
+  "Show": "Показати",
+  "tools ▸": "інструменти ▸",
+  "tools ◂": "інструменти ◂",
+
+  // ── presentation.ts ────────────────────────────────────────────────────────
+  "3D could not be loaded: {error}": "Не вдалося завантажити 3D: {error}",
+  "This view has no file of its own, so its page is shown instead. Double-tap a shape on the canvas or in 3D for its own view, then show that as code.": "Це подання не має власного файлу, тому показано його сторінку. Двічі клікніть фігуру на полотні або в 3D, щоб відкрити її власне подання, а тоді покажіть його як код.",
+
+  // ── canvas.ts ──────────────────────────────────────────────────────────────
+  "saved to {saved}": "збережено в {saved}",
+  "The drawing has unsaved changes. Leave the editor and lose them?": "У малюнку є незбережені зміни. Вийти з редактора й утратити їх?",
+
+  // ── project-map.ts ─────────────────────────────────────────────────────────
+  "{count} modules": (v) => `${v.count} ${plural(v.count, "модуль", "модулі", "модулів")}`,
+  "{lines} lines, {fns} functions, {joined} joined · click opens, Shift+click focuses, double click goes inside": (v) =>
+    `${v.lines} ${plural(v.lines, "рядок", "рядки", "рядків")}, ${v.fns} ${plural(v.fns, "функція", "функції", "функцій")}, ${v.joined} ${plural(v.joined, "зв'язок", "зв'язки", "зв'язків")} · клік відкриває, Shift+клік — фокус, подвійний клік — усередину`,
+  "Show the {layer} layer": "Показати шар {layer}",
+  "Hide the {layer} layer": "Сховати шар {layer}",
+  "{count} modules, {imports} imports": (v) => `${v.count} ${plural(v.count, "модуль", "модулі", "модулів")}, ${v.imports} ${plural(v.imports, "імпорт", "імпорти", "імпортів")}`,
+  "{count} directories, {imports} imports (folded: the repository is big)": (v) => `${v.count} ${plural(v.count, "тека", "теки", "тек")}, ${v.imports} ${plural(v.imports, "імпорт", "імпорти", "імпортів")} (згорнуто: репозиторій великий)`,
+
+  // ── three-view.ts ──────────────────────────────────────────────────────────
+  "3D needs WebGL, which this browser does not provide ({error})": "Для 3D потрібен WebGL, якого цей браузер не надає ({error})",
+
+  // ── options-panel.ts ───────────────────────────────────────────────────────
+  "not used here": "тут не використовується",
+  "auto ({depth})": "авто ({depth})",
+  "How far from the subject the picture goes; {depth} by default": "Як далеко від предмета сягає діаграма; типово {depth}",
+  "draws {what} only": "малює лише: {what}",
+  "options remembered as the defaults of this browser": "параметри запам'ятано як типові для цього браузера",
+  "no storage: the options last this page": "сховище недоступне: параметри діють, доки відкрита ця сторінка",
+  "every option back to the built-in one; the remembered defaults are forgotten": "усі параметри повернуто до вбудованих; запам'ятані типові забуто",
+
+  // ── export-menu.ts ─────────────────────────────────────────────────────────
+  "mermaid: pie of modules": "mermaid: pie модулів",
+  "Download the diagram as {format}": "Завантажити діаграму як {format}",
+  "Download the operations as a Postman collection": "Завантажити операції як колекцію Postman",
+  "postman collection": "колекція Postman",
+
+  // ── shape-menu.ts ──────────────────────────────────────────────────────────
+  "Open: inside it (its functions and calls)": "Відкрити: усередині (функції та виклики)",
+  "Open: its calls": "Відкрити: виклики",
+  "Open: the layer": "Відкрити: шар",
+  "Open: its logic": "Відкрити: логіку",
+  "Open: the machine": "Відкрити: автомат",
+  "Open: the directory": "Відкрити: теку",
+  "Open: what it did to the architecture": "Відкрити: що він зробив з архітектурою",
+  "Open {view}": "Відкрити {view}",
+  "What if it were deleted": "Що, якби його видалили",
+  "what breaks, the contract and the cycles after it": "що зламається, контракт і цикли після цього",
+  "What if it moved…": "Що, якби його перемістили…",
+  "to a path or a directory you name": "за шляхом або в теку, які ви вкажете",
+  "Move {target} to (a path, or a directory ending in /):": "Перемістити {target} до (шлях або тека, що закінчується на /):",
+  "What if it were split off…": "Що, якби її виокремили…",
+  "into a new module you name": "у новий модуль, який ви назвете",
+  "Split {name} off {module} into the new module:": "Виокремити {name} з {module} у новий модуль:",
+  "tap again": "ще клік",
+  "The code at this commit": "Код на цьому коміті",
+  "{sha} in the head field": "{sha} у полі head",
+  "The code of {branch}": "Код гілки {branch}",
+  "its tip in the head field": "її вершина в полі head",
+  "Review {branch}": "Рев'ю {branch}",
+  "since it left the base": "відколи вона відійшла від бази",
+  "Focus: everything joined to it": "Фокус: усе, що з цим пов'язане",
+  "callers, callees, imports, across the modules": "хто викликає, кого викликає, імпорти — через усі модулі",
+  "Impact: what a change to it reaches": "Вплив: що зачепить зміна",
+  "its dependents by distance, the tests, the risk": "залежні за відстанню, тести, ризик",
+  "Logic: the flowchart and its rules": "Логіка: блок-схема та її правила",
+  "Take out of the selection": "Прибрати з виділення",
+  "Add to the selection": "Додати до виділення",
+  "Shift+tap": "Shift+клік",
+  "Ask the agent about it": "Запитати агента про це",
+  "no tag for this kind of shape": "для такого виду фігур тегу немає",
+  "Explain it, step by step": "Пояснити це крок за кроком",
+  "a tour the agent writes": "тур, який пише агент",
+  "Dim all but its neighbours": "Приглушити все, крім сусідів",
+  "Show the code": "Показати код",
+  "Copy the name": "Скопіювати назву",
+  "Where this line leads": "Куди веде ця лінія",
+  "Follow the chain onward": "Простежити ланцюжок далі",
+  "Ask the agent about this picture": "Запитати агента про цю діаграму",
+  "Explain this picture, step by step": "Пояснити цю діаграму крок за кроком",
+  "Project map": "Карта проєкту",
+  "Fit the picture": "Вмістити діаграму",
+  "Clear the selection": "Зняти виділення",
+  "Edit the drawing": "Редагувати малюнок",
+
+  // ── link.ts ────────────────────────────────────────────────────────────────
+  "canvas": "полотно",
+  "code": "код",
+  "drag to orbit · wheel to zoom · right-drag to pan · tap a block for its code · double-tap it to open its own view · 0 fits": "тягніть, щоб обертати · колесо — масштаб · тягніть правою кнопкою, щоб рухати · клік по блоку — його код · подвійний клік відкриває його власне подання · 0 вміщує",
+  "the page of this view · a file:line in it opens the code on the right": "сторінка цього подання · file:line у ній відкриває код праворуч",
+  "the code of the view's subject · double-tap a shape on the canvas or in 3D for its own view, then its code · the picture's page is on the right": "код предмета подання · подвійний клік по фігурі на полотні або в 3D — її власне подання, далі її код · сторінка діаграми — праворуч",
+};

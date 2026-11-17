@@ -9,46 +9,47 @@
 
 import type { Line, Shape } from "./api.ts";
 import { element, h } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { COCHANGE_STROKE, DIFF_STROKE, LOOKS } from "../../src/looks.ts";
 
 /** What the legend calls each kind of shape, in the order it lists them; a kind left out (the foot of a lifeline) is never explained. */
 const SHAPES: [kind: Shape["kind"], label: string, title: string][] = [
-  ["layer", "layer", "A layer: a named set of modules that depend on other layers in one direction"],
-  ["package", "workspace package", "A package of the repository's own workspace"],
-  ["module", "module", "A module: a source file"],
-  ["participant", "participant", "A module at the top of a sequence, with its lifeline under it"],
-  ["start", "entry point", "A declaration execution starts from"],
-  ["fn", "function", "A function, a method or a class"],
-  ["class", "class", "A class or an interface, with its fields and methods"],
-  ["external", "package", "A package or a built-in the code imports"],
-  ["event", "event", "An event: emitted, or listened to"],
-  ["machine", "machine", "A state machine"],
-  ["state", "state", "A state of a machine"],
-  ["cell", "cell", "A cell of a table or a bar of a chart: darker, more"],
-  ["fragment", "guard", "The calls made under one condition or in one loop"],
-  ["decision", "branch", "A branch of a function's logic: an if, a switch, a loop, a try"],
-  ["action", "step", "One or two plain statements of a function"],
-  ["end", "exit", "Where a path through a function ends: a return, a throw, the end of the body"],
-  ["hole", "not followed", "A call the analysis could not follow"],
-  ["more", "… more", "The shapes a big picture folds away; the Markdown lists them all"],
+  ["layer", t("layer"), t("A layer: a named set of modules that depend on other layers in one direction")],
+  ["package", t("workspace package"), t("A package of the repository's own workspace")],
+  ["module", t("module"), t("A module: a source file")],
+  ["participant", t("participant"), t("A module at the top of a sequence, with its lifeline under it")],
+  ["start", t("entry point"), t("A declaration execution starts from")],
+  ["fn", t("function"), t("A function, a method or a class")],
+  ["class", t("class"), t("A class or an interface, with its fields and methods")],
+  ["external", t("package"), t("A package or a built-in the code imports")],
+  ["event", t("event"), t("An event: emitted, or listened to")],
+  ["machine", t("machine"), t("A state machine")],
+  ["state", t("state"), t("A state of a machine")],
+  ["cell", t("cell"), t("A cell of a table or a bar of a chart: darker, more")],
+  ["fragment", t("guard"), t("The calls made under one condition or in one loop")],
+  ["decision", t("branch"), t("A branch of a function's logic: an if, a switch, a loop, a try")],
+  ["action", t("step"), t("One or two plain statements of a function")],
+  ["end", t("exit"), t("Where a path through a function ends: a return, a throw, the end of the body")],
+  ["hole", t("not followed"), t("A call the analysis could not follow")],
+  ["more", t("… more"), t("The shapes a big picture folds away; the Markdown lists them all")],
 ];
 
 /** What the legend calls each kind of line, how it draws it, and what a line from A to B says. */
 const LINES: [kind: Line["kind"], label: string, stroke: string, dashed: boolean, title: string][] = [
-  ["dependency", "A → B: A imports B", "#616161", false, "An import: the left imports the right"],
-  ["call", "A calls B", "#1565c0", false, "A call the analysis followed to its target"],
-  ["ref", "passed as a value", "#1565c0", true, "A function passed as a value: it may be called"],
-  ["message", "message", "#1565c0", false, "One call of a sequence, in order from the top"],
-  ["flow", "next step", "#424242", false, "The next step of a function's logic, labelled with the branch taken"],
-  ["cochange", "changed together", COCHANGE_STROKE, true, "Two files the commits of the range changed together at least twice (the coupling overlay)"],
+  ["dependency", t("A → B: A imports B"), "#616161", false, t("An import: the left imports the right")],
+  ["call", t("A calls B"), "#1565c0", false, t("A call the analysis followed to its target")],
+  ["ref", t("passed as a value"), "#1565c0", true, t("A function passed as a value: it may be called")],
+  ["message", t("message"), "#1565c0", false, t("One call of a sequence, in order from the top")],
+  ["flow", t("next step"), "#424242", false, t("The next step of a function's logic, labelled with the branch taken")],
+  ["cochange", t("changed together"), COCHANGE_STROKE, true, t("Two files the commits of the range changed together at least twice (the coupling overlay)")],
 ];
 
 /** What the legend calls each mark of a change, in the order it lists them. */
 const MARKS: [mark: keyof typeof DIFF_STROKE, label: string, fill: string, dashed: boolean][] = [
-  ["added", "added", "#d4f8d4", false],
-  ["removed", "removed", "#f8d4d4", true],
-  ["changed", "changed", "#fff4c2", false],
-  ["planned", "planned", "#e3f2fd", true],
+  ["added", t("added"), "#d4f8d4", false],
+  ["removed", t("removed"), "#f8d4d4", true],
+  ["changed", t("changed"), "#fff4c2", false],
+  ["planned", t("planned"), "#e3f2fd", true],
 ];
 
 /** A swatch of a shape: its outline (a box, an ellipse, a diamond), its stroke and its fill. */
@@ -88,10 +89,10 @@ export function renderLegend(nodes: Iterable<Shape>, edges: readonly Line[]): vo
     const line = h("i", { class: "ln" });
     line.style.borderTopColor = "#9e9e9e";
     line.style.borderTopStyle = "dashed";
-    entries.push(h("span", { title: "Only types cross the line (import type): no dependency at run time" }, line, "types only"));
+    entries.push(h("span", { title: t("Only types cross the line (import type): no dependency at run time") }, line, t("types only")));
   }
 
-  for (const [mark, label, fill, dashed] of MARKS) if (marks.has(mark)) entries.push(h("span", { title: `${label[0]!.toUpperCase()}${label.slice(1)}: what the change, or the contract, says of the shape or the line` }, swatch("rectangle", DIFF_STROKE[mark], fill, dashed ? "dashed" : "solid", 2), label));
+  for (const [mark, label, fill, dashed] of MARKS) if (marks.has(mark)) entries.push(h("span", { title: t("{mark}: what the change, or the contract, says of the shape or the line", { mark: `${label[0]!.toUpperCase()}${label.slice(1)}` }) }, swatch("rectangle", DIFF_STROKE[mark], fill, dashed ? "dashed" : "solid", 2), label));
 
   element("legend").replaceChildren(...entries);
 }

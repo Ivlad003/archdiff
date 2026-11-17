@@ -96,7 +96,7 @@ test("the page lists the views, draws the layers and walks to a module and its c
   // The Markdown panel renders the diagram's page.
   await page!.waitForFunction(`document.querySelector("#markdown h1")?.textContent === "Layers"`);
   // Open a module view from the list and tap its shape: the code tab shows the file.
-  await page!.click("#views li[title='module:src/lib/orders.ts']");
+  await page!.click("#views li[data-view='module:src/lib/orders.ts']");
   await page!.waitForFunction(`location.hash.includes("module%3Asrc%2Flib%2Forders.ts")`);
   await page!.waitForFunction(`(document.querySelector("#crumbs")?.textContent ?? "").includes("orders.ts")`);
   assert.ok((await page!.textContent("#crumbs"))?.includes("lib"));
@@ -443,7 +443,7 @@ test("the branch bar compares two heads: the title, the table from where each le
       await page!.fill("#head", "a");
       await page!.dispatchEvent("#head", "change");
       await page!.waitForFunction(`location.hash.includes("head=a") && document.querySelector("#title-text")?.textContent?.endsWith("@ a")`, undefined, { timeout: 20_000 });
-      assert.ok((await page!.evaluate(`[...document.querySelectorAll("#views li")].map((li) => li.title)`) as string[]).includes("module:src/db/report.ts"));
+      assert.ok((await page!.evaluate(`[...document.querySelectorAll("#views li")].map((li) => li.dataset.view)`) as string[]).includes("module:src/db/report.ts"));
       assert.ok(((await page!.textContent("#stats")) ?? "").startsWith("at a · "));
       const before = (await page!.evaluate("location.hash")) as string;
       await page!.mouse.click(10, 300);
@@ -1097,12 +1097,15 @@ test("the navigation says where the picture is: the picture's files carry a dot 
   await page!.reload();
   await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/orders.ts"`);
   // The module view holds four modules: their entries carry the dot (the entry points, logic and types of those files too), the others do not; the toggle counts the files.
-  const dotted = (): Promise<string[]> => page!.evaluate(`[...document.querySelectorAll("#views li.in-picture")].map((li) => li.title).sort()`) as Promise<string[]>;
+  const dotted = (): Promise<string[]> => page!.evaluate(`[...document.querySelectorAll("#views li.in-picture")].map((li) => li.dataset.view).sort()`) as Promise<string[]>;
   assert.deepEqual((await dotted()).filter((key) => key.startsWith("module:")), ["module:src/db/store.ts", "module:src/lib/log.ts", "module:src/lib/orders.ts", "module:src/routes/checkout.tsx"]);
   assert.ok((await dotted()).every((key) => /src\/(db|lib|routes)\//.test(key)), (await dotted()).join(", "));
   assert.equal(await page!.textContent("#left-picture"), "● 4 in picture");
+  // The dot says what it is where it stands: in the entry's hint, which names the view whole too.
+  assert.equal(await page!.getAttribute("#views li[data-view='module:src/db/store.ts']", "title"), "src/db/store.ts — module:src/db/store.ts · ● its file is in the picture on the canvas now");
+  assert.equal(await page!.getAttribute("#views li[data-view='layers']", "title"), "Layers — layers");
   await page!.click("#left-picture");
-  const listed = (await page!.evaluate(`[...document.querySelectorAll("#views li:not(.group)")].map((li) => li.title)`)) as string[];
+  const listed = (await page!.evaluate(`[...document.querySelectorAll("#views li:not(.group)")].map((li) => li.dataset.view)`)) as string[];
   assert.ok(listed.includes("layers") && listed.includes("layer:lib") && listed.includes("dir:src/lib") && listed.includes("module:src/db/store.ts"), listed.join(", "));
   assert.ok(!listed.includes("layer:cartridge") && !listed.some((key) => key.startsWith("module:cartridges")), listed.join(", "));
   // The tree cut the same way: the layers of the picture's files, every one of them dotted, their folders open, the modules closed.
@@ -1110,6 +1113,7 @@ test("the navigation says where the picture is: the picture's files carry a dot 
   const rows = (await page!.evaluate(`[...document.querySelectorAll("#views .tree-row .label")].map((label) => label.textContent)`)) as string[];
   assert.ok(rows.includes("store.ts") && rows.includes("checkout.tsx") && !rows.includes("cartridge") && !rows.includes("saveOrder"), rows.join(", "));
   assert.equal(await page!.evaluate(`document.querySelectorAll("#views .tree-row.in-picture").length`), 4);
+  assert.deepEqual(await page!.evaluate(`[...new Set([...document.querySelectorAll("#views .tree-row.in-picture .icon")].map((icon) => icon.title))]`), ["● this file is in the picture on the canvas now"]);
   await page!.click("#left-picture");
   await page!.click("#left-mode [data-left='views']");
 });
@@ -1239,7 +1243,7 @@ test("the panels give way to the canvas: folded from their tabs and dragged to a
   assert.equal((await roomOfPage()).canvas, 960);
   await page!.keyboard.press("v");
   await page!.waitForFunction(`document.body.classList.contains("open-left") && document.activeElement?.id === "search"`);
-  await page!.click("#views li[title='layers']");
+  await page!.click("#views li[data-view='layers']");
   await page!.waitForFunction(`window.archdiff.drawn() === "layers" && !document.body.classList.contains("open-left")`);
   // The full canvas, whatever room the window has: f makes both panels drawers, f again docks them as they were.
   await page!.setViewportSize({ width: 1900, height: 1000 });
@@ -1679,7 +1683,7 @@ test("a guided tour is recorded step by step — the picture, its options, its s
       assert.deepEqual(kept().steps, [{ link: "view=layers", select: [], note: "The **layers** of the sample." }]);
 
       // On to a module, with an overlay and a shape picked: the tour stays in the link, and the bar says the picture left the step.
-      await page!.click(`#views li[title='${module}']`);
+      await page!.click(`#views li[data-view='${module}']`);
       await drawn(module);
       await page!.waitForFunction(`document.querySelector("#tour-state").textContent === "away from step 1: ‹ › or the list lead back"`);
       await page!.evaluate(`document.querySelector("#options .overlay[value='storages']").click()`);
@@ -1996,5 +2000,253 @@ test("an explanation is a tour the agent writes and the page plays: the pictures
       await page!.press("#ask", "Enter");
       await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev.you")].some((row) => row.textContent === "▸ explain: how an order is refused")`, undefined, { timeout: 15_000 });
       await page!.waitForFunction(`location.hash.includes("tour=explained-how-an-order-is-placed-") && location.hash.includes("step=1")`, undefined, { timeout: 20_000 });
+    },
+  ));
+
+test("the heads of a review are a list to search: a row a branch, cut as its name or its last commit is typed; the ticked ones stand in the bar as chips", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-heads-",
+    (dir) => {
+      const git = (...args: string[]): void => {
+        const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      git("init", "-q", "-b", "main");
+      git("add", ".");
+      git("commit", "-q", "-m", "base");
+
+      // Forty branches, as a repository in use has them: some local, some on the remote alone.
+      for (let i = 1; i <= 20; i++) git("branch", `feature/task-${i}`);
+
+      for (let i = 1; i <= 20; i++) git("update-ref", `refs/remotes/origin/fix/bug-${i}`, "HEAD");
+      git("checkout", "-q", "-b", "fix/the-one");
+      writeFileSync(join(dir, "src/db/store.ts"), "export function countOrders(): number {\n  return 0;\n}\n");
+      git("commit", "-q", "-am", "count the orders");
+      git("checkout", "-q", "main");
+    },
+    async (origin) => {
+      await page!.goto(`${origin}/#view=review`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "review"`, undefined, { timeout: 20_000 });
+      // The working tree, main, the forty and the one with a change of its own.
+      await page!.waitForFunction(`document.querySelectorAll("#head-list .head-row").length === 43`);
+      // The bar holds what is ticked — the working tree, for a plain review — and the list stays folded away.
+      assert.equal(await page!.textContent("#head-chips"), "working tree (main)×");
+      assert.equal(await page!.isVisible("#head-list"), false);
+      // A remote branch says so on its row, and so does the one checked out; the base is picked among the local and the remote.
+      assert.equal(await page!.evaluate(`[...document.querySelectorAll("#head-list .head-row.remote .tag")].filter((tag) => tag.textContent === "remote").length`), 20);
+      assert.equal(await page!.textContent("#head-list .head-row:has(input[value='main']) .tag"), "checked out");
+      assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#base-select optgroup")].map((group) => [group.label, group.children.length])`), [["local", 22], ["remote", 20]]);
+
+      // The list opens ready to type in; a part of a branch's name cuts it, and so do words of its last commit's subject.
+      await page!.click("#heads-menu summary");
+      await page!.waitForFunction(`document.activeElement?.id === "head-filter"`);
+      const shown = (): Promise<string[]> => page!.evaluate(`[...document.querySelectorAll("#head-list .head-row:not([hidden]) input")].map((box) => box.value).sort()`) as Promise<string[]>;
+      await page!.fill("#head-filter", "task-2");
+      assert.deepEqual(await shown(), ["feature/task-2", "feature/task-20"]);
+      await page!.fill("#head-filter", "count orders");
+      assert.deepEqual(await shown(), ["fix/the-one"]);
+      assert.equal(await page!.textContent("#head-count"), "1 of 43 heads · 1 ticked");
+      // Enter ticks the first one found without leaving the field, and its chip joins the bar.
+      await page!.press("#head-filter", "Enter");
+      assert.equal(await page!.textContent("#head-chips"), "working tree (main)×fix/the-one×");
+      assert.equal(await page!.evaluate(`document.activeElement?.id`), "head-filter");
+      // Words no branch has: the list says so. Escape clears the field, and the list is whole again.
+      await page!.fill("#head-filter", "nothing-like-this");
+      assert.equal(await page!.isVisible("#head-list .none"), true);
+      await page!.press("#head-filter", "Escape");
+      assert.equal((await shown()).length, 43);
+      assert.equal(await page!.evaluate(`document.querySelector("#heads-menu").open`), true);
+      // A press on a chip unticks its head.
+      await page!.click("#head-chips .chip:first-child");
+      assert.equal(await page!.textContent("#head-chips"), "fix/the-one×");
+      // One head ticked is that head's review: the list folds away, and the bar keeps the head.
+      await page!.click("#compare");
+      await page!.waitForFunction(`window.archdiff.drawn() === "review" && window.archdiff.state().head === "fix/the-one"`, undefined, { timeout: 20_000 });
+      await page!.waitForFunction(`document.querySelector("#head-chips").textContent === "fix/the-one×"`);
+      assert.equal(await page!.evaluate(`document.querySelector("#heads-menu").open`), false);
+      // The page is left with nothing asked of the server: its copy of the repository is about to go.
+      await page!.waitForFunction(`document.querySelector("#busy").hidden`);
+      await page!.goto("about:blank");
+    },
+  ));
+
+test("the Code tab comes at the press and says what it reads; the code is in its language's colours, and a shape of no file says so", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.setViewportSize({ width: 1900, height: 1000 });
+  await page!.goto(`${base}/?fresh=code#view=module%3Asrc%2Flib%2Forders.ts&depth=0`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "module:src/lib/orders.ts"`);
+  await page!.waitForTimeout(1000);
+  // The file is held back, as a big repository holds it: the tab is in front at the press and names what is coming,
+  // the bar under the header runs, and nothing is drawn a second time when the answer lands.
+  let release = (): void => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const file = /\/api\/file\?/;
+  await page!.route(file, async (route) => {
+    await held;
+    await route.continue();
+  });
+  const module = await screenPointOf("src/lib/orders.ts");
+  await page!.mouse.click(module.x, module.y);
+  await page!.waitForFunction(`document.querySelector(".panel.active").id === "code" && document.querySelector("#code").classList.contains("loading")`);
+  assert.equal(await page!.textContent("#code .code-head"), "reading src/lib/orders.ts…");
+  await page!.waitForFunction(`!document.querySelector("#busy").hidden`);
+  release();
+  await page!.waitForFunction(`!document.querySelector("#code").classList.contains("loading") && document.querySelector("#code .code-head").textContent === "src/lib/orders.ts"`);
+  await page!.unroute(file);
+  await page!.waitForFunction(`document.querySelector("#busy").hidden`);
+  assert.equal(await page!.evaluate(`document.querySelector(".panel.active").id`), "code");
+  // The words of the language wear its colours; the text of the lines is the file's own (less the carriage returns of a
+  // file checked out on Windows, which no line shows), and what is copied is the file as it is.
+  const keywords = (await page!.evaluate(`[...new Set([...document.querySelectorAll("#code .line .hljs-keyword")].map((span) => span.textContent))]`)) as string[];
+  assert.ok(keywords.includes("export") && keywords.includes("function") && keywords.includes("return"), keywords.join(", "));
+  assert.ok(((await page!.evaluate(`document.querySelectorAll("#code .line .hljs-string, #code .line .hljs-title").length`)) as number) > 0);
+  assert.equal(await page!.evaluate(`[...document.querySelectorAll("#code .line")].map((line, i) => line.textContent.slice(String(i + 1).length)).join("\\n") === document.querySelector("#code").dataset.text.replace(/\\r/g, "")`), true);
+
+  // A layer stands for no single file: its page comes to the front, and the Code tab says why it is empty.
+  await page!.goto(`${base}/?fresh=code#view=layers`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layers"`);
+  await page!.waitForTimeout(800);
+  const layer = await screenPointOf("lib");
+  await page!.mouse.click(layer.x, layer.y);
+  await page!.waitForFunction(`window.archdiff.selected().join() === "lib" && document.querySelector(".panel.active").id === "markdown" && !document.querySelector("#markdown").classList.contains("loading")`);
+  assert.equal(((await page!.textContent("#code")) ?? "").trim(), "lib stands for no single file: there is no code to show for it. Its page is on the Markdown tab.");
+});
+
+test("a hint says what a button or a tab is for: in a bubble beside it, a moment after the pointer rests on it, until a press", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.setViewportSize({ width: 1900, height: 1000 });
+  await page!.goto(`${base}/?fresh=hints#view=layers`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layers"`);
+  assert.equal(await page!.evaluate(`document.querySelector("#hint-bubble").hidden`), true);
+  await page!.hover("#fit");
+  await page!.waitForFunction(`!document.querySelector("#hint-bubble").hidden`);
+  assert.equal(await page!.textContent("#hint-bubble"), "Fit the diagram to the window (0)");
+  // The browser's own tooltip is held back while the bubble shows, and the button is described by the bubble.
+  assert.equal(await page!.getAttribute("#fit", "title"), null);
+  assert.equal(await page!.getAttribute("#fit", "aria-describedby"), "hint-bubble");
+  // Under the button, inside the window.
+  const placed = (await page!.evaluate(`(() => { const bubble = document.querySelector("#hint-bubble").getBoundingClientRect(); const button = document.querySelector("#fit").getBoundingClientRect(); return { under: bubble.top >= button.bottom, inside: bubble.left >= 0 && bubble.right <= innerWidth && bubble.bottom <= innerHeight }; })()`)) as { under: boolean; inside: boolean };
+  assert.deepEqual(placed, { under: true, inside: true });
+  // The tabs say what they hold; the hint of the last thing goes, and its title is its own again.
+  await page!.hover("#tabs button[data-tab='coverage']");
+  await page!.waitForFunction(`document.querySelector("#hint-bubble").textContent.startsWith("What the analysis read and what it could not")`);
+  assert.equal(await page!.getAttribute("#fit", "title"), "Fit the diagram to the window (0)");
+  assert.equal(await page!.getAttribute("#fit", "aria-describedby"), null);
+  assert.ok(((await page!.getAttribute("#tabs button[data-tab='markdown']", "title")) ?? "").startsWith("The page of the picture"));
+  assert.ok(((await page!.getAttribute("#tabs button[data-tab='code']", "title")) ?? "").startsWith("The code of the shape picked"));
+  // A press: the reader is doing, not reading.
+  await page!.mouse.down();
+  assert.equal(await page!.evaluate(`document.querySelector("#hint-bubble").hidden`), true);
+  await page!.mouse.up();
+  // Off anything with a hint: none shows, and the tab's title is its own again.
+  await page!.mouse.move(900, 500);
+  await page!.waitForTimeout(700);
+  assert.equal(await page!.evaluate(`document.querySelector("#hint-bubble").hidden`), true);
+  assert.ok(((await page!.getAttribute("#tabs button[data-tab='coverage']", "title")) ?? "").startsWith("What the analysis read"));
+  await page!.click("#tabs button[data-tab='markdown']");
+});
+
+test("the header takes a second row in a narrow window: no control is cut off at the window's edge", { skip: !CHROME && "no Chrome installed" }, async () => {
+  const beyond = (): Promise<string[]> => page!.evaluate(`[...document.querySelectorAll("#top > *")].filter((each) => each.getBoundingClientRect().width > 0 && each.getBoundingClientRect().right > innerWidth + 1).map((each) => each.id || each.tagName)`) as Promise<string[]>;
+  await page!.setViewportSize({ width: 1900, height: 1000 });
+  await page!.goto(`${base}/?fresh=narrow#view=layers`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layers"`);
+  const oneRow = (await page!.evaluate(`document.querySelector("#top").offsetHeight`)) as number;
+  assert.deepEqual(await beyond(), []);
+  await page!.setViewportSize({ width: 820, height: 900 });
+  await page!.waitForFunction(`document.querySelector("#top").offsetHeight > ${oneRow}`);
+  assert.deepEqual(await beyond(), []);
+  await page!.setViewportSize({ width: 1900, height: 1000 });
+  await page!.waitForFunction(`document.querySelector("#top").offsetHeight === ${oneRow}`);
+});
+
+test("the page speaks the language of the user's settings: Ukrainian from its first word, nothing of its own left untranslated; the settings window changes the language", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-language-",
+    (dir) => {
+      mkdirSync(join(homeOf(dir), ".archdiff"));
+      writeFileSync(join(homeOf(dir), ".archdiff", "settings.json"), '{ "language": "uk" }\n');
+      const git = (...args: string[]): void => {
+        const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      git("init", "-q", "-b", "main");
+      git("add", ".");
+      git("commit", "-q", "-m", "base");
+      writeFileSync(join(dir, "src/db/store.ts"), "export function countOrders(): number {\n  return 0;\n}\n");
+    },
+    async (origin, own) => {
+      const file = join(homeOf(own), ".archdiff", "settings.json");
+      await page!.setViewportSize({ width: 1900, height: 1000 });
+      await page!.goto(`${origin}/#view=layers`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "layers"`);
+      // (The canvas, once it is mounted, names the language with its region: uk-UA.)
+      assert.match((await page!.evaluate(`document.documentElement.lang`)) as string, /^uk/);
+      // What index.html says, and what the modules say.
+      assert.equal(await page!.textContent("#fit"), "вмістити");
+      assert.equal(await page!.getAttribute("#fit", "title"), "Вмістити діаграму у вікно (0)");
+      assert.equal(await page!.textContent("#tabs button[data-tab='code']"), "Код");
+      assert.equal(await page!.getAttribute("#search", "placeholder"), "фільтр подань (v)");
+      assert.match((await page!.textContent("#left-picture")) ?? "", /^● 0 /);
+      assert.ok(!/in picture/.test((await page!.textContent("#left-picture")) ?? ""));
+      // What archdiff writes about the code stays as the command line prints it.
+      assert.equal(await page!.textContent("#markdown h1"), "Layers");
+
+      // Around the page — the tree, a pick, the tabs, the menus, a review with its bars, the chat's commands, the
+      // settings — and nothing it said was left in English for want of a translation.
+      await page!.click("#left-mode [data-left='tree']");
+      await page!.click("#left-mode [data-left='views']");
+      await page!.waitForTimeout(800);
+      const layer = await screenPointOf("lib");
+      await page!.mouse.click(layer.x, layer.y);
+      await page!.waitForFunction(`window.archdiff.selected().join() === "lib"`);
+      await page!.keyboard.press("Escape");
+
+      for (const tab of ["coverage", "spec", "chat", "markdown"]) await page!.click(`#tabs button[data-tab='${tab}']`);
+      await page!.click("#tabs button[data-tab='chat']");
+      await page!.fill("#ask", "/select lib routes");
+      await page!.press("#ask", "Enter");
+      await page!.waitForFunction(`window.archdiff.selected().join() === "lib,routes"`);
+      await page!.fill("#ask", "/help");
+      await page!.press("#ask", "Enter");
+
+      for (const menu of ["options-menu", "tours-menu", "export-menu"]) {
+        await page!.click(`#${menu} summary`);
+        await page!.click(`#${menu} summary`);
+      }
+
+      await page!.evaluate(`location.hash = "view=review"`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "review"`, undefined, { timeout: 20_000 });
+      await page!.waitForFunction(`document.querySelectorAll("#head-list .head-row").length === 2`);
+      await page!.click("#heads-menu summary");
+      await page!.click("#heads-menu summary");
+      await page!.waitForTimeout(800);
+      const store = await screenPointOf("src/db/store.ts");
+      await page!.mouse.click(store.x, store.y);
+      await page!.waitForFunction(`!document.querySelector("#code").classList.contains("loading") && (document.querySelector("#code .code-head")?.textContent ?? "").startsWith("src/db/store.ts")`);
+      await page!.evaluate(`location.hash = "view=changes"`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "changes"`, undefined, { timeout: 20_000 });
+      await page!.evaluate(`location.hash = "view=layers"`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "layers"`, undefined, { timeout: 20_000 });
+      await page!.click("#settings-top");
+      await page!.waitForFunction(`document.querySelector("#settings").open && document.querySelectorAll("#settings .agent").length === 4`);
+      assert.deepEqual(await page!.evaluate(`window.archdiff.untranslated()`), []);
+
+      // The window: each language under its own name; English chosen, the page is drawn again in it at the same link,
+      // and the file, which says nothing of what is as it comes, forgets the language.
+      assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#settings-language option")].map((option) => [option.value, option.textContent])`), [["en", "English"], ["uk", "Українська"]]);
+      assert.equal(await page!.inputValue("#settings-language"), "uk");
+      await page!.selectOption("#settings-language", "en");
+      await page!.waitForFunction(`document.documentElement.lang === "en" && window.archdiff?.drawn() === "layers"`, undefined, { timeout: 20_000 });
+      assert.equal(await page!.textContent("#fit"), "fit");
+      assert.equal(await page!.textContent("#tabs button[data-tab='code']"), "Code");
+      assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {});
+      // And back.
+      await page!.click("#settings-top");
+      await page!.waitForFunction(`document.querySelector("#settings").open`);
+      await page!.selectOption("#settings-language", "uk");
+      await page!.waitForFunction(`document.documentElement.lang.startsWith("uk") && window.archdiff?.drawn() === "layers"`, undefined, { timeout: 20_000 });
+      assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { language: "uk" });
+      assert.equal(await page!.textContent("#fit"), "вмістити");
     },
   ));

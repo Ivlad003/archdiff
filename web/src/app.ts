@@ -19,11 +19,14 @@
 // (views-list.ts), the exports (export-menu.ts), the review (review.ts),
 // the commits of a range under their slider (commits.ts), the walk of
 // the uncommitted changes (board.ts), the guided tours (tours.ts),
-// the keys (shortcuts.ts), the tabs of the flow, the chat and the spec, and
-// the window of the user's settings (settings.ts).
+// the keys (shortcuts.ts), the tabs of the flow, the chat and the spec, the
+// window of the user's settings (settings.ts), the hints of the buttons
+// (hints.ts) and the page's words in the reader's language (i18n.ts, read
+// first: it translates the page index.html wrote before a module reads it).
 //
 // Entry point: the module itself, loaded by index.html.
 
+import "./i18n.ts";
 import { api, type Line, type Shape } from "./api.ts";
 import { fillBoardBar, showBoardBar } from "./board.ts";
 import { canvasHandle, canvasMode, leaveEdit, showScene } from "./canvas.ts";
@@ -32,6 +35,8 @@ import { loadAgents, loadTasks } from "./chat.ts";
 import { runCommandLine } from "./commands.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
+import "./hints.ts";
+import { t, untranslated } from "./i18n.ts";
 import { loadFlow } from "./flow-tab.ts";
 import { closeDrawers } from "./layout.ts";
 import { renderLegend } from "./legend.ts";
@@ -180,10 +185,10 @@ async function load(): Promise<void> {
     drawn = state.view;
     shownHash = hash;
     // Nothing on the canvas (no shape, no stroke of a drawing): it says why in the middle, not a blank canvas.
-    showEmpty(result.elements.length === 0 ? { head: "Nothing to draw here", why: result.diagram.reason || "the picture has no shapes" } : null);
+    showEmpty(result.elements.length === 0 ? { head: t("Nothing to draw here"), why: result.diagram.reason || t("the picture has no shapes") } : null);
     updateMinimap();
     // A value of the link the options table refuses is left out of the picture, and said first.
-    const wrong = wrongInLink().map((problem) => `⚠ ignored in the link: ${problem}`);
+    const wrong = wrongInLink().map((problem) => t("⚠ ignored in the link: {problem}", { problem }));
     setReason([...wrong, result.diagram.reason ?? ""].filter(Boolean).join("; "));
     renderExports(state);
 
@@ -217,7 +222,7 @@ async function load(): Promise<void> {
       if (overtaken()) return;
       drawn = state.view;
       shownHash = hash;
-      showEmpty({ head: "This picture could not be drawn", why: message });
+      showEmpty({ head: t("This picture could not be drawn"), why: message });
       fillBoardBar(state, null);
       updateMinimap();
       void applyPresentation(state, null);
@@ -230,12 +235,12 @@ async function load(): Promise<void> {
 // Live reload: the server watches the sources; a drawing in progress stays until the editor is left.
 api.changes((path) => {
   if (canvasMode() === "edit") {
-    notice(`${path} changed; the drawing stays until you leave the editor`);
+    notice(t("{path} changed; the drawing stays until you leave the editor", { path }));
 
     return;
   }
 
-  notice(`${path} changed — reloaded`);
+  notice(t("{path} changed — reloaded", { path }));
   void reloadCode().then(() => load());
 });
 
@@ -251,7 +256,7 @@ if (new URLSearchParams(location.search).get("embed") === "1") document.body.cla
 element<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 
 // A handle for the browser tests and for debugging in the console: the canvas and the state of the page.
-(window as unknown as { archdiff: unknown }).archdiff = { canvas: canvasHandle, state: currentLink, nodes: () => nodes, drawn: () => drawn, selected: selection, peeked: () => canvasHandle()?.peeked() ?? null, presentation: presentationState, mapDots, mapSettled, menuOpen };
+(window as unknown as { archdiff: unknown }).archdiff = { canvas: canvasHandle, state: currentLink, nodes: () => nodes, drawn: () => drawn, selected: selection, peeked: () => canvasHandle()?.peeked() ?? null, presentation: presentationState, mapDots, mapSettled, menuOpen, untranslated };
 
 void (async () => {
   // A repository the server cannot read (a broken archdiff.json) is said in the middle of the page, not a blank one.
@@ -261,7 +266,7 @@ void (async () => {
     const message = error instanceof Error ? error.message : String(error);
     showNoTitle();
     setMarkdown(markdownPanel, message);
-    showEmpty({ head: "The repository could not be read", why: message });
+    showEmpty({ head: t("The repository could not be read"), why: message });
 
     return;
   }

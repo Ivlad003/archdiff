@@ -24,7 +24,7 @@ export interface PageContext {
   setMocks(next: unknown[]): void;
   showTab(name: string): void;
   renderMarkdown(target: HTMLElement, markdown: string): void;
-  showCode(node: Shape): Promise<void>;
+  showCode(node: Shape, front?: boolean): Promise<void>;
   load(): Promise<void>;
   loadViews(): Promise<void>;
   /** Has the agent explain the shapes picked on the picture (the picture alone, with none) as a tour: the Chat tab's button, which the selection is picking.ts's to know. */

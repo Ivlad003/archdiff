@@ -13,6 +13,7 @@
 import { api } from "./api.ts";
 import { element } from "./dom.ts";
 import { mountCanvas, type CanvasCover, type CanvasEvents, type CanvasHandle, type Viewport } from "./editor.tsx";
+import { t } from "./i18n.ts";
 import { notice, setOverflow } from "./title.ts";
 import { currentLink, refsOf } from "./link.ts";
 import { page } from "./page.ts";
@@ -163,7 +164,7 @@ export async function saveDrawing(): Promise<void> {
   const { saved } = await api.saveDrawing(editedView ?? currentLink().view, canvas.scene(), page.mocks());
   dirty = false;
   saveButton.classList.remove("dirty");
-  notice(`saved to ${saved}`);
+  notice(t("saved to {saved}", { saved }));
 }
 
 /**
@@ -175,7 +176,7 @@ export function leaveEdit(next = false): boolean {
   if (mode !== "edit") return true;
   const given = dirty ? editedView : null;
 
-  if (dirty && !confirm("The drawing has unsaved changes. Leave the editor and lose them?")) return false;
+  if (dirty && !confirm(t("The drawing has unsaved changes. Leave the editor and lose them?"))) return false;
   setMode("view");
 
   if (given !== null && !next) void redraw(given);

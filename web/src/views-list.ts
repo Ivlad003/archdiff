@@ -17,6 +17,7 @@
 
 import { api, type ViewEntry } from "./api.ts";
 import { element, remember, remembered } from "./dom.ts";
+import { t, translated } from "./i18n.ts";
 import { codeHead, currentLink, refsOf, setLink, type Link } from "./link.ts";
 import { filesInPicture } from "./modules.ts";
 import { page } from "./page.ts";
@@ -77,9 +78,9 @@ export function renderViews(): void {
   // The files the picture shown now is of: their entries carry a dot; the toggle cuts the panel to them.
   const inPicture = filesInPicture(page.nodes());
   const pictureButton = element<HTMLButtonElement>("left-picture");
-  pictureButton.textContent = `● ${inPicture.size} in picture`;
+  pictureButton.textContent = t("● {count} in picture", { count: inPicture.size });
   pictureButton.classList.toggle("active", pictureOnly);
-  pictureButton.title = pictureOnly ? "The files of the picture shown now alone; press for every file" : "The files of the picture shown now carry a dot; press to list them alone";
+  pictureButton.title = pictureOnly ? t("Only the files of the picture on the canvas now are listed; press for every file") : t("● marks the files that are in the picture on the canvas now; press to list them alone");
 
   for (const button of document.querySelectorAll<HTMLButtonElement>("#left-mode button[data-left]")) button.classList.toggle("active", (button.dataset["left"] === "tree") === tree);
   list.classList.toggle("tree", tree);
@@ -112,17 +113,20 @@ export function renderViews(): void {
     if (members.length === 0) continue;
     const head = document.createElement("li");
     head.className = "group";
-    head.textContent = `${label} (${members.length})`;
+    head.textContent = `${translated(label)} (${members.length})`;
     list.append(head);
 
     for (const view of members.slice(0, cap)) {
       const item = document.createElement("li");
       item.textContent = view.title;
-      item.title = view.key;
+      // The entry is found by its view's key; its hint is the title whole (the list cuts a long one), the key, and what its dot says.
+      item.dataset["view"] = view.key;
       item.classList.toggle("active", view.key === state.view);
-      // The dot of a file of the picture shown now (page.css); the title stays the key, which the lookups by it read.
+      // The dot of a file of the picture shown now (page.css).
       const file = fileOf(view);
-      item.classList.toggle("in-picture", file !== null && inPicture.has(file));
+      const marked = file !== null && inPicture.has(file);
+      item.classList.toggle("in-picture", marked);
+      item.title = `${view.title === view.key ? view.key : `${view.title} — ${view.key}`}${marked ? ` · ● ${t("its file is in the picture on the canvas now")}` : ""}`;
       item.addEventListener("click", () => setLink({ ...currentLink(), view: view.key }));
       list.append(item);
     }
@@ -130,7 +134,7 @@ export function renderViews(): void {
     if (members.length > cap) {
       const more = document.createElement("li");
       more.className = "muted";
-      more.textContent = `… ${members.length - cap} more: type to filter`;
+      more.textContent = t("… {count} more: type to filter", { count: members.length - cap });
       list.append(more);
     }
   }
@@ -145,13 +149,15 @@ export async function loadViews(): Promise<void> {
   views = response.views;
   element("root").textContent = response.root;
   element("root").title = response.root;
+  // The tab of the browser is named for the repository: several pages open are told apart by it.
+  document.title = `${response.root.split(/[\\/]/).filter(Boolean).pop() ?? "archdiff"} — archdiff`;
   const s = response.stats;
   // A server that cannot follow the code says so here: the pictures stay as they were until a reload.
-  const notFollowing = response.watching.problem ? ` · ⚠ not following the code: ${response.watching.problem}` : "";
+  const notFollowing = response.watching.problem ? ` · ⚠ ${t("not following the code: {problem}", { problem: response.watching.problem })}` : "";
   // With the changed files alone: how many since which base, or why they could not be read (the list is whole then).
-  const changed = response.changed ? `${response.changed.files} changed since ${response.changed.since} · ` : response.note ? `⚠ ${response.note} · ` : "";
+  const changed = response.changed ? `${t("{files} changed since {since}", { files: response.changed.files, since: response.changed.since })} · ` : response.note ? `⚠ ${response.note} · ` : "";
   // A commit is named by its first seven characters, as git shows it; a branch or a tag as written.
-  element("stats").textContent = `${head ? `at ${/^[0-9a-f]{40}$/.test(head) ? head.slice(0, 7) : head} · ` : ""}${changed}${s.files} files · ${s.fns} functions · ${s.deps} imports · ${s.calls} calls · ${s.gaps} gaps · ${s.ms.total} ms${notFollowing}`;
+  element("stats").textContent = `${head ? `${t("at {head}", { head: /^[0-9a-f]{40}$/.test(head) ? head.slice(0, 7) : head })} · ` : ""}${changed}${t("{files} files · {fns} functions · {deps} imports · {calls} calls · {gaps} gaps · {ms} ms", { files: s.files, fns: s.fns, deps: s.deps, calls: s.calls, gaps: s.gaps, ms: s.ms.total })}${notFollowing}`;
   element("stats").title = element("stats").textContent;
   renderViews();
 }

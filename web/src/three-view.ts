@@ -19,6 +19,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { Diagram, Lane, Line, Shape } from "./api.ts";
+import { t } from "./i18n.ts";
 import { lineStroke, lookOf } from "../../src/looks.ts";
 
 /** What a tap and a double tap on a block do: what the canvas's taps do. */
@@ -90,7 +91,7 @@ function mounted(box: HTMLElement): Mount | null {
   try {
     renderer = new THREE.WebGLRenderer({ antialias: true });
   } catch (error) {
-    failure = `3D needs WebGL, which this browser does not provide (${error instanceof Error ? error.message : String(error)})`;
+    failure = t("3D needs WebGL, which this browser does not provide ({error})", { error: error instanceof Error ? error.message : String(error) });
     box.replaceChildren(Object.assign(document.createElement("div"), { className: "note", textContent: failure }));
 
     return null;

@@ -15,6 +15,7 @@
 
 import type { ChangeSummary } from "./api.ts";
 import { element, h } from "./dom.ts";
+import { t } from "./i18n.ts";
 import { currentLink, setLink, type Link } from "./link.ts";
 import { crumbsOf } from "./navigation.ts";
 import { page } from "./page.ts";
@@ -33,24 +34,24 @@ export function showEmpty(note: { head: string; why: string } | null): void {
 function changeTitle(change: ChangeSummary | null): string {
   if (!change) return "";
 
-  if (change.kind === "whatif") return change.findings.length > 0 ? ` — ⚠ ${change.findings.join(", ")}` : " — nothing would break";
+  if (change.kind === "whatif") return change.findings.length > 0 ? ` — ⚠ ${change.findings.join(", ")}` : ` — ${t("nothing would break")}`;
 
   if (change.kind === "compare") {
     const warnings = change.heads.filter((head) => head.diff.layerEdgesAdded.length > 0).length;
 
-    return warnings > 0 ? ` — ⚠ ${warnings === 1 ? "1 head adds" : `${warnings} heads add`} a layer dependency` : "";
+    return warnings > 0 ? ` — ⚠ ${warnings === 1 ? t("1 head adds a layer dependency") : t("{warnings} heads add a layer dependency", { warnings })}` : "";
   }
 
   const { diff, contract } = change;
   const findings = contract ? diff.layerEdgesAdded.filter((edge) => edge.against) : diff.layerEdgesAdded;
-  const dependencies = (count: number): string => (count === 1 ? "1 new layer dependency" : `${count} new layer dependencies`);
+  const dependencies = (count: number): string => (count === 1 ? t("1 new layer dependency") : t("{count} new layer dependencies", { count }));
 
-  return ` — ${diff.changedFiles.length === 1 ? "1 source file" : `${diff.changedFiles.length} source files`} changed${findings.length > 0 ? ` — ⚠ ${dependencies(findings.length)}${contract ? " against ARCHITECTURE.md" : ""}` : diff.layerEdgesAdded.length > 0 ? ` — ${dependencies(diff.layerEdgesAdded.length)}, allowed by ARCHITECTURE.md` : ""}`;
+  return ` — ${diff.changedFiles.length === 1 ? t("1 source file changed") : t("{count} source files changed", { count: diff.changedFiles.length })}${findings.length > 0 ? ` — ⚠ ${dependencies(findings.length)}${contract ? ` ${t("against ARCHITECTURE.md")}` : ""}` : diff.layerEdgesAdded.length > 0 ? ` — ${dependencies(diff.layerEdgesAdded.length)}, ${t("allowed by ARCHITECTURE.md")}` : ""}`;
 }
 
 /** The picture's title with the head whose code it is of, what its change found and whether it was drawn by hand; the question it answers as the tooltip. */
 export function showTitle(picture: { title: string; question?: string }, change: ChangeSummary | null, drawn: boolean, head: string | null = null): void {
-  title.textContent = `${picture.title}${head ? ` @ ${head}` : ""}${changeTitle(change)}${drawn ? " (drawn by hand)" : ""}`;
+  title.textContent = `${picture.title}${head ? ` @ ${head}` : ""}${changeTitle(change)}${drawn ? ` (${t("drawn by hand")})` : ""}`;
   title.title = picture.question ? `${picture.question[0]!.toUpperCase()}${picture.question.slice(1)}.` : "";
 }
 
@@ -83,11 +84,14 @@ export function renderCrumbs(state: Link): void {
 let pictureReason = "";
 let overflowing = false;
 
-/** The line under the canvas: the reason, then the overflow's note; kept as its tooltip so a notice can give way back to it. */
+/** What the line under the canvas says when no notice stands in it: the reason, then the overflow's note. */
+let reasonText = "";
+
+/** The line under the canvas: the reason, then the overflow's note; its hint too, and kept so a notice can give way back to it. */
 function showReason(): void {
-  const text = [pictureReason, overflowing ? "bigger than the canvas even at the smallest zoom: it starts from its beginning; drag along it or use the minimap" : ""].filter(Boolean).join("; ");
-  reason.textContent = text;
-  reason.title = text;
+  reasonText = [pictureReason, overflowing ? t("bigger than the canvas even at the smallest zoom: it starts from its beginning; drag along it or use the minimap") : ""].filter(Boolean).join("; ");
+  reason.textContent = reasonText;
+  reason.title = reasonText;
 }
 
 /** The picture's reason under the title; a new reason is a new picture, which the fit says again whether it overflows. */
@@ -111,7 +115,7 @@ export function notice(text: string): void {
 
 /** The picture's reason back under the title, after a notice. */
 export function clearNotice(): void {
-  reason.textContent = reason.title || "";
+  reason.textContent = reasonText;
 }
 
 /** A notice kept for after the picture now being drawn: the load that a button starts clears the line first. */

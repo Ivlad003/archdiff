@@ -69,7 +69,7 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
   { name: "code", args: "", does: "Fold the drawing into the contract and have the agent build it", agent: false },
   { name: "diagram", args: "[what to look at]", does: "Have the agent review ARCHITECTURE.md", agent: false },
   { name: "doc", args: "[text]", does: "A design note that becomes the contract", agent: false },
-  { name: "settings", args: "", does: "The agents of this computer and the keys", agent: false },
+  { name: "settings", args: "", does: "The settings: the page's language, the agents of this computer and the keys", agent: false },
 ];
 
 /** The language of the fenced block an agent writes its commands in. */
@@ -87,17 +87,24 @@ export function parseCommandLine(line: string): { command: ChatCommand; argument
   return command ? { command, argument: (match![2] ?? "").trim() } : null;
 }
 
-/** The commands as a Markdown table, or one command's own line; null for a name that is no command. */
-export function commandsHelp(name: string | null = null): string | null {
-  const row = (command: ChatCommand): string => `| \`/${command.name}${command.args ? ` ${command.args.replace(/\|/g, "\\|")}` : ""}\` | ${command.does} |`;
+/** What the help says beside the commands themselves: its first line, and the heads of its table. */
+export const HELP_TEXTS = { lead: "A line that starts with a slash is a command; the page does what it says, with or without an agent.", command: "command", does: "what it does" } as const;
+
+/**
+ * The commands as a Markdown table, or one command's own line; null for a name that is no command. `say` puts each
+ * text of it into the reader's language (the page's; the command line says them as they are written here).
+ */
+export function commandsHelp(name: string | null = null, say: (text: string) => string = (text) => text): string | null {
+  const row = (command: ChatCommand): string => `| \`/${command.name}${command.args ? ` ${command.args.replace(/\|/g, "\\|")}` : ""}\` | ${say(command.does)} |`;
+  const head = [`| ${say(HELP_TEXTS.command)} | ${say(HELP_TEXTS.does)} |`, "| --- | --- |"];
 
   if (name !== null) {
     const command = commandNamed(name.replace(/^\//, ""));
 
-    return command ? ["| command | what it does |", "| --- | --- |", row(command)].join("\n") : null;
+    return command ? [...head, row(command)].join("\n") : null;
   }
 
-  return ["A line that starts with a slash is a command; the page does what it says, with or without an agent.", "", "| command | what it does |", "| --- | --- |", ...CHAT_COMMANDS.map(row)].join("\n");
+  return [say(HELP_TEXTS.lead), "", ...head, ...CHAT_COMMANDS.map(row)].join("\n");
 }
 
 /** What the protocol of a run tells an agent of the commands: how to write them, and which it may. */
