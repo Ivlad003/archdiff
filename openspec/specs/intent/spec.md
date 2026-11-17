@@ -38,6 +38,11 @@ The system SHALL, with `archdiff check`, exit 1 when the code imports between tw
 - **WHEN** `src/routes/health.ts` imports `src/db/store.ts` and the contract has no arrow from `routes` to `db`
 - **THEN** `archdiff check` exits 1 and says "`src/routes/health.ts:2` imports `src/db/store.ts`: layer **routes** → **db** is not in the intent"
 
+#### Scenario: The report as JSON
+
+- **WHEN** `archdiff check --json` runs on the same code
+- **THEN** it exits 1, stdout holds only the report — its `violations` the one entry `{ rule: "layers", from: "src/routes/health.ts", to: "src/db/store.ts", fromLayer: "routes", toLayer: "db", line: 2, problem: "layer routes → db is not in the intent", known: false }`, beside `planned`, `plannedEdges`, `beyond`, `unintended`, `stale`, `baseline` and `ok` — and the note goes to stderr; with nothing to check against (no rule, and no contract that names a layer), stdout stays empty
+
 ### Requirement: A baseline keeps the known violations from failing the check
 
 The system SHALL, with `archdiff check --baseline [FILE]`, write the violations the check finds now — each as its rule, the module it is in and the module or package it imports, without a line, sorted, one per line — to `archdiff-baseline.json` at the root (the path `archdiff.json` names in `baseline`, or FILE), exit 0, and never write over a file that is not archdiff's. With that file present `archdiff check` SHALL exit 1 only when a violation is not listed in it, list the known violations apart with their count, and name the entries of the file that no longer occur; `--no-baseline` SHALL hold the code to no baseline. `--json` SHALL give every violation with its `rule` and `known`, the entries that no longer occur as `stale`, the baseline's file, and `ok`. A baseline that is not valid, or an entry of it without a rule and a module, SHALL exit 2 naming the file and the entry. The page's check and the contract check after an agent's run SHALL hold the code to the same baseline.

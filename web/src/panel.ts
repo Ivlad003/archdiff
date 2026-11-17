@@ -10,7 +10,8 @@
 // functions; the Markdown of the chat, the spec and the flow is rendered
 // plain. The note at the top of a tab (what the chat, the flow and the
 // spec are for) folds away, remembered. How the panels themselves fold,
-// widen and give way to the canvas is layout.ts's.
+// widen and give way to the canvas is layout.ts's; an editor that hosts
+// the page is told the place of the code shown (host.ts) and opens it.
 //
 // Entry points: `showTab`, `renderMarkdown`, `setMarkdown`, `showCode`,
 // `showCodeAt`, `renderCode`, `CodeSpot`, `copyText`, `setPicturePage`,
@@ -22,6 +23,7 @@ import { api, type Shape } from "./api.ts";
 import { transcript } from "./chat.ts";
 import { element, remember, rememberList, remembered, rememberedList } from "./dom.ts";
 import { flowText } from "./flow-tab.ts";
+import { hosted, tellHost } from "./host.ts";
 import { revealDetails } from "./layout.ts";
 import { codeHead, currentLink, setLink } from "./link.ts";
 import { fnView, functionsOf, isFilePath } from "./modules.ts";
@@ -391,14 +393,28 @@ export async function showCode(node: Shape): Promise<void> {
   await showCodeAt(spot);
 }
 
-/** The code of a spot on the Code tab, scrolled to its first marked line. */
+/** The places asked for on the Code tab so far: a host is told of the one asked for last. */
+let placesAsked = 0;
+
+/** The code of a spot on the Code tab, scrolled to its first marked line; an editor that hosts the page (host.ts) is told the place and opens it. */
 export async function showCodeAt(spot: CodeSpot): Promise<void> {
+  const mine = ++placesAsked;
   const first = await renderCode(codePanel, spot);
 
   // No file, or one that could not be read: the panel says so where it is, without coming to the front.
   if (codePanel.dataset["text"] === undefined) return;
-  showTab("code");
-  revealDetails();
+
+  if (hosted) {
+    const head = codeHead(currentLink());
+
+    // The editor opens the place itself, and the tab holds the code without coming to the front. A place a newer one
+    // overtook while its file was read is not told: the editor would open it over the one asked for last.
+    if (mine === placesAsked) tellHost({ type: "archdiff:open", file: spot.file, line: spot.line ?? 1, ...(spot.endLine === undefined ? {} : { endLine: spot.endLine }), ...(head === null ? {} : { head }) });
+  } else {
+    showTab("code");
+    revealDetails();
+  }
+
   first?.scrollIntoView({ block: "center" });
 }
 

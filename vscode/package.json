@@ -1,0 +1,158 @@
+{
+  "name": "archdiff-vscode",
+  "displayName": "archdiff",
+  "description": "The architecture of the repository beside the editor: archdiff's page in a panel, the picture of this file or this function, and the contract check as problems",
+  "version": "0.1.0",
+  "publisher": "ivlad003",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ivlad003/archdiff.git",
+    "directory": "vscode"
+  },
+  "homepage": "https://github.com/Ivlad003/archdiff/tree/master/vscode#readme",
+  "bugs": "https://github.com/Ivlad003/archdiff/issues",
+  "keywords": [
+    "architecture",
+    "diagram",
+    "call-graph",
+    "dependency-graph",
+    "archdiff"
+  ],
+  "categories": [
+    "Visualization",
+    "Linters"
+  ],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "type": "module",
+  "main": "./dist/extension.cjs",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "archdiff runs the archdiff command the workspace installed (node_modules/.bin/archdiff) or names in its settings."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "archdiff reads the files of the repository from the disk."
+    }
+  },
+  "activationEvents": [
+    "workspaceContains:ARCHITECTURE.md"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "archdiff.open",
+        "title": "Open",
+        "category": "archdiff"
+      },
+      {
+        "command": "archdiff.showFile",
+        "title": "Show this file",
+        "category": "archdiff"
+      },
+      {
+        "command": "archdiff.showFunction",
+        "title": "Show this function",
+        "category": "archdiff"
+      },
+      {
+        "command": "archdiff.check",
+        "title": "Check the contract",
+        "category": "archdiff"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "archdiff.showFile",
+          "when": "resourceScheme == file",
+          "group": "navigation@90"
+        },
+        {
+          "command": "archdiff.showFunction",
+          "when": "resourceScheme == file",
+          "group": "navigation@91"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "archdiff.showFile",
+          "when": "resourceScheme == file && !explorerResourceIsFolder",
+          "group": "navigation@90"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "archdiff.showFunction",
+          "when": "editorIsOpen"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "archdiff",
+      "properties": {
+        "archdiff.command": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "The archdiff to run: a path (relative to the workspace folder, or absolute) or a name on the PATH. Empty: the one the workspace installed (`node_modules/.bin/archdiff`), else the one on the PATH, else `npx --yes @ivlad003/archdiff`."
+        },
+        "archdiff.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "Run `archdiff check --json` when a file is saved, in a folder that has an `ARCHITECTURE.md` and an archdiff installed, and show every import against the contract as a problem on its line."
+        },
+        "archdiff.functionView": {
+          "type": "string",
+          "enum": [
+            "calls",
+            "sequence",
+            "path",
+            "focus",
+            "logic"
+          ],
+          "enumDescriptions": [
+            "What the function calls, step by step, and where the trail ends",
+            "In what order the function's calls cross the modules",
+            "Which calls lead from the function to a store",
+            "Everything joined to the function: what calls it and what it calls",
+            "The function's body as a flowchart, with its paths as rules"
+          ],
+          "default": "calls",
+          "scope": "resource",
+          "markdownDescription": "The view *Show this function* opens for the function under the cursor."
+        },
+        "archdiff.embed": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "markdownDescription": "Show the picture alone, without the page's header and side panels (`?embed=1`)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=dist/extension.cjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/command.test.ts tests/views.test.ts tests/diagnostics.test.ts tests/panel.test.ts tests/runner.test.ts",
+    "test:editor": "npm run build && node tests/editor/run.mjs",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "1.90.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.0"
+  }
+}

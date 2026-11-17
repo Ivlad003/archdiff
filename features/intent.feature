@@ -73,6 +73,13 @@ Feature: The contract: ARCHITECTURE.md
     Then archdiff-baseline.json lists the rule "no files in db" from src/db/store.ts to node:fs
     And "archdiff check" exits 0
 
+  Scenario: The check's report as JSON
+    Given the shop-api project with health.ts in routes importing store.ts in db
+    When I run "archdiff check --json"
+    Then the exit code is 1
+    And stdout holds only the report, whose one violation names its rule "layers", src/routes/health.ts, line 2, src/db/store.ts, the layers routes and db, what is wrong in plain words, and that the baseline does not know it
+    And the note "1 violation of the intent" is on stderr
+
   Scenario: A design note becomes the contract
     Given a Markdown note with a Mermaid flowchart whose subgraphs are http and app
     When I run "archdiff import note.md"

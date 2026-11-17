@@ -1755,3 +1755,48 @@ test("a guided tour is recorded step by step — the picture, its options, its s
       await page!.evaluate("localStorage.clear()");
     },
   ));
+
+test("an editor that frames the page with ?host=1 is told the place of the code a tap asks for; a window of its own shows it on the Code tab", { skip: !CHROME && "no Chrome installed" }, async () => {
+  const view = "#view=module%3Asrc%2Flib%2Forders.ts&depth=0";
+  /** Where the middle of the module's shape sits in the window that holds its canvas. */
+  const shapePoint = `(() => {
+    const shape = window.archdiff.canvas().scene().find((element) => element.id === "src/lib/orders.ts" && !element.isDeleted);
+    const viewport = window.archdiff.canvas().viewport();
+    const box = document.querySelector(".excalidraw__canvas.interactive").getBoundingClientRect();
+    return { x: box.left + (shape.x + shape.width / 2 + viewport.scrollX) * viewport.zoom, y: box.top + (shape.y + shape.height / 2 + viewport.scrollY) * viewport.zoom };
+  })()`;
+  // The host: a page of another origin that frames the page at its own corner and keeps what it is told.
+  const host = await browser!.newPage({ viewport: { width: 1900, height: 1000 } });
+
+  try {
+    await host.setContent(`<body style="margin:0"><script>window.told = []; addEventListener("message", (event) => { if (event.data && event.data.type === "archdiff:open") window.told.push({ from: event.origin, ...event.data }); });</script><iframe style="position:fixed;left:0;top:0;width:1800px;height:900px;border:0" src="${base}/?host=1${view}"></iframe></body>`);
+    const frame = await (await host.waitForSelector("iframe")).contentFrame();
+    assert.ok(frame, "the host's frame");
+    await frame.waitForFunction(`window.archdiff?.drawn() === "module:src/lib/orders.ts"`);
+    await frame.waitForTimeout(1000);
+    const at = (await frame.evaluate(shapePoint)) as { x: number; y: number };
+    await host.mouse.move(at.x, at.y);
+    await host.mouse.down();
+    await host.mouse.up();
+    await host.waitForFunction(`window.told.length > 0`, undefined, { timeout: 8000 });
+    // The place, and nothing but the place: the file as the repository names it, and its first line.
+    assert.deepEqual(await host.evaluate(`window.told`), [{ from: base, type: "archdiff:open", file: "src/lib/orders.ts", line: 1 }]);
+    // The Code tab holds the code for whoever opens it, without coming to the front: the editor shows the place.
+    assert.ok((await frame.textContent("#code"))?.includes("export function placeOrder"));
+    assert.equal(await frame.evaluate(`document.querySelector(".panel.active").id`), "markdown");
+  } finally {
+    await host.close();
+  }
+
+  // The same link in a window of its own has no host: the tap brings the Code tab to the front, as without the flag.
+  await page!.goto(`${base}/?host=1${view}`);
+  await page!.evaluate("localStorage.clear()");
+  await page!.reload();
+  await page!.waitForFunction(`window.archdiff?.drawn() === "module:src/lib/orders.ts"`);
+  await page!.waitForTimeout(1000);
+  const alone =(await page!.evaluate(shapePoint)) as { x: number; y: number };
+  await page!.mouse.move(alone.x, alone.y);
+  await page!.mouse.down();
+  await page!.mouse.up();
+  await page!.waitForFunction(`document.querySelector(".panel.active").id === "code" && (document.querySelector("#code")?.textContent ?? "").includes("placeOrder")`, undefined, { timeout: 8000 });
+});

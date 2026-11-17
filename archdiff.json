@@ -72,6 +72,9 @@
     ],
     "scripts": [
       "scripts/**"
+    ],
+    "vscode": [
+      "vscode/**"
     ]
   },
   "rules": [
