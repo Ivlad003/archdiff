@@ -6,13 +6,13 @@
 //
 // Pure: Diagram + Analysis → text, byte-stable for the same inputs.
 // Entry points: `diagramMarkdown`, `nodeMarkdown`, `edgeMarkdown`,
-// `metricsMarkdown`, `commitMarkdown`.
+// `metricsMarkdown`, `impactMarkdown`, `commitMarkdown`.
 
 import type { Analysis } from "./analyze.ts";
 import { operationLabel, parseApiId, participantLabel, API_LABELS, API_SHORT } from "./apis.ts";
 import { contractMarkdown, contractSummary, contractsOf } from "./contracts.ts";
 import type { CommitInfo } from "./git.ts";
-import type { Diagram, Line, Shape } from "./diagram.ts";
+import type { Diagram, Impact, ImpactData, Line, Shape } from "./diagram.ts";
 import { farFromMainSequence, type Metrics } from "./diagram.ts";
 import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
 import { isBlindSpot, moduleOf } from "./graph.ts";
@@ -58,6 +58,13 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
   // The metrics read as tables: the layers, then the modules, the farthest from the main sequence first.
   if (diagram.metrics) {
     lines.push(...metricsMarkdown(diagram.metrics));
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
+  // An impact reads as its risk with the parts, then the dependents step by step and the tests that reach the subject.
+  if (diagram.impact) {
+    lines.push(...impactMarkdown(diagram.impact));
 
     return `${lines.join("\n").trimEnd()}\n`;
   }
@@ -180,6 +187,63 @@ export function metricsMarkdown(metrics: Metrics): string[] {
 
   for (const row of metrics.modules) lines.push(`| ${row.id} | ${row.layer} | ${row.ca} | ${row.ce} | ${row.instability.toFixed(2)} | ${row.abstractness.toFixed(2)} | ${farFromMainSequence(row) ? `**${row.distance.toFixed(2)}** ⚠` : row.distance.toFixed(2)} | ${row.cohesion < 0.3 && row.fns > 2 ? `**${row.cohesion.toFixed(2)}** ⚠` : row.cohesion.toFixed(2)} | ${row.fns} | ${row.lines} |`);
   lines.push("", "Ca: modules that import it; Ce: modules it imports; I = Ce / (Ca + Ce), 0 stable, 1 unstable; A: types and interfaces among its declarations; D = |A + I − 1|, the distance from the main sequence (⚠ at 0.7 when the module is coupled at all: concrete and depended upon, or abstract and depending on everything); cohesion: 1 when its functions form one group by calls, shared callees and shared types, 0 when each stands alone.");
+
+  return lines;
+}
+
+/**
+ * A blast radius as Markdown: one subject's risk with its parts, its dependents by distance and the tests that reach
+ * it; for the files of a change, a table of the subjects by risk first, then each subject the same way a level down.
+ */
+export function impactMarkdown(impact: ImpactData): string[] {
+  const lines: string[] = [];
+  const several = impact.subjects.length !== 1 || impact.since !== undefined;
+
+  if (several && impact.subjects.length > 0) {
+    lines.push("## Subjects by risk", "", "| subject | risk | dependents | layers | tests |", "| --- | --- | --- | --- | --- |");
+
+    for (const subject of impact.subjects) lines.push(`| \`${subject.subject}\` | **${subject.risk.score}** ${subject.risk.level} | ${subject.total.dependents} | ${subject.layers.length} | ${subject.total.tests === 0 ? "none ⚠" : subject.total.tests} |`);
+    lines.push("");
+  }
+
+  for (const subject of impact.subjects) lines.push(...subjectSections(subject, impact.depth, several));
+
+  if (impact.subjects.length > 0) lines.push("The risk is the sum of its parts, 0–100, from the code alone: the dependents at any distance (full at 20), the layers they span besides the subject's own (full at 3), whether a test reaches it, the instability of its module where something imports it, and its module's rank among the hotspots.");
+
+  return lines;
+}
+
+/** The sections of one subject of an impact: its risk as a table of the parts, its dependents step by step, the tests that reach it. */
+function subjectSections(impact: Impact, depth: number, nested: boolean): string[] {
+  const top = nested ? "###" : "##";
+  const sub = nested ? "####" : "###";
+  const lines = nested ? [`## ${impact.subject} — risk ${impact.risk.score} of 100, ${impact.risk.level}`, ""] : [`## Risk: ${impact.risk.score} of 100 — ${impact.risk.level}`, ""];
+  lines.push("| part | points | of | what archdiff knows |", "| --- | --- | --- | --- |");
+
+  for (const part of impact.risk.parts) lines.push(`| ${part.part} | ${part.points} | ${part.of} | ${part.fact.replace(/\|/g, "\\|")} |`);
+  lines.push("");
+  const others = impact.dependents.filter((dependent) => !dependent.test);
+  // Where a dependent stands: through what it reaches the subject when not directly, and the line that import or call is written at.
+  const through = (dependent: Impact["dependents"][number]): string => `${dependent.distance > 1 ? ` — through \`${dependent.via}\`` : ""}${dependent.line === undefined ? "" : ` — ${dependent.module}:${dependent.line}`}`;
+  lines.push(`${top} Dependents (${impact.total.dependents})`, "");
+
+  if (impact.total.dependents === 0) lines.push("_Nothing depends on it._", "");
+
+  for (let distance = 1; distance <= depth; distance++) {
+    const at = others.filter((dependent) => dependent.distance === distance);
+
+    if (at.length === 0) continue;
+    lines.push(`${sub} ${counted(distance, "step")} away (${at.length})`, "", ...at.map((dependent) => `- \`${dependent.id}\` — ${dependent.layer}${through(dependent)}`), "");
+  }
+
+  if (impact.total.dependents > others.length) lines.push(`_${impact.total.dependents - others.length} more beyond ${counted(depth, "step")} (--depth goes further)._`, "");
+  lines.push(`${top} Tests that reach it (${impact.total.tests})`, "");
+
+  if (impact.total.tests === 0) lines.push("_No test reaches it._", "");
+  // The tests to run after a change: every one of them, however far, where the dependents stop at the depth.
+  else lines.push(...impact.tests.map((test) => `- \`${test.id}\` — ${counted(test.distance, "step")} away${through(test)}`), "");
+
+  if (impact.importing.length > 0) lines.push(`${sub} Test files that import its module, with no call archdiff follows to it (${impact.importing.length})`, "", ...impact.importing.map((test) => `- \`${test.id}\` — ${counted(test.distance, "step")} away${through(test)}`), "");
 
   return lines;
 }

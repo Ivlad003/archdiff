@@ -88,6 +88,12 @@ Feature: The page
     When I click the dot of store.ts
     Then the map closes and the link holds "module:src/db/store.ts"
 
+  Scenario: The impact of a shape, from its menu
+    Given the page open on "layer:lib"
+    When I right-click orders.ts and choose "Impact: what a change to it reaches"
+    Then the link holds "impact:src/lib/orders.ts" and the title starts "Impact of"
+    And the lanes read "the subject" and "1 step away (1)", with checkout.tsx in the second
+
   Scenario: A question about the picture, and a compact transcript
     Given the page open on "layer:lib" with the fake agent
     When I type "What does this layer do?" in the ask row and press Enter

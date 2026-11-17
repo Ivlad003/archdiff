@@ -94,22 +94,22 @@ The `check` tool SHALL answer with the report of `archdiff check` — the layers
 
 ### Requirement: impact names who depends on a module or a function
 
-The `impact` tool SHALL answer, for `target` — a module's path, a declaration's ID (`<path>#<name>`), or a view's key naming one — with what a change to it reaches: for a module, the modules importing it and the callers of its functions from other modules; for a function or a class, its callers (a class's: of its members too; a call at a module's top level is that module's); for a type, the importers of its module. Each list SHALL go breadth-first up the imports or the calls to `depth` steps (3 unless given), every dependent once at its shortest distance, with what it imports or calls and the file and line; an import of types only and a file loaded by URL SHALL be told apart; what lies further than the depth SHALL be counted. The test files that reach the target SHALL be listed at any distance: by a chain of calls archdiff followed, else by a chain of imports of the target's module. The answer SHALL say that a call archdiff could not follow is in no list.
+The `impact` tool SHALL answer, for `target` — a module's path, a declaration's ID (`<path>#<name>`), or a view's key naming one — with what `archdiff impact` reports of it (the impact specification), from the one computation the command and the view read: the risk of a change, 0–100, with the parts of its score; the dependents — for a module, the modules that import it or call into it; for a function or a class, its callers (a class's: of its members too; a call at a module's top level is that module's) — breadth-first to `depth` steps (3 unless given), every dependent once at its shortest distance, with its layer, what it reaches the target through and the file and line that import or call is written at, what lies further counted; and every test that reaches the target, at any distance, however short the list. For a declaration, the other test files that import its module with no call archdiff follows SHALL be named apart. For a type, which nothing calls, the answer SHALL be of its module with the imports of types alone counted, and SHALL say so. The answer SHALL say that a call archdiff could not follow is in no list.
 
 #### Scenario: A function's callers by distance
 
 - **WHEN** `impact` is called with `target` "src/db/store.ts#saveOrder" on the sample
-- **THEN** `placeOrder` is 1 step away, `OrderService.place` 2 and the route's `action` 3, each with the line of its call
+- **THEN** the answer opens with the risk and its parts, and `placeOrder` is 1 step away, `OrderService.place` 2 and the route's `action` 3, each with what it reaches the target through and the line of its call
 
 #### Scenario: The depth cuts the list, not the tests
 
 - **WHEN** a test file calls `placeOrder` in a test's body, and `impact` is called for `saveOrder` with `depth` 1
-- **THEN** the list holds `placeOrder` alone and counts 3 more further away, and the tests name that file as calling it, 2 steps away
+- **THEN** the list holds `placeOrder` alone and counts 2 more beyond 1 step, and the tests name that file, 2 steps away through `placeOrder`
 
 #### Scenario: A test that only imports
 
 - **WHEN** a test file imports the store's module whole and makes no call archdiff follows
-- **THEN** the tests of `saveOrder` name it as importing its module, 1 step away
+- **THEN** the answer for `saveOrder` names it among the test files that import its module with no call archdiff follows, 1 step away
 
 ### Requirement: review answers with the architectural diff
 

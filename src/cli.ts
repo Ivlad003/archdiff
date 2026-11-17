@@ -30,7 +30,7 @@ import { CACHE_DIRECTORY } from "./cache.ts";
 import { serve } from "./server.ts";
 import { serveMcp } from "./mcp.ts";
 import { archdiffTools, MCP_INSTRUCTIONS } from "./mcp-tools.ts";
-import { drawnAtHead, usesDepth, viewSyntax, viewsOfFiles } from "./view-keys.ts";
+import { defaultDepth, drawnAtHead, usesDepth, viewSyntax, viewsOfFiles } from "./view-keys.ts";
 import { parseView, viewList, viewOf, type View } from "./views.ts";
 import { INTENT_FILE, intentFromCode, intentMarkdown, judgesLayers, nothingToCheck, parseIntent, writeIntent } from "./intent.ts";
 import { baselineText, parseBaseline, readBaseline } from "./baseline.ts";
@@ -42,6 +42,7 @@ import { writeTestSkeletons } from "./gherkin.ts";
 import { FEATURES_DIRECTORY as FEATURES_DIRECTORY_NAME } from "./spec.ts";
 import { DEFAULT_PICTURE_OPTIONS, depthWarning, pictureFlags, pictureOptionsHelp, readPictureOptions, type PictureOptions } from "./options.ts";
 import { metricsOf } from "./metrics.ts";
+import { whatIfKey, type WhatIfChange } from "./whatif.ts";
 import { counted } from "./words.ts";
 
 /** A flag a command knows: its name after `--`, and whether a value follows it. */
@@ -105,11 +106,12 @@ async function writePicture(call: Call, command: string, root: string, view: Vie
   const analysis = drawnAtHead(view.kind) && refs.head ? await analysisAt(root, refs.head) : await analyze(root);
   const picture = await drawPicture(analysis, { view, options, refs });
 
-  // A missing subject: the reason, and where the subjects are listed, unless the reason says so already (a machine's).
+  // A missing subject: the reason, and where the subjects are listed, unless the reason says so already (a machine's)
+  // or is of another kind (a what-if that cannot be supposed).
   if (picture.diagram.missing) {
     const reason = picture.diagram.reason ?? "";
 
-    return { code: fail(`${command}: ${reason}${/ lists them\)$/.test(reason) ? "" : " (archdiff views lists them)"}`), picture: null };
+    return { code: fail(`${command}: ${reason}${/ lists them\)$/.test(reason) || !reason.startsWith("no ") ? "" : " (archdiff views lists them)"}`), picture: null };
   }
 
   const text = format === "md" ? picture.markdown : format === "json" ? json(picture) : exportDiagram(picture.diagram, format, options.mermaid);
@@ -188,6 +190,11 @@ function formatOf(call: Call, command: string): ExportFormat | null {
   fail(`${command}: unknown format "${written}" (${EXPORT_FORMATS.join(", ")})`);
 
   return null;
+}
+
+/** A module or a function as a command line names it (`src\\x.ts#f` typed or completed on Windows, `./src/x.ts`): the path as the graph has it, with slashes and no `./`. */
+function subjectOf(written: string): string {
+  return written.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
 /** Text broken into lines of at most `width` characters at its spaces, for the help. */
@@ -481,6 +488,84 @@ const COMMANDS: readonly Command[] = [
       if (code !== 0 || picture?.change?.kind !== "review") return code;
 
       return reviewFindings(picture.change.diff, picture.change.contract).length > 0 ? 1 : 0;
+    },
+  },
+  {
+    name: "impact",
+    usage: "<path>[#<fn>] | --changed [dir] [--depth N] [--limit N] [--types] [--base REF] [--head REF] [--json] [--format F] [--out FILE]",
+    help: [
+      "The blast radius of a change to a module or a function: everything that depends",
+      `on it — the modules that import it, the functions that call it — step by step to`,
+      `--depth (default ${defaultDepth("impact")}), the tests that reach it, and a risk score of 0-100 with its`,
+      "parts: the dependents, the layers they span, whether a test reaches it, its",
+      "instability, its rank among the hotspots. --changed: every file changed since",
+      "--base (default: where the head left develop, main or master), the riskiest",
+      "first. Markdown with the picture (the subject in the middle, its dependents by",
+      "distance, the tests on the left); --json: the same as data; --format: the picture",
+    ],
+    arity: 2,
+    flags: [...REF_FLAGS, ...OUTPUT_FLAGS, flag("changed"), flag("depth", true), flag("limit", true), flag("types"), flag("json")],
+    async run(call) {
+      const changed = call.has("changed");
+
+      if (changed && call.positional.length > 1) return fail(`impact: --changed takes no subject (the files changed since the base are the subjects); "${call.positional[0]}" given`);
+
+      if (!changed && !call.positional[0]) return fail("impact: a module (src/x.ts) or a function (src/x.ts#fn) is required, or --changed");
+      const format = call.has("json") ? "json" : formatOf(call, "impact");
+
+      if (format === null) return 2;
+      // The depth, the limit and the types are the picture's own options; --changed here names the subjects, it does not cut the picture.
+      const picture = readPictureOptions((name) => (name === "changed" ? undefined : call.flags.get(name)), "flag");
+
+      if (!picture.ok) return fail(`impact: ${picture.problem.message}`);
+      const view: View = { kind: "impact", subject: changed ? null : subjectOf(call.positional[0]!) };
+
+      // `json` is the report itself: every subject with its dependents, the tests that reach it and its risk.
+      return (await writePicture(call, "impact", call.dir(changed ? 0 : 1), view, picture.value.options, format, ({ diagram }) => `${JSON.stringify(diagram.impact ?? null, null, 2)}\n`)).code;
+    },
+  },
+  {
+    name: "whatif",
+    usage: "move <module> <to> | delete <module> | split <module> <fn,fn…> <new module> [dir] [--json] [--format F] [--out FILE]",
+    help: [
+      "The architecture as it would be after a change, without touching a file: a",
+      "module moved to another path or directory (its layer is the new place's), a",
+      "module deleted, or functions of a module split off into a new one (the imports",
+      "follow the code that uses them). Reported as a review reports a change — the",
+      "modules, functions, imports and calls it would add and remove, with the picture",
+      "— and what it would break: the imports and calls left without their target, the",
+      "imports that would go against ARCHITECTURE.md or stop going against it, the",
+      "cycles it would close or break. --json: the same as data. Exit 1 when the change",
+      "would break an import or a call, go against the contract or close a cycle",
+    ],
+    arity: 5,
+    flags: [...OUTPUT_FLAGS, flag("json")],
+    async run(call) {
+      const [op, ...rest] = call.positional;
+      const forms = "whatif move <module> <to>, whatif delete <module>, whatif split <module> <fn,fn…> <new module>";
+      const takes = op === "move" ? 2 : op === "delete" ? 1 : op === "split" ? 3 : null;
+
+      if (takes === null) return fail(`whatif: ${op === undefined ? "a change is required" : `unknown change "${op}"`} (${forms})`);
+
+      if (rest.length < takes) return fail(`whatif ${op}: ${counted(takes, "argument")} required (${forms})`);
+
+      // The directory comes after the change's own arguments; one more is a typo.
+      if (rest.length > takes + 1) return fail(`whatif: unexpected argument "${rest[takes + 1]}" (archdiff --help)`);
+      const module = subjectOf(rest[0]!);
+      const names = (rest[1] ?? "").split(",").map((name) => name.trim()).filter((name) => name !== "");
+      const change: WhatIfChange = op === "move" ? { op, module, to: subjectOf(rest[1]!) } : op === "delete" ? { op: "delete", module } : { op: "split", module, names, to: subjectOf(rest[2]!) };
+
+      if (change.op === "split" && names.length === 0) return fail(`whatif split: name the functions to split off (${forms})`);
+      const format = call.has("json") ? "json" : formatOf(call, "whatif");
+
+      if (format === null) return 2;
+
+      // `json` is the report itself; the exit code says whether the change would break something.
+      const { code, picture } = await writePicture(call, "whatif", call.dir(1 + takes), { kind: "whatif", subject: whatIfKey(change) }, DEFAULT_PICTURE_OPTIONS, format, ({ change: found }) => `${JSON.stringify(found?.kind === "whatif" ? found.report : null, null, 2)}\n`);
+
+      if (code !== 0 || picture?.change?.kind !== "whatif") return code;
+
+      return picture.change.findings.length > 0 ? 1 : 0;
     },
   },
   {
@@ -806,7 +891,7 @@ export function helpText(): string {
     for (const line of command.help) lines.push(`${" ".repeat(21)}${line}`);
   }
 
-  lines.push("  --version          Print the version", "", "Exit codes: 0 ok, 1 differences found (review, check), 2 wrong invocation or I/O error.");
+  lines.push("  --version          Print the version", "", "Exit codes: 0 ok, 1 differences found (review, check, whatif), 2 wrong invocation or I/O error.");
 
   return `${HELP_HEAD}${lines.join("\n")}\n`;
 }

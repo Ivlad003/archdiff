@@ -23,9 +23,10 @@
 import { analyze, type Analysis } from "./analyze.ts";
 import { shortCommits } from "./diff.ts";
 import { commitOf } from "./git.ts";
-import { DEFAULT_IMPACT_DEPTH, impactMarkdown, impactOf } from "./impact.ts";
+import { IMPACT_DEPTH, impactOf, type Impact } from "./impact.ts";
 import { readBaseline } from "./baseline.ts";
 import { importVerdict, importVerdictText, INTENT_FILE, judgesLayers, nothingToCheck } from "./intent.ts";
+import { impactMarkdown } from "./markdown.ts";
 import type { McpTool } from "./mcp.ts";
 import { DEFAULT_PICTURE_OPTIONS, PICTURE_OPTIONS, readPictureOptions, type PictureOptions } from "./options.ts";
 import { drawPicture, type Refs } from "./picture.ts";
@@ -168,6 +169,17 @@ function optionsOf(tool: string, args: Args): Result<PictureOptions> {
   return read.ok ? ok(read.value.options) : wrong(`${tool}: ${read.problem.message}`);
 }
 
+/**
+ * The impact of one subject as the tool answers it: what `archdiff impact` writes under its picture — the risk with
+ * its parts, the dependents step by step, each with the line it is written at, and every test that reaches the
+ * subject — and what no list can hold.
+ */
+function impactText(impact: Impact, depth: number): string {
+  const lines = [`<!-- archdiff:generated — impact of ${impact.subject} -->`, `# Impact of ${impact.subject}`, "", ...impactMarkdown({ depth, subjects: [impact] }), "", "A call archdiff could not follow (a computed callee, a value of an unknown type) is in no list above: the `coverage` view names those."];
+
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
 const REF_PROPERTIES = {
   base: { type: "string", description: "the revision a change is measured from: a branch, a tag or a commit (default: where the head left develop, main or master)" },
   head: { type: "string", description: "the revision to read instead of the working tree: a branch, a tag or a commit" },
@@ -303,10 +315,10 @@ export function archdiffTools(root: string): McpTool[] {
     tool(
       "impact",
       "Who depends on it",
-      "Who depends on a module or a function: the modules importing it and the functions calling it, and who imports and calls those, up to `depth` steps away, with the file and line of each; and every test file that reaches it, however far. Ask it before changing or removing something, to know what the change can break and which tests to run.",
+      "Who depends on a module or a function, as `archdiff impact` says it: the modules importing it or calling into it, or the functions calling it, and who imports and calls those, up to `depth` steps away, each with what it reaches the subject through and the file and line that is written at; every test that reaches it, however far; and how risky a change to it is, 0–100, with the parts of the score. Ask it before changing or removing something, to know what the change can break and which tests to run.",
       {
         target: { type: "string", description: "a module by its path (`src/db/store.ts`) or a function, class or type by its ID (`src/db/store.ts#saveOrder`, `src/lib/orders.ts#OrderService.place`)" },
-        depth: { type: "integer", minimum: 1, description: `how many steps up the imports and the calls the lists go (default ${DEFAULT_IMPACT_DEPTH}); the tests are found at any distance` },
+        depth: { type: "integer", minimum: 1, description: `how many steps up the imports and the calls the lists go (default ${IMPACT_DEPTH}); the tests and the risk are of any distance` },
       },
       ["target"],
       async (args) => {
@@ -315,15 +327,21 @@ export function archdiffTools(root: string): McpTool[] {
         if (!target.ok) return target;
 
         if (!target.value) return wrong("impact: a target is required: a module's path or a function's <path>#<name> (archdiff views lists them)");
-        const given = args["depth"] ?? DEFAULT_IMPACT_DEPTH;
+        const given = args["depth"] ?? IMPACT_DEPTH;
         const depth = typeof given === "string" && given.trim() !== "" ? Number(given) : given;
 
         if (typeof depth !== "number" || !Number.isInteger(depth) || depth < 1) return wrong("impact: depth must be a whole number of at least 1");
         const analysis = await fresh();
         // A view's key names its subject as surely: `module:src/x.ts`, `calls:src/x.ts#f`.
-        const impact = impactOf(analysis.graph, target.value, depth) ?? impactOf(analysis.graph, parseView(target.value)?.subject ?? "", depth);
+        const asked = impactOf(analysis, target.value, { depth }) ?? impactOf(analysis, parseView(target.value)?.subject ?? "", { depth });
 
-        return impact ? ok(impactMarkdown(impact)) : wrong(`impact: no module or function "${target.value}" (archdiff views lists them)`);
+        if (!asked) return wrong(`impact: no module or function "${target.value}" (archdiff views lists them)`);
+
+        if (asked.kind !== "type") return ok(impactText(asked, depth));
+        // A type has no callers: it flows by imports, so the importers of its module stand for it, the ones that take only types counted.
+        const ofModule = impactOf(analysis, asked.module, { depth, types: true })!;
+
+        return ok(impactText(ofModule, depth).replace("\n\n", `\n\n\`${asked.subject}\` is a type: nothing calls it, it flows by imports, so what depends on its module \`${asked.module}\` stands for it, the imports of types alone counted.\n\n`));
       },
     ),
     tool(

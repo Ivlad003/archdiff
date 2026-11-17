@@ -68,11 +68,11 @@ export function reviewing(view: string): boolean {
   return kind === "review" || kind === "compare";
 }
 
-/** A picture read from git — a review, a comparison, one commit's change, the branches: nothing is drawn on it. */
+/** A picture read from git — a review, a comparison, one commit's change, the branches — or of a change supposed (a what-if): nothing is drawn on it. */
 export function readOnlyView(view: string): boolean {
   const kind = parseView(view)?.kind;
 
-  return kind === "review" || kind === "compare" || kind === "commit" || kind === "branches";
+  return kind === "review" || kind === "compare" || kind === "commit" || kind === "branches" || kind === "whatif";
 }
 
 /** The revision whose code the page shows (null: the working tree), as `codeRevision` says for the link's view. */

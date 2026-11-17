@@ -24,13 +24,14 @@ Feature: The architecture asked by a coding agent
     When the agent calls "impact" with the target "src/db/store.ts#saveOrder"
     Then placeOrder is 1 step away, OrderService.place 2 and the route's action 3
     And each caller carries the file and the line of its call
+    And the answer opens with the risk of a change and the parts of its score
 
   Scenario: The tests to run
     Given a test file that calls placeOrder and one that only imports the store
     When the agent calls "impact" with the target "src/db/store.ts#saveOrder" and depth 1
-    Then the callers list holds placeOrder and counts 3 more further away
-    And the tests name the first file as calling it, 2 steps away
-    And the second as importing its module, 1 step away
+    Then the dependents list holds placeOrder and counts 2 more beyond 1 step
+    And the tests name the first file, 2 steps away through placeOrder
+    And the second among the test files that import its module, 1 step away
 
   Scenario: An import asked about before it is written
     Given a contract with the arrows routes to lib and lib to db

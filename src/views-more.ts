@@ -15,7 +15,8 @@
 //
 // Entry points: `matrixView`, `typeView`, `pathView`, `usageView`,
 // `eventsView`, `testsView`, `hotspotsView`, `packagesView`, `classesView`,
-// `timelineDiagram`, `branchesDiagram` (views.ts's `viewOf` dispatches to them).
+// `timelineDiagram`, `branchesDiagram` (views.ts's `viewOf` dispatches to them),
+// `isTestModule`.
 
 import type { Analysis } from "./analyze.ts";
 import { hookOf, isApiId, operationFromId, operationId, operationLabel, familyId, API_SHORT, SCAPI, type ApiHook, type ApiOperation } from "./apis.ts";

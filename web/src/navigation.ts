@@ -16,11 +16,11 @@ export function siblingViews(key: string): { label: string; key: string }[] {
   const subject = view.subject;
   const of = (kind: string, label: string): { label: string; key: string } => ({ label, key: `${kind}:${subject}` });
 
-  // A function's pictures: its calls, their order, its way to the storages, everything joined to it, its logic, its cycle.
-  if (subject.includes("#") && ["calls", "sequence", "path", "cycle", "focus", "logic"].includes(view.kind)) return [of("calls", "call tree"), of("sequence", "sequence of calls"), of("path", "path to the storages"), of("focus", "focus: everything joined to it"), of("logic", "logic: the flowchart and its rules"), of("cycle", "its call cycle")];
+  // A function's pictures: its calls, their order, its way to the storages, everything joined to it, what a change to it reaches, its logic, its cycle.
+  if (subject.includes("#") && ["calls", "sequence", "path", "cycle", "focus", "impact", "logic"].includes(view.kind)) return [of("calls", "call tree"), of("sequence", "sequence of calls"), of("path", "path to the storages"), of("focus", "focus: everything joined to it"), of("impact", "impact: what a change to it reaches"), of("logic", "logic: the flowchart and its rules"), of("cycle", "its call cycle")];
 
   // A module's pictures (a classes view of one file is one of them).
-  if (["module", "inside", "usage", "cycle", "focus"].includes(view.kind) || (view.kind === "classes" && /\.[a-z]+$/.test(subject))) return [of("module", "dependencies"), of("inside", "inside: functions and calls"), of("focus", "focus: everything joined to it"), of("classes", "classes: fields and methods"), of("usage", "usage: who uses its exports"), of("cycle", "its import cycle")];
+  if (["module", "inside", "usage", "cycle", "focus", "impact"].includes(view.kind) || (view.kind === "classes" && /\.[a-z]+$/.test(subject))) return [of("module", "dependencies"), of("inside", "inside: functions and calls"), of("focus", "focus: everything joined to it"), of("impact", "impact: what a change to it reaches"), of("classes", "classes: fields and methods"), of("usage", "usage: who uses its exports"), of("cycle", "its import cycle")];
 
   if (view.kind === "dir" || view.kind === "classes") return [of("dir", "modules of the directory"), of("classes", "classes of the directory")];
 

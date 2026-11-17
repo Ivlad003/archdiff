@@ -186,17 +186,19 @@ test("every tool answers on the fixture: the views, a picture with its options, 
   // The fixture has no contract: the check and the question about an import say so, in the CLI's words.
   assert.equal(await client.ask("check"), "no ARCHITECTURE.md, nothing to check against (archdiff intent --init)\n");
   assert.equal(await client.ask("may_import", { from: "src/routes/checkout.tsx", to: "src/db/store.ts" }), "Not judged: no ARCHITECTURE.md, nothing to check against (archdiff intent --init).\n");
-  // A function's callers by distance, each with the call that makes it one and where.
+  // A function's impact as `archdiff impact` says it: the risk with its parts, then the callers by distance, each with what it reaches the subject through and where that call is written.
   const fn = await client.ask("impact", { target: "src/db/store.ts#saveOrder" });
-  assert.ok(fn.includes("A function of `src/db/store.ts` (layer **db**), src/db/store.ts:6. Within 3 steps: 3 callers in 2 modules; 0 test files reach it."), fn);
-  assert.ok(fn.includes("1 step away:\n\n- `src/lib/orders.ts#placeOrder` calls it — src/lib/orders.ts:10\n"), fn);
-  assert.ok(fn.includes("3 steps away:\n\n- `src/routes/checkout.tsx#action` calls `src/lib/orders.ts#OrderService.place` — src/routes/checkout.tsx:5\n"), fn);
-  // A module's importers and the callers of its functions; the depth cuts the lists and counts the rest.
+  assert.match(fn, /^<!-- archdiff:generated — impact of src\/db\/store\.ts#saveOrder -->\n# Impact of src\/db\/store\.ts#saveOrder\n\n## Risk: \d+ of 100 — (low|medium|high)\n/);
+  assert.ok(fn.includes("| tests | 20 | 20 | no test reaches it |"), fn);
+  assert.ok(fn.includes("### 1 step away (1)\n\n- `src/lib/orders.ts#placeOrder` — lib — src/lib/orders.ts:10\n"), fn);
+  assert.ok(fn.includes("### 3 steps away (1)\n\n- `src/routes/checkout.tsx#action` — routes — through `src/lib/orders.ts#OrderService.place` — src/routes/checkout.tsx:5\n"), fn);
+  assert.ok(fn.endsWith("is in no list above: the `coverage` view names those.\n"), fn);
+  // A module's dependents are the modules that import it or call into it; the depth cuts the list and counts the rest.
   const module = await client.ask("impact", { target: "module:src/db/store.ts", depth: 1 });
-  assert.ok(module.includes("## Importers (1)\n\n1 step away:\n\n- `src/lib/orders.ts` imports it — src/lib/orders.ts:2\n\n… 1 more further than 1 step away"), module);
-  assert.ok(module.includes("- `src/lib/orders.ts#placeOrder` calls `src/db/store.ts#saveOrder` — src/lib/orders.ts:10\n"), module);
-  // A type flows by imports: its module's importers stand for it, the one that takes only types told apart.
-  assert.ok((await client.ask("impact", { target: "src/lib/orders.ts#Order" })).includes("- `src/db/store.ts` imports the types of its module — src/db/store.ts:2\n"));
+  assert.ok(module.includes("## Dependents (2)\n\n### 1 step away (1)\n\n- `src/lib/orders.ts` — lib — src/lib/orders.ts:2\n\n_1 more beyond 1 step (--depth goes further)._\n"), module);
+  // A type has no callers and flows by imports: what depends on its module stands for it, the imports of types alone counted.
+  const type = await client.ask("impact", { target: "src/lib/orders.ts#Order" });
+  assert.ok(type.includes("# Impact of src/lib/orders.ts\n\n`src/lib/orders.ts#Order` is a type: nothing calls it, it flows by imports") && type.includes("- `src/db/store.ts` — db — src/db/store.ts:2\n"), type);
   // The working tree against its own commit.
   assert.match(await client.ask("review", { base: "HEAD" }), /^<!-- archdiff:generated — review since HEAD -->\n# Architecture changes since HEAD\n/);
   const { code, stderr } = await client.close();
@@ -225,7 +227,7 @@ test("a wrong call is a JSON-RPC error carrying the CLI's message, and the serve
   // An argument a tool does not know is a typo, as a flag the CLI does not know.
   await refused("diagram", { view: "layers", dpth: 2 }, 'diagram: unknown argument "dpth" (view, base, head, heads, depth, limit, weight, hubs, packages, expand, hide, overlay, changes, only, changed, mermaid, lanes, types)');
   await refused("check", { json: true }, 'check: unknown argument "json" (it takes none)');
-  assert.match((await client.refused("views", { kind: "nope" })).message, /^views: unknown kind "nope" \(layers, layer, dir, module, .*, compare\)$/);
+  assert.match((await client.refused("views", { kind: "nope" })).message, /^views: unknown kind "nope" \(layers, layer, dir, module, .*, compare\b.*\)$/);
   await refused("may_import", { from: "src/lib/log.ts" }, "may_import: from and to are required: a module's path or a layer's name each");
   await refused("impact", { target: "src/none.ts" }, 'impact: no module or function "src/none.ts" (archdiff views lists them)');
   await refused("impact", { target: "src/db/store.ts", depth: 0 }, "impact: depth must be a whole number of at least 1");
@@ -293,13 +295,13 @@ test("with a contract, a test file and a commit: an import asked about is allowe
     assert.match(await client.ask("may_import", { from: "src/db/new-table.ts", to: "src/routes/checkout.tsx" }), /^Not allowed: `src\/db\/new-table\.ts` \(layer \*\*db\*\*\) → .*\*\*db\*\* may import no other layer\./);
     assert.match(await client.ask("may_import", { from: "routes", to: "lib" }), /^Allowed: the layer \*\*routes\*\* → the layer \*\*lib\*\*\. /);
     assert.equal(await client.ask("may_import", { from: "tests/orders.test.ts", to: "src/lib/orders.ts" }), "Not judged: `tests/orders.test.ts` (layer **other**) → `src/lib/orders.ts` (layer **lib**). ARCHITECTURE.md does not name the layer **other**, so it neither allows nor forbids the import.\n");
-    // One test calls placeOrder at its top level, which calls saveOrder: two calls away, however short the list. The
-    // other imports the store's module and makes no call archdiff follows: found by the import. Both are the tests to run.
+    // One test calls placeOrder at its top level, which calls saveOrder: two calls away, and named however short the
+    // list. The other imports the store's module and makes no call archdiff follows: named apart. Both are the tests to run.
     const impact = await client.ask("impact", { target: "src/db/store.ts#saveOrder", depth: 1 });
-    assert.ok(impact.includes("Within 1 step: 1 caller in 1 module; 2 test files reach it."), impact);
-    assert.ok(impact.includes("… 3 more further than 1 step away"), impact);
-    assert.ok(impact.includes("## Tests that reach it (2)\n\n- `tests/store.test.ts` — imports its module, 1 step away\n- `tests/orders.test.ts` — calls it, 2 steps away\n"), impact);
-    assert.ok((await client.ask("impact", { target: "src/lib/orders.ts#placeOrder" })).includes("- `tests/orders.test.ts` (its top level) calls it — tests/orders.test.ts:5\n"));
+    assert.ok(impact.includes("### 1 step away (1)\n\n- `src/lib/orders.ts#placeOrder` — lib — src/lib/orders.ts:10\n\n_2 more beyond 1 step (--depth goes further)._\n"), impact);
+    assert.ok(impact.includes("## Tests that reach it (1)\n\n- `tests/orders.test.ts` — 2 steps away — through `src/lib/orders.ts#placeOrder` — tests/orders.test.ts:5\n\n### Test files that import its module, with no call archdiff follows to it (1)\n\n- `tests/store.test.ts` — 1 step away — tests/store.test.ts:2\n"), impact);
+    assert.ok(impact.includes("| tests | 10 | 20 | reached only through other code: the nearest test is 2 steps away |"), impact);
+    assert.ok((await client.ask("impact", { target: "src/lib/orders.ts#placeOrder" })).includes("- `tests/orders.test.ts` — 1 step away — tests/orders.test.ts:5\n"));
     assert.ok((await client.ask("check")).includes("**The code follows the intent.**"));
     // The agent's edit: the route reads the store directly. The next answers are of the code as it is now.
     writeFileSync(join(dir, "src/routes/checkout.tsx"), `import { readOrder } from "@/db/store";\n\nexport function loader() {\n  return readOrder("y");\n}\n`);

@@ -65,7 +65,7 @@ export const PICTURE_OPTIONS = [
   { key: "changed", flag: "changed", param: "changed", type: "bool", default: false, help: "only the files changed since the base (--base, --head): their shapes alone, with the review's marks; `views --changed` and the page's lists the same" },
   { key: "mermaid", flag: "mermaid", param: "mermaid", type: "enum", values: MERMAID_STYLES, default: "auto", help: "the Mermaid type of the Markdown (auto: a sequence, class, state or gitGraph where the view has one, else a flowchart)" },
   { key: "lanes", flag: "lanes", param: "lanes", type: "enum", values: LANE_MODES, default: "auto", help: "lanes as rows (bands down the picture) or columns (blocks across it; auto: columns on a map of more than six lanes)" },
-  { key: "types", flag: "types", param: "types", type: "bool", default: false, help: "count type-only imports too (cycles, matrix), drawn dashed" },
+  { key: "types", flag: "types", param: "types", type: "bool", default: false, help: "count type-only imports too (cycles, matrix, impact), drawn dashed" },
 ] as const satisfies readonly OptionSpec[];
 
 type Spec = (typeof PICTURE_OPTIONS)[number];

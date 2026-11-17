@@ -42,10 +42,11 @@ flowchart LR
     n_src_pipeline_ts["src/pipeline.ts<br>the steps after a view as data: hide, mix, hubs, fold, weight, marks, overlays"]
     n_src_metrics_ts["src/metrics.ts<br>coupling and cohesion: Ca, Ce, I, A, D, the cohesion of a module's functions"]
     n_src_cycles_ts["src/cycles.ts<br>import, call and layer cycles, and where to cut them"]
+    n_src_impact_ts["src/impact.ts<br>the blast radius of a change: a subject's dependents step by step, the tests that reach it, its risk with the parts; impactOf is the one function another reader calls"]
+    n_src_whatif_ts["src/whatif.ts<br>a change supposed, not made: the graph after a move, a deletion or a split, set against the graph as it is — its diff, the contract and the cycles after it, what it breaks"]
     n_src_machines_ts["src/machines.ts<br>state machines: declared by a library, or written with literal states"]
     n_src_logic_ts["src/logic.ts<br>a function's body as a flowchart with its paths as rules, and the list of branching functions"]
     n_src_project_map_ts["src/project-map.ts<br>the whole repository as dots and lines for the page's project map"]
-    n_src_impact_ts["src/impact.ts<br>what a change to a module or a function reaches: importers and callers by distance, the tests to run"]
     n_src_violations_ts["src/violations.ts<br>what check finds — imports against the layers, violations of the rules — held against the baseline: the new, the known, the fixed; the report as Markdown, text and JSON"]
   end
   subgraph n_exports["exports — the picture as text and files"]
@@ -125,6 +126,14 @@ flowchart LR
   n_src_views_ts --> n_src_pipeline_ts
   n_src_views_ts --> n_src_metrics_ts
   n_src_views_ts --> n_src_cycles_ts
+  n_src_views_ts --> n_src_impact_ts
+  n_src_views_ts --> n_src_whatif_ts
+  n_src_picture_ts --> n_src_whatif_ts
+  n_src_whatif_ts --> n_src_diff_ts
+  n_src_whatif_ts --> n_src_intent_ts
+  n_src_whatif_ts --> n_src_graph_ts
+  n_src_impact_ts --> n_src_views_more_ts
+  n_src_impact_ts --> n_src_graph_ts
   n_src_views_ts --> n_src_machines_ts
   n_src_cli_ts --> n_src_picture_ts
   n_src_picture_ts --> n_src_views_ts
@@ -139,8 +148,6 @@ flowchart LR
   n_src_mcp_tools_ts --> n_src_review_ts
   n_src_mcp_tools_ts --> n_src_impact_ts
   n_src_mcp_tools_ts --> n_src_intent_ts
-  n_src_impact_ts --> n_src_views_more_ts
-  n_src_impact_ts --> n_src_graph_ts
   n_src_cli_ts --> n_src_run_ts
   n_src_run_ts --> n_src_flow_ts
   n_src_run_ts --> n_src_extract_bodies_ts

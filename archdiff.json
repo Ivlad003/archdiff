@@ -41,10 +41,11 @@
       "src/pipeline.ts",
       "src/cycles.ts",
       "src/metrics.ts",
+      "src/impact.ts",
+      "src/whatif.ts",
       "src/machines.ts",
       "src/logic.ts",
       "src/project-map.ts",
-      "src/impact.ts",
       "src/violations.ts"
     ],
     "exports": [

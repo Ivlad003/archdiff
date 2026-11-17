@@ -9,7 +9,7 @@
 // Pipeline: two graphs → GraphDiff → Diagram + Markdown. Entry points:
 // `graphDiff`, `diffDiagram`, `compareDiagram`, `markContract`,
 // `reviewFindings`, `reviewMarkdown`, `comparisonMarkdown`,
-// `historyMarkdown`, `overlayDiff`, `onlyChanged`.
+// `historyMarkdown`, `changeSections`, `overlayDiff`, `onlyChanged`.
 
 import type { Commit } from "./git.ts";
 import type { Diagram, Line, Shape, DiffMark, PictureContent } from "./diagram.ts";
@@ -311,7 +311,7 @@ export function reviewMarkdown(diff: GraphDiff, diagram: Diagram, contract: bool
 }
 
 /** What a diff changed, a section of `level` (`##`, `###`) each, the empty ones left out: modules, functions, imports, calls, packages. */
-function changeSections(diff: GraphDiff, level: string): string[] {
+export function changeSections(diff: GraphDiff, level: string): string[] {
   const lines: string[] = [];
   const section = (title: string, items: string[]): void => {
     if (items.length > 0) lines.push(`${level} ${title}`, "", ...items.map((item) => `- ${item}`), "");
