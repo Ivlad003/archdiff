@@ -774,10 +774,10 @@ test("imports resolve as the tools resolve them: baseUrl, a jsconfig, the longes
     assert.ok(archdiff(["diagram", "calls:backend/app/api.py#run", dir, "--format", "mermaid"]).stdout.includes("backend_app_api_py_run ==> backend_app_models_py_load"));
   }));
 
-test("Python, Rust and PHP are read with the same graph: imports resolve and calls are followed", () => {
+test("Python, Rust, PHP and Go are read with the same graph: imports resolve and calls are followed", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");
   const stats = JSON.parse(archdiff(["analyze", polyglot, "--json", "--no-cache"]).stdout) as { files: number; unresolvedImports: number; calls: number };
-  assert.equal(stats.files, 12);
+  assert.equal(stats.files, 19);
   assert.equal(stats.unresolvedImports, 0);
   const python = archdiff(["diagram", "calls:app/services/orders.py#place_order", polyglot, "--format", "mermaid"]).stdout;
   assert.ok(python.includes("app_services_orders_py_place_order ==> app_store_py_save_order"), python);
@@ -1804,6 +1804,34 @@ test("two entities with a field of one name are two machines: by the class the c
     assert.deepEqual(states("machine:src/flows.ts#Payment.status"), ["failed", "pending", "settled"]);
     assert.deepEqual(states("machine:src/flows.js#order.status"), ["confirmed", "draft", "shipped"]);
   }));
+
+test("Go: a package is its directory — a call reaches another file of the package, another package by its import path, a method written in another file than its type, and a handler handed to the router", () => {
+  const polyglot = join(root, "tests/fixtures/polyglot");
+  const diagram = (key: string, ...flags: string[]): string => archdiff(["diagram", key, polyglot, "--format", "mermaid", ...flags]).stdout;
+  // The import of a package names no file: each declaration used is a dependency on the file that declares it.
+  const modules = diagram("dir:go");
+  for (const line of ["go_cmd_shop_main_go --> go_internal_httpapi_handler_go", "go_internal_httpapi_handler_go --> go_internal_orders_orders_go", "go_internal_orders_orders_go --> go_internal_orders_validate_go", "go_internal_orders_orders_go --> go_internal_store_store_go", "go_internal_orders_find_go --> go_internal_orders_orders_go", "go_internal_orders_orders_test_go --> go_internal_orders_orders_go"]) assert.ok(modules.includes(line), `${line}\n${modules}`);
+  assert.ok(!modules.includes("go_cmd_shop_main_go --> go_internal_orders_validate_go"), modules);
+  // `main` is the entry; `handler.Place` given to `http.HandleFunc` is a function handed over (dashed), and its own calls follow.
+  assert.ok(archdiff(["views", polyglot]).stdout.includes("calls:go/cmd/shop/main.go#main\tmain (go/cmd/shop/main.go) — main"));
+  const calls = diagram("calls:go/cmd/shop/main.go#main", "--depth", "5");
+  for (const line of ["go_cmd_shop_main_go_main ==> go_internal_store_store_go_NewRepo", "go_cmd_shop_main_go_main -.-> go_internal_httpapi_handler_go_Handler_Place", "go_internal_httpapi_handler_go_Handler_Place ==> go_internal_orders_orders_go_Service_PlaceOrder", "go_internal_orders_orders_go_Service_PlaceOrder ==> go_internal_orders_validate_go_validate", "go_internal_orders_orders_go_Service_PlaceOrder ==> go_internal_store_store_go_Repo_Save"]) assert.ok(calls.includes(line), `${line}\n${calls}`);
+  // `FindOrder` and `lookup` are methods of `Service` written in find.go: `s.lookup()` is found there, `repo.Read()` on what `store.NewRepo()` returns.
+  const part = diagram("calls:go/internal/orders/find.go#Service.FindOrder");
+  assert.ok(part.includes("go_internal_orders_find_go_Service_FindOrder ==> go_internal_orders_find_go_Service_lookup") && part.includes("go_internal_orders_find_go_Service_lookup ==> go_internal_store_store_go_Repo_Read"), part);
+  // One box for the type, with the methods of both files; an interface with its methods; the fields' types as associations.
+  const classes = diagram("classes:go");
+  assert.equal(classes.split('["Service"]').length - 1, 1, classes);
+  assert.ok(classes.includes("+repo: *store.Repo") && classes.includes("+FindOrder(id string) returns (store.Order, bool)") && classes.includes("-lookup(id string)") && classes.includes("<<interface>>") && classes.includes("go_internal_orders_orders_go_Service --> go_internal_store_store_go_Repo : has"), classes);
+  // `_test.go` is a test file: the modules it imports are covered.
+  const tests = JSON.parse(archdiff(["diagram", "tests", polyglot, "--format", "json"]).stdout) as { nodes: { id: string; count?: number }[] };
+  assert.deepEqual(tests.nodes.filter((node) => node.id.startsWith("go/")).map((node) => [node.id, node.count]), [["go/cmd/shop/main.go", 0], ["go/internal/httpapi/handler.go", 0], ["go/internal/orders/find.go", 0], ["go/internal/orders/orders.go", 1], ["go/internal/orders/validate.go", 0], ["go/internal/store/store.go", 1]]);
+  // The body of a method as a flowchart: the statement of an `if` before its condition, a `switch` without a value by its cases.
+  const logic = diagram("logic:go/internal/httpapi/handler.go#Handler.Place");
+  assert.ok(logic.includes('n2{"switch"}') && logic.includes('n2 -->|"err != nil"| n3') && logic.includes('n2 -->|"default"| n4'), logic);
+  const placed = archdiff(["diagram", "logic:go/internal/orders/orders.go#Service.PlaceOrder", polyglot]).stdout;
+  assert.ok(placed.includes("| `err != nil: yes` | `validate` | **return order, err** |") && placed.includes("| `err != nil: no` | `validate`, `s.repo.Save` | **return order, nil** |"), placed);
+});
 
 test("Rust integration tests are crates of their own: `mod util;` and `use <crate>::` resolve from tests/", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");

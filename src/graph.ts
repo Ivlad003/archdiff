@@ -29,6 +29,7 @@ import { layerOf } from "./config.ts";
 import { operationOf, type ApiOperation } from "./apis.ts";
 import { SCAPI_TABLE } from "./scapi-table.ts";
 import { dottedForm, type Callee, type CallFact, type DeclFact, type FileFacts, type GuardFact, type ShapeFact, type ValueOfFact } from "./extract/facts.ts";
+import { languageOf } from "./languages.ts";
 import type { Resolution } from "./resolve.ts";
 
 /** A file of the repository. */
@@ -467,10 +468,29 @@ class CallResolver {
   private readonly implementers = new Map<string, string[]>();
   /** The facts of each file, by its path. */
   private readonly files = new Map<string, FileFacts>();
+  /** The other declarations of a class written in several files (a Go type and the files that add methods to it), by class node. */
+  private readonly parts = new Map<string, string[]>();
 
   constructor(b: Building, exports: ExportTable) {
     this.b = b;
     this.exports = exports;
+    // The class nodes of each qualified name, per language: one class once a declaration of the name is a part (`QualifiedSymbol.part`).
+    const named = new Map<string, { ids: string[]; parted: boolean }>();
+
+    for (const file of b.facts) {
+      for (const symbol of file.symbols ?? []) {
+        const id = nodeId(file.path, symbol.name);
+
+        if (symbol.table !== "class" || b.nodes.get(id)?.kind !== "class") continue;
+        const key = `${languageOf(file.path) ?? ""}\0${symbol.qualified}`;
+        const group = named.get(key) ?? { ids: [], parted: false };
+        group.ids.push(id);
+        group.parted ||= symbol.part === true;
+        named.set(key, group);
+      }
+    }
+
+    for (const { ids, parted } of named.values()) if (parted && ids.length > 1) for (const id of ids) this.parts.set(id, ids.filter((other) => other !== id));
 
     for (const file of b.facts) {
       this.files.set(file.path, file);
@@ -580,10 +600,10 @@ class CallResolver {
     const owner = enclosingClass ? this.b.nodes.get(enclosingClass) : undefined;
 
     if (!owner) return { gap: "dynamic" };
-    const base = this.declarationOf(owner, "class")?.base;
+    const base = this.baseOf(owner, "class");
 
     if (!base) return { gap: "unknown-member" };
-    const parent = this.nameTarget(owner.module, base.replace(/<.*$/, ""));
+    const parent = this.nameTarget(base.module, base.name.replace(/<.*$/, ""));
 
     // A base of a package's (`extends Component`): its member is the package's.
     if (!("id" in parent)) return memberOfGlobal(parent, "unknown-member");
@@ -804,6 +824,9 @@ class CallResolver {
     const direct = nodeId(owner.module, member, owner.parent ? `${owner.parent}.${owner.name}` : owner.name);
 
     if (this.b.nodes.has(direct)) return direct;
+
+    // A class written in several files: the member may be declared in another part of it.
+    for (const part of this.parts.get(classId) ?? []) if (this.b.nodes.has(`${part}.${member}`)) return `${part}.${member}`;
     const fact = this.declarationOf(owner);
 
     // PHP: a trait the class uses (`use Logs;`) — its methods are the class's own, found before the base's.
@@ -815,10 +838,10 @@ class CallResolver {
     }
 
     // The base class: the extractor records it by name on the class declaration.
-    const base = fact?.base;
+    const base = this.baseOf(owner);
 
     if (!base) return null;
-    const baseTarget = this.nameTarget(owner.module, base);
+    const baseTarget = this.nameTarget(base.module, base.name);
 
     return "id" in baseTarget ? this.memberOf(baseTarget.id, member, depth + 1) : null;
   }
@@ -828,12 +851,27 @@ class CallResolver {
     const owner = this.b.nodes.get(classId);
 
     if (!owner || depth > MAX_HOPS) return false;
-    const base = this.declarationOf(owner, "class")?.base;
+    const base = this.baseOf(owner, "class");
 
     if (!base) return false;
-    const target = this.nameTarget(owner.module, base.replace(/<.*$/, ""));
+    const target = this.nameTarget(base.module, base.name.replace(/<.*$/, ""));
 
     return "id" in target ? this.externalAncestor(target.id, depth + 1) : target.gap === "external";
+  }
+
+  /**
+   * The base a class extends as written, with the module that writes the name (it is resolved there): the class's own
+   * declaration's, else that of another part of it (a Go type declares its embedded base once, in one file).
+   */
+  private baseOf(owner: Declaration, kind?: DeclFact["kind"]): { module: string; name: string } | null {
+    for (const id of [owner.id, ...(this.parts.get(owner.id) ?? [])]) {
+      const node = this.b.nodes.get(id);
+      const base = node ? this.declarationOf(node, kind)?.base : undefined;
+
+      if (node && base) return { module: node.module, name: base };
+    }
+
+    return null;
   }
 
   /** The top-level declaration fact of a node, by its module and name (of a kind, when given). */

@@ -27,8 +27,13 @@ export interface LanguageInfo {
 
 const JS_IMPLICIT = new Set(["then", "next", "return", "throw", "toString", "valueOf", "toJSON"]);
 
+/** Go: the methods `fmt`, `errors` and the encoders call through an interface the code never names. */
+const GO_IMPLICIT = new Set(["String", "Error", "GoString", "Format", "Unwrap", "MarshalJSON", "UnmarshalJSON", "MarshalText", "UnmarshalText", "MarshalBinary", "UnmarshalBinary"]);
+
 /** The table of supported languages, keyed by the name used in `archdiff.json`. */
 export const LANGUAGES = {
+  // Go: a composite literal makes a value and runs no member; a file is no directory's module (the package is the directory).
+  go: { extensions: [".go"], module: "file", index: new Array<string>(), constructor: null, implicit: (name) => GO_IMPLICIT.has(name), caselessNames: false, interfaceTypes: false },
   javascript: { extensions: [".js", ".jsx", ".mjs", ".cjs"], module: "file", index: ["index"], constructor: "constructor", implicit: (name) => JS_IMPLICIT.has(name), caselessNames: false, interfaceTypes: false },
   // Dunder methods other than `__init__` run through syntax and built-ins: `with`, `for`, `str()`, operators, `x()`.
   python: { extensions: [".py"], module: "file", index: ["__init__"], constructor: "__init__", implicit: (name) => /^__.+__$/.test(name) && name !== "__init__", caselessNames: false, interfaceTypes: false },

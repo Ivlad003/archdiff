@@ -508,10 +508,10 @@ export function eventsView(analysis: Analysis): PictureContent {
 
 /**
  * A test file, by the conventions of each language: a `tests/` or `__tests__/` directory, `x.test.ts`,
- * `x.spec.js` or `x_test.js`, `test_x.py`, Django's `tests.py`, `conftest.py`, `x_test.rs`, `XTest.php`. Not a
+ * `x.spec.js` or `x_test.js`, `test_x.py`, Django's `tests.py`, `conftest.py`, `x_test.rs`, `XTest.php`, `x_test.go`. Not a
  * module whose name only contains the word (`ab-test.ts`, an A/B test).
  */
-const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$|_test\.(py|rs|php)$|(^|\/)tests?(_[^/]*)?\.py$|(^|\/)conftest\.py$|Test\.php$/;
+const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$|_test\.(py|rs|php|go)$|(^|\/)tests?(_[^/]*)?\.py$|(^|\/)conftest\.py$|Test\.php$/;
 
 /** Which modules the tests import: every non-test module in its layer's lane, with the number of test files importing it; one no test imports is marked. */
 export function testsView(graph: Graph): PictureContent {
@@ -725,6 +725,41 @@ function classBoxes(analysis: Analysis, module: string): ClassBox[] {
 }
 
 /**
+ * A class written in several files — a Go type and the files that add methods to it (`QualifiedSymbol.part`) — is
+ * one box: the declaration's, with the methods of every part among `boxes`, whose own boxes are taken out. The part
+ * → the box it went into; a part whose declaration is not among the boxes stays a box of its own.
+ */
+function foldParts(analysis: Analysis, boxes: Map<string, ClassBox>): Map<string, string> {
+  const declared = new Map<string, string>();
+  const parts: { id: string; key: string }[] = [];
+
+  for (const file of analysis.facts.values()) {
+    for (const symbol of file.symbols ?? []) {
+      if (symbol.table !== "class") continue;
+      // A qualified name is one language's: the file's extension keeps two languages' apart.
+      const key = `${file.path.slice(file.path.lastIndexOf("."))}\0${symbol.qualified}`;
+
+      if (symbol.part) parts.push({ id: `${file.path}#${symbol.name}`, key });
+      else if (!declared.has(key)) declared.set(key, `${file.path}#${symbol.name}`);
+    }
+  }
+
+  const folded = new Map<string, string>();
+
+  for (const { id, key } of parts) {
+    const part = boxes.get(id);
+    const whole = boxes.get(declared.get(key) ?? "");
+
+    if (!part || !whole || whole.id === id) continue;
+    whole.methods.push(...part.methods);
+    boxes.delete(id);
+    folded.set(id, whole.id);
+  }
+
+  return folded;
+}
+
+/**
  * The class diagram: every class, interface and object type of the scope
  * (the whole repository, a module, or a directory) as a box with its
  * fields and methods, and the lines between them: `extends` and
@@ -750,6 +785,7 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
   const boxes = new Map<string, ClassBox>();
 
   for (const module of modules) for (const box of classBoxes(analysis, module)) boxes.set(box.id, box);
+  const folded = foldParts(analysis, boxes);
 
   if (boxes.size === 0) return unplaced(scope === null ? "Classes" : `Classes of ${scope}`, [], [], [], { reason: "no class, interface or object type here" });
   // A name written on `extends`/`implements` → the box it means: the same module first, then the modules this one imports.
@@ -843,7 +879,8 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
 
     if (hash === -1) return null;
     const dot = id.indexOf(".", hash);
-    const box = dot === -1 ? id : id.slice(0, dot);
+    const written = dot === -1 ? id : id.slice(0, dot);
+    const box = folded.get(written) ?? written;
 
     return kept.has(box) ? box : null;
   };

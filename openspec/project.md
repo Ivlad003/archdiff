@@ -1,6 +1,6 @@
 # archdiff
 
-Live architecture diagrams of a TypeScript, JavaScript, Python, Rust or PHP repository, computed from the code without a model: the layers and the imports between them, every module and function with its calls, the map of what the analysis cannot see, the architectural diff of a change for reviewing pull requests, and a contract (`ARCHITECTURE.md`) the code is checked against. One npm package, `@ivlad003/archdiff`, with a CLI and a local web page.
+Live architecture diagrams of a TypeScript, JavaScript, Python, Rust, PHP or Go repository, computed from the code without a model: the layers and the imports between them, every module and function with its calls, the map of what the analysis cannot see, the architectural diff of a change for reviewing pull requests, and a contract (`ARCHITECTURE.md`) the code is checked against. One npm package, `@ivlad003/archdiff`, with a CLI and a local web page.
 
 ## Tech stack
 

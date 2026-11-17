@@ -9,12 +9,14 @@
 // tree-sitter queries; Python with a walk, its comparison node having no
 // fields to query by.
 //
-// Shared by the TypeScript and Python frontends (source → FileFacts):
+// Shared by the TypeScript, Python and Go frontends (source → FileFacts):
 // `guardsOf` annotates every call fact, `collectStates` and
-// `collectMachines` fill `FileFacts.states` and `FileFacts.machines`.
-// Entry points: `guardsOf`, `collectTsStates`, `collectPyStates`,
-// `collectTsMachines`, `collectPyMachines`, `enclosingDeclaration`,
-// `TS_CONTROL`, `PY_CONTROL`.
+// `collectMachines` fill `FileFacts.states` and `FileFacts.machines`
+// (TypeScript and Python only). Entry points: `guardsOf`, `countBranches`,
+// `headerOf`, `short`, `unwrapped`,
+// `collectTsStates`, `collectPyStates`, `collectTsMachines`,
+// `collectPyMachines`, `enclosingDeclaration`, `TS_CONTROL`, `PY_CONTROL`,
+// `GO_CONTROL`.
 
 import type { GuardFact, MachineFact, StateFact } from "./facts.ts";
 import { query, startCol, type Grammar, type Language, type Node } from "./treesitter.ts";
@@ -25,7 +27,11 @@ export interface ControlGrammar {
   /** The field of an `if` that holds the taken branch; the other named child is the `else`. */
   consequence: string;
   elses: ReadonlySet<string>;
+  /** The field of an `if` that holds the other branch itself — a block, or the next `if` of the chain — where no clause is written around it (Go). */
+  alternative?: string;
   loops: ReadonlySet<string>;
+  /** The statements that choose among cases: one branch each, whatever the number of cases. */
+  switches: ReadonlySet<string>;
   cases: ReadonlySet<string>;
   tries: ReadonlySet<string>;
   catches: ReadonlySet<string>;
@@ -42,6 +48,7 @@ export const TS_CONTROL: ControlGrammar = {
   consequence: "consequence",
   elses: new Set(["else_clause"]),
   loops: new Set(["for_statement", "for_in_statement", "while_statement", "do_statement"]),
+  switches: new Set(["switch_statement"]),
   cases: new Set(["switch_case", "switch_default"]),
   tries: new Set(["try_statement"]),
   catches: new Set(["catch_clause", "finally_clause"]),
@@ -56,6 +63,7 @@ export const PY_CONTROL: ControlGrammar = {
   consequence: "consequence",
   elses: new Set(["else_clause"]),
   loops: new Set(["for_statement", "while_statement"]),
+  switches: new Set(["match_statement"]),
   cases: new Set(["case_clause"]),
   tries: new Set(["try_statement"]),
   catches: new Set(["except_clause", "finally_clause"]),
@@ -63,6 +71,23 @@ export const PY_CONTROL: ControlGrammar = {
   functions: new Set(["function_definition", "lambda"]),
   classes: new Set(["class_definition"]),
   equality: pyEquality,
+};
+
+/** Go: `else` is followed by the block or the next `if` itself; a `switch`, a type switch and a `select` choose among cases; there is no `try` and no ternary. */
+export const GO_CONTROL: ControlGrammar = {
+  ifs: new Set(["if_statement"]),
+  consequence: "consequence",
+  elses: new Set(),
+  alternative: "alternative",
+  loops: new Set(["for_statement"]),
+  switches: new Set(["expression_switch_statement", "type_switch_statement", "select_statement"]),
+  cases: new Set(["expression_case", "type_case", "communication_case", "default_case"]),
+  tries: new Set(),
+  catches: new Set(),
+  ternaries: new Set(),
+  functions: new Set(["function_declaration", "method_declaration", "func_literal"]),
+  classes: new Set(),
+  equality: tsEquality,
 };
 
 /** `a === b` or `a == b`: a binary expression with an equality operator. */
@@ -95,12 +120,28 @@ export function short(text: string): string {
 export function headerOf(node: Node): string {
   const condition = node.childForFieldName("condition") ?? node.childForFieldName("value");
 
-  if (condition) return short(condition.text.replace(/^\(|\)$/g, ""));
+  if (condition) return short(unwrapped(condition.text));
   // A loop header without a condition field (`for (…)`, `for x in y:`): the text up to its body.
   const body = node.childForFieldName("body") ?? node.childForFieldName("consequence");
   const head = body ? node.text.slice(0, body.startIndex - node.startIndex) : node.text;
 
-  return short(head.replace(/^(for|while|do|if|elif|case|try|except|finally)\b/, "").replace(/[:{]\s*$/, "").replace(/^\s*\(|\)\s*$/g, ""));
+  return short(unwrapped(head.replace(/^(foreach|for|while|do|if|elif|case|try|except|finally)\b/, "").replace(/[:{]\s*$/, "")));
+}
+
+/** A text without the parentheses written around the whole of it: `(x > 1)` is `x > 1`; `check(x)` and `(a) && (b)` are left as they are. */
+export function unwrapped(text: string): string {
+  const trimmed = text.trim();
+
+  if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) return trimmed;
+  let depth = 0;
+
+  // The first parenthesis must close at the end, not before it.
+  for (let at = 0; at < trimmed.length - 1; at++) {
+    if (trimmed[at] === "(") depth++;
+    else if (trimmed[at] === ")" && --depth === 0) return trimmed;
+  }
+
+  return trimmed.slice(1, -1);
 }
 
 /** How many branching statements a declaration holds: its ifs, cases (a switch or match as one), loops and tries, nested functions included. */
@@ -112,7 +153,7 @@ export function countBranches(node: Node, grammar: ControlGrammar): number {
     const at = stack.pop()!;
 
     // An `elif` is a branch of its own; a switch counts once (its cases are its branches), as does a try (its catches).
-    if (grammar.ifs.has(at.type) || grammar.loops.has(at.type) || grammar.tries.has(at.type) || at.type === "switch_statement" || at.type === "match_statement") count++;
+    if (grammar.ifs.has(at.type) || grammar.loops.has(at.type) || grammar.tries.has(at.type) || grammar.switches.has(at.type)) count++;
 
     for (const child of at.namedChildren) stack.push(child);
   }
@@ -138,12 +179,15 @@ export function guardsOf(node: Node, stop: Node, grammar: ControlGrammar): Guard
 
       if (consequence && consequence.id === child.id) chain.push({ kind: "if", text: headerOf(at), id: at.startIndex });
       else if (grammar.elses.has(child.type)) chain.push({ kind: "else", text: `not ${headerOf(at)}`, id: child.startIndex });
+      // No clause around the other branch: the `else` before it names the guard (the next `if` of a chain starts where its own guard does).
+      else if (grammar.alternative !== undefined && at.childForFieldName(grammar.alternative)?.id === child.id) chain.push({ kind: "else", text: `not ${headerOf(at)}`, id: child.startIndex - 1 });
     } else if (grammar.loops.has(at.type)) {
       const body = at.childForFieldName("body");
 
       if (!body || body.id === child.id || body.startIndex <= node.startIndex) chain.push({ kind: "loop", text: headerOf(at), id: at.startIndex });
     } else if (grammar.cases.has(at.type)) {
-      const value = at.childForFieldName("value") ?? at.namedChildren.find((candidate) => candidate.type === "case_pattern");
+      // What the case names: a value, Python's pattern, the type of a Go type switch, the channel operation of a `select`.
+      const value = at.childForFieldName("value") ?? at.namedChildren.find((candidate) => candidate.type === "case_pattern") ?? at.childForFieldName("type") ?? at.childForFieldName("communication");
 
       if (!value || value.id !== child.id) chain.push({ kind: "case", text: value ? short(value.text) : "default", id: at.startIndex });
     } else if (grammar.tries.has(at.type)) {

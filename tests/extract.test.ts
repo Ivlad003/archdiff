@@ -246,3 +246,154 @@ export async function total(clients: AppClients) {
   assert.deepEqual(addItem!.returnsFrom, { callee: "clients.shopperBasketsV2.addItemToBasket", form: { kind: "value" }, path: ["data"], callLine: 2 });
   assert.deepEqual(total!.returnsFrom, { callee: "addItem", form: { kind: "name", name: "addItem" }, path: ["orderTotal"], callLine: 8 });
 });
+
+test("Go: the packages imported and every declaration used of them, structs with fields and methods, an interface's shape, calls by receiver, type and result, a method of a type of another file", async () => {
+  const facts = await extractAny(
+    "internal/orders/orders.go",
+    `// Package orders places orders.
+package orders
+
+import (
+	"net/http"
+
+	"example.com/shop/internal/store"
+)
+
+// Service places orders.
+type Service struct {
+	repo *store.Repo
+	Limits
+}
+
+// Placer is what a service does.
+type Placer interface {
+	Place(id string) error
+}
+
+// NewService makes a service.
+func NewService(repo *store.Repo) *Service {
+	return &Service{repo: repo}
+}
+
+// Place checks and saves an order.
+func (s *Service) Place(id string) error {
+	if err := validate(id); err != nil {
+		return err
+	}
+
+	for _, line := range s.lines(id) {
+		s.repo.Save(line)
+	}
+
+	audit := store.NewAudit()
+	audit.Record(id)
+
+	return nil
+}
+
+func (s *Service) lines(id string) []string { return nil }
+
+func Routes(service *Service, mux *http.ServeMux) {
+	mux.HandleFunc("/orders", service.handle)
+}
+
+func (c *Cache) Drop() {}
+
+func main() {
+	Routes(NewService(store.NewRepo()), http.NewServeMux())
+}
+`,
+  );
+  assert.equal(facts.doc, "Package orders places orders.");
+  assert.equal(facts.parseError, null);
+  // The two packages (a module object each), then a declaration per name used: `store.Repo` is `Repo` of that package,
+  // `validate`, `Limits` and `Cache` names of the file's own package another file may declare (optional: nothing missing when none does).
+  assert.deepEqual(
+    facts.imports.map((fact) => [fact.source, fact.bindings.map((binding) => `${binding.kind}:${binding.local}`).join(), fact.optional ?? false]),
+    [
+      ["net/http", "module:http", false],
+      ["example.com/shop/internal/store", "module:store", false],
+      [".validate", "named:validate", true],
+      ["example.com/shop/internal/store.NewAudit", "named:store::NewAudit", false],
+      ["example.com/shop/internal/store.NewRepo", "named:store::NewRepo", false],
+      ["net/http.NewServeMux", "named:http::NewServeMux", false],
+      ["example.com/shop/internal/store.Repo", "named:store::Repo", false],
+      [".Limits", "named:Limits", true],
+      ["net/http.ServeMux", "named:http::ServeMux", false],
+      [".Cache", "named:Cache", true],
+    ],
+  );
+  assert.deepEqual(facts.decls.map((decl) => [decl.kind, decl.name, decl.exported]), [["class", "Service", true], ["type", "Placer", true], ["fn", "NewService", true], ["fn", "Routes", true], ["class", "Cache", true], ["fn", "main", false]]);
+  const service = facts.decls.find((decl) => decl.name === "Service")!;
+  assert.equal(service.doc, "Service places orders.");
+  // An embedded type is a field named as itself, and the base its methods come from.
+  assert.deepEqual(service.fields, [{ name: "repo", class: "*store.Repo" }, { name: "Limits", class: "Limits" }]);
+  assert.equal(service.base, "Limits");
+  assert.deepEqual(service.members.map((member) => [member.name, member.exported, member.signature]), [["Place", true, "(id string) → error"], ["lines", false, "(id string) → []string"]]);
+  assert.deepEqual(facts.decls.find((decl) => decl.name === "Placer")!.shape, [{ name: "Place", optional: false, type: "(id string) => error" }]);
+  const place = service.members.find((member) => member.name === "Place")!;
+  assert.equal(place.branches, 2);
+  // By the receiver, by the type its field declares, by what the call that made the local returns; the guard as written.
+  assert.deepEqual(place.calls.map((call) => [call.callee, call.form.kind, (call.guards ?? []).map((guard) => `${guard.kind}:${guard.text}`).join(" > ")]), [
+    ["validate", "name", ""],
+    ["this.lines", "own", ""],
+    ["s.repo.Save", "typed", "loop:_, line := range s.lines(id)"],
+    ["store.NewAudit", "name", ""],
+    ["audit.Record", "result", ""],
+  ]);
+  assert.deepEqual(place.calls[2]!.form, { kind: "typed", type: "store::Repo", member: "Save" });
+  assert.deepEqual(place.calls[4]!.form, { kind: "result", of: { call: { kind: "name", name: "store::NewAudit" } }, member: "Record" });
+  assert.deepEqual(facts.decls.find((decl) => decl.name === "NewService")!.result, { class: "Service" });
+  // A handler handed to the router: the method of the parameter's type.
+  const routes = facts.decls.find((decl) => decl.name === "Routes")!;
+  assert.deepEqual(routes.calls.map((call) => [call.callee, call.form, (call.passes ?? []).map((pass) => [pass.arg, pass.callee, pass.form])]), [["mux.HandleFunc", { kind: "typed", type: "http::ServeMux", member: "HandleFunc" }, [[1, "service.handle", { kind: "typed", type: "Service", member: "handle" }]]]]);
+  // `Cache` is declared in another file of the package: this one holds a part of it, the method.
+  assert.deepEqual(facts.decls.find((decl) => decl.name === "Cache")!.members.map((member) => member.name), ["Drop"]);
+  assert.deepEqual(facts.symbols, [
+    { name: "Service", qualified: "internal/orders.Service", table: "class" },
+    { name: "Placer", qualified: "internal/orders.Placer", table: "class" },
+    { name: "NewService", qualified: "internal/orders.NewService", table: "function" },
+    { name: "Routes", qualified: "internal/orders.Routes", table: "function" },
+    { name: "Cache", qualified: "internal/orders.Cache", table: "class", part: true },
+    { name: "main", qualified: "internal/orders.main", table: "function" },
+  ]);
+  // Every top-level name is visible to the other files of the package, whatever its case.
+  assert.deepEqual([...facts.exports], ["Service", "Placer", "NewService", "Routes", "Cache", "main"]);
+});
+
+test("Go: a blank and a dot import, `init` and a package variable's initializer as the file's own code, the class of a variable, a conversion as no call, a file checked out with CRLF", async () => {
+  const source = `package store
+
+import (
+	_ "github.com/lib/pq"
+	. "example.com/shop/internal/util"
+	"database/sql"
+)
+
+var Default = NewRepo()
+var fallback Repo
+var ids = []int64{int64(len(name))}
+
+func init() {
+	sql.Register("memory", driver{})
+}
+
+func touch() {
+	Default.Save()
+	fallback.Save()
+	handlers[0]()
+}
+`;
+  const facts = await extractAny("store/store.go", source);
+  assert.deepEqual(facts.imports.slice(0, 3).map((fact) => [fact.source, fact.bindings.map((binding) => binding.local), fact.glob ?? false]), [["_ github.com/lib/pq", [], false], ["example.com/shop/internal/util", [], true], ["database/sql", ["sql"], false]]);
+  assert.ok(facts.unsupported.some((fact) => fact.reason.startsWith("dot import of `example.com/shop/internal/util`")));
+  // `init` is no declaration: the package's loading runs it, as it runs the initializers. `int64(…)` converts; `len` is the language's.
+  assert.deepEqual(facts.decls.map((decl) => decl.name), ["touch"]);
+  assert.deepEqual(facts.moduleCalls.map((call) => call.callee), ["NewRepo", "len", "sql.Register"]);
+  assert.deepEqual(facts.instances, [{ name: "Default", of: { call: { kind: "name", name: "NewRepo" } } }, { name: "fallback", class: "Repo" }]);
+  // A member called through a package variable is looked up on the class of its value; an element of a slice is a value.
+  assert.deepEqual(facts.decls[0]!.calls.map((call) => [call.callee, call.form]), [["Default.Save", { kind: "member", head: "Default", member: "Save" }], ["fallback.Save", { kind: "member", head: "fallback", member: "Save" }], ["handlers[0]", { kind: "value" }]]);
+  const crlf = await extractAny("store/store.go", source.replace(/\n/g, "\r\n"));
+  assert.deepEqual(crlf.decls.map((decl) => [decl.name, decl.line, decl.fingerprint]), facts.decls.map((decl) => [decl.name, decl.line, decl.fingerprint]));
+  assert.deepEqual(crlf.imports.map((fact) => fact.source), facts.imports.map((fact) => fact.source));
+});

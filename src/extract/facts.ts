@@ -85,6 +85,12 @@ export interface QualifiedSymbol {
   qualified: string;
   /** PHP keeps classes (interfaces, traits and enums too), functions and constants in tables of their own. */
   table: "class" | "function" | "const";
+  /**
+   * The file holds a part of the class, which is written in several files: the methods a Go file declares on a
+   * type of another file of its package. The graph looks a member up in every declaration of the qualified name
+   * once one of them is a part, and a resolver names the file of the declaration that is none.
+   */
+  part?: true;
 }
 
 /** One import, require or re-export statement, with the names it binds. */
@@ -531,7 +537,8 @@ export interface MachineFact {
 /**
  * A function value in the arguments of a call: argument index, property path
  * ("" for the argument itself). `callee` names it as a call would (`this.m`,
- * `Cls.m`, `save`) and `form` is how it was read (`passable` forms only);
+ * `Cls.m`, `save`) and `form` is how it was read (`passable` forms; Go, a
+ * method of a call's result too);
  * `text` is the argument as written (`[$this, 'm']`), at the position. One
  * passed as the argument itself is a `callable-arg` edge of the enclosing fn
  * when it resolves.

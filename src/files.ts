@@ -1,5 +1,5 @@
 // Which files of a repository archdiff reads: TypeScript, JavaScript,
-// Python, Rust and PHP sources, as git lists them when the root is a repository (so .gitignore
+// Python, Rust, PHP and Go sources, as git lists them when the root is a repository (so .gitignore
 // holds, and it is one process call), else a walk that skips the usual
 // generated directories. Paths are POSIX, relative to the root, sorted.
 //

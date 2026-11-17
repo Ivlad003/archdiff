@@ -13,11 +13,11 @@
 // the `logic:<path>#<fn>` view (logic.ts), which draws it and lists the
 // paths from the start to every exit as the rules of the function.
 //
-// TypeScript, JavaScript and Python, over the control grammars of
+// TypeScript, JavaScript, Python and Go, over the control grammars of
 // control.ts. Entry points: `readLogic`, `LogicFact`, `LogicStep`,
 // `LogicEdge`.
 
-import { headerOf, PY_CONTROL, short, TS_CONTROL, type ControlGrammar } from "./control.ts";
+import { GO_CONTROL, headerOf, PY_CONTROL, short, TS_CONTROL, unwrapped, type ControlGrammar } from "./control.ts";
 import { collapse, grammarFor, withTree, type Grammar, type Node } from "./treesitter.ts";
 
 /** One box of the flowchart. */
@@ -66,17 +66,26 @@ const STATEMENT_CHARS = 56;
 
 /** The node types of one language's statements, beside the control grammar. */
 interface LogicGrammar {
-  lang: "ts" | "py";
+  lang: "ts" | "py" | "go";
   control: ControlGrammar;
   returns: ReadonlySet<string>;
   throws: ReadonlySet<string>;
+  /** A plain statement that ends the path as a `throw` does: Go's `panic(…)`, `log.Fatal(…)`, `os.Exit(…)`. */
+  throwCall?: RegExp;
   breaks: ReadonlySet<string>;
   continues: ReadonlySet<string>;
   blocks: ReadonlySet<string>;
+  /** Statements that run a block under a header written before it (Python's `with x as y:`): the header is an action, the block follows. */
+  wrappers: ReadonlySet<string>;
   /** Statements that are no step of the logic (a nested declaration, an import, an empty statement). */
   silent: ReadonlySet<string>;
   calls: ReadonlySet<string>;
+  /** How a switch (`control.switches`, but Python's `match`) is written: its cases, and whether one that does not leave runs into the next. */
+  cases: { of(node: Node): Node[]; fallThrough: boolean };
 }
+
+/** `case a:` and `default:` under the switch's body, each with its statements after the value: a case without `break` runs into the next. */
+const TS_CASES: LogicGrammar["cases"] = { of: (node) => (node.childForFieldName("body")?.namedChildren ?? []).filter((clause) => clause.type === "switch_case" || clause.type === "switch_default"), fallThrough: true };
 
 const TS_LOGIC: LogicGrammar = {
   lang: "ts",
@@ -86,8 +95,10 @@ const TS_LOGIC: LogicGrammar = {
   breaks: new Set(["break_statement"]),
   continues: new Set(["continue_statement"]),
   blocks: new Set(["statement_block"]),
+  wrappers: new Set(),
   silent: new Set(["function_declaration", "generator_function_declaration", "class_declaration", "abstract_class_declaration", "import_statement", "export_statement", "empty_statement", "comment", "type_alias_declaration", "interface_declaration", "enum_declaration", "debugger_statement"]),
   calls: new Set(["call_expression", "new_expression"]),
+  cases: TS_CASES,
 };
 
 const PY_LOGIC: LogicGrammar = {
@@ -98,9 +109,36 @@ const PY_LOGIC: LogicGrammar = {
   breaks: new Set(["break_statement"]),
   continues: new Set(["continue_statement"]),
   blocks: new Set(["block"]),
+  wrappers: new Set(["with_statement"]),
   silent: new Set(["function_definition", "class_definition", "decorated_definition", "import_statement", "import_from_statement", "pass_statement", "comment", "global_statement", "nonlocal_statement"]),
   calls: new Set(["call"]),
+  cases: TS_CASES,
 };
+
+/** Go: a block holds a statement list; the cases of a `switch`, a type switch and a `select` are its children, and none runs into the next. */
+const GO_LOGIC: LogicGrammar = {
+  lang: "go",
+  control: GO_CONTROL,
+  returns: new Set(["return_statement"]),
+  throws: new Set(),
+  throwCall: /^(panic|log\.(Fatal|Fatalf|Fatalln|Panic|Panicf)|os\.Exit)\(/,
+  breaks: new Set(["break_statement"]),
+  continues: new Set(["continue_statement"]),
+  blocks: new Set(["block", "statement_list"]),
+  wrappers: new Set(),
+  silent: new Set(["type_declaration", "empty_statement", "comment"]),
+  calls: new Set(["call_expression"]),
+  cases: { of: (node) => node.namedChildren.filter((clause) => GO_CONTROL.cases.has(clause.type)), fallThrough: false },
+};
+
+/** What a case of a switch names (null: the default), and the statements it runs: the clause's children but what it names. */
+function caseOf(clause: Node): { label: string | null; statements: Node[] } {
+  // A value (`case "a":`), the types of a Go type switch (`case int, string:`), the channel operation of a `select`.
+  const named = [clause.childForFieldName("value"), ...clause.childrenForFieldName("type"), clause.childForFieldName("communication")].filter((each) => each !== null);
+  const ids = new Set(named.map((each) => each.id));
+
+  return { label: named.length === 0 ? null : short(named.map((each) => each.text).join(", ")), statements: clause.namedChildren.filter((child) => !ids.has(child.id) && child.type !== "comment") };
+}
 
 /** A dangling arrow out of a built node, waiting for the next node to point at. */
 interface Exit {
@@ -227,7 +265,7 @@ class Builder {
     if (node.type === "labeled_statement") {
       const inner = node.childForFieldName("body") ?? node.namedChildren[node.namedChildren.length - 1];
       // The loop or switch right under the label takes it; a labelled block has no frame (its `break` ends nothing drawn).
-      this.label = node.childForFieldName("label")?.text ?? null;
+      this.label = node.childForFieldName("label")?.text ?? (node.namedChildren.length > 1 ? node.namedChildren[0]!.text : null);
       const exits = inner ? this.statement(inner, open) : open;
       this.label = null;
 
@@ -244,18 +282,20 @@ class Builder {
 
     if (control.ifs.has(node.type)) return this.branch(node, open);
 
-    if (node.type === "switch_statement") return this.switchOf(node, open, label);
-
     if (node.type === "match_statement") return this.matchOf(node, open);
+
+    if (control.switches.has(node.type)) return this.switchOf(node, open, label);
 
     if (control.loops.has(node.type)) return this.loop(node, open, label);
 
     if (control.tries.has(node.type)) return this.tryOf(node, open);
+    // A call that ends the program or unwinds the stack (Go's `panic(…)`) is an exit as a `throw` is.
+    const throws = grammar.throws.has(node.type) || (grammar.throwCall !== undefined && node.type === "expression_statement" && grammar.throwCall.test(node.text));
 
     // An exit; the `finally` blocks around it run after it, innermost first, on the way to the end of the body (a
     // `finally` that returns on its own ends the path there).
-    if (grammar.returns.has(node.type) || grammar.throws.has(node.type)) {
-      const made = this.add(grammar.returns.has(node.type) ? "return" : "throw", statementText(node), node, calleesIn(node, grammar));
+    if (grammar.returns.has(node.type) || throws) {
+      const made = this.add(throws ? "throw" : "return", statementText(node), node, calleesIn(node, grammar));
       this.link(open, made.id);
 
       if (this.finallies.length > 0) this.afterExits.push(...this.throughFinally([{ from: made.id }], 0));
@@ -265,7 +305,8 @@ class Builder {
 
     // `break` and `continue` (`break outer` the loop so labelled) leave through the `finally` blocks opened inside the loop.
     if (grammar.breaks.has(node.type) || grammar.continues.has(node.type)) {
-      const named = node.childForFieldName("label")?.text ?? null;
+      // The label a jump names: a field of the statement, or (Go) its one child.
+      const named = node.childForFieldName("label")?.text ?? node.namedChildren.find((child) => child.type === "label_name")?.text ?? null;
       const isBreak = grammar.breaks.has(node.type);
       const frame = [...this.frames].reverse().find((each) => (named !== null ? each.label === named : isBreak || each.kind === "loop"));
 
@@ -279,7 +320,7 @@ class Builder {
     }
 
     // Python's `with x as y:` runs its block under the context: the header is an action, the block follows.
-    if (node.type === "with_statement") {
+    if (grammar.wrappers.has(node.type)) {
       const body = node.childForFieldName("body");
       const header = collapse(node.text.slice(0, (body?.startIndex ?? node.endIndex) - node.startIndex)).replace(/:\s*$/, "");
       const made = this.add("action", short(header), node, calleesIn(node, grammar));
@@ -334,11 +375,19 @@ class Builder {
   /** An `if` (or an `elif`): yes into its branch, no into the alternatives, both open afterwards. */
   private branch(node: Node, open: Exit[]): Exit[] {
     const { control } = this.grammar;
+    // Go's `if err := f(); err != nil`: the statement before the condition runs first.
+    const initializer = node.childForFieldName("initializer");
+
+    if (initializer) open = this.action(initializer, open);
     const decision = this.add("decision", headerOf(node), node, calleesIn(node.childForFieldName("condition") ?? node, this.grammar));
     this.link(open, decision.id);
     const consequence = node.childForFieldName(control.consequence);
     const exits = this.statements(this.body(consequence), [{ from: decision.id, label: "yes" }]);
     let pending: Exit[] = [{ from: decision.id, label: "no" }];
+    // Go: `else` is followed by the other branch itself, a block or the next `if` of the chain.
+    const bare = control.alternative === undefined ? null : node.childForFieldName(control.alternative);
+
+    if (control.alternative !== undefined) return bare ? [...exits, ...this.statement(bare, pending)] : [...exits, ...pending];
 
     // TypeScript: one `else_clause` holding a block or an `if`; Python: `elif_clause`s then an `else_clause`.
     for (const alternative of node.namedChildren) {
@@ -360,29 +409,36 @@ class Builder {
     return [...exits, ...pending];
   }
 
-  /** A `switch`: the value is the decision, every case a labelled arrow; a case without `break` falls into the next. */
+  /**
+   * A `switch`: the value is the decision, every case a labelled arrow; a case without `break` falls into the next
+   * where the language lets it (Go's cases, a type switch's and a `select`'s never do).
+   */
   private switchOf(node: Node, open: Exit[], label: string | null): Exit[] {
+    const { cases } = this.grammar;
     const value = node.childForFieldName("value");
-    const decision = this.add("decision", `switch ${short(value?.text.replace(/^\(|\)$/g, "") ?? "")}`, node, calleesIn(value ?? node, this.grammar));
+    // Go's `select` chooses among channel operations and `switch { … }` among conditions: no value to name.
+    const head = node.type === "select_statement" ? "select" : `switch ${short(unwrapped(value?.text ?? ""))}`.trim();
+    const decision = this.add("decision", head, node, value ? calleesIn(value, this.grammar) : cases.fallThrough ? calleesIn(node, this.grammar) : []);
     this.link(open, decision.id);
     const frame: Frame = { kind: "switch", head: null, breaks: [], label, finallies: this.finallies.length };
     this.frames.push(frame);
     let fall: Exit[] = [];
+    const done: Exit[] = [];
     let hasDefault = false;
 
-    for (const clause of node.childForFieldName("body")?.namedChildren ?? []) {
-      if (clause.type !== "switch_case" && clause.type !== "switch_default") continue;
-      const caseValue = clause.childForFieldName("value");
-      const label = clause.type === "switch_default" ? "default" : short(caseValue?.text ?? "");
-      hasDefault = hasDefault || clause.type === "switch_default";
-      const statements = clause.namedChildren.filter((child) => child.id !== caseValue?.id);
-      const entry: Exit[] = [...fall, { from: decision.id, label }];
-      fall = statements.length === 0 ? entry : this.statements(statements, entry);
+    for (const clause of cases.of(node)) {
+      const { label, statements } = caseOf(clause);
+      hasDefault = hasDefault || label === null;
+      const entry: Exit[] = [...fall, { from: decision.id, label: label ?? "default" }];
+      const exits = statements.length === 0 ? entry : this.statements(statements, entry);
+
+      if (cases.fallThrough) fall = exits;
+      else done.push(...exits);
     }
 
     this.frames.pop();
 
-    return [...frame.breaks, ...fall, ...(hasDefault ? [] : [{ from: decision.id, label: "no match" }])];
+    return [...frame.breaks, ...fall, ...done, ...(hasDefault ? [] : [{ from: decision.id, label: "no match" }])];
   }
 
   /** Python's `match`: one arrow per case pattern (with its guard), no fall-through. */
@@ -407,11 +463,14 @@ class Builder {
 
   /** A loop: `each` (or `while`) into the body, whose end comes back; `done` carries on, as does every `break`. */
   private loop(node: Node, open: Exit[], label: string | null): Exit[] {
-    const head = this.add("loop", headerOf(node), node, calleesIn(node.childForFieldName("right") ?? node.childForFieldName("condition") ?? node.childForFieldName("value") ?? node, this.grammar));
+    // Go writes its loop's clause (`i := 0; i < n; i++`, `_, x := range xs`, a bare condition) as a child without a field; `for { … }` has none.
+    const clause = this.grammar.lang === "go" ? (node.namedChildren.find((child) => child.id !== node.childForFieldName("body")?.id) ?? null) : undefined;
+    const head = this.add("loop", headerOf(node), node, clause === null ? [] : calleesIn(clause ?? node.childForFieldName("right") ?? node.childForFieldName("condition") ?? node.childForFieldName("value") ?? node, this.grammar));
     this.link(open, head.id);
     const frame: Frame = { kind: "loop", head: head.id, breaks: [], label, finallies: this.finallies.length };
     this.frames.push(frame);
-    const inside = node.type === "while_statement" || node.type === "do_statement" ? "while" : "each";
+    // A loop over the elements of something, or one that runs while a condition holds (Go's `for cond`, `for { … }`).
+    const inside = node.type === "while_statement" || node.type === "do_statement" || (clause !== undefined && clause?.type !== "range_clause" && clause?.type !== "for_clause") ? "while" : "each";
     const back = this.statements(this.body(node.childForFieldName("body")), [{ from: head.id, label: inside, enters: true }]);
     this.link(back, head.id, true);
     this.frames.pop();
@@ -496,7 +555,7 @@ export async function readLogic(path: string, source: string, name: string, line
     return null;
   }
 
-  const grammar = g === "python" ? PY_LOGIC : g === "typescript" || g === "tsx" || g === "javascript" ? TS_LOGIC : null;
+  const grammar = g === "python" ? PY_LOGIC : g === "typescript" || g === "tsx" || g === "javascript" ? TS_LOGIC : g === "go" ? GO_LOGIC : null;
 
   if (!grammar) return null;
 

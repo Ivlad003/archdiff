@@ -1,11 +1,12 @@
 // One extractor for every language archdiff reads: the file's extension
-// picks the frontend (TypeScript/JavaScript, Python, Rust, PHP), all of
+// picks the frontend (TypeScript/JavaScript, Python, Rust, PHP, Go), all of
 // which produce the same `FileFacts`.
 //
 // Entry point: `extractAny` (pool.ts and its workers).
 
 import type { FileFacts } from "./facts.ts";
 import { languageOf } from "../languages.ts";
+import { extractGo } from "./go.ts";
 import { extractPhp } from "./php.ts";
 import { extractPython } from "./python.ts";
 import { extractRust } from "./rust.ts";
@@ -20,6 +21,8 @@ export function extractAny(path: string, src: string): Promise<FileFacts> {
       return extractRust(path, src);
     case "php":
       return extractPhp(path, src);
+    case "go":
+      return extractGo(path, src);
     default:
       return extractTs(path, src);
   }
