@@ -4,14 +4,16 @@
 // `p` the project map, `0` fits, Backspace goes back, the arrows walk
 // from the picked shape and Enter goes into it, `s` splits, `m` mix, `d`
 // dim, `l` flips the lanes, `[` and `]` step the head through the
-// branches, `b` shows the branches, `e` edits, `f` gives the canvas the
-// whole page, Escape clears (or first closes what is open over the page:
+// branches, `b` shows the branches, `c` the board of the uncommitted
+// changes, `.` and `,` step through what is walked (walk.ts), `e` edits,
+// `f` gives the canvas the whole page, Escape clears (or first closes what is open over the page:
 // a menu, the project map, a drawer). A picture read from git (a review,
 // a comparison, a commit, the branches) is not drawn on: the keys of the
 // tools are off there.
 //
 // Entry point: the module itself, imported by app.ts.
 
+import { openBoard } from "./board.ts";
 import { canvasMode, saveDrawing, setMode } from "./canvas.ts";
 import { closeOpenDrawers, closePopovers, drawerOpen, popoverOpen, showPanel, toggleFullCanvas } from "./layout.ts";
 import { currentLink, readOnlyView, setLink, presentationOf } from "./link.ts";
@@ -23,6 +25,7 @@ import { projectMapOpen, toggleProjectMap } from "./project-map.ts";
 import { flipLanes, focusFind, toggleSplit, toggleTool } from "./toolbar.ts";
 import { stepHead } from "./review.ts";
 import { focusViewSearch, toggleTree } from "./views-list.ts";
+import { stepWalk } from "./walk.ts";
 
 const ARROWS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"] as const;
 
@@ -63,6 +66,8 @@ function readingKey(event: KeyboardEvent): void {
   else if (event.key === "f") toggleFullCanvas();
   else if (event.key === "[" || event.key === "]") stepHead(event.key === "]" ? 1 : -1);
   else if (event.key === "b") setLink({ ...currentLink(), view: "branches", heads: [] });
+  else if (event.key === "c") openBoard();
+  else if (event.key === "." || event.key === ",") stepWalk(event.key === "." ? 1 : -1);
   else if (event.key === "e" && drawable) setMode("edit");
   else if (event.key === "Escape") select([]);
 }

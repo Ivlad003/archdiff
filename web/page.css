@@ -905,6 +905,32 @@ html.dark #legend .ln {
   padding: 0;
 }
 
+/* A diff on a page (a group of the uncommitted changes): read by its signs, in a taller box. */
+.prose pre.diff {
+  max-height: 420px;
+}
+
+.prose pre.diff .add {
+  color: #2e7d32;
+}
+
+.prose pre.diff .del {
+  color: #c62828;
+}
+
+.prose pre.diff .hunk,
+.prose pre.diff .file {
+  color: var(--muted);
+}
+
+html.dark .prose pre.diff .add {
+  color: #81c784;
+}
+
+html.dark .prose pre.diff .del {
+  color: #ef9a9a;
+}
+
 .prose hr {
   border: 0;
   border-top: 1px solid var(--border);
@@ -1181,6 +1207,31 @@ body.editing #empty {
 
 #commits[hidden] {
   display: none;
+}
+
+/* The walk of the uncommitted changes (board.ts): the steps under the title, as the commits of a review are. */
+#board {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+#board[hidden] {
+  display: none;
+}
+
+#board-steps {
+  max-width: 60%;
+  font: inherit;
+}
+
+#board-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #commit-list {

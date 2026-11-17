@@ -109,6 +109,12 @@
           <button id="compare" title="Compare the ticked heads against the base">compare</button>
           <span id="compare-note" class="muted"></span>
         </div>
+        <div id="board" hidden>
+          <button id="board-prev" class="icon" title="The previous step of the walk (,)">‹</button>
+          <select id="board-steps" title="The walk through the uncommitted changes: the whole board, then each group of changed modules in the order a reviewer reads them — the entry points first, then what they import and call"></select>
+          <button id="board-next" class="icon" title="The next step of the walk: the group's own picture, its diff on the Markdown tab (.)">›</button>
+          <span id="board-note" class="muted"></span>
+        </div>
         <div id="commits" hidden>
           <button id="commit-prev" class="icon" title="The previous commit of the branch">‹</button>
           <select id="commit-list" title="The commits from the base to the head, oldest first; pick one to review it against the previous"></select>

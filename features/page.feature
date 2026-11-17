@@ -107,6 +107,20 @@ Feature: The page
     When I press "f" in a window 1900 pixels wide
     Then the canvas is 1900 pixels wide, and "f" again docks both panels as they were
 
+  Scenario: The board of the uncommitted changes
+    Given a repository with a changed route, a changed library module and a new one, not committed
+    When I press "c"
+    Then the title reads "Uncommitted changes: 3 modules in 2 groups — 3 source files changed"
+    And the walk lists the whole board, then "routes · src/routes/", then "lib · src/lib/"
+    When I press "."
+    Then the canvas shows the route's group, and the Markdown tab its diff with the added lines in green
+    When I press "." twice
+    Then the library's group is shown and the line under the picture says "the last group of the walk"
+    When I save another file
+    Then a third group joins the walk
+    When I commit everything
+    Then the board says there is nothing to walk
+
   Scenario: The toolbar folds, the legend is of the picture, the menus close
     Given the page open on "modules"
     Then the legend reads "module", "A → B: A imports B" and "types only"

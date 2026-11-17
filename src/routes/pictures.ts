@@ -115,11 +115,11 @@ export async function getScene(ctx: RouteContext, { url, response }: RouteReques
   const picture = await ctx.picture(url.searchParams);
 
   if (!picture.ok) return failed(response, picture);
-  const { diagram, markdown, drawing, change } = picture.value;
+  const { diagram, markdown, drawing, change, board } = picture.value;
   // The code's picture at the saved places, then the saved drawing's own elements (pencil, notes) on top.
   const generated = (JSON.parse(toExcalidraw(diagram)) as { elements: SceneElement[] }).elements;
 
-  return json(response, { elements: drawing ? mergeScene(drawing.elements, generated) : generated, mocks: drawing?.mocks ?? [], diagram, markdown, drawn: drawing !== null, change: change ?? null });
+  return json(response, { elements: drawing ? mergeScene(drawing.elements, generated) : generated, mocks: drawing?.mocks ?? [], diagram, markdown, drawn: drawing !== null, change: change ?? null, board: board ?? null });
 }
 
 export async function getViews(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
@@ -171,9 +171,9 @@ export async function getDiagram(ctx: RouteContext, { url, response }: RouteRequ
   const picture = await ctx.picture(url.searchParams);
 
   if (!picture.ok) return failed(response, picture);
-  const { diagram, markdown, drawing, change } = picture.value;
+  const { diagram, markdown, drawing, change, board } = picture.value;
 
-  return json(response, { diagram, markdown, drawn: drawing !== null, change: change ?? null });
+  return json(response, { diagram, markdown, drawn: drawing !== null, change: change ?? null, board: board ?? null });
 }
 
 export async function getShape(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {

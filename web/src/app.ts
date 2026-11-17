@@ -17,12 +17,14 @@
 // the code (presentation.ts) — the toolbar (toolbar.ts), the minimap
 // (minimap.ts), the options (options-panel.ts), the views
 // (views-list.ts), the exports (export-menu.ts), the review (review.ts),
+// the walk of the uncommitted changes (board.ts),
 // the keys (shortcuts.ts), the tabs of the flow, the chat and the spec, and
 // the window of the user's settings (settings.ts).
 //
 // Entry point: the module itself, loaded by index.html.
 
 import { api, type Line, type Shape } from "./api.ts";
+import { fillBoardBar, showBoardBar } from "./board.ts";
 import { canvasHandle, canvasMode, leaveEdit, showScene } from "./canvas.ts";
 import { loadAgents, loadTasks } from "./chat.ts";
 import { element } from "./dom.ts";
@@ -134,10 +136,11 @@ async function load(): Promise<void> {
   const kind = parseView(state.view)?.kind;
   const deep = kind !== undefined && usesDepth(kind) ? depthWarning(state.depth) : null;
   setReason(deep ? `⚠ ${deep}` : "");
-  // A change (a review, a comparison, a commit) is read, not drawn on; the chat has nothing to build from it. Drawing
-  // needs the canvas: not a scene, a page or code in the centre.
+  // A change (a review, a comparison, a commit) is read, not drawn on; the chat has nothing to build from it — but the
+  // uncommitted changes, which are what an agent is doing now. Drawing needs the canvas: not a scene, a page or code
+  // in the centre.
   element<HTMLButtonElement>("edit").disabled = readOnlyView(state.view) || !presentationOf(state.as).canvas;
-  element("chat-tab").hidden = readOnlyView(state.view);
+  element("chat-tab").hidden = readOnlyView(state.view) && kind !== "changes";
 
   /** The scene is on the canvas: a failure after it (the flow, the page) leaves the picture be. */
   let shown = false;
@@ -145,6 +148,7 @@ async function load(): Promise<void> {
   try {
     renderCrumbs(state);
     showReviewBars(state);
+    showBoardBar(state);
     const result = await api.scene(state.view, state, refsOf(state));
 
     if (overtaken()) return;
@@ -174,6 +178,7 @@ async function load(): Promise<void> {
 
     if (reviewing(state.view)) void loadBranches(state);
     setPicturePage(result.markdown);
+    fillBoardBar(state, result.board);
     // The centre as the link says: the scene in 3D, the page or the code over the canvas, or the canvas alone.
     await applyPresentation(state, result.diagram);
 
@@ -199,6 +204,7 @@ async function load(): Promise<void> {
       drawn = state.view;
       shownHash = hash;
       showEmpty({ head: "This picture could not be drawn", why: message });
+      fillBoardBar(state, null);
       updateMinimap();
       void applyPresentation(state, null);
     }

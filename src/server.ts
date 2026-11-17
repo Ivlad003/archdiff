@@ -190,9 +190,13 @@ function changeChannel(invalidate: () => void): { listeners: Set<ServerResponse>
   };
 }
 
+/** Where git writes a line whenever HEAD moves, in a checkout whose `.git` is a directory. */
+const HEAD_LOG = ".git/logs/HEAD";
+
 /**
  * Watches the repository for a changed source file of any language archdiff reads (the cache, the drawings, git and
- * node_modules change for other reasons); the problem when it cannot, else null. A plain watch of the root goes
+ * node_modules change for other reasons), and for the checkout moving (a commit: the board of the uncommitted
+ * changes empties); the problem when it cannot, else null. A plain watch of the root goes
  * first, as a probe: Node's recursive watch on Linux gives neither events nor an error once the system's file
  * watchers are used up (ENOSPC), where a plain one throws.
  */
@@ -201,6 +205,9 @@ function watchSources(root: string, onChange: (path: string) => void): string | 
     watchFs(root).close();
     watchFs(root, { recursive: true }, (_event, name) => {
       const path = typeof name === "string" ? name.split("\\").join("/") : "";
+
+      // The checkout moved — a commit, a switch of branch, a reset: what the working tree changes against it is another change.
+      if (path === HEAD_LOG) return onChange("the last commit (HEAD)");
 
       if (path === "" || path.startsWith(".archdiff/") || path.startsWith(".git/") || path.includes("node_modules/") || !isSourceFile(path)) return;
       onChange(path);

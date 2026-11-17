@@ -25,6 +25,14 @@ Feature: Reviewing a change by its architecture
     Then the exit code is 2
     And stderr says "is not a git repository"
 
+  Scenario: The uncommitted changes as a board
+    Given a repository committed on main
+    And a working tree that adds a loader to the route and a module the orders call
+    When I run "archdiff diagram changes"
+    Then the walk lists "routes · src/routes/" before "lib · src/lib/"
+    When I run "archdiff diagram changes:lib:src/lib"
+    Then the picture marks the new call in green and the page ends with the diff of the group's files
+
   Scenario: Several heads against one base
     Given branches a and b off main
     When I run "archdiff compare --heads a,b,WORKTREE"

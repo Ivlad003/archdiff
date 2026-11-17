@@ -34,6 +34,7 @@ flowchart LR
     n_src_views_more_ts["src/views-more.ts<br>the question views: cycles, matrix, type, path, contract, events, tests, hotspots"]
     n_src_shape_ts["src/shape.ts<br>hubs as badges, hidden lanes, the mix, the fold, the weight"]
     n_src_diff_ts["src/diff.ts<br>the architectural diff of two graphs: the review's and the comparison's pictures, their Markdown"]
+    n_src_board_ts["src/board.ts<br>the board of the uncommitted changes: the changed modules in groups, in reading order, their pictures and pages"]
     n_src_intent_view_ts["src/intent-view.ts<br>ARCHITECTURE.md drawn against the code"]
     n_src_flow_ts["src/flow.ts<br>the data flow of a call tree with mocks, and which modules are storages"]
     n_src_pipeline_ts["src/pipeline.ts<br>the steps after a view as data: hide, mix, hubs, fold, weight, marks, overlays"]
@@ -124,6 +125,8 @@ flowchart LR
   n_src_picture_ts --> n_src_analyze_ts
   n_src_picture_ts --> n_src_extract_logic_ts
   n_src_review_ts --> n_src_diff_ts
+  n_src_picture_ts --> n_src_board_ts
+  n_src_board_ts --> n_src_diff_ts
   n_src_cli_ts --> n_src_run_ts
   n_src_run_ts --> n_src_flow_ts
   n_src_run_ts --> n_src_extract_bodies_ts

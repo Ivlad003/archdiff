@@ -246,6 +246,12 @@ export function renderMarkdown(target: HTMLElement, markdown: string, navigation
     details.append(pre);
   }
 
+  // A diff is read by its signs: the lines added and removed and the heads of the hunks, each in its colour, in a box tall enough to read.
+  for (const code of target.querySelectorAll("pre > code.language-diff")) {
+    code.parentElement!.classList.add("diff");
+    code.replaceChildren(...(code.textContent ?? "").split("\n").map((line) => Object.assign(document.createElement("span"), { className: line.startsWith("@@") ? "hunk" : /^(\+\+\+|---|index )/.test(line) ? "file" : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "same", textContent: `${line}\n` })));
+  }
+
   // A picture's page as a navigation: folding sections, names that open views, bullets that unfold a module's functions.
   if (navigation) {
     foldSections(target, "h2");

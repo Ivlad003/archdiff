@@ -4,8 +4,9 @@
 // view, the picture's options (options.ts) and the refs (a base, a head,
 // heads). What the view needs from git or a file is read here — the
 // commits of a timeline, the two analyses of a review, the heads of a
-// comparison, a function's body for its logic, the review's diff for
-// `changes` — then the view is drawn (viewOf), placed where the saved
+// comparison, the working tree against the last commit for the board of
+// the uncommitted changes, a function's body for its logic, the review's
+// diff for `changes` — then the view is drawn (viewOf), placed where the saved
 // drawing puts its shapes (layout), stamped with the revision and written
 // as Markdown. One picture per analysis and request: asking twice is a
 // lookup.
@@ -17,16 +18,19 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
+import { CACHE_DIRECTORY } from "./cache.ts";
 import { layout, type Diagram } from "./diagram.ts";
+import { boardMarkdown, boardOf, groupMarkdown, type Board } from "./board.ts";
 import { comparisonMarkdown, reviewMarkdown, type Compared, type GraphDiff } from "./diff.ts";
 import { readLogic, type LogicFact } from "./extract/logic.ts";
-import { branchGraph, commitInfo, defaultBase, mergeBase, revisionStamp, type CommitInfo } from "./git.ts";
+import { branchGraph, changedPaths, commitInfo, commitOf, defaultBase, EMPTY_TREE, mergeBase, revisionStamp, worktreeDiff, type CommitInfo } from "./git.ts";
+import { isSourceFile } from "./languages.ts";
 import { positionsOf, readDrawing, type DrawingFile } from "./drawings.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import type { PictureOptions } from "./options.ts";
 import { compareBranches, history, reviewOf } from "./review.ts";
 import { codeRevision, viewKey, type View } from "./view-keys.ts";
-import { viewOf, type EdgeReads } from "./views.ts";
+import { entryPoints, viewOf, type EdgeReads } from "./views.ts";
 
 /**
  * The revisions a picture is drawn against: the base (null: the
@@ -59,6 +63,8 @@ export interface Picture {
   /** The saved drawing of the view, when there is one: its shapes' places are the picture's. */
   drawing: DrawingFile | null;
   change?: Change;
+  /** The board of the uncommitted changes, with its picture and with a group's: the groups in reading order, which the page walks. */
+  board?: Board;
 }
 
 /** The pictures drawn per analysis, by request: a new analysis (a changed file) starts afresh. */
@@ -93,9 +99,28 @@ async function draw(analysis: Analysis, { view, options, refs }: PictureRequest,
   const revision = codeRevision(view, refs.head);
   const stamp = revision ? revisionStamp(analysis.root, revision) : revisionStamp(analysis.root);
   const diagram = stamp ? { ...placed, stamp } : placed;
-  const markdown = change?.kind === "review" ? reviewMarkdown(change.diff, diagram, change.contract, change.commit ?? null) : change?.kind === "compare" ? comparisonMarkdown(change.base, change.heads, diagram) : diagramMarkdown(diagram, analysis, options.mermaid);
+  const markdown = reads.board && change?.kind === "review" ? boardPage(view, reads.board, diagram, change.contract) : change?.kind === "review" ? reviewMarkdown(change.diff, diagram, change.contract, change.commit ?? null) : change?.kind === "compare" ? comparisonMarkdown(change.base, change.heads, diagram) : diagramMarkdown(diagram, analysis, options.mermaid);
+  const picture: Picture = change ? { diagram, markdown, drawing, change } : { diagram, markdown, drawing };
 
-  return change ? { diagram, markdown, drawing, change } : { diagram, markdown, drawing };
+  return reads.board ? { ...picture, board: reads.board.board } : picture;
+}
+
+/** What the working tree is compared against for its uncommitted changes: the last commit, or the empty tree before the first one. Outside git it throws git's words. */
+function lastCommit(root: string): string {
+  try {
+    return commitOf(root, "HEAD") === null ? EMPTY_TREE : "HEAD";
+  } catch (error) {
+    if (error instanceof Error && /has no commits yet/.test(error.message)) return EMPTY_TREE;
+
+    throw error;
+  }
+}
+
+/** The page of the board of the uncommitted changes, or of the one group its view names. */
+function boardPage(view: View, read: NonNullable<EdgeReads["board"]>, diagram: Diagram, contract: boolean): string {
+  if (view.subject === null) return boardMarkdown(read.board, diagram, read.diff, contract);
+
+  return groupMarkdown(read.board, read.board.groups.find((group) => group.id === view.subject) ?? null, view.subject, diagram, read.diff, read.text);
 }
 
 /**
@@ -131,6 +156,22 @@ async function readAtTheEdge(analysis: Analysis, view: View, options: PictureOpt
     const result = await reviewOf(analysis, commit.parent, commit.sha);
 
     return { reads: { review: { diff: result.diff, base: result.base.graph, head: result.head.graph }, commit }, change: { kind: "review", diff: result.diff, contract: result.contract, commit }, notes: [] };
+  }
+
+  // The working tree against the last commit (against nothing, before the first one): the board, and for one group's
+  // view the text of what changed in its files.
+  if (view.kind === "changes") {
+    const last = lastCommit(root);
+    const result = await reviewOf(analysis, last, null);
+    const entries = (of: Analysis): string[] => entryPoints(of).map((entry) => entry.node.module);
+    // The files changed that are no source; archdiff's own cache and drawings, where the repository tracks them, are no news.
+    const others = changedPaths(root, last).filter((file) => !isSourceFile(file.path) && !file.path.startsWith(`${CACHE_DIRECTORY}/`));
+    const stamp = last === "HEAD" ? revisionStamp(root) : null;
+    const board = { ...boardOf(result.diff, result.base.graph, result.head.graph, entries(result.head), entries(result.base), others), base: stamp ? `the last commit (${stamp.commit})` : "an empty repository" };
+    const group = board.groups.find((candidate) => candidate.id === view.subject);
+    const text = group ? worktreeDiff(root, last, group.modules.map((module) => module.id)) : new Map<string, string>();
+
+    return { reads: { board: { board, diff: result.diff, base: result.base.graph, head: result.head.graph, text } }, change: { kind: "review", diff: result.diff, contract: result.contract }, notes: [] };
   }
 
   // The branches against the base (develop, main or master unless named; the checkout's branch without one).

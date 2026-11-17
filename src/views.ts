@@ -34,6 +34,7 @@ import { runSteps } from "./pipeline.ts";
 import { branchesDiagram, timelineDiagram } from "./views-more.ts";
 import type { BranchGraph } from "./git.ts";
 import { compareDiagram, diffDiagram, type Compared, type GraphDiff, type HistoryRow } from "./diff.ts";
+import { boardDiagram, groupDiagram, type Board } from "./board.ts";
 import type { LogicFact } from "./extract/logic.ts";
 import { DEFAULT_PICTURE_OPTIONS, type PictureOptions } from "./options.ts";
 import { counted } from "./words.ts";
@@ -59,6 +60,8 @@ export interface EdgeReads {
   commit?: { sha: string; short: string; author: string; date: string; subject: string };
   /** The branches and their commits, for the branches' picture. */
   branches?: BranchGraph;
+  /** The board of the uncommitted changes: the groups in reading order, the diff and the two graphs they are drawn from, and the text of a group's diff by file. */
+  board?: { board: Board; diff: GraphDiff; base: Graph; head: Graph; text: ReadonlyMap<string, string> };
 }
 
 /** Modules whose public methods a framework calls: controllers, handlers, commands, jobs, listeners, middleware, routes. */
@@ -215,6 +218,7 @@ export function viewList(analysis: Analysis): ViewEntry[] {
   list.push({ key: "hotspots", title: "Hotspots: size and calls in", kind: "hotspots" });
 
   if (analysis.packages.length > 1) list.push({ key: "packages", title: `Packages: ${analysis.packages.length} package.json as a system`, kind: "packages" });
+  list.push({ key: "changes", title: "Changes: what the working tree changes against the last commit, group by group", kind: "changes" });
   list.push({ key: "timeline", title: "Timeline: the drift of the architecture, commit by commit", kind: "timeline" });
   list.push({ key: "branches", title: "Branches: where each branch left the base, commit by commit", kind: "branches" });
 
@@ -999,6 +1003,16 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
         return reads.review && reads.commit ? { ...diffDiagram(reads.review.diff, reads.review.base, reads.review.head), title: `Commit ${reads.commit.short}: ${reads.commit.subject}`, question: `what ${reads.commit.short} (${reads.commit.author}, ${reads.commit.date}) did to the architecture` } : unplaced(`Commit ${view.subject}`, [], [], [], { reason: "a commit is read from git" });
       case "compare":
         return reads.compare ? compareDiagram(reads.compare.base, reads.compare.heads, reads.compare.baseGraph, reads.compare.graphs, reads.compare.forks) : unplaced("Compare", [], [], [], { reason: "a comparison is read from git (archdiff compare --heads a,b)" });
+      case "changes": {
+        // The working tree against the last commit, which picture.ts reads from git: the whole board, or one group of it.
+        if (!reads.board) return unplaced("Uncommitted changes", [], [], [], { reason: "the uncommitted changes are read from git (archdiff diagram changes, or the page's board)" });
+        const { board, diff, base, head } = reads.board;
+
+        if (view.subject === null) return boardDiagram(board, diff, base, head);
+        const group = board.groups.find((candidate) => candidate.id === view.subject);
+
+        return group ? groupDiagram(board, group, diff, base, head) : unplaced(`Changes in ${view.subject}`, [], [], [], { reason: `nothing changes in ${view.subject} against ${board.base} (committed, or put back): the board lists the groups that do` });
+      }
       case "coverage":
         return coverageView(graph);
       case "intent":

@@ -363,6 +363,60 @@ export default function Checkout() {
     assert.ok(clean.stdout.includes("_no module, function, import or call changed_"));
   }));
 
+test("the board of the uncommitted changes: the working tree against the last commit, its groups in reading order, a group's own picture and diff", () =>
+  withTempDir("archdiff-board-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    // Outside git there is no last commit to compare with: git's own words, exit 2.
+    const outside = archdiff(["diagram", "changes", dir]);
+    assert.equal(outside.status, 2);
+    assert.ok(outside.stderr.includes("is not a git repository"), outside.stderr);
+    const git = gitIn(dir);
+    git("init", "-q", "-b", "main");
+    // Before the first commit everything is new: the board is of the whole repository, against nothing.
+    const unborn = archdiff(["diagram", "changes", dir]);
+    assert.equal(unborn.status, 0, unborn.stderr);
+    assert.ok(unborn.stdout.includes("# Uncommitted changes against an empty repository\n\n5 source files changed; modules +5 −0;"), unborn.stdout.slice(0, 300));
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    const clean = archdiff(["diagram", "changes", dir]);
+    assert.equal(clean.status, 0, clean.stderr);
+    assert.match(clean.stdout, /_the working tree is as the last commit \([0-9a-f]{7}\) has it: nothing to walk_/);
+    // The change: the route gets a loader that reads an order, the orders audit what they place, a note is written.
+    writeFileSync(join(dir, "src/routes/checkout.tsx"), 'import { OrderService, findOrder } from "@/lib/orders";\n\nexport async function action(request: { total: number }) {\n  const service = new OrderService("web");\n  return service.place(request.total);\n}\n\nexport async function loader(request: { id: string }) {\n  return findOrder(request.id);\n}\n\nexport default function Checkout() {\n  return null;\n}\n');
+    writeFileSync(join(dir, "src/lib/audit.ts"), 'import { log } from "./log.ts";\n\nexport function audit(what: string): void {\n  log(`audit ${what}`);\n}\n');
+    writeFileSync(join(dir, "src/lib/orders.ts"), 'import { readOrder, saveOrder } from "@/db/store";\nimport { audit } from "./audit.ts";\nimport { log } from "./log.ts";\n\nexport interface Order { id: string; total: number }\n\nexport function placeOrder(id: string, total: number): Order {\n  const order: Order = { id, total };\n  saveOrder(order);\n  log(`placed ${id}`);\n  audit(id);\n  return order;\n}\n\nexport function findOrder(id: string): Order | null {\n  return readOrder(id);\n}\n\nexport class OrderService {\n  constructor(private readonly prefix: string) {}\n  place(total: number): Order {\n    return placeOrder(`${this.prefix}-1`, total);\n  }\n}\n');
+    writeFileSync(join(dir, "NOTES.md"), "# a note\n");
+    assert.ok(archdiff(["views", dir]).stdout.includes("changes\tChanges: what the working tree changes against the last commit, group by group\n"));
+    const board = archdiff(["diagram", "changes", dir]);
+    assert.equal(board.status, 0, board.stderr);
+    assert.match(board.stdout, /^<!-- archdiff:generated — uncommitted changes against the last commit \([0-9a-f]{7}\) -->\n# Uncommitted changes against the last commit \([0-9a-f]{7}\)\n\n3 source files changed; modules \+1 −0; functions \+2 −2 ~3; imports \+2 −0; calls \+3 −2\.\n/);
+    // The walk: the route (an entry point) first, then the library it calls into; each module with what the change did in it.
+        assert.ok(board.stdout.includes("1. routes · src/routes/ — modules ~1 · functions +1 · calls +1\n   - **src/routes/checkout.tsx** — changed, functions +1, an entry point\n2. lib · src/lib/ — modules +1 ~1 · functions +1 −2 ~3 · imports +2 · calls +3 −2\n   - **src/lib/orders.ts** — changed, functions −2 ~3\n   - **src/lib/audit.ts** — added, functions +1\n"), board.stdout);
+    // The picture: a lane per group, the modules marked, the import the change added in green.
+    assert.ok(board.stdout.includes('  subgraph "routes · src/routes/ — modules ~1 · functions +1 · calls +1"\n    src_routes_checkout_tsx["src/routes/checkout.tsx<br/>+1 fn"]\n  end\n'), board.stdout);
+    assert.ok(board.stdout.includes("class src_lib_audit_ts added") && board.stdout.includes("class src_routes_checkout_tsx,src_lib_orders_ts changed"), board.stdout);
+    assert.ok(board.stdout.includes("## Other files changed\n\n- `NOTES.md` — not tracked yet\n"), board.stdout);
+    // The board as JSON is the placed diagram, every lane a group.
+    const diagram = JSON.parse(archdiff(["diagram", "changes", dir, "--format", "json"]).stdout) as { groups: { id: string }[]; nodes: { id: string; diff?: string; group?: string }[] };
+    assert.deepEqual(diagram.groups.map((lane) => lane.id), ["routes:src/routes", "lib:src/lib"]);
+    assert.deepEqual(diagram.nodes.map((node) => `${node.id} ${node.diff ?? "context"} ${node.group}`), ["src/routes/checkout.tsx changed routes:src/routes", "src/lib/orders.ts changed lib:src/lib", "src/lib/audit.ts added lib:src/lib", "src/lib/log.ts context lib:src/lib"]);
+    // One group: its modules opened to the declarations the change touched, the calls it added and removed, and the diff as text.
+    const group = archdiff(["diagram", "changes:lib:src/lib", dir]);
+    assert.equal(group.status, 0, group.stderr);
+    assert.ok(group.stdout.includes("# Changes in lib · src/lib/\n\n_Step 2 of 2 of the uncommitted changes against the last commit"), group.stdout.slice(0, 300));
+    assert.ok(group.stdout.includes('src_lib_orders_ts_placeOrder ==> src_lib_audit_ts_audit') && group.stdout.includes('src_routes_checkout_tsx ==>|"from loader"| src_lib_orders_ts_findOrder'), group.stdout);
+    assert.ok(group.stdout.includes('src_lib_orders_ts_validate("validate<br/>removed")') && group.stdout.includes("## Functions removed\n\n- fn `OrderService.nextId`"), group.stdout);
+    assert.ok(group.stdout.includes("## The diff\n\n### src/lib/orders.ts\n\n````diff\n") && group.stdout.includes("\n+  audit(id);\n") && group.stdout.includes("### src/lib/audit.ts\n\n````diff\n--- /dev/null\n+++ b/src/lib/audit.ts\n@@ -0,0 +1,5 @@\n+import { log } from \"./log.ts\";\n"), group.stdout);
+    // A group the working tree does not change says so, and the command does not fail.
+    const gone = archdiff(["diagram", "changes:db:src/db", dir]);
+    assert.equal(gone.status, 0, gone.stderr);
+    assert.ok(gone.stdout.includes("_nothing changes in db:src/db against the last commit"), gone.stdout);
+    // Committed: the board is empty again.
+    git("add", "-A");
+    git("commit", "-q", "-m", "audit");
+    assert.ok(archdiff(["diagram", "changes", dir]).stdout.includes("nothing to walk"));
+  }));
+
 test("--out writes a new file or one archdiff wrote, and refuses any other file", () =>
   withTempDir("archdiff-out-", (dir) => {
     const out = join(dir, "layers.md");

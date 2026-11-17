@@ -170,6 +170,14 @@ _Avoid_: multi-review, merge preview
 What a change did to a shape or a line: added, removed, changed; or what the contract says of it: planned, beyond the intent.
 _Avoid_: status, colour
 
+**Board**:
+The uncommitted changes as a picture: the working tree against the last commit, the changed modules in groups — the layer, then the directory — in the order a reviewer reads them.
+_Avoid_: dashboard, status, staging view
+
+**Walk**:
+The steps through a change (the groups of the board, the commits of a range) or through a tour, one picture at a time.
+_Avoid_: wizard, slideshow
+
 **Finding**:
 A new dependency between layers that the contract does not allow (any, without a contract): what makes a review fail.
 _Avoid_: issue, violation (in a review)

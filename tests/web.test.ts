@@ -384,6 +384,51 @@ test("a module's page in a comparison says what each head did to it", () =>
     },
   ));
 
+test("the board of the uncommitted changes through the API: the groups in reading order, a group's picture and diff, a module's page", () =>
+  withOwnServer(
+    "archdiff-board-api-",
+    (dir) => {
+      const git = (...args: string[]): void => {
+        const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      git("init", "-q", "-b", "main");
+      git("add", ".");
+      git("commit", "-q", "-m", "base");
+      // The working tree: the route reads an order through a loader, the store counts its rows, a new module audits.
+      writeFileSync(join(dir, "src/routes/checkout.tsx"), 'import { OrderService, findOrder } from "@/lib/orders";\n\nexport async function action(request: { total: number }) {\n  const service = new OrderService("web");\n  return service.place(request.total);\n}\n\nexport async function loader(request: { id: string }) {\n  return findOrder(request.id);\n}\n\nexport default function Checkout() {\n  return null;\n}\n');
+      writeFileSync(join(dir, "src/db/audit.ts"), 'import { log } from "../lib/log.ts";\n\nexport function audit(what: string): void {\n  log(`audit ${what}`);\n}\n');
+    },
+    async (origin) => {
+      type BoardAnswer = { board: { base: string; files: number; groups: { id: string; key: string; label: string; modules: { id: string; mark: string; entry: boolean; rank: number | null }[]; functions: { added: number }; imports: { added: number } }[] } | null; markdown: string; change: { kind: string } | null; diagram: { title: string; nodes: { id: string; diff?: string; group?: string }[]; edges: { from: string; to: string; kind: string; diff?: string; label?: string }[] } };
+      const board = (await (await fetch(`${origin}/api/diagram?view=changes`)).json()) as BoardAnswer;
+      // Both are where execution starts as far as the code says (a route, an export nothing calls): the upper layer is read first.
+      assert.deepEqual(board.board?.groups.map((group) => `${group.key} ${group.label}`), ["changes:routes:src/routes routes · src/routes/", "changes:db:src/db db · src/db/"]);
+      assert.deepEqual(board.board?.groups.map((group) => group.modules), [[{ id: "src/routes/checkout.tsx", mark: "changed", functions: { added: 1, removed: 0, changed: 0 }, entry: true, rank: 0 }], [{ id: "src/db/audit.ts", mark: "added", functions: { added: 1, removed: 0, changed: 0 }, entry: true, rank: 0 }]]);
+      assert.match(board.board!.base, /^the last commit \([0-9a-f]{7}\)$/);
+      assert.equal(board.board!.files, 2);
+      assert.equal(board.diagram.title, "Uncommitted changes: 2 modules in 2 groups");
+      assert.equal(board.change?.kind, "review");
+      // The new import goes against the layers (db → lib): the board's page says so first, as a review does.
+      assert.ok(board.markdown.includes("## ⚠ New dependencies between layers\n\n- **db → lib**\n"), board.markdown);
+      assert.ok(board.diagram.edges.some((edge) => edge.from === "src/db/audit.ts" && edge.to === "src/lib/log.ts" && edge.diff === "added"));
+      // A group's own picture: the loader the change added, its call into the library landing on that module, and the diff as text.
+      const group = (await (await fetch(`${origin}/api/scene?view=${encodeURIComponent("changes:routes:src/routes")}`)).json()) as BoardAnswer;
+      assert.equal(group.diagram.title, "Changes in routes · src/routes/ — step 1 of 2");
+      assert.deepEqual(group.diagram.nodes.filter((node) => node.diff).map((node) => `${node.id} ${node.diff}`), ["src/routes/checkout.tsx changed", "src/routes/checkout.tsx#loader added"]);
+      assert.ok(group.diagram.edges.some((edge) => edge.from === "src/routes/checkout.tsx#loader" && edge.to === "src/lib/orders.ts" && edge.kind === "call" && edge.diff === "added" && edge.label === "findOrder()"), JSON.stringify(group.diagram.edges));
+      assert.ok(group.markdown.includes("## The diff\n\n### src/routes/checkout.tsx\n\n````diff\n") && group.markdown.includes("\n+export async function loader(request: { id: string }) {"), group.markdown);
+      assert.equal(group.board?.groups.length, 2);
+      // A module's page on the board says what the change did to it.
+      const shape = (await (await fetch(`${origin}/api/shape?view=changes&id=${encodeURIComponent("src/routes/checkout.tsx")}`)).json()) as { markdown: string };
+      assert.ok(shape.markdown.includes("## In this change\n\n- added fn `loader`"), shape.markdown);
+      // Outside git there is no last commit: the picture is refused with git's words.
+      const outside = await fetch(`${base}/api/scene?view=changes`);
+      assert.equal(outside.status, 400);
+      assert.ok(((await outside.json()) as { error: string }).error.includes("not a git repository"));
+    },
+  ));
+
 test("chat tags are suggested and expanded into context; mocks come from the types when the agent gives no JSON", async () => {
   const tags = await getJson<{ tags: { tag: string; title: string }[] }>("/api/tags?q=orders");
   assert.ok(tags.tags.some((tag) => tag.tag === "@module:src/lib/orders.ts"), JSON.stringify(tags.tags.slice(0, 5)));

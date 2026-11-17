@@ -7,11 +7,12 @@
 
 import assert from "node:assert/strict";
 import { spawnSync, type ChildProcess } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { chromium, type Browser, type Page } from "playwright-core";
+import { withTempDir } from "./temp-dir.ts";
 import { homeOf, startWeb, withOwnServer } from "./web-server.ts";
 
 const root = join(import.meta.dirname, "..");
@@ -1328,3 +1329,98 @@ test("the settings window places the agents and keeps the keys: an agent of the 
       await page!.waitForFunction(`document.querySelector("#transcript .answer")?.textContent?.includes("Done.")`, undefined, { timeout: 15_000 });
     },
   ));
+
+/** A repository made of a copy of the fixture, committed, with a server that follows its files, for `body`; stopped and removed after it. */
+function withWatchedRepository(prefix: string, body: (origin: string, dir: string, git: (...args: string[]) => void) => Promise<void>): Promise<void> {
+  return withTempDir(prefix, async (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    mkdirSync(homeOf(dir));
+    const git = (...args: string[]): void => {
+      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git("init", "-q", "-b", "main");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    const { server: own, origin } = startWeb(dir, [], homeOf(dir));
+
+    try {
+      await body(await origin, dir, git);
+    } finally {
+      own.kill();
+    }
+  });
+}
+
+test("the board of the uncommitted changes: the groups in reading order, a walk to each group's picture and diff, drawn again as the working tree changes and emptied by a commit", { skip: !CHROME && "no Chrome installed" }, () =>
+  withWatchedRepository("archdiff-page-board-", async (origin, dir, git) => {
+    // The working tree: the route reads an order through a loader, the orders audit what they place.
+    writeFileSync(join(dir, "src/routes/checkout.tsx"), 'import { OrderService, findOrder } from "@/lib/orders";\n\nexport async function action(request: { total: number }) {\n  const service = new OrderService("web");\n  return service.place(request.total);\n}\n\nexport async function loader(request: { id: string }) {\n  return findOrder(request.id);\n}\n\nexport default function Checkout() {\n  return null;\n}\n');
+    writeFileSync(join(dir, "src/lib/audit.ts"), 'import { log } from "./log.ts";\n\nexport function audit(what: string): void {\n  log(`audit ${what}`);\n}\n');
+    writeFileSync(join(dir, "src/lib/orders.ts"), 'import { readOrder, saveOrder } from "@/db/store";\nimport { audit } from "./audit.ts";\nimport { log } from "./log.ts";\n\nexport interface Order { id: string; total: number }\n\nexport function placeOrder(id: string, total: number): Order {\n  const order: Order = { id, total };\n  saveOrder(order);\n  log(`placed ${id}`);\n  audit(id);\n  return order;\n}\n\nexport function findOrder(id: string): Order | null {\n  return readOrder(id);\n}\n\nexport class OrderService {\n  constructor(private readonly prefix: string) {}\n  place(total: number): Order {\n    return placeOrder(`${this.prefix}-1`, total);\n  }\n}\n');
+    const steps = (): Promise<string[]> => page!.evaluate(`[...document.querySelectorAll("#board-steps option")].map((option) => option.textContent)`) as Promise<string[]>;
+    const marks = (): Promise<Record<string, string>> => page!.evaluate(`Object.fromEntries([...window.archdiff.nodes().values()].map((node) => [node.id, node.diff ?? "context"]))`) as Promise<Record<string, string>>;
+    const drawn = (view: string): Promise<unknown> => page!.waitForFunction(`window.archdiff.drawn() === ${JSON.stringify(view)}`, undefined, { timeout: 20_000 });
+
+    // c opens the board from any picture.
+    await page!.goto(`${origin}/?fresh=board#view=layers`);
+    await drawn("layers");
+    assert.ok(await page!.evaluate(`document.querySelector("#board").hidden`));
+    await page!.click("#title-text");
+    await page!.keyboard.press("c");
+    await drawn("changes");
+    assert.equal(await page!.textContent("#title-text"), "Uncommitted changes: 3 modules in 2 groups — 3 source files changed");
+    // The walk: the whole board, then the route (where execution starts), then the library it calls into.
+    assert.deepEqual(await steps(), ["the whole board: 2 groups", "1 of 2 · routes · src/routes/ — 1 module", "2 of 2 · lib · src/lib/ — 2 modules"]);
+    assert.deepEqual(await marks(), { "src/routes/checkout.tsx": "changed", "src/lib/orders.ts": "changed", "src/lib/audit.ts": "added", "src/lib/log.ts": "context" });
+    assert.match((await page!.textContent("#board-note")) ?? "", /^against the last commit \([0-9a-f]{7}\) · 3 source files changed/);
+    // The board is read, not drawn on, and the chat stays: the agent's run is what it shows.
+    assert.ok(await page!.evaluate(`document.querySelector("#edit").disabled && !document.querySelector("#chat-tab").hidden && document.querySelector("#board-prev").disabled`));
+
+    // . steps to the first group: its own picture, and its diff on the Markdown tab.
+    await page!.keyboard.press(".");
+    await drawn("changes:routes:src/routes");
+    assert.equal(await page!.textContent("#title-text"), "Changes in routes · src/routes/ — step 1 of 2 — 3 source files changed");
+    await page!.waitForFunction(`document.querySelector("#markdown").classList.contains("active") && [...document.querySelectorAll("#markdown pre.diff .add")].some((line) => line.textContent.includes("export async function loader"))`, undefined, { timeout: 8000 });
+    assert.equal(await page!.inputValue("#board-steps"), "changes:routes:src/routes");
+    assert.deepEqual(await marks(), { "src/routes/checkout.tsx": "changed", "src/routes/checkout.tsx#loader": "added", "src/lib/orders.ts": "context" });
+    // On to the library: the function added, the ones changed and removed, the call the change added.
+    await page!.keyboard.press(".");
+    await drawn("changes:lib:src/lib");
+    const lib = await marks();
+    assert.equal(lib["src/lib/audit.ts#audit"], "added");
+    assert.equal(lib["src/lib/orders.ts#placeOrder"], "changed");
+    assert.equal(lib["src/lib/orders.ts#validate"], "removed");
+    assert.ok(await page!.evaluate(`window.archdiff.canvas().scene().some((element) => element.customData?.archdiff === "edge" && element.customData.from === "src/lib/orders.ts#placeOrder" && element.customData.to === "src/lib/audit.ts#audit")`));
+    // The last group: . stays and says so; , goes back, ‹ too, down to the board; the select opens any step.
+    await page!.keyboard.press(".");
+    await page!.waitForFunction(`document.querySelector("#reason").textContent === "the last group of the walk"`);
+    await page!.keyboard.press(",");
+    await drawn("changes:routes:src/routes");
+    await page!.click("#board-prev");
+    await drawn("changes");
+    await page!.selectOption("#board-steps", "changes:lib:src/lib");
+    await drawn("changes:lib:src/lib");
+    await page!.selectOption("#board-steps", "changes");
+    await drawn("changes");
+
+    // The board follows the working tree: a third file changes, and a third group joins the walk.
+    const { watching } = (await (await fetch(`${origin}/api/views`)).json()) as { watching: { on: boolean; problem: string | null } };
+
+    if (watching.problem) return;
+    writeFileSync(join(dir, "src/db/store.ts"), 'import type { Order } from "../lib/orders.ts";\n\nconst rows = new Map<string, Order>();\n\nexport function saveOrder(order: Order): void {\n  rows.set(order.id, order);\n}\n\nexport function readOrder(id: string): Order | null {\n  return rows.get(id) ?? null;\n}\n\nexport function countOrders(): number {\n  return rows.size;\n}\n');
+    await page!.waitForFunction(`document.querySelectorAll("#board-steps option").length === 4`, undefined, { timeout: 20_000 });
+    assert.equal((await steps())[3], "3 of 3 · db · src/db/ — 1 module");
+    assert.equal((await marks())["src/db/store.ts"], "changed");
+    // The group's picture is open when its change is committed: the picture says the group is gone, and the walk leads on.
+    await page!.selectOption("#board-steps", "changes:db:src/db");
+    await drawn("changes:db:src/db");
+    git("add", "-A");
+    git("commit", "-q", "-m", "audit");
+    await page!.waitForFunction(`document.querySelectorAll("#board-steps option").length === 2 && !document.querySelector("#empty").hidden`, undefined, { timeout: 20_000 });
+    assert.deepEqual(await steps(), ["db:src/db — no longer changed", "the whole board: 0 groups"]);
+    assert.ok(((await page!.textContent("#empty")) ?? "").includes("nothing changes in db:src/db"));
+    await page!.click("#board-prev");
+    await drawn("changes");
+    await page!.waitForFunction(`(document.querySelector("#empty")?.textContent ?? "").includes("nothing to walk")`, undefined, { timeout: 10_000 });
+  }));

@@ -240,7 +240,7 @@ The system SHALL switch the canvas to Excalidraw's full editor on `✎ edit`, sa
 
 ### Requirement: The page follows the code
 
-The system SHALL reload the picture when a source file of any language the analysis reads changes (`--no-watch` turns this off) and after every agent run; a picture asked for after a change SHALL be drawn from the new analysis. When the server cannot follow the files (the system's file watchers used up), it SHALL say so on its first lines, in `/api/views` and in the page's stats, rather than stay silent.
+The system SHALL reload the picture when a source file of any language the analysis reads changes, and when the checkout moves (a commit, a switch of branch, a reset — where `.git` is a directory), (`--no-watch` turns this off) and after every agent run; a picture asked for after a change SHALL be drawn from the new analysis. When the server cannot follow the files (the system's file watchers used up), it SHALL say so on its first lines, in `/api/views` and in the page's stats, rather than stay silent.
 
 #### Scenario: A file changes
 
@@ -251,6 +251,20 @@ The system SHALL reload the picture when a source file of any language the analy
 
 - **WHEN** `src/lib/tool.py` is written while the page shows the lib layer
 - **THEN** `/api/changes` names it and the next picture of the layer holds it
+
+### Requirement: The board of the uncommitted changes is walked
+
+The system SHALL open the board of the uncommitted changes (`view=changes`) from the picture select, the views list and the key `c`, and show under the title a bar with the steps of its walk — the whole board, then every group in reading order, each with its place, its layer and directory and the count of its modules — a button to the previous and one to the next step, and what the board is compared against. A step SHALL open the group's own picture (`changes:<layer>:<dir>`) and bring its page, which ends with the group's diff, to the Markdown tab (a drawer opens for it where the details are one); the diff SHALL be read by its signs — the lines added, removed and the heads of the hunks each in their colour. `.` and `,` SHALL step forward and back; past either end the line under the picture SHALL say so. The board SHALL be drawn again by the live reload, and its bar filled anew from every picture: a group that is no longer changed while its picture is open SHALL be named as such in the bar, with the walk leading on from it. The board SHALL not be drawn on, and SHALL keep the Chat tab.
+
+#### Scenario: The walk
+
+- **WHEN** the board shows a changed route and a changed library, and `.` is pressed twice, then again, then `,`
+- **THEN** the canvas shows the route's group and its diff with the added lines in green, then the library's group with the function added, the one changed and the one removed marked; then the line under the picture says "the last group of the walk"; then the route's group is back
+
+#### Scenario: The board follows the working tree
+
+- **WHEN** another file is saved while the board is open, and then everything is committed
+- **THEN** a third group joins the walk within a second or two, and after the commit the board says there is nothing to walk
 
 ### Requirement: The page's modules take the page as their context
 
@@ -287,7 +301,7 @@ The system SHALL fold each side panel away and back from the header's button, th
 
 ### Requirement: The keys
 
-The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or Cmd held: `/` focuses find, `v` the filter of the views (showing the left panel), `o` opens the options, `p` the project map, `0` fits, Backspace goes back, the arrows walk from the picked shape, Enter goes into it, `s` splits, `m` and `d` turn mix and dim on and off, `l` flips the lanes, `[` and `]` step the head through the branches, `e` edits, `f` turns the full canvas on and off, Escape clears the selection and closes an open drawer with it (a menu and the project map close first); Ctrl+B and Ctrl+] SHALL fold the left and the right panel, Ctrl+S save a drawing. In a review or a comparison the keys of the tools (`p`, `s`, `m`, `d`, `e`) SHALL do nothing.
+The system SHALL answer, outside a field and the editor and with no Ctrl, Alt or Cmd held: `/` focuses find, `v` the filter of the views (showing the left panel), `o` opens the options, `p` the project map, `0` fits, Backspace goes back, the arrows walk from the picked shape, Enter goes into it, `s` splits, `m` and `d` turn mix and dim on and off, `l` flips the lanes, `[` and `]` step the head through the branches, `b` shows the branches and `c` the board of the uncommitted changes, `.` and `,` step forward and back through what is walked (the groups of the board), `e` edits, `f` turns the full canvas on and off, Escape clears the selection and closes an open drawer with it (a menu and the project map close first); Ctrl+B and Ctrl+] SHALL fold the left and the right panel, Ctrl+S save a drawing. In a review, a comparison, a commit's change, the branches and the board of the uncommitted changes the keys of the tools (`p`, `s`, `m`, `d`, `e`) SHALL do nothing.
 
 #### Scenario: Find and filter
 

@@ -81,6 +81,25 @@ The system SHALL draw the branches as the `branches` view: a lane per branch wit
 - **WHEN** a reader opens `commit:<sha>` of the commit that added `src/lib/extra.ts`
 - **THEN** the Markdown starts with "# Architecture changes of commit <short>: <subject>" and lists the module added, and the export's stamp names that commit
 
+### Requirement: The uncommitted changes are a board
+
+The system SHALL draw, as the `changes` view, what the working tree changes against the last commit (against the empty tree before the first commit; outside git it SHALL be refused with git's words): every module the change added, removed or edited — one whose declarations it did not touch too — in the group of its layer and its directory, each group a lane labelled with the modules, functions, imports and calls the change added, removed and changed in it, the imports it added and removed marked, and the modules at their other ends drawn unmarked for context. The groups SHALL be in reading order: by how many imports or calls their nearest module is from an entry point (the head's; the base's for a module the change removed), then the layers with the importers first, then the directory. `changes:<layer>:<dir>` SHALL draw one group: a lane per changed module holding the module and the declarations the change added, changed and removed in it, the imports and calls added and removed with an end in the group (a call to or from a module outside it landing on that module, labelled with the function), and the unchanged calls among the declarations drawn; its Markdown SHALL say where the group stands in the walk, list its changes by kind and end with the diff of its files as text (a file not tracked yet as all of its lines added, a long diff cut with the count of the lines left out). The board's Markdown SHALL list the walk and the files changed that are no source. A group the working tree does not change SHALL be an empty picture that says so, not an error. The API's picture SHALL carry `board`, the groups in order with their modules.
+
+#### Scenario: A route and the library it calls
+
+- **WHEN** the working tree adds a `loader` to `src/routes/checkout.tsx` and a module `src/lib/audit.ts` that `src/lib/orders.ts` now calls
+- **THEN** `archdiff diagram changes` lists the walk as "1. routes · src/routes/" then "2. lib · src/lib/", draws a lane per group with `checkout.tsx` and `orders.ts` changed and `audit.ts` added, and `archdiff diagram changes:lib:src/lib` draws `placeOrder` calling `audit` in green and ends with the diff of both files
+
+#### Scenario: Before the first commit
+
+- **WHEN** `archdiff diagram changes` runs in a repository with no commit
+- **THEN** the page is headed "Uncommitted changes against an empty repository" and every module is added
+
+#### Scenario: Nothing changed
+
+- **WHEN** the working tree is as the last commit has it
+- **THEN** the picture is empty and says "the working tree is as the last commit (<short>) has it: nothing to walk"
+
 ### Requirement: A GitHub Action posts the review
 
 The system SHALL offer `action.yml` that runs the review of a pull request against its base and posts the Markdown as a comment, failing the check on a new dependency between layers.

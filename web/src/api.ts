@@ -5,11 +5,12 @@
 // Entry points: `api`, and the types of its answers.
 
 export type { Diagram, Line, Lane, Shape } from "../../src/diagram.ts";
-export type { ProjectMap, MapLine, MapDot } from "../../src/diagram.ts";
+export type { ProjectMap, MapLine, MapDot, Board } from "../../src/diagram.ts";
 import type { ProjectMap } from "../../src/diagram.ts";
 import type { Diagram } from "../../src/diagram.ts";
 import { pictureQueryText, type PictureOptions } from "../../src/options.ts";
 export type { ViewEntry } from "../../src/view-keys.ts";
+import type { Board } from "../../src/diagram.ts";
 import type { ViewEntry } from "../../src/view-keys.ts";
 
 export interface ViewsResponse {
@@ -79,6 +80,8 @@ export interface SceneResponse {
   drawn: boolean;
   /** A review or a comparison: what it found. */
   change: ChangeSummary | null;
+  /** The board of the uncommitted changes (`view=changes`, and a group's own picture): the groups in reading order, for the walk. */
+  board: Board | null;
 }
 
 export interface FlowStep {

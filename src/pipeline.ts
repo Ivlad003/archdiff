@@ -45,14 +45,14 @@ export interface Step {
 /** More lanes than this on a map of modules (the whole map, a layer, a directory), and `auto` lays them as columns. */
 const COLUMNS_ABOVE = 6;
 
-/** The pictures the review's diff is laid over as marks: a picture of the code with a diff read for it — not a change (a timeline, a review, a comparison), which carries its own. */
+/** The pictures the review's diff is laid over as marks: a picture of the code with a diff read for it — not a change (a timeline, a review, a comparison, the uncommitted changes), which carries its own. */
 function overlaysMarks({ reads, view }: StepContext): boolean {
-  return reads.diff !== undefined && view.kind !== "timeline" && view.kind !== "review" && view.kind !== "compare";
+  return reads.diff !== undefined && view.kind !== "timeline" && view.kind !== "review" && view.kind !== "compare" && view.kind !== "changes";
 }
 
 /** The pictures whose shapes carry a review's marks: the review's own marks, or those `changes` laid over the picture. */
 function marked(ctx: StepContext): boolean {
-  return overlaysMarks(ctx) || ctx.view.kind === "review" || ctx.view.kind === "compare";
+  return overlaysMarks(ctx) || ctx.view.kind === "review" || ctx.view.kind === "compare" || ctx.view.kind === "changes";
 }
 
 /** The pictures the changed files cannot be told apart in: a grid or a chart placed by its view, a flowchart, a change of several revisions. */

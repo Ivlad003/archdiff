@@ -8,7 +8,7 @@
 //
 // Sits at the I/O edge below review.ts (which reads a change), files.ts
 // (which lists the sources) and the server. Entry points: `listedFiles`,
-// `changedFiles`, `treeAt`, `mergeBase`, `forkPoint`, `commitOf`,
+// `changedFiles`, `changedPaths`, `worktreeDiff`, `treeAt`, `mergeBase`, `forkPoint`, `commitOf`,
 // `defaultBase`, `listBranches`, `branchGraph`, `commitsBetween`,
 // `commitInfo`, `commitFiles`, `fileHistory`, `fileAt`, `revisionStamp`,
 // `commitFirst`.
@@ -304,6 +304,65 @@ export function treeAt(root: string, ref: string, also: readonly string[] = []):
   if (untracked.ok) for (const path of untracked.out.split("\0")) if (path !== "" && isSourceFile(path) && !overrides.has(path)) overrides.set(path, null);
 
   return overrides;
+}
+
+/**
+ * Every path the working tree changes against `base`, source file or not, as git names what happened to it: `A`
+ * added, `M` modified, `D` deleted, `R` renamed (the new path), `?` not tracked yet. Relative to `root`.
+ */
+export function changedPaths(root: string, base: string): { status: string; path: string }[] {
+  assertRef(base);
+  const diff = git(root, ["diff", "--relative", "--name-status", "-z", "--no-renames", base, "--"]);
+
+  if (!diff.ok) throw new Error(diff.error);
+  const parts = diff.out.split("\0").filter((part) => part !== "");
+  const paths: { status: string; path: string }[] = [];
+
+  for (let i = 0; i + 1 < parts.length; i += 2) paths.push({ status: parts[i]!.slice(0, 1), path: parts[i + 1]! });
+  const untracked = git(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
+
+  if (untracked.ok) for (const path of untracked.out.split("\0")) if (path !== "" && !paths.some((known) => known.path === path)) paths.push({ status: "?", path });
+
+  return paths.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/** How many lines of one file's diff a reader is given: a rewritten file is read in the Code tab, not as a diff. */
+const DIFF_LINES = 400;
+
+/**
+ * The text of what the working tree changes in each of `paths` against `base`, as a unified diff per path (git's own
+ * for a tracked file; a file not tracked yet as all of its lines added), cut after `DIFF_LINES` lines with a line
+ * saying how many more there are. A path that does not differ has no entry.
+ */
+export function worktreeDiff(root: string, base: string, paths: readonly string[]): Map<string, string> {
+  assertRef(base);
+  const out = new Map<string, string>();
+
+  if (paths.length === 0) return out;
+  const cut = (text: string): string => {
+    const lines = text.replace(/\n$/, "").split("\n");
+
+    return lines.length <= DIFF_LINES ? lines.join("\n") : `${lines.slice(0, DIFF_LINES).join("\n")}\n… ${lines.length - DIFF_LINES} more lines`;
+  };
+  const diff = git(root, ["diff", "--relative", "--no-color", "--no-ext-diff", "--no-renames", base, "--", ...paths]);
+
+  // One section per file, each from its `diff --git` line; the file is the one whose name ends that line.
+  if (diff.ok) {
+    for (const section of diff.out.split(/^(?=diff --git )/m)) {
+      const head = section.slice(0, section.indexOf("\n"));
+      const path = paths.find((candidate) => head.endsWith(` b/${candidate}`) || head.endsWith(` b/${candidate}"`));
+
+      if (path !== undefined) out.set(path, cut(section.slice(section.indexOf("\n") + 1)));
+    }
+  }
+
+  for (const path of paths) {
+    if (out.has(path) || !existsSync(join(root, path)) || !git(root, ["ls-files", "--error-unmatch", "--others", "--exclude-standard", "--", path]).ok) continue;
+    const lines = readFileSync(join(root, path), "utf8").replace(/\r?\n$/, "").split(/\r?\n/);
+    out.set(path, cut([`--- /dev/null`, `+++ b/${path}`, `@@ -0,0 +1,${lines.length} @@`, ...lines.map((line) => `+${line}`)].join("\n")));
+  }
+
+  return out;
 }
 
 /** One commit of a range, as `git log` lists it. */
