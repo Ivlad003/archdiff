@@ -1,0 +1,121 @@
+# A release publishes itself: a tag `v<version>` pushed to GitHub is tested, packed, tried as its user
+# would get it, and published to npm — with no token kept in the repository and no code typed by hand.
+# npm trusts this workflow by its name (trusted publishing, over OIDC): the package's settings on
+# npmjs.com name this repository and this file, GitHub vouches for the run, and the package carries
+# the proof of where it was built. docs/publishing.md says how that is set up once, and what a release is.
+name: publish
+on:
+  push:
+    tags: ["v*"]
+# One release at a time: a second tag waits for the first.
+concurrency: publish
+permissions:
+  contents: read
+jobs:
+  test:
+    # What ci.yml's `test` job holds a push to, on the tagged commit: a release is never of code that fails them.
+    runs-on: ubuntu-latest
+    steps:
+      # The whole history, as CI's own checkout has it.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:web
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # GitHub's word for this run, which npm takes in place of a token.
+      id-token: write
+    steps:
+      # The whole history: whether the tagged commit is one of master's is asked of it.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # Node 24 comes with an npm that can publish this way (11.5.1 or later; Node 22.14 at least). No cache in a release build.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: The tag names the version of package.json, on a commit of master, not published yet
+        id: release
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag $GITHUB_REF_NAME is not v$version, the version of package.json"
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::the tag $GITHUB_REF_NAME is on a commit that is not on master"
+            exit 1
+          fi
+
+          if [ -n "$(npm view "$name@$version" version 2>/dev/null)" ]; then
+            echo "::error::$name@$version is on npm already: a version is published once"
+            exit 1
+          fi
+
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: An npm that publishes without a token
+        run: |
+          have=$(npm --version)
+          enough='const [have, need] = process.argv.slice(1).map((v) => v.split(".").map(Number)); process.exit(have[0] > need[0] || (have[0] === need[0] && (have[1] > need[1] || (have[1] === need[1] && have[2] >= need[2]))) ? 0 : 1)'
+
+          if ! node -e "$enough" "$have" 11.5.1; then
+            echo "npm $have is older than 11.5.1: taking the newest npm 11"
+            npm install -g npm@11
+          fi
+
+          npm --version
+      - run: npm ci
+      # `npm pack` runs prepack: tsc, the grammars, the page's bundle. What is published is this file and no other.
+      - name: Pack
+        id: pack
+        run: |
+          npm pack
+          echo "tarball=$(ls ./*.tgz)" >> "$GITHUB_OUTPUT"
+      - name: Try the package as its user gets it
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          try=$(mktemp -d)
+          cd "$try"
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE/$TARBALL"
+          said=$(npx archdiff --version)
+
+          if [ "$said" != "$VERSION" ]; then
+            echo "::error::the packed archdiff says it is $said, not $VERSION"
+            exit 1
+          fi
+
+          npx archdiff diagram layers "$GITHUB_WORKSPACE" > /dev/null
+      # No token: npm asks GitHub who runs this, and finds the workflow among the package's trusted publishers.
+      - name: Publish
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: npm publish "$TARBALL" --access public
+      - name: Say what was published
+        env:
+          NAME: ${{ steps.release.outputs.name }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          {
+            echo "Published **$NAME@$VERSION** to npm: https://www.npmjs.com/package/$NAME/v/$VERSION"
+            echo
+            echo "The registry may take a few minutes to serve it; then: \`npx $NAME@$VERSION --version\`"
+          } >> "$GITHUB_STEP_SUMMARY"

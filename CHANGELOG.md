@@ -20,6 +20,10 @@
 
 **For whoever scripts the page:** an entry of the views list is found by `data-view` (its key); its `title` is its hint now.
 
+### A release publishes itself
+
+- A tag `v<version>` pushed to GitHub runs `.github/workflows/publish.yml`: the checks of CI on the tagged commit, then the package packed, tried as its user would get it (`archdiff --version`, a picture of this repository) and published to npm by trusted publishing — no token in the repository, no one-time code typed by hand, and the package carries the proof of where it was built. The workflow refuses a tag that is not the version of `package.json`, a tag on a commit that is not on master, and a version npm already has. npm is told once, on the package's settings page, to trust the workflow: `docs/publishing.md` says how, what a failed run means, and the way by hand, which stays for when the workflow cannot.
+
 ## 0.7.0 — 2026-11-17
 
 A review that reads down to the logic and the lines, and an agent that explains what it shows as a tour the page plays; the page driven from the Chat tab; the architecture asked by the agent over MCP; the contract check with rules and a baseline, on the pull request itself; the blast radius of a change, and a change supposed without being made; Go, Java and C#; a VS Code extension; and the agents started on Windows, their programs and keys in the user's settings. What is incompatible with 0.6.0 comes first.
