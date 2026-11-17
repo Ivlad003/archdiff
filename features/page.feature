@@ -113,6 +113,46 @@ Feature: The page
     When I press "f" in a window 1900 pixels wide
     Then the canvas is 1900 pixels wide, and "f" again docks both panels as they were
 
+  Scenario: A guided tour is recorded, played and shared
+    Given the page open on "layers"
+    When I open "tours", type the name "intro" and press Enter
+    Then the bar of the tour says "recording"
+    When I press "add step" and keep the note "The **layers** of the sample."
+    Then the link holds "tour=intro&step=1" and the note shows "layers" in bold
+    When I open the module of orders.ts with the storages overlay, tap store.ts and add a step with a note
+    Then .archdiff/tours/intro.json holds two steps, the second with the overlay in its link and store.ts selected
+    When I press ","
+    Then the layers are shown with the first note
+    When I open "#tour=intro&step=2" in a browser that remembers another overlay
+    Then the module is shown with the storages overlay alone, store.ts selected and the second note
+
+  Scenario: The slider over the commits of a range
+    Given a branch of four commits by two authors, open on "timeline"
+    When I press "."
+    Then the canvas shows the map of the code at the first commit, the module it added marked, and the link holds "at="
+    When I let the slider go on the third commit and press ›
+    Then the title ends "commit 4 of 4" within a second
+    When I press "churn", "coupling" and "owners"
+    Then the modules are shaded by their changes, the two changed together are joined by a dashed line, and each names its author
+    When I open the whole range, set the pace to fast and press "k"
+    Then the commits follow by themselves and the play ends at the fourth
+    When I open the review and let the slider go on the second commit
+    Then the review is that commit's own change against the one before it
+
+  Scenario: The board of the uncommitted changes
+    Given a repository with a changed route, a changed library module and a new one, not committed
+    When I press "c"
+    Then the title reads "Uncommitted changes: 3 modules in 2 groups — 3 source files changed"
+    And the walk lists the whole board, then "routes · src/routes/", then "lib · src/lib/"
+    When I press "."
+    Then the canvas shows the route's group, and the Markdown tab its diff with the added lines in green
+    When I press "." twice
+    Then the library's group is shown and the line under the picture says "the last group of the walk"
+    When I save another file
+    Then a third group joins the walk
+    When I commit everything
+    Then the board says there is nothing to walk
+
   Scenario: The toolbar folds, the legend is of the picture, the menus close
     Given the page open on "modules"
     Then the legend reads "module", "A → B: A imports B" and "types only"

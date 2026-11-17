@@ -31,12 +31,14 @@ flowchart LR
     n_src_mcp_ts["src/mcp.ts<br>the Model Context Protocol over stdio: the handshake, the list of tools, a call; knows nothing of archdiff"]
     n_src_mcp_tools_ts["src/mcp-tools.ts<br>the tools an agent asks: views, diagram, check, may_import, impact, review, each from the code as it is now"]
     n_src_checks_ts["src/checks.ts<br>the checks after an agent's run: the contract check held against the baseline it reads, the commands it runs, and the run's report against the violations before it"]
+    n_src_tours_ts["src/tours.ts<br>the guided tours: steps through the pictures kept as files, and a tour as Markdown"]
   end
   subgraph n_views["views — one picture per question, and the reports; pure functions of the analysis"]
     n_src_views_ts["src/views.ts<br>the structural views and viewOf: the chain of pure steps after a view"]
     n_src_views_more_ts["src/views-more.ts<br>the question views: cycles, matrix, type, path, contract, events, tests, hotspots"]
     n_src_shape_ts["src/shape.ts<br>hubs as badges, hidden lanes, the mix, the fold, the weight"]
     n_src_diff_ts["src/diff.ts<br>the architectural diff of two graphs: the review's and the comparison's pictures, their Markdown"]
+    n_src_board_ts["src/board.ts<br>the board of the uncommitted changes: the changed modules in groups, in reading order, their pictures and pages"]
     n_src_intent_view_ts["src/intent-view.ts<br>ARCHITECTURE.md drawn against the code"]
     n_src_flow_ts["src/flow.ts<br>the data flow of a call tree with mocks, and which modules are storages"]
     n_src_pipeline_ts["src/pipeline.ts<br>the steps after a view as data: hide, mix, hubs, fold, weight, marks, overlays"]
@@ -148,7 +150,11 @@ flowchart LR
   n_src_mcp_tools_ts --> n_src_review_ts
   n_src_mcp_tools_ts --> n_src_impact_ts
   n_src_mcp_tools_ts --> n_src_intent_ts
+  n_src_picture_ts --> n_src_board_ts
+  n_src_board_ts --> n_src_diff_ts
   n_src_cli_ts --> n_src_run_ts
+  n_src_cli_ts --> n_src_tours_ts
+  n_src_tours_ts --> n_src_picture_ts
   n_src_run_ts --> n_src_flow_ts
   n_src_run_ts --> n_src_extract_bodies_ts
   n_src_views_ts --> n_src_logic_ts

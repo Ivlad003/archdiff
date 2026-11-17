@@ -7,11 +7,12 @@
 
 import assert from "node:assert/strict";
 import { spawnSync, type ChildProcess } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { chromium, type Browser, type Page } from "playwright-core";
+import { withTempDir } from "./temp-dir.ts";
 import { homeOf, startWeb, withOwnServer } from "./web-server.ts";
 
 const root = join(import.meta.dirname, "..");
@@ -1429,3 +1430,328 @@ test("a what-if opens as a review's picture does: a module's menu supposes it de
   assert.ok(own.some((item) => item.startsWith("Impact: what a change to it reaches")) && !own.some((item) => item.startsWith("What if")), own.join(" | "));
   await page!.keyboard.press("Escape");
 });
+
+/** A repository made of a copy of the fixture, committed, with a server that follows its files, for `body`; stopped and removed after it. */
+function withWatchedRepository(prefix: string, body: (origin: string, dir: string, git: (...args: string[]) => void) => Promise<void>): Promise<void> {
+  return withTempDir(prefix, async (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    mkdirSync(homeOf(dir));
+    const git = (...args: string[]): void => {
+      const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git("init", "-q", "-b", "main");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    const { server: own, origin } = startWeb(dir, [], homeOf(dir));
+
+    try {
+      await body(await origin, dir, git);
+    } finally {
+      own.kill();
+    }
+  });
+}
+
+test("the board of the uncommitted changes: the groups in reading order, a walk to each group's picture and diff, drawn again as the working tree changes and emptied by a commit", { skip: !CHROME && "no Chrome installed" }, () =>
+  withWatchedRepository("archdiff-page-board-", async (origin, dir, git) => {
+    // The working tree: the route reads an order through a loader, the orders audit what they place.
+    writeFileSync(join(dir, "src/routes/checkout.tsx"), 'import { OrderService, findOrder } from "@/lib/orders";\n\nexport async function action(request: { total: number }) {\n  const service = new OrderService("web");\n  return service.place(request.total);\n}\n\nexport async function loader(request: { id: string }) {\n  return findOrder(request.id);\n}\n\nexport default function Checkout() {\n  return null;\n}\n');
+    writeFileSync(join(dir, "src/lib/audit.ts"), 'import { log } from "./log.ts";\n\nexport function audit(what: string): void {\n  log(`audit ${what}`);\n}\n');
+    writeFileSync(join(dir, "src/lib/orders.ts"), 'import { readOrder, saveOrder } from "@/db/store";\nimport { audit } from "./audit.ts";\nimport { log } from "./log.ts";\n\nexport interface Order { id: string; total: number }\n\nexport function placeOrder(id: string, total: number): Order {\n  const order: Order = { id, total };\n  saveOrder(order);\n  log(`placed ${id}`);\n  audit(id);\n  return order;\n}\n\nexport function findOrder(id: string): Order | null {\n  return readOrder(id);\n}\n\nexport class OrderService {\n  constructor(private readonly prefix: string) {}\n  place(total: number): Order {\n    return placeOrder(`${this.prefix}-1`, total);\n  }\n}\n');
+    const steps = (): Promise<string[]> => page!.evaluate(`[...document.querySelectorAll("#board-steps option")].map((option) => option.textContent)`) as Promise<string[]>;
+    const marks = (): Promise<Record<string, string>> => page!.evaluate(`Object.fromEntries([...window.archdiff.nodes().values()].map((node) => [node.id, node.diff ?? "context"]))`) as Promise<Record<string, string>>;
+    const drawn = (view: string): Promise<unknown> => page!.waitForFunction(`window.archdiff.drawn() === ${JSON.stringify(view)}`, undefined, { timeout: 20_000 });
+
+    // c opens the board from any picture.
+    await page!.goto(`${origin}/?fresh=board#view=layers`);
+    await drawn("layers");
+    assert.ok(await page!.evaluate(`document.querySelector("#board").hidden`));
+    await page!.click("#title-text");
+    await page!.keyboard.press("c");
+    await drawn("changes");
+    assert.equal(await page!.textContent("#title-text"), "Uncommitted changes: 3 modules in 2 groups — 3 source files changed");
+    // The walk: the whole board, then the route (where execution starts), then the library it calls into.
+    assert.deepEqual(await steps(), ["the whole board: 2 groups", "1 of 2 · routes · src/routes/ — 1 module", "2 of 2 · lib · src/lib/ — 2 modules"]);
+    assert.deepEqual(await marks(), { "src/routes/checkout.tsx": "changed", "src/lib/orders.ts": "changed", "src/lib/audit.ts": "added", "src/lib/log.ts": "context" });
+    assert.match((await page!.textContent("#board-note")) ?? "", /^against the last commit \([0-9a-f]{7}\) · 3 source files changed/);
+    // The board is read, not drawn on, and the chat stays: the agent's run is what it shows.
+    assert.ok(await page!.evaluate(`document.querySelector("#edit").disabled && !document.querySelector("#chat-tab").hidden && document.querySelector("#board-prev").disabled`));
+
+    // . steps to the first group: its own picture, and its diff on the Markdown tab.
+    await page!.keyboard.press(".");
+    await drawn("changes:routes:src/routes");
+    assert.equal(await page!.textContent("#title-text"), "Changes in routes · src/routes/ — step 1 of 2 — 3 source files changed");
+    await page!.waitForFunction(`document.querySelector("#markdown").classList.contains("active") && [...document.querySelectorAll("#markdown pre.diff .add")].some((line) => line.textContent.includes("export async function loader"))`, undefined, { timeout: 8000 });
+    assert.equal(await page!.inputValue("#board-steps"), "changes:routes:src/routes");
+    assert.deepEqual(await marks(), { "src/routes/checkout.tsx": "changed", "src/routes/checkout.tsx#loader": "added", "src/lib/orders.ts": "context" });
+    // On to the library: the function added, the ones changed and removed, the call the change added.
+    await page!.keyboard.press(".");
+    await drawn("changes:lib:src/lib");
+    const lib = await marks();
+    assert.equal(lib["src/lib/audit.ts#audit"], "added");
+    assert.equal(lib["src/lib/orders.ts#placeOrder"], "changed");
+    assert.equal(lib["src/lib/orders.ts#validate"], "removed");
+    assert.ok(await page!.evaluate(`window.archdiff.canvas().scene().some((element) => element.customData?.archdiff === "edge" && element.customData.from === "src/lib/orders.ts#placeOrder" && element.customData.to === "src/lib/audit.ts#audit")`));
+    // The last group: . stays and says so; , goes back, ‹ too, down to the board; the select opens any step.
+    await page!.keyboard.press(".");
+    await page!.waitForFunction(`document.querySelector("#reason").textContent === "the last group of the walk"`);
+    await page!.keyboard.press(",");
+    await drawn("changes:routes:src/routes");
+    await page!.click("#board-prev");
+    await drawn("changes");
+    await page!.selectOption("#board-steps", "changes:lib:src/lib");
+    await drawn("changes:lib:src/lib");
+    await page!.selectOption("#board-steps", "changes");
+    await drawn("changes");
+
+    // The board follows the working tree: a third file changes, and a third group joins the walk.
+    const { watching } = (await (await fetch(`${origin}/api/views`)).json()) as { watching: { on: boolean; problem: string | null } };
+
+    if (watching.problem) return;
+    writeFileSync(join(dir, "src/db/store.ts"), 'import type { Order } from "../lib/orders.ts";\n\nconst rows = new Map<string, Order>();\n\nexport function saveOrder(order: Order): void {\n  rows.set(order.id, order);\n}\n\nexport function readOrder(id: string): Order | null {\n  return rows.get(id) ?? null;\n}\n\nexport function countOrders(): number {\n  return rows.size;\n}\n');
+    await page!.waitForFunction(`document.querySelectorAll("#board-steps option").length === 4`, undefined, { timeout: 20_000 });
+    assert.equal((await steps())[3], "3 of 3 · db · src/db/ — 1 module");
+    assert.equal((await marks())["src/db/store.ts"], "changed");
+    // The group's picture is open when its change is committed: the picture says the group is gone, and the walk leads on.
+    await page!.selectOption("#board-steps", "changes:db:src/db");
+    await drawn("changes:db:src/db");
+    git("add", "-A");
+    git("commit", "-q", "-m", "audit");
+    await page!.waitForFunction(`document.querySelectorAll("#board-steps option").length === 2 && !document.querySelector("#empty").hidden`, undefined, { timeout: 20_000 });
+    assert.deepEqual(await steps(), ["db:src/db — no longer changed", "the whole board: 0 groups"]);
+    assert.ok(((await page!.textContent("#empty")) ?? "").includes("nothing changes in db:src/db"));
+    await page!.click("#board-prev");
+    await drawn("changes");
+    await page!.waitForFunction(`(document.querySelector("#empty")?.textContent ?? "").includes("nothing to walk")`, undefined, { timeout: 10_000 });
+  }));
+
+/** The commits of a branch `feature` off main in `dir`, by two authors: a module added, then changed twice together with the log, then the store reading the log. */
+function commitHistory(dir: string): void {
+  const git = (author: string, ...args: string[]): void => {
+    const result = spawnSync("git", ["-C", dir, "-c", `user.email=${author.toLowerCase()}@example.com`, "-c", `user.name=${author}`, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const commit = (author: string, subject: string, files: Record<string, string>): void => {
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
+    git(author, "add", ".");
+    git(author, "commit", "-q", "-m", subject);
+  };
+  const log = (how: string): string => `import { step1 } from "./step1.ts";\n\nexport function log(message: string): void {\n  console.${how}(message, step1());\n}\n`;
+  const step1 = (value: number): string => `export function step1(): number {\n  return ${value};\n}\n`;
+  git("Ann", "init", "-q", "-b", "main");
+  git("Ann", "add", ".");
+  git("Ann", "commit", "-q", "-m", "base");
+  git("Ann", "checkout", "-q", "-b", "feature");
+  commit("Ann", "step 1: a module", { "src/lib/step1.ts": step1(1) });
+  commit("Bob", "step 2: the log counts", { "src/lib/log.ts": log("log"), "src/lib/step1.ts": step1(11) });
+  commit("Bob", "step 3: louder", { "src/lib/log.ts": log("error"), "src/lib/step1.ts": step1(111) });
+  commit("Ann", "step 4: the store logs", { "src/db/store.ts": 'import { log } from "../lib/log.ts";\nimport type { Order } from "../lib/orders.ts";\n\nconst rows = new Map<string, Order>();\n\nexport function saveOrder(order: Order): void {\n  log("save");\n  rows.set(order.id, order);\n}\n\nexport function readOrder(id: string): Order | null {\n  return rows.get(id) ?? null;\n}\n' });
+}
+
+test("the slider over the commits of a range: the timeline drawn at each commit, played and paused, with churn, coupling and ownership laid over; the review's bar steps the same way", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer("archdiff-page-slider-", commitHistory, async (origin) => {
+    const titled = (text: string): Promise<unknown> => page!.waitForFunction(`(document.querySelector("#title-text")?.textContent ?? "").includes(${JSON.stringify(text)})`, undefined, { timeout: 20_000 });
+    const shapes = (): Promise<Record<string, { diff: string; label: string; tint: string | null; heat: number }>> => page!.evaluate(`Object.fromEntries([...window.archdiff.nodes().values()].map((node) => [node.id, { diff: node.diff ?? "", label: node.label, tint: node.tint ?? null, heat: node.heat ?? 0 }]))`) as Promise<Record<string, { diff: string; label: string; tint: string | null; heat: number }>>;
+    const slider = (): Promise<{ value: string; max: string; picked: string }> => page!.evaluate(`({ value: document.querySelector("#commit-slider").value, max: document.querySelector("#commit-slider").max, picked: document.querySelector("#commit-list").selectedOptions[0]?.textContent ?? "" })`) as Promise<{ value: string; max: string; picked: string }>;
+    const slideTo = (value: number): Promise<unknown> => page!.evaluate(`(() => { const slider = document.querySelector("#commit-slider"); slider.value = "${value}"; slider.dispatchEvent(new Event("input")); slider.dispatchEvent(new Event("change")); })()`);
+
+    await page!.goto(`${origin}/?fresh=slider#view=timeline`);
+    await page!.evaluate("localStorage.clear()");
+    await titled("4 commits");
+    await page!.waitForFunction(`document.querySelectorAll("#commit-list option").length === 5`);
+    // The whole range: the bars, the slider at its left end over the four commits.
+    assert.deepEqual(await slider(), { value: "0", max: "4", picked: `whole range: ${((await page!.evaluate(`document.querySelector("#commit-list option").textContent`)) as string).slice("whole range: ".length)}` });
+    assert.ok(await page!.evaluate(`!document.querySelector("#commits").hidden && !document.querySelector("#edit").disabled`));
+
+    // . steps to the first commit: the map of the code as it was then, the module it added marked; the link says where.
+    await page!.click("#title-text");
+    await page!.keyboard.press(".");
+    await titled("step 1: a module — commit 1 of 4");
+    assert.match((await page!.evaluate("location.hash")) as string, /^#view=timeline&at=[0-9a-f]{40}$/);
+    let drawn = await shapes();
+    assert.equal(drawn["src/lib/step1.ts"]?.diff, "added");
+    assert.equal(drawn["src/lib/log.ts"]?.diff, "");
+    assert.equal((await slider()).value, "1");
+    // The code of a module there is the commit's: step1 returned 1 then. Nothing is drawn on a commit's picture.
+    assert.ok(await page!.evaluate(`document.querySelector("#edit").disabled`));
+    assert.ok(((await (await fetch(`${origin}/api/file?path=src/lib/step1.ts&head=${((await page!.evaluate("location.hash")) as string).slice(-40)}`)).text()).includes("return 1;")));
+
+    // The slider let go on the third commit; then › to the fourth, a commit not seen before, in under a second.
+    await slideTo(3);
+    await titled("step 3: louder — commit 3 of 4");
+    drawn = await shapes();
+    assert.deepEqual([drawn["src/lib/log.ts"]?.diff, drawn["src/lib/step1.ts"]?.diff, drawn["src/db/store.ts"]?.diff], ["changed", "changed", ""]);
+    const started = Date.now();
+    await page!.click("#commit-next");
+    await titled("step 4: the store logs — commit 4 of 4");
+    const took = Date.now() - started;
+    assert.ok(took < 1000, `a step of the slider took ${took} ms`);
+    assert.equal((await shapes())["src/db/store.ts"]?.diff, "changed");
+    await page!.click("#commit-next");
+    await page!.waitForFunction(`document.querySelector("#reason").textContent === "the last commit of the range"`);
+
+    // The overlays read from git, from the range up to the commit shown: churn shades, coupling joins, ownership names and tints.
+    await page!.click("#git-overlays button[data-overlay='churn']");
+    await page!.waitForFunction(`location.hash.includes("overlay=churn") && [...window.archdiff.nodes().values()].some((node) => node.label.includes("3 changes"))`, undefined, { timeout: 20_000 });
+    drawn = await shapes();
+    assert.ok(drawn["src/lib/step1.ts"]!.heat === 1 && drawn["src/lib/log.ts"]!.heat > 0.6 && drawn["src/lib/orders.ts"]!.heat === 0, JSON.stringify(drawn));
+    await page!.click("#git-overlays button[data-overlay='coupling']");
+    await page!.waitForFunction(`window.archdiff.canvas().scene().some((element) => element.customData?.archdiff === "edge" && element.customData.kind === "cochange")`, undefined, { timeout: 20_000 });
+    assert.deepEqual(await page!.evaluate(`window.archdiff.canvas().scene().filter((element) => element.customData?.kind === "cochange").map((element) => [element.customData.from, element.customData.to, element.strokeStyle, element.endArrowhead])`), [["src/lib/log.ts", "src/lib/step1.ts", "dashed", null]]);
+    await page!.click("#git-overlays button[data-overlay='ownership']");
+    await page!.waitForFunction(`[...window.archdiff.nodes().values()].some((node) => node.label.includes("◉ Bob"))`, undefined, { timeout: 20_000 });
+    drawn = await shapes();
+    assert.ok(drawn["src/lib/log.ts"]!.label.endsWith("◉ Bob 67%") && drawn["src/lib/orders.ts"]!.label.endsWith("◉ Ann"), JSON.stringify(drawn));
+    assert.ok(drawn["src/lib/log.ts"]!.tint !== null && drawn["src/lib/log.ts"]!.tint !== drawn["src/lib/orders.ts"]!.tint);
+    assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#git-overlays button.active")].map((button) => button.dataset.overlay)`), ["churn", "coupling", "ownership"]);
+    assert.ok((await page!.evaluate(`[...document.querySelectorAll("#options .overlay:checked")].map((box) => box.value)`) as string[]).includes("coupling"));
+    // The legend names the new line; the line's page says how often, and that an import joins the two.
+    assert.ok(((await page!.textContent("#legend")) ?? "").includes("changed together"));
+
+    // Play from the whole range, fast: the commits follow by themselves to the last, where the play ends; the pace is remembered.
+    await page!.evaluate(`location.hash = "view=timeline"`);
+    await titled("4 commits");
+    await page!.selectOption("#commit-speed", "fast");
+    assert.equal(await page!.evaluate(`localStorage.getItem("archdiff.slider.speed")`), "fast");
+    await page!.click("#title-text");
+    await page!.keyboard.press("k");
+    await titled("commit 1 of 4");
+    assert.equal(await page!.textContent("#commit-play"), "⏸");
+    await titled("commit 4 of 4");
+    await page!.waitForFunction(`document.querySelector("#commit-play").textContent === "▶"`, undefined, { timeout: 5000 });
+    // Played again and paused on the way: the picture stays at the commit it was paused on.
+    await page!.click("#commit-play");
+    await titled("commit 1 of 4");
+    await page!.keyboard.press("k");
+    assert.equal(await page!.textContent("#commit-play"), "▶");
+    await page!.waitForTimeout(1500);
+    assert.equal((await slider()).value, "1");
+
+    // The review's bar has the same slider: a commit is its own change against the one before it; , steps back.
+    await page!.evaluate(`location.hash = "view=review"`);
+    await page!.waitForFunction(`window.archdiff.drawn() === "review" && document.querySelectorAll("#commit-list option").length === 5`, undefined, { timeout: 20_000 });
+    await slideTo(2);
+    await page!.waitForFunction(`document.querySelector("#commit-list").selectedOptions[0]?.textContent.endsWith("step 2: the log counts") && /— 2 source files changed$/.test(document.querySelector("#title-text")?.textContent ?? "")`, undefined, { timeout: 20_000 });
+    assert.equal((await slider()).value, "2");
+    assert.equal(await page!.textContent("#commit-note"), "commit 2 of 4 · this commit against the one before it");
+    await page!.click("#title-text");
+    await page!.keyboard.press(",");
+    await page!.waitForFunction(`document.querySelector("#commit-list").selectedOptions[0]?.textContent.endsWith("step 1: a module")`, undefined, { timeout: 20_000 });
+    await page!.keyboard.press("k");
+    await page!.waitForFunction(`document.querySelector("#commit-list").selectedOptions[0]?.textContent.endsWith("step 4: the store logs") && document.querySelector("#commit-play").textContent === "▶"`, undefined, { timeout: 20_000 });
+    await page!.evaluate("localStorage.clear()");
+  }));
+
+test("a guided tour is recorded step by step — the picture, its options, its selection, a note — played with . and , and opened by a link that names the tour and the step alone", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-tours-",
+    () => undefined,
+    async (origin, dir) => {
+      const file = join(dir, ".archdiff/tours/intro.json");
+      const kept = (): { title: string; steps: { link: string; select: string[]; note: string }[] } => JSON.parse(readFileSync(file, "utf8")) as { title: string; steps: { link: string; select: string[]; note: string }[] };
+      const drawn = (view: string): Promise<unknown> => page!.waitForFunction(`window.archdiff.drawn() === ${JSON.stringify(view)}`, undefined, { timeout: 20_000 });
+      const hash = (): Promise<string> => page!.evaluate("location.hash") as Promise<string>;
+      const module = "module:src/lib/orders.ts";
+      await page!.goto(`${origin}/?fresh=tours#view=layers`);
+      await page!.evaluate("localStorage.clear()");
+      await drawn("layers");
+      assert.ok(await page!.evaluate(`document.querySelector("#tour").hidden`));
+
+      // The menu of the header: no tour yet; a name starts the recording of one, and the bar says how.
+      await page!.click("#tours-menu summary");
+      await page!.waitForFunction(`document.querySelector("#tours-note").textContent === "no tours yet in .archdiff/tours/"`);
+      await page!.fill("#tour-name", "not a name!");
+      await page!.press("#tour-name", "Enter");
+      await page!.waitForFunction(`document.querySelector("#tours-note").textContent.startsWith("a name of letters")`);
+      await page!.fill("#tour-name", "intro");
+      await page!.press("#tour-name", "Enter");
+      await page!.waitForFunction(`location.hash === "#view=layers&tour=intro" && !document.querySelector("#tour").hidden && !document.querySelector("#tours-menu").open`);
+      await page!.waitForFunction(`document.querySelector("#tour-state").textContent.startsWith("recording: add step keeps the picture shown")`);
+      assert.equal(await page!.textContent("#tour-title"), "intro");
+
+      // The first step: the layers as shown, under a note in Markdown.
+      await page!.click("#tour-add");
+      await page!.fill("#tour-text", "The **layers** of the sample.");
+      await page!.click("#tour-keep");
+      await page!.waitForFunction(`location.hash === "#view=layers&tour=intro&step=1" && document.querySelector("#tour-note strong")?.textContent === "layers"`, undefined, { timeout: 10_000 });
+      assert.deepEqual(kept().steps, [{ link: "view=layers", select: [], note: "The **layers** of the sample." }]);
+
+      // On to a module, with an overlay and a shape picked: the tour stays in the link, and the bar says the picture left the step.
+      await page!.click(`#views li[title='${module}']`);
+      await drawn(module);
+      await page!.waitForFunction(`document.querySelector("#tour-state").textContent === "away from step 1: ‹ › or the list lead back"`);
+      await page!.evaluate(`document.querySelector("#options .overlay[value='storages']").click()`);
+      await page!.waitForFunction(`location.hash.includes("overlay=storages") && [...window.archdiff.nodes().values()].some((node) => node.label.includes("⛁"))`, undefined, { timeout: 20_000 });
+      await page!.waitForTimeout(600);
+      const store = await screenPointOf("src/db/store.ts");
+      await page!.mouse.click(store.x, store.y);
+      await page!.waitForFunction(`window.archdiff.selected().join() === "src/db/store.ts"`);
+      await page!.click("#tour-add");
+      await page!.fill("#tour-text", "The orders **write** to the store.\n\nIt holds the file system.");
+      await page!.press("#tour-text", "Control+Enter");
+      await page!.waitForFunction(`location.hash.endsWith("&tour=intro&step=2") && document.querySelector("#tour-note strong")?.textContent === "write"`, undefined, { timeout: 10_000 });
+      assert.deepEqual(kept().steps[1], { link: `view=${encodeURIComponent(module)}&overlay=storages`, select: ["src/db/store.ts"], note: "The orders **write** to the store.\n\nIt holds the file system." });
+      // The step kept is the step shown: its selection is back once the picture is drawn again, and the list names both.
+      await page!.waitForFunction(`window.archdiff.selected().join() === "src/db/store.ts"`, undefined, { timeout: 10_000 });
+      assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#tour-steps option")].map((option) => option.textContent)`), ["1 of 2 · The layers of the sample.", "2 of 2 · The orders write to the store."]);
+      assert.equal(await page!.textContent("#tour-state"), "");
+
+      // , and . walk the tour: each step its picture, its options, its selection, its note.
+      await page!.click("#title-text");
+      await page!.keyboard.press(",");
+      await drawn("layers");
+      assert.equal(await hash(), "#view=layers&tour=intro&step=1");
+      await page!.waitForFunction(`document.querySelector("#tour-note strong")?.textContent === "layers" && document.querySelector("#tour-prev").disabled`);
+      await page!.keyboard.press(".");
+      await drawn(module);
+      await page!.waitForFunction(`window.archdiff.selected().join() === "src/db/store.ts" && window.archdiff.state().overlays.join() === "storages"`, undefined, { timeout: 10_000 });
+      await page!.keyboard.press(".");
+      await page!.waitForFunction(`document.querySelector("#reason").textContent === "the last step of the tour"`);
+
+      // A second picture beside this one is a picture alone: the tour stays the first pane's (the pane goes with the next address).
+      await page!.keyboard.press("s");
+      const pane = await (await page!.waitForSelector("#split-frame"))!.contentFrame();
+      await pane!.waitForFunction(`window.archdiff?.drawn() === ${JSON.stringify(module)}`, undefined, { timeout: 20_000 });
+      assert.ok(await pane!.evaluate(`document.querySelector("#tour").hidden && location.hash.includes("tour=intro")`));
+      await page!.keyboard.press("s");
+      await page!.waitForFunction(`document.querySelector("#split").hidden`);
+
+      // The link that is shared names the tour and the step alone; it opens the step whatever this browser remembers as its defaults.
+      await page!.evaluate(`localStorage.setItem("archdiff.defaults.v2", "overlay=tests")`);
+      await page!.goto(`${origin}/?fresh=shared#tour=intro&step=2`);
+      await drawn(module);
+      assert.equal(await hash(), `#view=${encodeURIComponent(module)}&overlay=storages&tour=intro&step=2`);
+      await page!.waitForFunction(`window.archdiff.selected().join() === "src/db/store.ts" && document.querySelector("#tour-note strong")?.textContent === "write"`, undefined, { timeout: 10_000 });
+      assert.deepEqual(await page!.evaluate("window.archdiff.state().overlays"), ["storages"]);
+      await page!.selectOption("#tour-steps", "1");
+      await drawn("layers");
+      assert.deepEqual(await page!.evaluate("window.archdiff.state().overlays"), []);
+      assert.ok(!(await page!.evaluate(`[...window.archdiff.nodes().values()].some((node) => node.label.includes("no tests"))`)));
+
+      // A note rewritten; the link to the step copied; a step taken out; the tour in the menu, played from its first step.
+      await page!.click("#tour-edit");
+      assert.equal(await page!.inputValue("#tour-text"), "The **layers** of the sample.");
+      await page!.fill("#tour-text", "Four layers, _routes_ on top.");
+      await page!.click("#tour-keep");
+      await page!.waitForFunction(`document.querySelector("#tour-note em")?.textContent === "routes"`, undefined, { timeout: 10_000 });
+      assert.equal(kept().steps[0]!.note, "Four layers, _routes_ on top.");
+      await page!.click("#tour-link");
+      await page!.waitForFunction(`document.querySelector("#reason").textContent === "the link to step 1 is copied: tour=intro&step=1"`);
+      await page!.selectOption("#tour-steps", "2");
+      await drawn(module);
+      await page!.click("#tour-remove");
+      await drawn("layers");
+      assert.equal(kept().steps.length, 1);
+      await page!.click("#tours-menu summary");
+      await page!.waitForFunction(`document.querySelector("#tours-list .play")?.textContent === "▶ intro · 1 step"`);
+      await page!.click("#tours-list .play");
+      await page!.waitForFunction(`location.hash === "#view=layers&tour=intro&step=1" && !document.querySelector("#tours-menu").open`, undefined, { timeout: 10_000 });
+
+      // Leaving the tour keeps the picture: the link says the same without it, against this browser's defaults again.
+      await page!.click("#tour-end");
+      await page!.waitForFunction(`document.querySelector("#tour").hidden && location.hash === "#view=layers&overlay=none"`);
+      assert.deepEqual(await page!.evaluate("window.archdiff.state().overlays"), []);
+      await page!.evaluate("localStorage.clear()");
+    },
+  ));

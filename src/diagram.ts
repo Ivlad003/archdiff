@@ -43,6 +43,8 @@ export interface Shape {
   kind: "layer" | "module" | "fn" | "external" | "hole" | "start" | "more" | "participant" | "anchor" | "event" | "cell" | "package" | "class" | "state" | "machine" | "fragment" | "decision" | "action" | "end";
   /** How hot the shape is, 0–1 (a hotspot's calls in, a matrix cell's count): the fill darkens with it. */
   heat?: number;
+  /** A fill of the shape's own, over its kind's and its heat: the colour of its main author under the ownership overlay. */
+  tint?: string;
   label: string;
   /** The code the shape stands for: the ID of a declaration or a module (never a view's key), and where it is written. */
   ref?: { id?: string; file?: string; line?: number; endLine?: number };
@@ -91,9 +93,10 @@ export interface Line {
   /**
    * `dependency`: an import; `call`: a resolved call; `ref`: a function passed as a value (may be called);
    * `message`: one call of a sequence view, in order; `lifeline`: the dashed line under a participant;
-   * `flow`: the next step of a function's logic, labelled with the branch taken (`yes`, `no`, a case, `each`, `done`).
+   * `flow`: the next step of a function's logic, labelled with the branch taken (`yes`, `no`, a case, `each`, `done`);
+   * `cochange`: two files the commits of a range changed together (the coupling overlay), dashed, without a direction.
    */
-  kind: "dependency" | "call" | "ref" | "message" | "lifeline" | "flow";
+  kind: "dependency" | "call" | "ref" | "message" | "lifeline" | "flow" | "cochange";
   label?: string;
   /** The line's own bends, scene coordinates, when the view placed it (a sequence): exports draw these instead of routing. */
   route?: { x: number; y: number }[];
@@ -303,6 +306,60 @@ export interface MapLine {
   typeOnly?: true;
 }
 
+// The board of the uncommitted changes (board.ts), as the page reads it for its walk.
+
+/** How a change marks a module of the board. */
+export type BoardMark = "added" | "removed" | "changed";
+
+/** What was added, removed and changed of one kind of thing. */
+export interface Counts {
+  added: number;
+  removed: number;
+  changed: number;
+}
+
+/** One changed module of a group. */
+export interface BoardModule {
+  id: string;
+  mark: BoardMark;
+  /** Its declarations the change added, removed and changed. */
+  functions: Counts;
+  /** A function execution starts from is written in it. */
+  entry: boolean;
+  /** How many imports or calls it is from the nearest entry point; null when none leads to it. */
+  rank: number | null;
+}
+
+/** The changed modules of one directory of one layer, counted. */
+export interface BoardGroup {
+  /** `<layer>:<directory>`, the directory `.` at the root: the subject of the group's view. */
+  id: string;
+  /** The view of the group's own picture (`changes:<id>`). */
+  key: string;
+  layer: string;
+  /** The directory, without a trailing slash; empty at the root. */
+  directory: string;
+  /** `lib · src/lib/`. */
+  label: string;
+  /** Its changed modules in reading order. */
+  modules: BoardModule[];
+  functions: Counts;
+  /** The imports and the calls the change added and removed with an end in the group. */
+  imports: { added: number; removed: number };
+  calls: { added: number; removed: number };
+}
+
+/** The board: the groups in the order a reviewer reads them. */
+export interface Board {
+  /** What the working tree is compared against, as a reader names it (`HEAD`, a short commit). */
+  base: string;
+  groups: BoardGroup[];
+  /** The source files that changed. */
+  files: number;
+  /** The other files that changed (a README, a package.json), each with git's letter for what happened to it. */
+  others: { status: string; path: string }[];
+}
+
 /** The coupling and cohesion of one module (metrics.ts): Martin's Ca, Ce, I, A and D, and the cohesion of its functions. */
 export interface ModuleMetrics {
   id: string;
@@ -402,7 +459,8 @@ function rankNodes(diagram: Diagram, index: ReadonlyMap<string, number>): Ranked
   const indegree = new Map<string, number>();
 
   for (const edge of diagram.edges) {
-    if (!index.has(edge.from) || !index.has(edge.to) || edge.from === edge.to) continue;
+    // Two files changed together say nothing of which comes first: their line is drawn, the layout stays the code's.
+    if (!index.has(edge.from) || !index.has(edge.to) || edge.from === edge.to || edge.kind === "cochange") continue;
     out.set(edge.from, [...(out.get(edge.from) ?? []), edge.to]);
     indegree.set(edge.to, (indegree.get(edge.to) ?? 0) + 1);
   }
@@ -689,7 +747,7 @@ function lanesAsColumns(diagram: Diagram, laneOf: (node: Shape) => number): Diag
     const from = index.get(edge.from);
     const to = index.get(edge.to);
 
-    if (!from || !to) continue;
+    if (!from || !to || edge.kind === "cochange") continue;
     const a = String(laneOf(from));
     const b = String(laneOf(to));
 

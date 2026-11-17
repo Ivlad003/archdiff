@@ -67,6 +67,15 @@ The system SHALL list, commit by commit between a base and a head, the modules, 
 - **WHEN** a commit adds the first import from `routes` to `db`
 - **THEN** that commit's row names `+routes→db` and its bar in the timeline is red
 
+### Requirement: The timeline is drawn at any commit of its range
+
+The system SHALL draw the `timeline` view, with `--at SHA` (`at=` in the API and the page's link), as the code at that commit: every module in its layer with every import, in the whole map's order whatever the commit changed, the modules the commit added and those with a declaration it added, removed or changed marked, the imports it added marked, and the modules and imports it removed drawn where they were; titled by the commit and its place in the range, its Markdown the commit's own change with a flowchart of the map, its stamp the commit's. A module's page and file there SHALL be the commit's. No saved drawing SHALL be laid over it. A commit git does not know SHALL be refused by name. The commit's own change SHALL be kept per commit and configuration, so that a commit asked for again, and the parent of the next one, are not analysed again.
+
+#### Scenario: The second commit of four
+
+- **WHEN** `archdiff diagram timeline --at <sha>` runs for the commit that made `log.ts` import `step1.ts`
+- **THEN** the title ends "— commit 2 of 4", `log.ts` and `step1.ts` carry the changed mark, the import between them is added, and an import a later commit made is not in the picture
+
 ### Requirement: The branches and one commit are pictures
 
 The system SHALL draw the branches as the `branches` view: a lane per branch with commits of its own, the base's lane on top (develop, main or master unless a base is named), its last commits from left to right; each branch SHALL leave the commit it forked from — on the base, or the newest commit of a branch it was started on — and its lane SHALL say how many commits it is ahead and behind the base; a branch with nothing of its own SHALL be named on the commit it points at. Every commit SHALL open `commit:<sha>`: the review of the commit against its first parent (the empty tree for a first commit), headed and stamped by the commit. A commit git does not know SHALL be refused by name.
@@ -80,6 +89,25 @@ The system SHALL draw the branches as the `branches` view: a lane per branch wit
 
 - **WHEN** a reader opens `commit:<sha>` of the commit that added `src/lib/extra.ts`
 - **THEN** the Markdown starts with "# Architecture changes of commit <short>: <subject>" and lists the module added, and the export's stamp names that commit
+
+### Requirement: The uncommitted changes are a board
+
+The system SHALL draw, as the `changes` view, what the working tree changes against the last commit (against the empty tree before the first commit; outside git it SHALL be refused with git's words): every module the change added, removed or edited — one whose declarations it did not touch too — in the group of its layer and its directory, each group a lane labelled with the modules, functions, imports and calls the change added, removed and changed in it, the imports it added and removed marked, and the modules at their other ends drawn unmarked for context. The groups SHALL be in reading order: by how many imports or calls their nearest module is from an entry point (the head's; the base's for a module the change removed), then the layers with the importers first, then the directory. `changes:<layer>:<dir>` SHALL draw one group: a lane per changed module holding the module and the declarations the change added, changed and removed in it, the imports and calls added and removed with an end in the group (a call to or from a module outside it landing on that module, labelled with the function), and the unchanged calls among the declarations drawn; its Markdown SHALL say where the group stands in the walk, list its changes by kind and end with the diff of its files as text (a file not tracked yet as all of its lines added, a long diff cut with the count of the lines left out). The board's Markdown SHALL list the walk and the files changed that are no source. A group the working tree does not change SHALL be an empty picture that says so, not an error. The API's picture SHALL carry `board`, the groups in order with their modules.
+
+#### Scenario: A route and the library it calls
+
+- **WHEN** the working tree adds a `loader` to `src/routes/checkout.tsx` and a module `src/lib/audit.ts` that `src/lib/orders.ts` now calls
+- **THEN** `archdiff diagram changes` lists the walk as "1. routes · src/routes/" then "2. lib · src/lib/", draws a lane per group with `checkout.tsx` and `orders.ts` changed and `audit.ts` added, and `archdiff diagram changes:lib:src/lib` draws `placeOrder` calling `audit` in green and ends with the diff of both files
+
+#### Scenario: Before the first commit
+
+- **WHEN** `archdiff diagram changes` runs in a repository with no commit
+- **THEN** the page is headed "Uncommitted changes against an empty repository" and every module is added
+
+#### Scenario: Nothing changed
+
+- **WHEN** the working tree is as the last commit has it
+- **THEN** the picture is empty and says "the working tree is as the last commit (<short>) has it: nothing to walk"
 
 ### Requirement: A GitHub Action posts the review
 

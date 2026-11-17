@@ -2,7 +2,7 @@
 // options, the analysis cache, the agent, the live-reload listeners, the
 // picture of a request) and the request (URL, body, response, request),
 // plus the ways to answer and to read a picture's request from a query. The handlers live in pictures.ts,
-// agent.ts, git.ts, spec.ts and settings.ts; server.ts builds the context and dispatches by
+// agent.ts, git.ts, spec.ts, settings.ts and tours.ts; server.ts builds the context and dispatches by
 // `METHOD /path`.
 //
 // Entry points: `RouteContext`, `RouteRequest`, `requestOf`, `optionsOf`,
@@ -56,8 +56,8 @@ export interface RouteContext {
 /**
  * The picture a query names: `view=<key>`, the picture's options as
  * options.ts names them, and the refs `base` (else `defaultBase`, the
- * server's `--base`), `head` and `heads=a,b`. A problem names an unknown
- * view or a wrong option.
+ * server's `--base`), `head`, `heads=a,b` and `at` (the commit the timeline
+ * is at). A problem names an unknown view or a wrong option.
  */
 export function requestOf(query: URLSearchParams, defaultBase: string | null): Result<PictureRequest> {
   const view = parseView(query.get("view") ?? "");
@@ -68,7 +68,7 @@ export function requestOf(query: URLSearchParams, defaultBase: string | null): R
   if (!read.ok) return read;
   const heads = (query.get("heads") ?? "").split(",").filter((head) => head !== "");
 
-  return ok({ view, options: read.value.options, refs: { base: query.get("base") || defaultBase, head: query.get("head") || null, heads } });
+  return ok({ view, options: read.value.options, refs: { base: query.get("base") || defaultBase, head: query.get("head") || null, heads, at: query.get("at") || null } });
 }
 
 /** The picture's options as a query names them, or the problem with one of them. */

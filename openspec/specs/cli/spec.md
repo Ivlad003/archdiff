@@ -8,7 +8,7 @@
 
 ### Requirement: The commands
 
-The system SHALL offer `analyze`, `views`, `diagram`, `metrics`, `run`, `apis` (the operations of an external API the code calls with their contracts as used), `postman` (a Postman collection of them, `--family` for one), `drawings` (also called `layouts`, its old name), `flow`, `plan`, `new` (`--no-git`: no repository and no first commit), `import`, `intent`, `check`, `spec` (`--tests [DIR]`: a test skeleton per Gherkin scenario, into `tests/` or `DIR`), `coverage`, `review`, `impact` (the blast radius of a module, a function or, with `--changed`, the files of a change: the impact specification), `whatif` (`move`, `delete` or `split`: the architecture after a change that is not made — the what-if specification), `branches`, `compare`, `history`, `web`, `mcp` (the MCP server of the `mcp` spec, on stdin and stdout until its input ends) and `--version`, as one table of commands from which `--help` is printed (each with its usage, its other names, help and flags); an unknown command, an unknown flag (with "did you mean" when a known flag is near), a missing required argument or an extra positional argument SHALL exit 2 with one plain line.
+The system SHALL offer `analyze`, `views`, `diagram`, `metrics`, `run`, `apis` (the operations of an external API the code calls with their contracts as used), `postman` (a Postman collection of them, `--family` for one), `drawings` (also called `layouts`, its old name), `flow`, `plan`, `new` (`--no-git`: no repository and no first commit), `import`, `intent`, `check`, `spec` (`--tests [DIR]`: a test skeleton per Gherkin scenario, into `tests/` or `DIR`), `coverage`, `review`, `impact` (the blast radius of a module, a function or, with `--changed`, the files of a change: the impact specification), `whatif` (`move`, `delete` or `split`: the architecture after a change that is not made — the what-if specification), `branches`, `compare`, `history`, `tour` (a guided tour as Markdown), `web`, `mcp` (the MCP server of the `mcp` spec, on stdin and stdout until its input ends) and `--version`, as one table of commands from which `--help` is printed (each with its usage, its other names, help and flags); an unknown command, an unknown flag (with "did you mean" when a known flag is near), a missing required argument or an extra positional argument SHALL exit 2 with one plain line.
 
 #### Scenario: An extra argument
 
@@ -33,6 +33,29 @@ The system SHALL draw `diagram <view> --head REF`, for a view that is no change,
 
 - **WHEN** `archdiff diagram modules --head gone` runs on main, where branch `gone` removed `log.ts`
 - **THEN** the map has no `log.ts`, and the stamp names `gone`'s commit
+
+### Requirement: The timeline can be drawn at one commit
+
+The system SHALL draw `diagram timeline --at SHA` as the map of the code at that commit of the range `--base`..`--head` with what the commit did marked, and SHALL exit 2 naming a commit git does not know.
+
+#### Scenario: A commit that is none
+
+- **WHEN** `archdiff diagram timeline --at nope` runs
+- **THEN** it exits 2 with `no commit "nope" (archdiff history lists the commits of the range)`
+
+### Requirement: A guided tour is written as Markdown
+
+The system SHALL write, with `archdiff tour <name> [dir] [--out FILE]`, the tour of that name — `.archdiff/tours/<name>.json`, or `<dir>/<name>.json` when archdiff.json names `"tours": "<dir>"` (a directory of the repository written from its root; one that leaves it SHALL be refused naming the field) — as Markdown: its title, then every step with the title of its picture, its note, the picture as Mermaid drawn with the options and at the revisions the step's link names (the options it leaves out the built-in ones), the shapes it selects by their labels, and its link; a step whose picture cannot be drawn SHALL say so in its place without failing the command. Without a name, with a name no tour has, or with a file that does not read as a tour (what is wrong in it named), it SHALL exit 2; the first two SHALL list the tours there are.
+
+#### Scenario: A tour of two steps
+
+- **WHEN** `.archdiff/tours/intro.json` holds a step on `layers` selecting `lib` and one on `module:src/lib/orders.ts` with `overlay=storages`, and `archdiff tour intro` runs
+- **THEN** the Markdown has "## 1. Layers" with its note, a Mermaid block and "Picked: **lib**.", then "## 2. src/lib/orders.ts" whose picture labels the store "⛁ the file system"
+
+#### Scenario: No tour of that name
+
+- **WHEN** `archdiff tour other` runs where only `intro` is kept
+- **THEN** it exits 2 with `tour: no tour "other" (the tours in .archdiff/tours: intro)`
 
 ### Requirement: Exit codes mean one thing
 

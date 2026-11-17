@@ -483,6 +483,8 @@ export function edgeMarkdown(edge: Line, diagram: Diagram, analysis: Analysis): 
   const to = diagram.nodes.find((node) => node.id === edge.to);
 
   if (!from || !to) return `# ${edge.from} → ${edge.to}\n\nThe line's ends are not in this view.\n`;
+  // Two files changed together are joined without a direction, by the commits that changed both.
+  if (edge.kind === "cochange") return `# ${nameOf(from)} ⇄ ${nameOf(to)}\n\n${nameOf(from)} and ${nameOf(to)} changed together in ${counted(edge.count ?? 0, "commit")} of the range the picture reads (the coupling overlay).\n\n${graph.deps.some((dep) => (dep.from === standsFor(from) && dep.to === standsFor(to)) || (dep.from === standsFor(to) && dep.to === standsFor(from))) ? "An import joins them: the code says they belong together." : "No import joins them: they are coupled where the code does not say so."}\n`;
   const lines = [`# ${nameOf(from)} → ${nameOf(to)}`, ""];
   const what = edge.kind === "dependency" ? (edge.loads ? "loads by URL (a worker, a child process, a hook)" : "imports") : edge.kind === "call" ? "calls" : edge.kind === "ref" ? "passes as a value (may call)" : edge.kind === "message" ? `message${edge.label ? ` ${edge.label}` : ""}` : "lifeline";
   lines.push(`${nameOf(from)} ${what} ${nameOf(to)}${edge.count !== undefined && edge.count > 1 ? ` — ${edge.count} lines behind this one` : ""}${edge.diff ? ` (${edge.diff})` : ""}.`, "");

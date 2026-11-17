@@ -384,6 +384,151 @@ test("a module's page in a comparison says what each head did to it", () =>
     },
   ));
 
+test("the board of the uncommitted changes through the API: the groups in reading order, a group's picture and diff, a module's page", () =>
+  withOwnServer(
+    "archdiff-board-api-",
+    (dir) => {
+      const git = (...args: string[]): void => {
+        const result = spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      git("init", "-q", "-b", "main");
+      git("add", ".");
+      git("commit", "-q", "-m", "base");
+      // The working tree: the route reads an order through a loader, the store counts its rows, a new module audits.
+      writeFileSync(join(dir, "src/routes/checkout.tsx"), 'import { OrderService, findOrder } from "@/lib/orders";\n\nexport async function action(request: { total: number }) {\n  const service = new OrderService("web");\n  return service.place(request.total);\n}\n\nexport async function loader(request: { id: string }) {\n  return findOrder(request.id);\n}\n\nexport default function Checkout() {\n  return null;\n}\n');
+      writeFileSync(join(dir, "src/db/audit.ts"), 'import { log } from "../lib/log.ts";\n\nexport function audit(what: string): void {\n  log(`audit ${what}`);\n}\n');
+    },
+    async (origin) => {
+      type BoardAnswer = { board: { base: string; files: number; groups: { id: string; key: string; label: string; modules: { id: string; mark: string; entry: boolean; rank: number | null }[]; functions: { added: number }; imports: { added: number } }[] } | null; markdown: string; change: { kind: string } | null; diagram: { title: string; nodes: { id: string; diff?: string; group?: string }[]; edges: { from: string; to: string; kind: string; diff?: string; label?: string }[] } };
+      const board = (await (await fetch(`${origin}/api/diagram?view=changes`)).json()) as BoardAnswer;
+      // Both are where execution starts as far as the code says (a route, an export nothing calls): the upper layer is read first.
+      assert.deepEqual(board.board?.groups.map((group) => `${group.key} ${group.label}`), ["changes:routes:src/routes routes · src/routes/", "changes:db:src/db db · src/db/"]);
+      assert.deepEqual(board.board?.groups.map((group) => group.modules), [[{ id: "src/routes/checkout.tsx", mark: "changed", functions: { added: 1, removed: 0, changed: 0 }, entry: true, rank: 0 }], [{ id: "src/db/audit.ts", mark: "added", functions: { added: 1, removed: 0, changed: 0 }, entry: true, rank: 0 }]]);
+      assert.match(board.board!.base, /^the last commit \([0-9a-f]{7}\)$/);
+      assert.equal(board.board!.files, 2);
+      assert.equal(board.diagram.title, "Uncommitted changes: 2 modules in 2 groups");
+      assert.equal(board.change?.kind, "review");
+      // The new import goes against the layers (db → lib): the board's page says so first, as a review does.
+      assert.ok(board.markdown.includes("## ⚠ New dependencies between layers\n\n- **db → lib**\n"), board.markdown);
+      assert.ok(board.diagram.edges.some((edge) => edge.from === "src/db/audit.ts" && edge.to === "src/lib/log.ts" && edge.diff === "added"));
+      // A group's own picture: the loader the change added, its call into the library landing on that module, and the diff as text.
+      const group = (await (await fetch(`${origin}/api/scene?view=${encodeURIComponent("changes:routes:src/routes")}`)).json()) as BoardAnswer;
+      assert.equal(group.diagram.title, "Changes in routes · src/routes/ — step 1 of 2");
+      assert.deepEqual(group.diagram.nodes.filter((node) => node.diff).map((node) => `${node.id} ${node.diff}`), ["src/routes/checkout.tsx changed", "src/routes/checkout.tsx#loader added"]);
+      assert.ok(group.diagram.edges.some((edge) => edge.from === "src/routes/checkout.tsx#loader" && edge.to === "src/lib/orders.ts" && edge.kind === "call" && edge.diff === "added" && edge.label === "findOrder()"), JSON.stringify(group.diagram.edges));
+      assert.ok(group.markdown.includes("## The diff\n\n### src/routes/checkout.tsx\n\n````diff\n") && group.markdown.includes("\n+export async function loader(request: { id: string }) {"), group.markdown);
+      assert.equal(group.board?.groups.length, 2);
+      // A module's page on the board says what the change did to it.
+      const shape = (await (await fetch(`${origin}/api/shape?view=changes&id=${encodeURIComponent("src/routes/checkout.tsx")}`)).json()) as { markdown: string };
+      assert.ok(shape.markdown.includes("## In this change\n\n- added fn `loader`"), shape.markdown);
+      // Outside git there is no last commit: the picture is refused with git's words.
+      const outside = await fetch(`${base}/api/scene?view=changes`);
+      assert.equal(outside.status, 400);
+      assert.ok(((await outside.json()) as { error: string }).error.includes("not a git repository"));
+    },
+  ));
+
+/** A branch `feature` off main in `dir`, by two authors: a module added, then changed twice together with the log, then the store reading the log. */
+function commitHistory(dir: string): void {
+  const git = (author: string, ...args: string[]): void => {
+    const result = spawnSync("git", ["-C", dir, "-c", `user.email=${author.toLowerCase()}@example.com`, "-c", `user.name=${author}`, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const commit = (author: string, subject: string, files: Record<string, string>): void => {
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
+    git(author, "add", ".");
+    git(author, "commit", "-q", "-m", subject);
+  };
+  const log = (how: string): string => `import { step1 } from "./step1.ts";\n\nexport function log(message: string): void {\n  console.${how}(message, step1());\n}\n`;
+  const step1 = (value: number): string => `export function step1(): number {\n  return ${value};\n}\n`;
+  git("Ann", "init", "-q", "-b", "main");
+  git("Ann", "add", ".");
+  git("Ann", "commit", "-q", "-m", "base");
+  git("Ann", "checkout", "-q", "-b", "feature");
+  commit("Ann", "step 1: a module", { "src/lib/step1.ts": step1(1) });
+  commit("Bob", "step 2: the log counts", { "src/lib/log.ts": log("log"), "src/lib/step1.ts": step1(11) });
+  commit("Bob", "step 3: louder", { "src/lib/log.ts": log("error"), "src/lib/step1.ts": step1(111) });
+  commit("Ann", "step 4: the store logs", { "src/db/store.ts": 'import { log } from "../lib/log.ts";\nimport type { Order } from "../lib/orders.ts";\n\nconst rows = new Map<string, Order>();\n\nexport function saveOrder(order: Order): void {\n  log("save");\n  rows.set(order.id, order);\n}\n\nexport function readOrder(id: string): Order | null {\n  return rows.get(id) ?? null;\n}\n' });
+}
+
+test("the timeline at a commit through the API: the map of the code then, a module's page and file as the commit has them, the page of a line of two files changed together", () =>
+  withOwnServer("archdiff-slider-api-", commitHistory, async (origin, dir) => {
+    const shas = spawnSync("git", ["-C", dir, "log", "--reverse", "--format=%H", "main..feature"], { encoding: "utf8" }).stdout.trim().split("\n");
+    type Scene = { diagram: { title: string; reason: string; nodes: { id: string; diff?: string; label: string }[]; edges: { from: string; to: string; kind: string }[]; stamp?: { commit: string } }; markdown: string; change: { kind: string } | null; drawn: boolean; error?: string };
+    const scene = async (query: string): Promise<Scene> => (await (await fetch(`${origin}/api/scene?${query}`)).json()) as Scene;
+    const third = await scene(`view=timeline&at=${shas[2]}&overlay=churn,coupling`);
+    assert.match(third.diagram.title, /step 3: louder — commit 3 of 4$/);
+    assert.equal(third.diagram.stamp?.commit, shas[2]!.slice(0, 7));
+    assert.equal(third.change?.kind, "review");
+    assert.ok(third.markdown.startsWith(`<!-- archdiff:generated — commit ${shas[2]!.slice(0, 7)} -->`), third.markdown.slice(0, 80));
+    assert.deepEqual(third.diagram.nodes.filter((node) => node.diff).map((node) => node.id), ["src/lib/log.ts", "src/lib/step1.ts"]);
+    assert.ok(third.diagram.edges.some((edge) => edge.kind === "cochange" && edge.from === "src/lib/log.ts" && edge.to === "src/lib/step1.ts"));
+    // A module's page says what the commit did to it, and reads the module as the commit has it.
+    const logAt = (await (await fetch(`${origin}/api/shape?view=timeline&at=${shas[2]}&id=${encodeURIComponent("src/lib/log.ts")}`)).json()) as { markdown: string };
+    assert.ok(logAt.markdown.includes("## In this change\n\n- changed fn `log` — src/lib/log.ts:3 (body)"), logAt.markdown);
+    const storeAt = (await (await fetch(`${origin}/api/shape?view=timeline&at=${shas[2]}&id=${encodeURIComponent("src/db/store.ts")}`)).json()) as { markdown: string };
+    assert.ok(!storeAt.markdown.includes("src/lib/log.ts"), storeAt.markdown);
+    // The line of the two files changed together has a page of its own.
+    const line = (await (await fetch(`${origin}/api/line?view=timeline&at=${shas[2]}&overlay=coupling&from=${encodeURIComponent("src/lib/log.ts")}&to=${encodeURIComponent("src/lib/step1.ts")}&kind=cochange`)).json()) as { markdown: string };
+    assert.equal(line.markdown, "# src/lib/log.ts ⇄ src/lib/step1.ts\n\nsrc/lib/log.ts and src/lib/step1.ts changed together in 2 commits of the range the picture reads (the coupling overlay).\n\nAn import joins them: the code says they belong together.\n");
+    // A commit git does not know is the request's problem; the whole range is still the bars.
+    const unknown = await fetch(`${origin}/api/scene?view=timeline&at=nope`);
+    assert.equal(unknown.status, 400);
+    assert.ok(((await unknown.json()) as { error: string }).error.includes('no commit "nope"'));
+    assert.match((await scene("view=timeline")).diagram.title, /: 4 commits$/);
+  }));
+
+test("the guided tours through the API: saved whole, listed, read, removed; what is no tour is refused; the directory archdiff.json names", () =>
+  withOwnServer(
+    "archdiff-tours-api-",
+    (dir) => {
+      const config = JSON.parse(readFileSync(join(dir, "archdiff.json"), "utf8")) as Record<string, unknown>;
+      writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ ...config, tours: "docs/tours" }));
+    },
+    async (origin, dir) => {
+      const post = (path: string, body: unknown): Promise<Response> => fetch(`${origin}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      assert.deepEqual(await (await fetch(`${origin}/api/tours`)).json(), { directory: "docs/tours", tours: [] });
+      // A tour is saved whole: its title and steps; a step's link loses the tour's own parameters and its `#`.
+      const steps = [
+        { link: "#view=layers&tour=intro&step=1", select: ["lib"], note: "The **layers**." },
+        { link: "view=module%3Asrc%2Flib%2Forders.ts&overlay=storages", note: "The orders." },
+      ];
+      const saved = (await (await post("/api/tour?name=intro", { title: "How an order is placed", steps })).json()) as { saved: string; tour: { name: string; title: string; steps: unknown[] } };
+      assert.equal(saved.saved, "docs/tours/intro.json");
+      assert.deepEqual(saved.tour.steps, [
+        { link: "view=layers", select: ["lib"], note: "The **layers**." },
+        { link: "view=module%3Asrc%2Flib%2Forders.ts&overlay=storages", select: [], note: "The orders." },
+      ]);
+      const onDisk = JSON.parse(readFileSync(join(dir, "docs/tours/intro.json"), "utf8")) as { format: number; name: string; title: string; steps: unknown[] };
+      assert.deepEqual([onDisk.format, onDisk.name, onDisk.title, onDisk.steps.length], [1, "intro", "How an order is placed", 2]);
+      assert.deepEqual(await (await fetch(`${origin}/api/tours`)).json(), { directory: "docs/tours", tours: [{ name: "intro", title: "How an order is placed", steps: 2 }] });
+      assert.equal(((await (await fetch(`${origin}/api/tour?name=intro`)).json()) as { title: string }).title, "How an order is placed");
+      // What is no tour is refused, each with its reason, and nothing is written.
+      const refused = async (path: string, body: unknown): Promise<string> => {
+        const response = await post(path, body);
+        assert.equal(response.status, 400, path);
+
+        return ((await response.json()) as { error: string }).error;
+      };
+      assert.ok((await refused("/api/tour?name=..%2Fescape", { steps: [] })).includes("is no name of a tour"));
+      assert.equal(await refused("/api/tour?name=bad", { steps: [{ link: "view=nope" }] }), "tour: the link of step 1 names no view (view=<key>)");
+      assert.equal(await refused("/api/tour?name=bad", { steps: [{ link: "view=layers", select: "lib" }] }), 'tour: "select" of step 1 must be a list of shape IDs');
+      assert.ok(!existsSync(join(dir, "docs/tours/bad.json")) && !existsSync(join(dir, "docs/escape.json")));
+      assert.equal((await fetch(`${origin}/api/tour?name=bad`)).status, 404);
+      // A file written by hand that does not read as a tour says what is wrong in it, and is not listed.
+      writeFileSync(join(dir, "docs/tours/broken.json"), JSON.stringify({ format: 1, steps: [{ link: "view=layers" }, { note: "no link" }] }));
+      const broken = await fetch(`${origin}/api/tour?name=broken`);
+      assert.equal(broken.status, 400);
+      assert.equal(((await broken.json()) as { error: string }).error, 'docs/tours/broken.json does not read as a tour: step 2 needs a "link" (a view\'s link with its options)');
+      assert.equal(((await (await fetch(`${origin}/api/tours`)).json()) as { tours: unknown[] }).tours.length, 1);
+      // Removed: its file goes; a second time there is none.
+      assert.deepEqual(await (await post("/api/tour/delete?name=intro", {})).json(), { removed: "intro" });
+      assert.ok(!existsSync(join(dir, "docs/tours/intro.json")));
+      assert.equal((await post("/api/tour/delete?name=intro", {})).status, 404);
+    },
+  ));
+
 test("chat tags are suggested and expanded into context; mocks come from the types when the agent gives no JSON", async () => {
   const tags = await getJson<{ tags: { tag: string; title: string }[] }>("/api/tags?q=orders");
   assert.ok(tags.tags.some((tag) => tag.tag === "@module:src/lib/orders.ts"), JSON.stringify(tags.tags.slice(0, 5)));

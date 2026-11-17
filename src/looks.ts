@@ -8,7 +8,8 @@
 // (`lineStroke`); the one scale of heat (`heatColour`). Node-free, in the
 // core beside the vocabularies the page bundles.
 //
-// Entry points: `LOOKS`, `Look`, `lookOf`, `lineStroke`, `heatColour`, `DIFF_STROKE`.
+// Entry points: `LOOKS`, `Look`, `lookOf`, `lineStroke`, `heatColour`, `DIFF_STROKE`,
+// `COCHANGE_STROKE`, `OWNER_TINTS`.
 
 import type { Line, Shape } from "./diagram.ts";
 
@@ -22,6 +23,12 @@ export function heatColour(heat: number): string {
 
 /** The stroke of a shape or a line a change marks: added green, removed red, changed and warned orange, planned blue. */
 export const DIFF_STROKE = { added: "#2e7d32", removed: "#c62828", changed: "#ef6c00", warning: "#ef6c00", planned: "#1565c0" } as const;
+
+/** The stroke of a line between two files changed together (the coupling overlay): a purple no other line wears. */
+export const COCHANGE_STROKE = "#8e24aa";
+
+/** The fills the ownership overlay gives the modules of the authors with the most of them, in order; the rest share the last. */
+export const OWNER_TINTS = ["#bbdefb", "#c8e6c9", "#ffe0b2", "#e1bee7", "#fff9c4", "#b2ebf2", "#f8bbd0", "#d7ccc8", "#eceff1"] as const;
 
 /** How a stroke is drawn: whole, dashed (a removed or a planned shape, a frame), dotted (a folded tail). */
 export type StrokeStyle = "solid" | "dashed" | "dotted";
@@ -63,7 +70,7 @@ export const LOOKS: Record<Shape["kind"], Look> = {
 export function lookOf(node: Shape): Look & { width: number } {
   const look = LOOKS[node.kind];
   // Heat darkens the fill; a diff mark is the stroke, so both show at once.
-  const fill = node.heat !== undefined && node.heat > 0 ? heatColour(node.heat) : look.fill;
+  const fill = node.tint ?? (node.heat !== undefined && node.heat > 0 ? heatColour(node.heat) : look.fill);
   const stroke = node.diff ? DIFF_STROKE[node.diff] : look.stroke;
   const style = node.diff === "removed" || node.diff === "planned" ? "dashed" : look.style;
 
@@ -82,6 +89,8 @@ export function lineStroke(edge: Line): string {
       return "#b0bec5";
     case "flow":
       return "#424242";
+    case "cochange":
+      return COCHANGE_STROKE;
     default:
       return edge.typeOnly ? "#9e9e9e" : "#616161";
   }

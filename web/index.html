@@ -41,6 +41,9 @@
             <label title="Label the modules that hold data: stores, databases, caches"><input type="checkbox" class="overlay" value="storages" /> storages</label>
             <label title="Shade every shape by the calls into it from other modules"><input type="checkbox" class="overlay" value="heat" /> heat: calls in</label>
             <label title="Shade every module by its instability I = Ce / (Ca + Ce); orange when it is unstable and others depend on it"><input type="checkbox" class="overlay" value="instability" /> instability</label>
+            <label title="From git: shade every module by how many commits of the range (base → head) changed its file"><input type="checkbox" class="overlay" value="churn" /> churn: changes per file</label>
+            <label title="From git: a dashed line between two modules the commits of the range changed together at least twice"><input type="checkbox" class="overlay" value="coupling" /> change coupling</label>
+            <label title="From git: name and tint every module for the author of most of the commits that changed its file"><input type="checkbox" class="overlay" value="ownership" /> ownership: the main author</label>
           </fieldset>
           <label title="The Mermaid type of the Markdown and the export">Mermaid
             <select id="mermaid">
@@ -74,6 +77,17 @@
         <button id="shot-svg" title="Download an SVG of the drawing (or of the selected shapes)">SVG</button>
         <button id="exit" title="Back to reading">done</button>
       </span>
+      <details id="tours-menu" class="popover">
+        <summary title="Guided tours: a walk through the pictures step by step, each with a note — play one, or record your own">tours ▾</summary>
+        <div id="tours">
+          <div id="tours-list"></div>
+          <div class="row">
+            <input id="tour-name" type="text" placeholder="a new tour's name" size="16" title="Letters, digits, . - _ : the tour is kept as <name>.json" />
+            <button id="tour-record" title="Record a tour of this name: add step keeps the picture shown, its selection and a note">record</button>
+          </div>
+          <div id="tours-note" class="muted"></div>
+        </div>
+      </details>
       <details id="export-menu" class="popover">
         <summary title="Download the diagram for another tool">export ▾</summary>
         <div id="export"></div>
@@ -109,10 +123,41 @@
           <button id="compare" title="Compare the ticked heads against the base">compare</button>
           <span id="compare-note" class="muted"></span>
         </div>
+        <div id="tour" hidden>
+          <div class="row">
+            <strong id="tour-title" title="The tour being played or recorded; press to give it another title"></strong>
+            <button id="tour-prev" class="icon" title="The previous step of the tour (,)">‹</button>
+            <select id="tour-steps" title="The steps of the tour"></select>
+            <button id="tour-next" class="icon" title="The next step of the tour (.)">›</button>
+            <button id="tour-add" class="small" title="Add a step after this one: the picture shown now with its options, the shapes selected, and a note">+ add step</button>
+            <button id="tour-edit" class="small" title="Rewrite the note of this step">✎ note</button>
+            <button id="tour-remove" class="small" title="Take this step out of the tour">remove</button>
+            <button id="tour-link" class="small" title="Copy the link to this step: tour=&lt;name&gt;&amp;step=N opens its picture with its selection and note">link</button>
+            <span id="tour-state" class="muted"></span>
+            <button id="tour-end" class="icon" title="Leave the tour; the picture stays">✕</button>
+          </div>
+          <div id="tour-note" class="prose"></div>
+          <div id="tour-editor" hidden>
+            <textarea id="tour-text" placeholder="A note for this step, in Markdown: what to look at here, and why (Ctrl+Enter keeps it)"></textarea>
+            <div class="row"><button id="tour-keep">keep the step</button><button id="tour-cancel">cancel</button></div>
+          </div>
+        </div>
+        <div id="board" hidden>
+          <button id="board-prev" class="icon" title="The previous step of the walk (,)">‹</button>
+          <select id="board-steps" title="The walk through the uncommitted changes: the whole board, then each group of changed modules in the order a reviewer reads them — the entry points first, then what they import and call"></select>
+          <button id="board-next" class="icon" title="The next step of the walk: the group's own picture, its diff on the Markdown tab (.)">›</button>
+          <span id="board-note" class="muted"></span>
+        </div>
         <div id="commits" hidden>
-          <button id="commit-prev" class="icon" title="The previous commit of the branch">‹</button>
-          <select id="commit-list" title="The commits from the base to the head, oldest first; pick one to review it against the previous"></select>
-          <button id="commit-next" class="icon" title="The next commit of the branch">›</button>
+          <button id="commit-prev" class="icon" title="The previous commit of the range (,)">‹</button>
+          <select id="commit-list" title="The commits from the base to the head, oldest first; pick one: on a review its own change against the one before it, on the timeline the code as it was then"></select>
+          <button id="commit-next" class="icon" title="The next commit of the range (.)">›</button>
+          <button id="commit-play" class="icon">▶</button>
+          <input id="commit-slider" type="range" min="0" max="0" step="1" value="0" title="The commits of the range, the oldest on the left; the left end is the whole range. Let go on a commit and the picture is drawn again at it" />
+          <select id="commit-speed" title="How long each commit stays while playing"></select>
+          <span id="git-overlays" class="group" title="Laid over the picture, read from the commits of the range up to the commit shown (the options hold them too)">
+            <button data-overlay="churn" title="Churn: every module shaded by how many commits of the range changed its file">churn</button><button data-overlay="coupling" title="Change coupling: a dashed line between two modules the commits of the range changed together at least twice">coupling</button><button data-overlay="ownership" title="Ownership: every module named and tinted for the author of most of the commits that changed it">owners</button>
+          </span>
           <span id="commit-note" class="muted"></span>
         </div>
         <div id="canvas-wrap">

@@ -7,7 +7,7 @@
 // returns no file outside the repository.
 //
 // The routes live in routes/*.ts by `METHOD /path` — the pictures, the
-// agent and the contract, git's bars, the specs, the user's settings — over one context; every
+// agent and the contract, git's bars, the specs, the user's settings, the guided tours — over one context; every
 // picture is the one picture.ts draws for the query. Entry points:
 // `serve`, `ServeOptions`, `DEFAULT_PORT`.
 
@@ -32,6 +32,7 @@ import { routes as agentRoutes } from "./routes/agent.ts";
 import { routes as gitRoutes } from "./routes/git.ts";
 import { routes as specRoutes } from "./routes/spec.ts";
 import { routes as settingsRoutes } from "./routes/settings.ts";
+import { routes as toursRoutes } from "./routes/tours.ts";
 import { agentSpecs, NO_SETTINGS, readSettings } from "./settings.ts";
 
 export interface ServeOptions {
@@ -190,9 +191,13 @@ function changeChannel(invalidate: () => void): { listeners: Set<ServerResponse>
   };
 }
 
+/** Where git writes a line whenever HEAD moves, in a checkout whose `.git` is a directory. */
+const HEAD_LOG = ".git/logs/HEAD";
+
 /**
  * Watches the repository for a changed source file of any language archdiff reads (the cache, the drawings, git and
- * node_modules change for other reasons); the problem when it cannot, else null. A plain watch of the root goes
+ * node_modules change for other reasons), and for the checkout moving (a commit: the board of the uncommitted
+ * changes empties); the problem when it cannot, else null. A plain watch of the root goes
  * first, as a probe: Node's recursive watch on Linux gives neither events nor an error once the system's file
  * watchers are used up (ENOSPC), where a plain one throws.
  */
@@ -201,6 +206,9 @@ function watchSources(root: string, onChange: (path: string) => void): string | 
     watchFs(root).close();
     watchFs(root, { recursive: true }, (_event, name) => {
       const path = typeof name === "string" ? name.split("\\").join("/") : "";
+
+      // The checkout moved — a commit, a switch of branch, a reset: what the working tree changes against it is another change.
+      if (path === HEAD_LOG) return onChange("the last commit (HEAD)");
 
       if (path === "" || path.startsWith(".archdiff/") || path.startsWith(".git/") || path.includes("node_modules/") || !isSourceFile(path)) return;
       onChange(path);
@@ -247,7 +255,7 @@ async function pictureOf(query: URLSearchParams, defaultBase: string | null, ana
 }
 
 /** Every route of the API by `METHOD /path`. */
-const ROUTES = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes, ...settingsRoutes };
+const ROUTES = { ...pictureRoutes, ...agentRoutes, ...gitRoutes, ...specRoutes, ...settingsRoutes, ...toursRoutes };
 
 /** Answers one request: an API route by its method and path, else a static file of the page. */
 async function handle(ctx: RouteContext, web: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -344,7 +352,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   const at = analysesAt(root, analyses.fresh);
   // A picture of the code is drawn on the analysis of its head; a change reads its revisions itself (picture.ts).
   const pictureAnalysis = (query: URLSearchParams): Promise<Analysis> => (drawnAtHead(parseView(query.get("view") ?? "layers")?.kind) ? at(query.get("head") || null) : analyses.fresh());
-  const analysisFor = (query: URLSearchParams): Promise<Analysis> => at(codeRevision(parseView(query.get("view") ?? "layers"), query.get("head") || null));
+  const analysisFor = (query: URLSearchParams): Promise<Analysis> => at(codeRevision(parseView(query.get("view") ?? "layers"), query.get("head") || null, query.get("at") || null));
   const changes = changeChannel(analyses.invalidate);
 
   // Whether the page follows the code, and why not when it was asked to (`--no-watch` is no problem).

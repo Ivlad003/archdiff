@@ -45,14 +45,14 @@ export interface Step {
 /** More lanes than this on a map of modules (the whole map, a layer, a directory), and `auto` lays them as columns. */
 const COLUMNS_ABOVE = 6;
 
-/** The pictures the review's diff is laid over as marks: a picture of the code with a diff read for it — not a change (a timeline, a review, a comparison), which carries its own. */
+/** The pictures the review's diff is laid over as marks: a picture of the code with a diff read for it — not a change (a timeline, a review, a comparison, the uncommitted changes), which carries its own. */
 function overlaysMarks({ reads, view }: StepContext): boolean {
-  return reads.diff !== undefined && view.kind !== "timeline" && view.kind !== "review" && view.kind !== "compare";
+  return reads.diff !== undefined && view.kind !== "timeline" && view.kind !== "review" && view.kind !== "compare" && view.kind !== "changes";
 }
 
 /** The pictures whose shapes carry a review's marks: the review's own marks (a what-if's are of the same kind), or those `changes` laid over the picture. */
 function marked(ctx: StepContext): boolean {
-  return overlaysMarks(ctx) || ctx.view.kind === "review" || ctx.view.kind === "compare" || ctx.view.kind === "whatif";
+  return overlaysMarks(ctx) || ctx.view.kind === "review" || ctx.view.kind === "compare" || ctx.view.kind === "whatif" || ctx.view.kind === "changes";
 }
 
 /** The pictures the changed files cannot be told apart in: a grid or a chart placed by its view, a flowchart, a change of several revisions. */
@@ -83,7 +83,7 @@ export const STEPS: readonly Step[] = [
   { name: "question", applies: (_ctx, diagram) => !diagram.question, run: (diagram, { view }) => ({ ...diagram, question: questionOf(view.kind) }) },
   { name: "fold", applies: (_ctx, diagram) => !diagram.placed && !diagram.classes && !diagram.logic, run: (diagram, { options, view }) => fold(diagram, options.limit ?? foldLimit(view.kind)) },
   { name: "light lines", applies: ({ options }) => (options.weight ?? 1) > 1, run: (diagram, { options }) => dropLightLines(diagram, options.weight ?? 1) },
-  { name: "overlays", applies: ({ options }) => options.overlays.length > 0, run: (diagram, { analysis, options }) => applyOverlays(diagram, analysis, options.overlays) },
+  { name: "overlays", applies: ({ options }) => options.overlays.length > 0, run: (diagram, { analysis, options, reads }) => applyOverlays(diagram, analysis, options.overlays, reads.git) },
   // Rows or columns, said once, here: `layout` lays the lanes as the picture says and writes back what it could do.
   { name: "lane mode", applies: () => true, run: (diagram, { options, view }) => ({ ...diagram, lanes: options.lanes !== "auto" ? options.lanes : isMapView(view.kind) && diagram.groups.length > COLUMNS_ABOVE ? "columns" : "rows" }) },
   // A depth has no ceiling: past DEEP_DEPTH the picture says first that it may be big, on a view the depth changes.

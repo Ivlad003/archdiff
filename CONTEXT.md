@@ -178,6 +178,18 @@ _Avoid_: multi-review, merge preview
 What a change did to a shape or a line: added, removed, changed; or what the contract says of it: planned, beyond the intent.
 _Avoid_: status, colour
 
+**Board**:
+The uncommitted changes as a picture: the working tree against the last commit, the changed modules in groups — the layer, then the directory — in the order a reviewer reads them.
+_Avoid_: dashboard, status, staging view
+
+**Walk**:
+The steps through a change (the groups of the board, the commits of a range) or through a tour, one picture at a time.
+_Avoid_: wizard, slideshow
+
+**Tour**:
+A list of steps through the pictures, each a view's link with its options, the shapes selected and a note, kept as a file and played on the page.
+_Avoid_: presentation, slideshow, walkthrough (for the file)
+
 **Finding**:
 A new dependency between layers that the contract does not allow (any, without a contract): what makes a review fail.
 _Avoid_: issue, violation (in a review)
@@ -193,6 +205,18 @@ _Avoid_: events (for the typed messages), calls
 **Timeline**:
 How the dependencies between layers moved, commit by commit.
 _Avoid_: history graph
+
+**Churn**:
+How many commits of a range changed a file.
+_Avoid_: activity, hotness (heat is the calls into a shape)
+
+**Change coupling**:
+Two files that the commits of a range changed together, at least twice.
+_Avoid_: temporal coupling, co-change (for the fact; `cochange` is the kind of its line)
+
+**Ownership**:
+The author of most of the commits that changed a file.
+_Avoid_: blame, maintainer
 
 **Branches**:
 The picture of the branches against the base: where each left it, its own commits, how far it is ahead and behind.

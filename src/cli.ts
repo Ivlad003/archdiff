@@ -41,6 +41,8 @@ import { listSpecs, specPrompt, specSubject, validateSpecs } from "./spec.ts";
 import { writeTestSkeletons } from "./gherkin.ts";
 import { FEATURES_DIRECTORY as FEATURES_DIRECTORY_NAME } from "./spec.ts";
 import { DEFAULT_PICTURE_OPTIONS, depthWarning, pictureFlags, pictureOptionsHelp, readPictureOptions, type PictureOptions } from "./options.ts";
+import { loadConfig } from "./config.ts";
+import { listTours, loadTour, tourMarkdown, toursDirectory } from "./tours.ts";
 import { metricsOf } from "./metrics.ts";
 import { whatIfKey, type WhatIfChange } from "./whatif.ts";
 import { counted } from "./words.ts";
@@ -83,9 +85,9 @@ const flag = (name: string, value: FlagSpec["value"] = false): FlagSpec => ({ na
 /** A flag of a ref (--base, --head): a value. */
 const REF_FLAGS = [flag("base", true), flag("head", true)];
 
-/** The refs of a picture from the flags: `--base`, `--head` and `--heads a,b` (a comparison's). */
+/** The refs of a picture from the flags: `--base`, `--head`, `--heads a,b` (a comparison's) and `--at SHA` (the commit the timeline is at). */
 function refsOf(call: Call): Refs {
-  return { base: call.text("base"), head: call.text("head"), heads: (call.text("heads") ?? "").split(",").filter((head) => head !== "") };
+  return { base: call.text("base"), head: call.text("head"), heads: (call.text("heads") ?? "").split(",").filter((head) => head !== ""), at: call.text("at") };
 }
 
 /**
@@ -270,19 +272,20 @@ const COMMANDS: readonly Command[] = [
   },
   {
     name: "diagram",
-    usage: "<view> [dir] [--format F] [--out FILE] [--base REF] [--head REF] [--heads A,B] [picture options]",
+    usage: "<view> [dir] [--format F] [--out FILE] [--base REF] [--head REF] [--heads A,B] [--at SHA] [picture options]",
     help: [
       "Draw one view. F: md (Markdown with Mermaid, default), mermaid, json,",
       "drawio, excalidraw, archimate. Views (the table of kinds, view-keys.ts):",
       ...wrapped(viewSyntax().join(" | "), 88),
-      "timeline and review take --base --head, compare --base --heads; logic:<path>#<fn> is the",
+      "timeline and review take --base --head, compare --base --heads; timeline --at SHA is the map",
+      "of the code at one commit of the range, what the commit did marked; logic:<path>#<fn> is the",
       "function's body as a flowchart, with its paths as rules; commit:<sha> is one commit's",
       "change against the commit before it. Every export names the commit it was drawn from.",
       "The picture options:",
       ...pictureOptionsHelp().map((line) => `  ${line}`),
     ],
     arity: 2,
-    flags: [...OUTPUT_FLAGS, ...REF_FLAGS, flag("heads", true), ...pictureFlags().map((item) => flag(item.name, item.value))],
+    flags: [...OUTPUT_FLAGS, ...REF_FLAGS, flag("heads", true), flag("at", true), ...pictureFlags().map((item) => flag(item.name, item.value))],
     async run(call) {
       const key = call.positional[0];
 
@@ -834,6 +837,28 @@ const COMMANDS: readonly Command[] = [
       const plan = planFromScene(analysis, key, saved.elements);
 
       return writeOut(call.has("json") ? `${JSON.stringify(plan, null, 2)}\n` : taskMarkdown(plan, analysis), call.text("out"));
+    },
+  },
+  {
+    name: "tour",
+    usage: "<name> [dir] [--out FILE]",
+    help: ["A guided tour as Markdown: every step with its note and its picture as Mermaid.", "The tours are recorded on the page (tours ▾, add step) and kept as", ".archdiff/tours/<name>.json, or under the directory archdiff.json names as", "\"tours\" (one the repository commits). Without a name: the tours there are"],
+    arity: 2,
+    flags: [flag("out", true)],
+    async run(call) {
+      const root = call.dir(1);
+      const directory = toursDirectory(loadConfig(root));
+      const name = call.positional[0];
+      const known = listTours(root, directory).map((tour) => tour.name);
+      const there = known.length > 0 ? `the tours in ${directory}: ${known.join(", ")}` : `no tour in ${directory} yet; the page records one (archdiff web, tours ▾)`;
+
+      if (!name) return fail(`tour: a name is required (${there})`);
+      const tour = loadTour(root, directory, name);
+
+      // No tour of that name: the ones there are; a file that does not read as one: what is wrong in it.
+      if (!tour.ok) return fail(`tour: ${tour.problem.message}${tour.problem.status === 404 ? ` (${there})` : ""}`);
+
+      return writeOut(await tourMarkdown(root, tour.value, `${directory}/${name}.json`), call.text("out"));
     },
   },
   {

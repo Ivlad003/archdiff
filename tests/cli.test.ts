@@ -363,6 +363,195 @@ export default function Checkout() {
     assert.ok(clean.stdout.includes("_no module, function, import or call changed_"));
   }));
 
+test("the board of the uncommitted changes: the working tree against the last commit, its groups in reading order, a group's own picture and diff", () =>
+  withTempDir("archdiff-board-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    // Outside git there is no last commit to compare with: git's own words, exit 2.
+    const outside = archdiff(["diagram", "changes", dir]);
+    assert.equal(outside.status, 2);
+    assert.ok(outside.stderr.includes("is not a git repository"), outside.stderr);
+    const git = gitIn(dir);
+    git("init", "-q", "-b", "main");
+    // Before the first commit everything is new: the board is of the whole repository, against nothing.
+    const unborn = archdiff(["diagram", "changes", dir]);
+    assert.equal(unborn.status, 0, unborn.stderr);
+    assert.ok(unborn.stdout.includes("# Uncommitted changes against an empty repository\n\n5 source files changed; modules +5 −0;"), unborn.stdout.slice(0, 300));
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    const clean = archdiff(["diagram", "changes", dir]);
+    assert.equal(clean.status, 0, clean.stderr);
+    assert.match(clean.stdout, /_the working tree is as the last commit \([0-9a-f]{7}\) has it: nothing to walk_/);
+    // The change: the route gets a loader that reads an order, the orders audit what they place, a note is written.
+    writeFileSync(join(dir, "src/routes/checkout.tsx"), 'import { OrderService, findOrder } from "@/lib/orders";\n\nexport async function action(request: { total: number }) {\n  const service = new OrderService("web");\n  return service.place(request.total);\n}\n\nexport async function loader(request: { id: string }) {\n  return findOrder(request.id);\n}\n\nexport default function Checkout() {\n  return null;\n}\n');
+    writeFileSync(join(dir, "src/lib/audit.ts"), 'import { log } from "./log.ts";\n\nexport function audit(what: string): void {\n  log(`audit ${what}`);\n}\n');
+    writeFileSync(join(dir, "src/lib/orders.ts"), 'import { readOrder, saveOrder } from "@/db/store";\nimport { audit } from "./audit.ts";\nimport { log } from "./log.ts";\n\nexport interface Order { id: string; total: number }\n\nexport function placeOrder(id: string, total: number): Order {\n  const order: Order = { id, total };\n  saveOrder(order);\n  log(`placed ${id}`);\n  audit(id);\n  return order;\n}\n\nexport function findOrder(id: string): Order | null {\n  return readOrder(id);\n}\n\nexport class OrderService {\n  constructor(private readonly prefix: string) {}\n  place(total: number): Order {\n    return placeOrder(`${this.prefix}-1`, total);\n  }\n}\n');
+    writeFileSync(join(dir, "NOTES.md"), "# a note\n");
+    assert.ok(archdiff(["views", dir]).stdout.includes("changes\tChanges: what the working tree changes against the last commit, group by group\n"));
+    const board = archdiff(["diagram", "changes", dir]);
+    assert.equal(board.status, 0, board.stderr);
+    assert.match(board.stdout, /^<!-- archdiff:generated — uncommitted changes against the last commit \([0-9a-f]{7}\) -->\n# Uncommitted changes against the last commit \([0-9a-f]{7}\)\n\n3 source files changed; modules \+1 −0; functions \+2 −2 ~3; imports \+2 −0; calls \+3 −2\.\n/);
+    // The walk: the route (an entry point) first, then the library it calls into; each module with what the change did in it.
+        assert.ok(board.stdout.includes("1. routes · src/routes/ — modules ~1 · functions +1 · calls +1\n   - **src/routes/checkout.tsx** — changed, functions +1, an entry point\n2. lib · src/lib/ — modules +1 ~1 · functions +1 −2 ~3 · imports +2 · calls +3 −2\n   - **src/lib/orders.ts** — changed, functions −2 ~3\n   - **src/lib/audit.ts** — added, functions +1\n"), board.stdout);
+    // The picture: a lane per group, the modules marked, the import the change added in green.
+    assert.ok(board.stdout.includes('  subgraph "routes · src/routes/ — modules ~1 · functions +1 · calls +1"\n    src_routes_checkout_tsx["src/routes/checkout.tsx<br/>+1 fn"]\n  end\n'), board.stdout);
+    assert.ok(board.stdout.includes("class src_lib_audit_ts added") && board.stdout.includes("class src_routes_checkout_tsx,src_lib_orders_ts changed"), board.stdout);
+    assert.ok(board.stdout.includes("## Other files changed\n\n- `NOTES.md` — not tracked yet\n"), board.stdout);
+    // The board as JSON is the placed diagram, every lane a group.
+    const diagram = JSON.parse(archdiff(["diagram", "changes", dir, "--format", "json"]).stdout) as { groups: { id: string }[]; nodes: { id: string; diff?: string; group?: string }[] };
+    assert.deepEqual(diagram.groups.map((lane) => lane.id), ["routes:src/routes", "lib:src/lib"]);
+    assert.deepEqual(diagram.nodes.map((node) => `${node.id} ${node.diff ?? "context"} ${node.group}`), ["src/routes/checkout.tsx changed routes:src/routes", "src/lib/orders.ts changed lib:src/lib", "src/lib/audit.ts added lib:src/lib", "src/lib/log.ts context lib:src/lib"]);
+    // One group: its modules opened to the declarations the change touched, the calls it added and removed, and the diff as text.
+    const group = archdiff(["diagram", "changes:lib:src/lib", dir]);
+    assert.equal(group.status, 0, group.stderr);
+    assert.ok(group.stdout.includes("# Changes in lib · src/lib/\n\n_Step 2 of 2 of the uncommitted changes against the last commit"), group.stdout.slice(0, 300));
+    assert.ok(group.stdout.includes('src_lib_orders_ts_placeOrder ==> src_lib_audit_ts_audit') && group.stdout.includes('src_routes_checkout_tsx ==>|"from loader"| src_lib_orders_ts_findOrder'), group.stdout);
+    assert.ok(group.stdout.includes('src_lib_orders_ts_validate("validate<br/>removed")') && group.stdout.includes("## Functions removed\n\n- fn `OrderService.nextId`"), group.stdout);
+    assert.ok(group.stdout.includes("## The diff\n\n### src/lib/orders.ts\n\n````diff\n") && group.stdout.includes("\n+  audit(id);\n") && group.stdout.includes("### src/lib/audit.ts\n\n````diff\n--- /dev/null\n+++ b/src/lib/audit.ts\n@@ -0,0 +1,5 @@\n+import { log } from \"./log.ts\";\n"), group.stdout);
+    // A group the working tree does not change says so, and the command does not fail.
+    const gone = archdiff(["diagram", "changes:db:src/db", dir]);
+    assert.equal(gone.status, 0, gone.stderr);
+    assert.ok(gone.stdout.includes("_nothing changes in db:src/db against the last commit"), gone.stdout);
+    // Committed: the board is empty again.
+    git("add", "-A");
+    git("commit", "-q", "-m", "audit");
+    assert.ok(archdiff(["diagram", "changes", dir]).stdout.includes("nothing to walk"));
+  }));
+
+/** A branch `feature` off main in `dir`, by two authors: a module added, then changed twice together with the log, then the store reading the log. */
+function commitHistory(dir: string): void {
+  const git = (author: string, ...args: string[]): void => {
+    const result = spawnSync("git", ["-C", dir, "-c", `user.email=${author.toLowerCase()}@example.com`, "-c", `user.name=${author}`, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const commit = (author: string, subject: string, files: Record<string, string>): void => {
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
+    git(author, "add", ".");
+    git(author, "commit", "-q", "-m", subject);
+  };
+  const log = (how: string): string => `import { step1 } from "./step1.ts";\n\nexport function log(message: string): void {\n  console.${how}(message, step1());\n}\n`;
+  const step1 = (value: number): string => `export function step1(): number {\n  return ${value};\n}\n`;
+  git("Ann", "init", "-q", "-b", "main");
+  git("Ann", "add", ".");
+  git("Ann", "commit", "-q", "-m", "base");
+  git("Ann", "checkout", "-q", "-b", "feature");
+  commit("Ann", "step 1: a module", { "src/lib/step1.ts": step1(1) });
+  commit("Bob", "step 2: the log counts", { "src/lib/log.ts": log("log"), "src/lib/step1.ts": step1(11) });
+  commit("Bob", "step 3: louder", { "src/lib/log.ts": log("error"), "src/lib/step1.ts": step1(111) });
+  commit("Ann", "step 4: the store logs", { "src/db/store.ts": 'import { log } from "../lib/log.ts";\nimport type { Order } from "../lib/orders.ts";\n\nconst rows = new Map<string, Order>();\n\nexport function saveOrder(order: Order): void {\n  log("save");\n  rows.set(order.id, order);\n}\n\nexport function readOrder(id: string): Order | null {\n  return rows.get(id) ?? null;\n}\n' });
+}
+
+test("the timeline at a commit is the map of the code as it was then; churn, coupling and ownership are read from the commits of the range", () =>
+  withTempDir("archdiff-slider-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    // Outside git the overlays read from it are left out, and the picture says why; the command does not fail.
+    const outside = archdiff(["diagram", "modules", dir, "--overlay", "churn,ownership", "--format", "json"]);
+    assert.equal(outside.status, 0, outside.stderr);
+    assert.match((JSON.parse(outside.stdout) as { reason: string }).reason, /⚠ the overlays read from git \(churn, ownership\) are not laid over: .* is not a git repository$/);
+    commitHistory(dir);
+    const git = gitIn(dir);
+    const shas = git("log", "--reverse", "--format=%H", "main..feature").split("\n");
+    assert.equal(shas.length, 4);
+    type Drawn = { title: string; reason: string; nodes: { id: string; label: string; diff?: string; heat?: number; tint?: string }[]; edges: { from: string; to: string; kind: string; count?: number; label?: string; diff?: string }[] };
+    const drawn = (...args: string[]): Drawn => {
+      const result = archdiff(["diagram", ...args, "--format", "json"]);
+      assert.equal(result.status, 0, result.stderr);
+
+      return JSON.parse(result.stdout) as Drawn;
+    };
+    const shape = (picture: Drawn, id: string) => picture.nodes.find((node) => node.id === id)!;
+
+    // The second commit: the whole map as it stood, the two modules it changed marked, the import it added in green.
+    const second = drawn("timeline", dir, "--at", shas[1]!);
+    assert.match(second.title, /^[0-9a-f]{7} \d{4}-\d\d-\d\d: step 2: the log counts — commit 2 of 4$/);
+    assert.deepEqual(second.nodes.map((node) => `${node.id} ${node.diff ?? "-"}`), ["cartridges/base/cartridge/scripts/hooks/basket.js -", "src/db/store.ts -", "src/lib/log.ts changed", "src/lib/orders.ts -", "src/lib/step1.ts changed", "src/routes/checkout.tsx -"]);
+    assert.ok(second.edges.some((edge) => edge.from === "src/lib/log.ts" && edge.to === "src/lib/step1.ts" && edge.diff === "added"));
+    // The store does not read the log yet at that commit: the map is the commit's, not the working tree's.
+    assert.ok(!second.edges.some((edge) => edge.from === "src/db/store.ts" && edge.to === "src/lib/log.ts"));
+    // Its page is the commit's own change, its Mermaid a flowchart of the map (no gitGraph of one commit).
+    const page = archdiff(["diagram", "timeline", dir, "--at", shas[1]!.slice(0, 7)]);
+    assert.equal(page.status, 0, page.stderr);
+    assert.match(page.stdout, /^<!-- archdiff:generated — commit [0-9a-f]{7} -->\n# Architecture changes of commit [0-9a-f]{7}: step 2: the log counts\n/);
+    assert.ok(page.stdout.includes("flowchart LR") && page.stdout.includes("class src_lib_log_ts,src_lib_step1_ts changed") && !page.stdout.includes("gitGraph"), page.stdout);
+    // The first commit adds the module; the whole range is still the bars.
+    assert.equal(shape(drawn("timeline", dir, "--at", shas[0]!), "src/lib/step1.ts").diff, "added");
+    assert.match(drawn("timeline", dir).title, /^Timeline [0-9a-f]{40}\.\.HEAD: 4 commits$/);
+    // A commit git does not know is refused by name.
+    const unknown = archdiff(["diagram", "timeline", dir, "--at", "nope"]);
+    assert.equal(unknown.status, 2);
+    assert.ok(unknown.stderr.includes('no commit "nope"'), unknown.stderr);
+
+    // The overlays on the whole map, from the four commits of the range: who changed, what changed together, whose it is.
+    const map = drawn("modules", dir, "--overlay", "churn,coupling,ownership");
+    assert.match(map.reason, /shade: churn, the commits of [0-9a-f]{7}\.\.HEAD that changed each file \(4 commits read\); 1 pair of modules changed together at least twice in [0-9a-f]{7}\.\.HEAD \(dashed, × the commits\); ownership, the author of most of the commits that changed each file \(the last 5 commits\): Ann 4, Bob 2$/);
+    assert.equal(shape(map, "src/lib/step1.ts").label, "src/lib/step1.ts\n3 changes\n◉ Bob 67%");
+    assert.equal(shape(map, "src/lib/step1.ts").heat, 1);
+    assert.equal(shape(map, "src/lib/orders.ts").label, "src/lib/orders.ts\n◉ Ann");
+    assert.equal(shape(map, "src/lib/orders.ts").heat, undefined);
+    assert.ok(shape(map, "src/lib/log.ts").tint !== undefined && shape(map, "src/lib/log.ts").tint === shape(map, "src/lib/step1.ts").tint && shape(map, "src/lib/log.ts").tint !== shape(map, "src/lib/orders.ts").tint);
+    assert.deepEqual(map.edges.filter((edge) => edge.kind === "cochange"), [{ from: "src/lib/log.ts", to: "src/lib/step1.ts", kind: "cochange", count: 2, label: "×2" }]);
+    // The line of two files changed together does not move the map: the shapes stand where they stand without it.
+    const plain = drawn("modules", dir);
+    assert.deepEqual((map.nodes as unknown as { id: string; x: number; y: number }[]).map((node) => [node.id, node.x, node.y]), (plain.nodes as unknown as { id: string; x: number; y: number }[]).map((node) => [node.id, node.x, node.y]));
+    // At the second commit the range is two commits long: the pair changed together once, which is no coupling yet.
+    const early = drawn("timeline", dir, "--at", shas[1]!, "--overlay", "churn,coupling");
+    assert.equal(shape(early, "src/lib/step1.ts").label, "src/lib/step1.ts\n2 changes");
+    assert.ok(early.reason.includes("no two modules of this picture changed together twice"), early.reason);
+    assert.ok(!early.edges.some((edge) => edge.kind === "cochange"));
+    // In Mermaid the pair is joined without a direction; on the main line itself the range is its last commits.
+    assert.ok(archdiff(["diagram", "modules", dir, "--overlay", "coupling", "--format", "mermaid"]).stdout.includes('src_lib_log_ts -.-|"×2"| src_lib_step1_ts'));
+    git("checkout", "-q", "main");
+    assert.match(drawn("modules", dir, "--overlay", "churn").reason, /the commits of the last commit of HEAD that changed each file \(1 commit read\)$/);
+  }));
+
+test("tour prints a guided tour as Markdown, every step with its note and its picture as Mermaid", () =>
+  withTempDir("archdiff-tour-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    // No tour yet: the command says where they are kept and how one is made.
+    const none = archdiff(["tour", "intro", dir]);
+    assert.equal(none.status, 2);
+    assert.equal(none.stderr, 'archdiff: tour: no tour "intro" (no tour in .archdiff/tours yet; the page records one (archdiff web, tours ▾))\n');
+    mkdirSync(join(dir, ".archdiff/tours"), { recursive: true });
+    const steps = [
+      { link: "view=layers", select: ["lib"], note: "The **layers**: routes on top, the store at the bottom." },
+      { link: "view=module%3Asrc%2Flib%2Forders.ts&overlay=storages&depth=1", select: ["src/lib/orders.ts", "src/db/store.ts"], note: "The orders write to the store." },
+      { link: "view=module%3Asrc%2Fgone.ts", select: [], note: "A module the code no longer has." },
+    ];
+    writeFileSync(join(dir, ".archdiff/tours/intro.json"), JSON.stringify({ format: 1, title: "How an order is placed", steps }));
+    const tour = archdiff(["tour", "intro", dir]);
+    assert.equal(tour.status, 0, tour.stderr);
+    assert.ok(tour.stdout.startsWith("<!-- archdiff:generated — tour intro -->\n# How an order is placed\n\n_A guided tour of 3 steps (`.archdiff/tours/intro.json`); on the page it opens with `#tour=intro&step=1`._\n\n## 1. Layers\n\nThe **layers**: routes on top, the store at the bottom.\n\n```mermaid\n"), tour.stdout.slice(0, 400));
+    assert.ok(tour.stdout.includes('  routes -->|"1"| lib\n```\n\nPicked: **lib**.\n\n`view=layers`\n\n## 2. src/lib/orders.ts\n\nThe orders write to the store.\n'), tour.stdout);
+    // The step's options are the link's: the storages overlay is in its picture.
+    assert.ok(tour.stdout.includes('src_db_store_ts["src/db/store.ts<br/>⛁ the file system"]') && tour.stdout.includes("Picked: **src/lib/orders.ts**, **src/db/store.ts**.\n\n`view=module%3Asrc%2Flib%2Forders.ts&overlay=storages&depth=1`\n"), tour.stdout);
+    // A step whose picture cannot be drawn says so in its place; the tour is still written.
+    assert.ok(tour.stdout.includes("## 3. module:src/gone.ts\n\nA module the code no longer has.\n\n_The picture of this step could not be drawn: no module \"src/gone.ts\"_\n"), tour.stdout);
+    // --out writes it; the name alone is asked for with the tours there are.
+    const out = join(dir, "TOUR.md");
+    assert.equal(archdiff(["tour", "intro", dir, "--out", out]).status, 0);
+    assert.equal(readFileSync(out, "utf8"), tour.stdout);
+    const unnamed = archdiff(["tour"], dir);
+    assert.equal(unnamed.status, 2);
+    assert.equal(unnamed.stderr, "archdiff: tour: a name is required (the tours in .archdiff/tours: intro)\n");
+    assert.ok(archdiff(["tour", "other", dir]).stderr.includes('no tour "other" (the tours in .archdiff/tours: intro)'));
+    // A file that does not read as a tour says what is wrong in it.
+    writeFileSync(join(dir, ".archdiff/tours/broken.json"), JSON.stringify({ format: 1, steps: [{ link: "view=nope" }] }));
+    const broken = archdiff(["tour", "broken", dir]);
+    assert.equal(broken.status, 2);
+    assert.equal(broken.stderr, "archdiff: tour: .archdiff/tours/broken.json does not read as a tour: the link of step 1 names no view (view=<key>)\n");
+    // archdiff.json names a directory the repository commits; one that leaves the repository is refused.
+    mkdirSync(join(dir, "docs/tours"), { recursive: true });
+    writeFileSync(join(dir, "docs/tours/short.json"), JSON.stringify({ format: 1, steps: [steps[0]] }));
+    const config = JSON.parse(readFileSync(join(dir, "archdiff.json"), "utf8")) as Record<string, unknown>;
+    writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ ...config, tours: "docs/tours/" }));
+    const committed = archdiff(["tour", "short", dir]);
+    assert.equal(committed.status, 0, committed.stderr);
+    assert.ok(committed.stdout.includes("# short\n\n_A guided tour of 1 step (`docs/tours/short.json`)"), committed.stdout.slice(0, 200));
+    writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ ...config, tours: "../elsewhere" }));
+    const outside = archdiff(["tour", "short", dir]);
+    assert.equal(outside.status, 2);
+    assert.ok(outside.stderr.includes('archdiff.json: "tours" must be a directory of the repository'), outside.stderr);
+  }));
+
 test("--out writes a new file or one archdiff wrote, and refuses any other file", () =>
   withTempDir("archdiff-out-", (dir) => {
     const out = join(dir, "layers.md");

@@ -1,5 +1,6 @@
 // The link of the page: what the hash says — the view (a review and a
-// comparison are views too), the head and the heads, how the centre shows
+// comparison are views too), the head and the heads, the commit a
+// timeline is at, the guided tour and its step (`tour=<name>&step=N`), how the centre shows
 // the view (`as`: the canvas, 3D, its Markdown, its code), and the options
 // of the picture as options.ts names them (depth, limit, weight, hubs,
 // packages, opened modules, hidden lanes, overlays, the review's marks,
@@ -11,7 +12,7 @@
 //
 // Entry points: `Link`, `currentLink`, `setLink`, `wrongInLink`, `refsOf`, `codeHead`,
 // `reviewing`, `readOnlyView`, `readDefaults`, `rememberDefaults`, `forgetDefaults`,
-// `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`, `PRESENTATIONS`, `Presentation`, `presentationOf`.
+// `stepHash`, `PRESETS`, `detailPresets`, `Detail`, `OVERVIEWS`, `PRESENTATIONS`, `Presentation`, `presentationOf`.
 
 import { DEFAULT_PICTURE_OPTIONS, readEachPictureOption, writePictureParams, type PictureOptionKey, type PictureOptions } from "../../src/options.ts";
 import { codeRevision, defaultDepth, overviews, parseView, usesDepth } from "../../src/view-keys.ts";
@@ -59,6 +60,12 @@ export interface Link extends PictureOptions {
   heads: string[];
   /** How the centre shows the view (`as=3d`); the canvas when the link says nothing. */
   as: Presentation;
+  /** The commit of its range the timeline is at (`at=<sha>`): the code as it was then; null for the whole range. */
+  at: string | null;
+  /** The guided tour being played or recorded (`tour=<name>`); null: none. */
+  tour: string | null;
+  /** The step of the tour the link is at (`step=N`, from 1); 0: none yet. */
+  step: number;
 }
 
 /** A review of a change or a comparison of heads: the page shows the branch bar. */
@@ -68,23 +75,23 @@ export function reviewing(view: string): boolean {
   return kind === "review" || kind === "compare";
 }
 
-/** A picture read from git — a review, a comparison, one commit's change, the branches — or of a change supposed (a what-if): nothing is drawn on it. */
+/** A picture read from git — a review, a comparison, one commit's change, the branches, the uncommitted changes — or of a change supposed (a what-if): nothing is drawn on it. */
 export function readOnlyView(view: string): boolean {
   const kind = parseView(view)?.kind;
 
-  return kind === "review" || kind === "compare" || kind === "commit" || kind === "branches" || kind === "whatif";
+  return kind === "review" || kind === "compare" || kind === "commit" || kind === "branches" || kind === "whatif" || kind === "changes";
 }
 
 /** The revision whose code the page shows (null: the working tree), as `codeRevision` says for the link's view. */
 export function codeHead(link: Link): string | null {
-  return codeRevision(parseView(link.view), link.head);
+  return codeRevision(parseView(link.view), link.head, link.at);
 }
 
-/** The refs of the link: the base (the base field), the head, the heads. */
+/** The refs of the link: the base (the base field), the head, the heads, the commit the timeline is at. */
 export function refsOf(link: Link): Refs {
   const base = (document.getElementById("base") as HTMLInputElement | null)?.value.trim() || null;
 
-  return { base, head: link.head, heads: link.heads };
+  return { base, head: link.head, heads: link.heads, at: link.at };
 }
 
 /** The options a link may leave out: remembered in this browser as defaults ("remember as defaults"). */
@@ -141,9 +148,15 @@ export function forgetDefaults(): void {
   }
 }
 
+/** A name a tour's file can have (src/tours.ts checks the same). */
+const TOUR_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+
 export function currentLink(): Link {
   const params = new URLSearchParams(location.hash.slice(1));
-  const defaults = readDefaults();
+  const named = params.get("tour") ?? "";
+  const tour = TOUR_NAME.test(named) ? named : null;
+  // A link of a tour takes no remembered default: a step shows the same picture in every browser, and in the terminal.
+  const defaults = tour === null ? readDefaults() : { ...DEFAULT_PICTURE_OPTIONS };
   // A wrong value in the hash is left out alone, not an error (the link may be old or typed); `wrongInLink` names it.
   const read = readEachPictureOption((name) => params.get(name));
   const options = { ...read.options };
@@ -157,7 +170,12 @@ export function currentLink(): Link {
 
   const as = params.get("as");
 
-  return { ...options, view, head: params.get("head") || null, heads, as: isPresentation(as) ? as : "canvas" };
+  // The commit a timeline is at; another view has none, whatever a link carried over says.
+  const at = parseView(view)?.kind === "timeline" ? params.get("at") || null : null;
+
+  const step = Math.floor(Number(params.get("step") ?? 0));
+
+  return { ...options, view, head: params.get("head") || null, heads, as: isPresentation(as) ? as : "canvas", at, tour, step: tour !== null && Number.isFinite(step) && step > 0 ? step : 0 };
 }
 
 /** The values of the link the options table refuses (`limit=1.5 (limit must be a whole number of at least 1)`), each left out of the picture. */
@@ -167,7 +185,8 @@ export function wrongInLink(): string[] {
   return readEachPictureOption((name) => params.get(name)).wrong;
 }
 
-export function setLink(link: Link): void {
+/** The link as the parameters of the hash, the picture's options written where they differ from `defaults`. */
+function paramsOf(link: Link, defaults: PictureOptions): URLSearchParams {
   const params = new URLSearchParams();
   params.set("view", link.view);
   const base = (document.getElementById("base") as HTMLInputElement | null)?.value.trim() ?? "";
@@ -179,11 +198,35 @@ export function setLink(link: Link): void {
   if (link.heads.length > 0) params.set("heads", link.heads.join(","));
 
   if (link.as !== "canvas") params.set("as", link.as);
+
+  if (link.at && parseView(link.view)?.kind === "timeline") params.set("at", link.at);
   // The picture's options, written only when they differ from the remembered defaults, so a plain link stays short; an
   // explicit "none" when a default is turned off. "Only the changes" needs marks: the changes laid over, or a review.
-  const picture = writePictureParams({ ...link, onlyChanges: link.onlyChanges && (link.changes || readOnlyView(link.view)) }, { ...DEFAULT_PICTURE_OPTIONS, ...readDefaults() });
+  const picture = writePictureParams({ ...link, onlyChanges: link.onlyChanges && (link.changes || readOnlyView(link.view)) }, defaults);
 
   for (const [key, value] of picture) params.set(key, value);
+
+  return params;
+}
+
+/**
+ * What a step of a tour keeps of a link: the view, the refs and every option that differs from the built-in ones —
+ * none left to this browser's remembered defaults — without the tour's own `tour=` and `step=`.
+ */
+export function stepHash(link: Link): string {
+  return paramsOf(link, DEFAULT_PICTURE_OPTIONS).toString();
+}
+
+export function setLink(link: Link): void {
+  // Under a tour the options are written against the built-in ones, as its steps are kept; else against this browser's defaults.
+  const params = paramsOf(link, link.tour === null ? { ...DEFAULT_PICTURE_OPTIONS, ...readDefaults() } : DEFAULT_PICTURE_OPTIONS);
+
+  if (link.tour !== null) {
+    params.set("tour", link.tour);
+
+    if (link.step > 0) params.set("step", String(link.step));
+  }
+
   location.hash = params.toString();
 }
 

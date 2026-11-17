@@ -25,7 +25,8 @@
       "src/gherkin.ts",
       "src/mcp.ts",
       "src/mcp-tools.ts",
-      "src/checks.ts"
+      "src/checks.ts",
+      "src/tours.ts"
     ],
     "views": [
       "src/views.ts",
@@ -35,6 +36,7 @@
       "src/shape.ts",
       "src/overlays.ts",
       "src/diff.ts",
+      "src/board.ts",
       "src/flow.ts",
       "src/plan.ts",
       "src/coverage.ts",

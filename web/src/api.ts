@@ -5,11 +5,12 @@
 // Entry points: `api`, and the types of its answers.
 
 export type { Diagram, Line, Lane, Shape } from "../../src/diagram.ts";
-export type { ProjectMap, MapLine, MapDot } from "../../src/diagram.ts";
+export type { ProjectMap, MapLine, MapDot, Board } from "../../src/diagram.ts";
 import type { ProjectMap } from "../../src/diagram.ts";
 import type { Diagram } from "../../src/diagram.ts";
 import { pictureQueryText, type PictureOptions } from "../../src/options.ts";
 export type { ViewEntry } from "../../src/view-keys.ts";
+import type { Board } from "../../src/diagram.ts";
 import type { ViewEntry } from "../../src/view-keys.ts";
 
 export interface ViewsResponse {
@@ -50,11 +51,12 @@ async function get<T>(url: string): Promise<T> {
   return body as T;
 }
 
-/** The revisions a picture is drawn against, as the link holds them: the base (null: the default), the head (null: the working tree), the heads of a comparison. */
+/** The revisions a picture is drawn against, as the link holds them: the base (null: the default), the head (null: the working tree), the heads of a comparison, the commit the timeline is at. */
 export interface Refs {
   base: string | null;
   head: string | null;
   heads: readonly string[];
+  at?: string | null;
 }
 
 /** What a review, a comparison or a what-if found, as the page reads it for the title (the server sends the whole diff). */
@@ -67,7 +69,7 @@ function headQuery(joint: string, head: string | null): string {
 
 /** The refs as query parameters, empty when there are none. */
 function refsQuery(refs: Refs): string {
-  return `${refs.base ? `&base=${encodeURIComponent(refs.base)}` : ""}${refs.head ? `&head=${encodeURIComponent(refs.head)}` : ""}${refs.heads.length > 0 ? `&heads=${encodeURIComponent(refs.heads.join(","))}` : ""}`;
+  return `${refs.base ? `&base=${encodeURIComponent(refs.base)}` : ""}${refs.head ? `&head=${encodeURIComponent(refs.head)}` : ""}${refs.heads.length > 0 ? `&heads=${encodeURIComponent(refs.heads.join(","))}` : ""}${refs.at ? `&at=${encodeURIComponent(refs.at)}` : ""}`;
 }
 
 export interface SceneResponse {
@@ -79,6 +81,8 @@ export interface SceneResponse {
   drawn: boolean;
   /** A review or a comparison: what it found. */
   change: ChangeSummary | null;
+  /** The board of the uncommitted changes (`view=changes`, and a group's own picture): the groups in reading order, for the walk. */
+  board: Board | null;
 }
 
 export interface FlowStep {
@@ -123,6 +127,21 @@ export interface Branch {
   subject: string;
   remote: boolean;
   current: boolean;
+}
+
+/** One step of a guided tour: the link of its picture (without the tour's own parameters), the shapes selected, a note in Markdown. */
+export interface TourStep {
+  link: string;
+  select: string[];
+  note: string;
+}
+
+/** A guided tour as the server keeps it (src/tours.ts). */
+export interface Tour {
+  name: string;
+  title: string;
+  steps: TourStep[];
+  saved: string;
 }
 
 /** An agent as the settings window shows it: whose it is, whether it can run here, and what the settings place for it. */
@@ -191,6 +210,12 @@ export const api = {
 
     return () => source.close();
   },
+  /** The guided tours of the repository, and the directory they are kept in. */
+  tours: () => get<{ directory: string; tours: { name: string; title: string; steps: number }[] }>("/api/tours"),
+  tour: (name: string) => get<Tour>(`/api/tour?name=${encodeURIComponent(name)}`),
+  /** Saves a tour whole, as recorded: its title and every step; the tour as the server keeps it. */
+  saveTour: (name: string, title: string, steps: readonly TourStep[]) => post<{ saved: string; tour: Tour }>(`/api/tour?name=${encodeURIComponent(name)}`, { title, steps }),
+  removeTour: (name: string) => post<{ removed: string }>(`/api/tour/delete?name=${encodeURIComponent(name)}`, {}),
   specs: () => get<{ initialised: boolean; specs: { path: string; title: string; kind: "openspec" | "gherkin" }[] }>("/api/specs"),
   spec: (path: string) => get<{ path: string; text: string }>(`/api/spec?path=${encodeURIComponent(path)}`),
   specPrompt: (mode: "generate" | "update", view: string | null) => get<{ markdown: string }>(`/api/spec/prompt?mode=${mode}${view ? `&view=${encodeURIComponent(view)}` : ""}`),
