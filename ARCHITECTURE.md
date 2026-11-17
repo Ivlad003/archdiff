@@ -86,11 +86,13 @@ flowchart LR
     n_tests_cli_test_ts["tests/cli.test.ts<br>the commands on the fixtures"]
     n_tests_routing_test_ts["tests/routing.test.ts<br>the layout and the router: no line through a shape"]
     n_tests_extract_test_ts["tests/extract.test.ts<br>the language frontends on snippets"]
+    n_tests_pr_comment_test_ts["tests/pr-comment.test.ts<br>the body of the pull request's comment: a change, no change, a failing check, a report over the limit"]
   end
-  subgraph n_scripts["scripts — build and pack"]
+  subgraph n_scripts["scripts — build, pack, and the body of the action's comment"]
     n_scripts_build_web_mjs["scripts/build-web.mjs<br>bundles the page into dist/web"]
     n_scripts_copy_wasm_mjs["scripts/copy-wasm.mjs<br>copies the grammar WASM files into dist"]
     n_scripts_scapi_table_mjs["scripts/scapi-table.mjs<br>regenerates src/scapi-table.ts from a runtime's declarations, with core's reader"]
+    n_scripts_pr_comment_ts["scripts/pr-comment.ts<br>the body of the comment the GitHub Action keeps on a pull request, from the review's Markdown and the check's JSON"]
   end
   n_bin_archdiff_js --> n_src_cli_ts
   n_scripts_scapi_table_mjs --> n_src_scapi_runtime_ts
@@ -154,6 +156,8 @@ flowchart LR
   n_tests_routing_test_ts --> n_src_diagram_ts
   n_tests_routing_test_ts --> n_src_analyze_ts
   n_scripts_copy_wasm_mjs --> n_src_extract_grammars_ts
+  n_tests_pr_comment_test_ts --> n_scripts_pr_comment_ts
+  n_tests_pr_comment_test_ts --> n_src_diff_ts
 ```
 
 The page (`web/src`) imports the Node-free vocabularies of the core, bundled into it — the table of picture options (`src/options.ts`), the kinds of view with their keys (`src/view-keys.ts`) and what a shape stands for and opens (`src/shape-keys.ts`, which the Excalidraw export shares), the looks of the shapes and lines (`src/looks.ts`, which the exports draw by too), and through `view-keys.ts` whether a path is a source file (`src/languages.ts`) — and only types from `src/diagram.ts` and `src/scene.ts`, which erase at build time. Tests import whatever they test. `src/routes/context.ts` imports the `ServeOptions` type back from `server.ts`: a type, inside one layer.

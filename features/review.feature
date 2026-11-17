@@ -30,3 +30,29 @@ Feature: Reviewing a change by its architecture
     When I run "archdiff compare --heads a,b,WORKTREE"
     Then one picture holds the union of their changes
     And every changed module carries a glyph per head
+
+  Scenario: The comment on a pull request
+    Given the Markdown of a review that added a module and an import across two layers
+    And the report of a check the code follows
+    When the body of the pull request's comment is built
+    Then its first line is the hidden marker "<!-- archdiff:pull-request-comment -->"
+    And it holds the review's counts, the verdict, the picture and every change by kind, folded
+
+  Scenario: A pull request with no architectural change
+    Given the Markdown of a review of two source files changed in their comments only
+    When the body of the pull request's comment is built
+    Then it says "No architectural change" in one line
+    And it has no picture
+
+  Scenario: A failing check in the comment
+    Given the report of a check with an import from db to routes against the contract
+    When the body of the pull request's comment is built
+    Then it says "✘ 1 import goes against ARCHITECTURE.md"
+    And it lists the import with its line and its two layers
+
+  Scenario: A review longer than a comment may be
+    Given the Markdown of a review of 1800 changes
+    When the body of the pull request's comment is built
+    Then it is at most 65536 characters long
+    And the picture is whole
+    And every list holds the same number of its first items and counts the rest

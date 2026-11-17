@@ -83,12 +83,46 @@ The system SHALL draw the branches as the `branches` view: a lane per branch wit
 
 ### Requirement: A GitHub Action posts the review
 
-The system SHALL offer `action.yml` that runs the review of a pull request against its base and posts the Markdown as a comment, failing the check on a new dependency between layers.
+The system SHALL offer `action.yml`, a composite action with the inputs `base` (default: the pull request's base ref), `fail-on-check` (default true), `comment` (default true) and `working-directory`, that runs the review of a pull request's head against where it left the base (their merge-base) and `check` against the contract, writes both to the job summary and, when `comment` is true, keeps them as one comment on the pull request — found by its hidden first line (`<!-- archdiff:pull-request-comment -->`) and rewritten, or created when there is none — and fails the job when the check fails and `fail-on-check` is true. A base that is not in the clone SHALL fail the job naming `fetch-depth: 0`; a comment that cannot be posted (a read-only token) SHALL be a warning, the job summary written all the same.
 
 #### Scenario: A pull request
 
-- **WHEN** the action runs on a pull request
-- **THEN** a comment holds the review's Markdown and the picture
+- **WHEN** the action runs on a pull request that adds a module and an import
+- **THEN** a comment starts with the hidden marker and holds the review's counts, the verdict of the check, the picture and the lists of the changes, folded, and the job summary holds the same
+
+#### Scenario: A second push
+
+- **WHEN** the pull request gets another commit and the action runs again
+- **THEN** the comment of the first run is rewritten, and the pull request still has one
+
+#### Scenario: A failing check
+
+- **WHEN** the head has an import from `db` to `routes` that ARCHITECTURE.md does not allow
+- **THEN** the body says "✘ 1 import goes against ARCHITECTURE.md" and lists the import with its line and its two layers, and the job fails; with `fail-on-check: false` the body is the same and the job passes
+
+#### Scenario: A shallow clone
+
+- **WHEN** the job checked out with the default depth, so the base of the pull request is not in the clone
+- **THEN** the job fails with "the base of the pull request (main) is not in this clone: give actions/checkout fetch-depth: 0" and posts nothing
+
+### Requirement: The comment's body fits a comment
+
+The system SHALL build the body from the two outputs and nothing else (`scripts/pr-comment.ts`: the review's Markdown, the check's JSON), so it is tested without GitHub: the review's title and counts, the verdict of the check with its violations, the dependencies between layers that appeared and went, the Mermaid picture, and every change by kind, folded. A pull request that changed no module, function, import or call SHALL say so in one line instead of an empty picture, and without a contract the body SHALL say there is nothing to check against. The body SHALL be at most 65 536 characters, GitHub's limit for a comment: past it the picture stays and the lists are cut, each to the same number of its first items, with a count of what was left out; then the violations; a picture longer than the limit by itself gives way to a line.
+
+#### Scenario: No architectural change
+
+- **WHEN** the pull request changes two source files in their comments only
+- **THEN** the body says "No architectural change since" the base in one line, with the 2 source files as changed in what the diff does not show, and has no picture
+
+#### Scenario: A report over the limit
+
+- **WHEN** the review lists 1800 changes in more than 100 000 characters
+- **THEN** the body is at most 65 536 characters, the picture is whole, each list holds the same number of its first items and says how many more it has, and a line counts what was left out
+
+#### Scenario: No contract
+
+- **WHEN** the repository has no ARCHITECTURE.md, so `check` prints no report
+- **THEN** the body says "No ARCHITECTURE.md that names layers: nothing to check the code against" above the review, and the job passes
 
 ### Requirement: A review knows the contract
 
