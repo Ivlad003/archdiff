@@ -56,7 +56,7 @@ export function fillBoardBar(state: Link, board: Board | null): void {
   const at = keys.indexOf(state.view);
   element<HTMLButtonElement>("board-prev").disabled = at === 0;
   element<HTMLButtonElement>("board-next").disabled = at === keys.length - 1;
-  note.textContent = board === null ? "" : `against ${board.base} · ${board.files} ${board.files === 1 ? "source file" : "source files"} changed · drawn again when a file changes`;
+  note.textContent = board === null ? "" : `against ${board.base} · ${board.files} ${board.files === 1 ? "source file" : "source files"} changed`;
 
   if (stepped) {
     stepped = false;
