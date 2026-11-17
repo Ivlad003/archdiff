@@ -1,6 +1,7 @@
 // The checks run after an agent's run, or on request from the page: the
-// contract (`archdiff check`, in process, held against the baseline of
-// known violations as the command holds it) and the commands archdiff.json
+// contract (`archdiff check`, in process: the layers and the rules, held
+// against the baseline of known violations as the command holds them) and
+// the commands archdiff.json
 // names in `checks` (`npm test`, `npm run typecheck`, `npx -y
 // @fission-ai/openspec validate --specs`), each run in a shell in the
 // repository with a time limit, its exit code and the tail of its output
@@ -17,7 +18,7 @@ import type { AgentEvent } from "./agent.ts";
 import type { Analysis } from "./analyze.ts";
 import { readBaseline } from "./baseline.ts";
 import { checkCode, checkSummary, violationLine } from "./violations.ts";
-import { INTENT_FILE, judgesLayers } from "./intent.ts";
+import { INTENT_FILE } from "./intent.ts";
 
 export interface CheckResult {
   command: string;
@@ -60,16 +61,15 @@ function runCommand(root: string, command: string): Promise<CheckResult> {
 }
 
 /**
- * The contract check as `archdiff check` runs it, held against the repository's baseline: the new violations fail
- * it, each on a line; the known ones are counted. Null without a contract; a baseline that cannot be read fails it.
+ * The contract check as `archdiff check` runs it — the contract's layers and the rules of archdiff.json — held
+ * against the repository's baseline: the new violations fail it, each on a line; the known ones are counted. Null
+ * without a contract or a rule; a baseline that cannot be read, or a rule of a layer the code lacks, fails it.
  */
 function contractCheck(analysis: Analysis): CheckResult | null {
-  if (!analysis.intent) return null;
-
-  if (!judgesLayers(analysis.intent)) return { command: "archdiff check", ok: true, output: `${INTENT_FILE} names no layer: nothing to check against` };
-
   try {
-    const check = checkCode(analysis, readBaseline(analysis.root, analysis.config.baseline))!;
+    const check = checkCode(analysis, readBaseline(analysis.root, analysis.config.baseline));
+
+    if (check === null) return analysis.intent ? { command: "archdiff check", ok: true, output: `${INTENT_FILE} names no layer: nothing to check against` } : null;
     const summary = checkSummary(check, INTENT_FILE);
 
     return { command: "archdiff check", ok: check.ok, output: check.ok ? summary : [summary, ...check.fresh.map(violationLine)].join("\n") };

@@ -8,7 +8,7 @@
 // when asked (`--types`) and are drawn dashed.
 //
 // Pure functions of the graph, on scc.ts. Entry points: `cyclesView`,
-// `feedbackArcSet`.
+// `importCycles`, `feedbackArcSet`.
 
 import type { PictureContent, Line, Shape } from "./diagram.ts";
 import { moduleOf, type Graph } from "./graph.ts";
@@ -191,6 +191,16 @@ function adjacencyOf(edges: readonly WeightedEdge[]): Map<string, Set<string>> {
   }
 
   return adjacency;
+}
+
+/**
+ * The import cycles of the code: every group of two or more modules that import each other in a circle, the
+ * biggest first. Type-only imports count only when asked. The `cycles` rule of archdiff.json counts them.
+ */
+export function importCycles(graph: Graph, types = false): string[][] {
+  return stronglyConnected(adjacencyOf(importEdges(graph, types).edges))
+    .filter((component) => component.length >= 2)
+    .sort((a, b) => b.length - a.length || (a[0]! < b[0]! ? -1 : 1));
 }
 
 /**

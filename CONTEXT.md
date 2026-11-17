@@ -149,8 +149,12 @@ The contract as the analysis reads it, set against the code: what is planned and
 _Avoid_: plan, spec
 
 **Violation**:
-An import between two layers that no arrow of the contract allows.
+An import between two layers that no arrow of the contract allows, or what the code does against a contract rule.
 _Avoid_: error, breach
+
+**Contract rule**:
+What `archdiff.json` asks of the code beside the contract's arrows: how a layer's files are named, how far a metric may go, no import cycle, the module a layer is reached through, what is not imported.
+_Avoid_: constraint, lint, policy; rule alone where a function's logic is near
 
 **Baseline**:
 The violations a repository is known to have, kept in a committed file: the check fails on any other.
@@ -224,7 +228,7 @@ _Avoid_: control flow graph (in prose)
 
 **Rule**:
 One way through a function: the conditions taken, the calls made, how it ends.
-_Avoid_: path, case
+_Avoid_: path, case; rule for what `archdiff.json` asks (a contract rule)
 
 ## The agent
 

@@ -1,7 +1,9 @@
 // The contract check through the real CLI and the HTTP API on copies of
 // tests/fixtures/sample: the baseline of known violations — written,
 // honoured, and shrunk as the code is fixed — in the command, the page's
-// check and the checks after an agent's run.
+// check and the checks after an agent's run; and the rules of
+// archdiff.json, each kind violated and satisfied, with the messages of a
+// rule written wrong.
 //
 // Entry point: run by `npm test`.
 
@@ -163,5 +165,185 @@ test("the page's check and the checks after a run hold the code to the baseline 
       // A baseline that cannot be read fails the check, saying why.
       writeFileSync(join(dir, "archdiff-baseline.json"), "{");
       assert.match((await run())[0]!, /^✘ archdiff check\narchdiff-baseline\.json: not valid JSON/);
+    },
+  ));
+
+/** The layers of the sample, as its archdiff.json names them. */
+const LAYERS = { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"], cartridge: ["cartridges/**"] };
+
+/** A module of routes that reads the store itself: routes → db, past the lib layer. */
+const PEEK = 'import { readOrder } from "../db/store.ts";\n\nexport function peek(): unknown {\n  return readOrder("x");\n}\n';
+
+/**
+ * A copy of the sample without a contract, for `body`: `check` runs it under the rules given (archdiff.json's
+ * `rules`, beside the sample's layers) and gives the exit code, the bullets of the report's violations and stderr.
+ */
+function withRules(body: (check: (rules: unknown) => { status: number | null; violations: string[]; stderr: string }, dir: string) => void): Promise<void> {
+  return withTempDir("archdiff-rules-", (dir) => {
+    cpSync(fixture, dir, { recursive: true });
+    body((rules) => {
+      writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ layers: LAYERS, rules }));
+      const { status, stdout, stderr } = archdiff(["check", dir]);
+
+      return { status, violations: stdout.split("\n").filter((line) => line.startsWith("- `")), stderr };
+    }, dir);
+  });
+}
+
+const FOLLOWED = "archdiff check: the code follows the rules of archdiff.json\n";
+
+test("a naming rule: the files of a layer match a glob of the name or of the path, or a regular expression", () =>
+  withRules((check) => {
+    const violated = check([{ kind: "naming", layer: "lib", pattern: "*.service.ts" }]);
+    assert.equal(violated.status, 1);
+    assert.deepEqual(violated.violations, [
+      "- `src/lib/log.ts:1`: the files of layer **lib** are named `*.service.ts` (rule `naming:lib`). Rename the file, or place it in the layer it belongs to.",
+      "- `src/lib/orders.ts:1`: the files of layer **lib** are named `*.service.ts` (rule `naming:lib`). Rename the file, or place it in the layer it belongs to.",
+    ]);
+    assert.equal(violated.stderr, "archdiff check: 2 violations of the rules of archdiff.json\n");
+    // Satisfied: by the name, by the path (a glob with a slash), by a regular expression of the name.
+    const satisfied = check([{ kind: "naming", layer: "lib", pattern: "*.ts" }, { kind: "naming", name: "lib lives in src/lib", layer: "lib", pattern: "src/lib/*.ts" }, { kind: "naming", layer: "routes", regex: "^[a-z]+\\.tsx$" }]);
+    assert.equal(satisfied.status, 0, satisfied.stderr);
+    assert.equal(satisfied.stderr, FOLLOWED);
+    assert.deepEqual(check([{ kind: "naming", name: "capitals", layer: "routes", regex: "^[A-Z]" }]).violations, ["- `src/routes/checkout.tsx:1`: the files of layer **routes** are named `/^[A-Z]/` (rule `capitals`). Rename the file, or place it in the layer it belongs to."]);
+    assert.deepEqual(check([{ kind: "naming", layer: "lib", pattern: "src/lib/services/*.ts" }]).violations.length, 2);
+  }));
+
+test("a threshold rule: a number metrics measures stays under max and over min, in a layer or everywhere", () =>
+  withRules((check) => {
+    // orders.ts: Ca 1, Ce 2, instability 0.67, 31 lines; checkout.tsx: cohesion 0.
+    const violated = check([{ kind: "threshold", metric: "instability", max: 0.5, layer: "lib" }, { kind: "threshold", metric: "lines", max: 30 }, { kind: "threshold", metric: "cohesion", min: 0.5 }, { kind: "threshold", metric: "fanOut", max: 1 }, { kind: "threshold", name: "someone uses it", metric: "fanIn", min: 1, layer: "routes" }]);
+    assert.equal(violated.status, 1);
+    assert.deepEqual(violated.violations, [
+      "- `src/lib/orders.ts:1`: its instability is 0.67, over the 0.5 allowed (rule `instability:lib`).",
+      "- `src/lib/orders.ts:1`: it has 31 lines, over the 30 allowed (rule `lines`).",
+      "- `src/routes/checkout.tsx:1`: its cohesion is 0, under the 0.5 asked for (rule `cohesion`).",
+      "- `src/lib/orders.ts:1`: its fan-out (Ce) is 2, over the 1 allowed (rule `fanOut`).",
+      "- `src/routes/checkout.tsx:1`: its fan-in (Ca) is 0, under the 1 asked for (rule `someone uses it`).",
+    ]);
+    // The same numbers within their limits; instability over 0.5 is routes' own, where the rule does not look.
+    const satisfied = check([{ kind: "threshold", metric: "instability", max: 0.7, layer: "lib" }, { kind: "threshold", metric: "lines", max: 31, min: 3 }, { kind: "threshold", metric: "cohesion", min: 0.5, layer: "lib" }, { kind: "threshold", metric: "distance", max: 1 }, { kind: "threshold", metric: "abstractness", max: 0.2 }]);
+    assert.equal(satisfied.status, 0, satisfied.violations.join("\n"));
+    assert.equal(satisfied.stderr, FOLLOWED);
+  }));
+
+test("a cycles rule: no import cycle, or no more than N; an import inside a cycle is the violation, and types make none", () =>
+  withRules((check, dir) => {
+    // The sample has none: store.ts imports orders.ts for a type only.
+    assert.equal(check([{ kind: "cycles" }]).status, 0);
+    // log.ts imports orders.ts back: a cycle of two, each import of it a violation at its line.
+    writeFileSync(join(dir, "src/lib/log.ts"), 'import { findOrder } from "./orders.ts";\n\nexport function log(message: string): void {\n  console.log(message, findOrder("x"));\n}\n');
+    const violated = check([{ kind: "cycles" }]);
+    assert.equal(violated.status, 1);
+    assert.deepEqual(violated.violations, [
+      "- `src/lib/log.ts:1` imports `src/lib/orders.ts`: inside an import cycle of 2 modules (rule `cycles`). `archdiff diagram cycle:src/lib/log.ts` draws the cycle and the imports to cut.",
+      "- `src/lib/orders.ts:3` imports `src/lib/log.ts`: inside an import cycle of 2 modules (rule `cycles`). `archdiff diagram cycle:src/lib/orders.ts` draws the cycle and the imports to cut.",
+    ]);
+    // One cycle is allowed by `max: 1`; a second one is one too many, and every import of both is listed.
+    assert.equal(check([{ kind: "cycles", max: 1 }]).status, 0);
+    writeFileSync(join(dir, "src/db/a.ts"), 'import { b } from "./b.ts";\n\nexport const a = (): number => b() + 1;\n');
+    writeFileSync(join(dir, "src/db/b.ts"), 'import { a } from "./a.ts";\n\nexport const b = (): number => a() + 1;\n');
+    const two = check([{ kind: "cycles", max: 1 }]);
+    assert.equal(two.status, 1);
+    assert.equal(two.violations.length, 4);
+    assert.ok(two.violations[0]!.startsWith("- `src/db/a.ts:1` imports `src/db/b.ts`: inside an import cycle of 2 modules (2 cycles, 1 allowed) (rule `cycles`)."), two.violations[0]);
+  }));
+
+test("a through rule: a layer is reached only through the module named, from one layer or from every other", () =>
+  withRules((check, dir) => {
+    // Only orders.ts imports the store: the rule holds.
+    const rule = { kind: "through", to: "db", through: "src/lib/orders.ts" };
+    assert.equal(check([rule]).status, 0);
+    assert.equal(check([rule]).stderr, FOLLOWED);
+    // A route that reads the store itself goes past it.
+    writeFileSync(join(dir, "src/routes/peek.ts"), PEEK);
+    const violated = check([rule]);
+    assert.equal(violated.status, 1);
+    assert.deepEqual(violated.violations, ["- `src/routes/peek.ts:1` imports `src/db/store.ts`: layer **routes** reaches **db** only through `src/lib/orders.ts` (rule `through:*→db`)."]);
+    // The rule of one layer does not judge another's imports; a facade inside the layer reached is named the same way.
+    assert.equal(check([{ ...rule, from: "lib" }]).status, 0);
+    assert.equal(check([{ kind: "through", from: "routes", to: "db", through: ["src/db/index.ts", "src/db/st*.ts"] }]).status, 0);
+    assert.deepEqual(check([{ kind: "through", name: "the db facade", from: "routes", to: "db", through: "src/db/index.ts" }]).violations, ["- `src/routes/peek.ts:1` imports `src/db/store.ts`: layer **routes** reaches **db** only through `src/db/index.ts` (rule `the db facade`)."]);
+  }));
+
+test("a forbidden rule: a module, a glob, a package or a built-in is not imported from a layer, or from anywhere", () =>
+  withRules((check, dir) => {
+    // The store reads node:fs: named by its ID or by its name.
+    const violated = check([{ kind: "forbidden", from: "db", imports: ["node:fs"] }]);
+    assert.equal(violated.status, 1);
+    assert.deepEqual(violated.violations, ["- `src/db/store.ts:1` imports `node:fs`: layer **db** is not to import `node:fs` (rule `forbidden:db`)."]);
+    assert.deepEqual(check([{ kind: "forbidden", name: "no files", imports: "fs" }]).violations, ["- `src/db/store.ts:1` imports `node:fs`: `node:fs` is not to be imported (rule `no files`)."]);
+    // Another layer may; and the store's `import type` of lib runs nothing, so it breaks no rule.
+    assert.equal(check([{ kind: "forbidden", from: "lib", imports: ["node:fs"] }, { kind: "forbidden", name: "db stays below lib", from: "db", imports: "src/lib/**" }]).status, 0);
+    // A module of the repository, by a glob.
+    writeFileSync(join(dir, "src/routes/peek.ts"), PEEK);
+    assert.deepEqual(check([{ kind: "forbidden", from: "routes", imports: ["src/db/**"] }]).violations, ["- `src/routes/peek.ts:1` imports `src/db/store.ts`: layer **routes** is not to import `src/db/store.ts` (rule `forbidden:routes`)."]);
+  }));
+
+test("a rule written wrong names its field; a layer the repository lacks is a wrong call of check", () =>
+  withRules((check) => {
+    const refused = (rules: unknown, message: string): void => {
+      const result = check(rules);
+      assert.equal(result.status, 2, JSON.stringify(rules));
+      assert.equal(result.stderr, `archdiff: archdiff.json: ${message}\n`);
+    };
+    refused({}, '"rules" must be a list of rules: { "kind": "naming" | "threshold" | "cycles" | "through" | "forbidden", … }');
+    refused(["cycles"], '"rules[0]" must be an object with a "kind": naming, threshold, cycles, through, forbidden');
+    refused([{ kind: "cycles" }, { kind: "nope" }], '"rules[1].kind" must be one of naming, threshold, cycles, through, forbidden');
+    refused([{ kind: "naming", layer: "lib" }], '"rules[0]" needs one of "pattern" (a glob) and "regex"');
+    refused([{ kind: "naming", pattern: "*.ts" }], '"rules[0].layer" must be the name of a layer');
+    assert.match(check([{ kind: "naming", layer: "lib", regex: "(" }]).stderr, /^archdiff: archdiff\.json: "rules\[0\]\.regex" is no regular expression \(/);
+    refused([{ kind: "threshold", metric: "speed", max: 1 }], '"rules[0].metric" must be one of fanIn, fanOut, instability, abstractness, distance, cohesion, lines');
+    refused([{ kind: "threshold", metric: "lines" }], '"rules[0]" needs "max" or "min"');
+    refused([{ kind: "threshold", metric: "lines", max: "many" }], '"rules[0].max" must be a number, 0 or more');
+    refused([{ kind: "cycles", max: 1.5 }], '"rules[0].max" must be a whole number, 0 or more');
+    refused([{ kind: "through", to: "db" }], '"rules[0].through" must be the path of a module, a glob, or a list of them');
+    // A field the kind does not take is refused: a misspelt one would loosen the rule unseen.
+    refused([{ kind: "forbidden", from: "db", import: ["node:fs"] }], '"rules[0].import" is no field of a forbidden rule (it takes name, from, imports)');
+    // A rule is known to the baseline by its name: two of one name are refused, and the contract's own is taken.
+    refused([{ kind: "cycles" }, { kind: "cycles", max: 2 }], '"rules[1]" is named "cycles" as rules[0] is: give one of them a "name"');
+    refused([{ kind: "cycles", name: "tidy" }, { kind: "naming", name: "tidy", layer: "lib", pattern: "*" }], '"rules[1].name" is rules[0]\'s name too: a rule is known by its name');
+    refused([{ kind: "cycles", name: "layers" }], '"rules[0].name" must not be "layers": that is the rule of the contract\'s arrows');
+    // The layers are known once the code is read: a rule of one that is not there is told, with the ones that are.
+    refused([{ kind: "cycles" }, { kind: "through", from: "route", to: "db", through: "src/lib/orders.ts" }], '"rules[1].from": no layer "route" (the layers: cartridge, db, lib, routes)');
+  }));
+
+test("the rules beside the contract: one report, the baseline knows a rule's violation by the rule's name, and the JSON lists them", () =>
+  withViolations((dir) => {
+    writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ layers: LAYERS, rules: [{ kind: "forbidden", name: "no files in db", from: "db", imports: "fs" }, { kind: "threshold", metric: "lines", max: 30 }] }));
+    const red = archdiff(["check", dir]);
+    assert.equal(red.status, 1);
+    assert.equal(red.stderr, "archdiff check: 4 violations of the intent and the rules of archdiff.json\n");
+    assert.ok(red.stdout.includes(`# Check: the code of ${dir} against ARCHITECTURE.md and the rules of archdiff.json\n\n**4 violations of the intent and the rules of archdiff.json.**\n\n## Violations\n\n- \`src/db/report.ts:1\` imports \`src/routes/checkout.tsx\`: layer **db** → **routes** is not in the intent.`), red.stdout);
+    // The baseline keeps a rule's violation as the rule's name and the module, with what it imports when it is an import.
+    assert.equal(archdiff(["check", dir, "--baseline"]).status, 0);
+    assert.deepEqual((JSON.parse(readFileSync(join(dir, "archdiff-baseline.json"), "utf8")) as { violations: unknown }).violations, [
+      { rule: "layers", from: "src/db/report.ts", to: "src/lib/log.ts" },
+      { rule: "layers", from: "src/db/report.ts", to: "src/routes/checkout.tsx" },
+      { rule: "lines", from: "src/lib/orders.ts" },
+      { rule: "no files in db", from: "src/db/store.ts", to: "node:fs" },
+    ]);
+    const green = archdiff(["check", dir]);
+    assert.equal(green.status, 0, green.stdout);
+    assert.equal(green.stderr, "archdiff check: the code follows the intent and the rules of archdiff.json; 4 known violations in archdiff-baseline.json\n");
+    // A rule made stricter finds a module the baseline does not know.
+    writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ layers: LAYERS, rules: [{ kind: "forbidden", name: "no files in db", from: "db", imports: "fs" }, { kind: "threshold", metric: "lines", max: 12 }] }));
+    const json = JSON.parse(archdiff(["check", dir, "--json"]).stdout) as { ok: boolean; violations: Record<string, unknown>[] };
+    assert.equal(json.ok, false);
+    assert.deepEqual(json.violations.filter((violation) => violation["known"] === false), [{ rule: "lines", from: "src/db/store.ts", line: 1, problem: "it has 13 lines, over the 12 allowed", known: false }]);
+    assert.deepEqual(json.violations.find((violation) => violation["rule"] === "no files in db"), { rule: "no files in db", from: "src/db/store.ts", to: "node:fs", line: 1, problem: "layer db is not to import node:fs", known: true });
+  }));
+
+test("the rules need no contract on the page: the check and the checks after a run hold the code to them", () =>
+  withOwnServer(
+    "archdiff-rules-web-",
+    (dir) => writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ layers: LAYERS, rules: [{ kind: "forbidden", from: "db", imports: "fs" }] })),
+    async (origin) => {
+      const check = (await (await fetch(`${origin}/api/check`)).json()) as { exists: boolean; ok: boolean; markdown: string };
+      assert.equal(check.exists, false, "there is no ARCHITECTURE.md");
+      assert.equal(check.ok, false);
+      assert.ok(check.markdown.includes("- `src/db/store.ts:1` imports `node:fs`: layer **db** is not to import `node:fs` (rule `forbidden:db`)."), check.markdown);
+      const { events } = (await (await fetch(`${origin}/api/checks`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json()) as { events: { text: string }[] };
+      assert.deepEqual(events.map((event) => event.text), ["✘ archdiff check\n1 violation of the rules of archdiff.json\nsrc/db/store.ts:1 imports node:fs: layer db is not to import node:fs (rule forbidden:db)"]);
     },
   ));

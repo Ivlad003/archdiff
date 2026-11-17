@@ -13,7 +13,7 @@ import { mergePlan, planFromScene, taskMarkdown } from "../plan.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { CACHE_DIRECTORY } from "../cache.ts";
 import { drawingSlug } from "../drawings.ts";
-import { AGENT_PROTOCOL, checkIntent, documentPrompt, INTENT_FILE, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "../intent.ts";
+import { AGENT_PROTOCOL, checkIntent, documentPrompt, INTENT_FILE, intentMarkdown, parseIntent, writeIntent } from "../intent.ts";
 import { readBaseline } from "../baseline.ts";
 import { checkCode, checkJson, checkMarkdown } from "../violations.ts";
 import { readDrawing } from "../drawings.ts";
@@ -250,14 +250,14 @@ export async function getIntent(ctx: RouteContext, { response }: RouteRequest): 
 export async function getCheck(ctx: RouteContext, { response }: RouteRequest): Promise<void> {
   const { root } = ctx;
   const analysis = await ctx.fresh();
+  // As `archdiff check` holds it: the contract's layers and the rules, against the baseline of known violations when the repository keeps one.
+  const check = checkCode(analysis, readBaseline(root, analysis.config.baseline));
+
+  if (check !== null) return json(response, { exists: analysis.intent !== null, ok: check.ok, report: checkJson(check), markdown: checkMarkdown(check, root) });
 
   if (!analysis.intent) return json(response, { exists: false, markdown: `# Check\n\nNo ${INTENT_FILE}: draw on the intent view and run "code this", import a document, or \`archdiff intent --init\`.\n`, ok: true });
 
-  if (!judgesLayers(analysis.intent)) return json(response, { exists: true, markdown: `# Check\n\n${INTENT_FILE} names no layer — no Mermaid flowchart with a subgraph, or a module in one — so nothing is checked against it.\n`, ok: true });
-  // As `archdiff check` holds it: against the baseline of known violations, when the repository keeps one.
-  const check = checkCode(analysis, readBaseline(root, analysis.config.baseline))!;
-
-  return json(response, { exists: true, ok: check.ok, report: checkJson(check), markdown: checkMarkdown(check, root) });
+  return json(response, { exists: true, markdown: `# Check\n\n${INTENT_FILE} names no layer — no Mermaid flowchart with a subgraph, or a module in one — so nothing is checked against it.\n`, ok: true });
 }
 
 export async function getAgentEvents(ctx: RouteContext, { url, response, request }: RouteRequest): Promise<void> {

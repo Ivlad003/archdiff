@@ -678,7 +678,10 @@ const COMMANDS: readonly Command[] = [
     usage: "[dir] [--baseline [FILE]] [--no-baseline] [--json] [--out FILE]",
     help: [
       "The code against ARCHITECTURE.md: imports between layers the intent does",
-      "not allow (exit 1), what is planned and not built, what is built beyond it.",
+      "not allow (exit 1), what is planned and not built, what is built beyond it;",
+      "and against the \"rules\" of archdiff.json: how a layer's files are named, a",
+      "threshold on a metric, import cycles, a module a layer is reached through,",
+      "what is not imported — every violation with its file and line.",
       "--baseline writes the violations found now to archdiff-baseline.json (or FILE;",
       "archdiff.json's \"baseline\" names another), a file to commit: from then on only",
       "a violation that is not in it fails, the known ones are listed apart, and the",
@@ -689,14 +692,16 @@ const COMMANDS: readonly Command[] = [
     async run(call) {
       if (call.has("baseline") && call.has("no-baseline")) return fail("check: --baseline writes the baseline and --no-baseline reads none: one of them");
       const analysis = await analyze(call.dir(0));
+      // The rules of archdiff.json judge the code with or without a contract; without either there is nothing to hold it to.
+      const ruled = analysis.config.rules.length > 0;
 
-      if (!analysis.intent) {
+      if (!analysis.intent && !ruled) {
         process.stderr.write(`archdiff check: no ${INTENT_FILE}, nothing to check against (archdiff intent --init)\n`);
 
         return 0;
       }
 
-      if (!judgesLayers(analysis.intent)) {
+      if (!judgesLayers(analysis.intent) && !ruled) {
         process.stderr.write(`archdiff check: ${INTENT_FILE} names no layer (no Mermaid flowchart with a subgraph, or a module in one): nothing to check against (archdiff intent --init --force)\n`);
 
         return 0;

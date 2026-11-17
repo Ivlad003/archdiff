@@ -39,6 +39,40 @@ Feature: The contract: ARCHITECTURE.md
     Then "archdiff check" exits 0 and names the entry under "Fixed since the baseline (1)"
     And "archdiff check --baseline" writes the file with one violation
 
+  Scenario Outline: A rule of archdiff.json is violated
+    Given the sample repository with the rule <rule> in archdiff.json
+    And <code>
+    When I run "archdiff check"
+    Then the exit code is 1
+    And the report says "<violation>"
+
+    Examples:
+      | rule                                                                         | code                                      | violation                                                                                                          |
+      | { "kind": "naming", "layer": "lib", "pattern": "*.service.ts" }              | src/lib/log.ts in layer lib               | `src/lib/log.ts:1`: the files of layer **lib** are named `*.service.ts` (rule `naming:lib`)                        |
+      | { "kind": "threshold", "metric": "instability", "max": 0.5, "layer": "lib" } | src/lib/orders.ts with instability 0.67   | `src/lib/orders.ts:1`: its instability is 0.67, over the 0.5 allowed (rule `instability:lib`)                      |
+      | { "kind": "cycles" }                                                         | log.ts and orders.ts importing each other | `src/lib/log.ts:1` imports `src/lib/orders.ts`: inside an import cycle of 2 modules (rule `cycles`)                |
+      | { "kind": "through", "to": "db", "through": "src/lib/orders.ts" }            | src/routes/peek.ts importing the store    | `src/routes/peek.ts:1` imports `src/db/store.ts`: layer **routes** reaches **db** only through `src/lib/orders.ts` |
+      | { "kind": "forbidden", "from": "db", "imports": ["node:fs"] }                | src/db/store.ts importing node:fs         | `src/db/store.ts:1` imports `node:fs`: layer **db** is not to import `node:fs` (rule `forbidden:db`)               |
+
+  Scenario: The rules hold without a contract
+    Given the sample repository without ARCHITECTURE.md
+    And the rule { "kind": "threshold", "metric": "lines", "max": 31 } in archdiff.json
+    When I run "archdiff check"
+    Then the exit code is 0
+    And stderr says "the code follows the rules of archdiff.json"
+
+  Scenario: A rule written wrong names its field
+    Given the rule { "kind": "threshold", "metric": "speed", "max": 1 } in archdiff.json
+    When I run "archdiff check"
+    Then the exit code is 2
+    And stderr names "rules[0].metric" and the metrics a threshold takes
+
+  Scenario: A rule's violation is known to the baseline by the rule's name
+    Given the rule { "kind": "forbidden", "name": "no files in db", "from": "db", "imports": "fs" } in archdiff.json
+    When I run "archdiff check --baseline"
+    Then archdiff-baseline.json lists the rule "no files in db" from src/db/store.ts to node:fs
+    And "archdiff check" exits 0
+
   Scenario: A design note becomes the contract
     Given a Markdown note with a Mermaid flowchart whose subgraphs are http and app
     When I run "archdiff import note.md"
