@@ -1349,3 +1349,48 @@ test("a shape's menu opens its impact: the subject in the middle lane, what depe
   const pictures = (await page!.evaluate(`[...document.querySelectorAll("#picture option")].map((option) => option.value)`)) as string[];
   assert.ok(pictures.includes("impact:src/lib/orders.ts") && pictures.includes("module:src/lib/orders.ts"), pictures.join(", "));
 });
+
+test("a what-if opens as a review's picture does: a module's menu supposes it deleted, a function's split off into a module the reader names", { skip: !CHROME && "no Chrome installed" }, async () => {
+  await page!.goto(`${base}/#view=layer%3Alib`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`);
+  await page!.waitForTimeout(600);
+  const log = await screenPointOf("src/lib/log.ts");
+  await page!.mouse.click(log.x, log.y, { button: "right" });
+  await page!.waitForSelector("#context-menu:not([hidden])");
+  const items = (await page!.evaluate(`[...document.querySelectorAll("#context-menu li")].map((li) => li.textContent)`)) as string[];
+  assert.ok(items.some((item) => item.startsWith("What if it were deleted")) && items.some((item) => item.startsWith("What if it moved…")), items.join(" | "));
+  await page!.click("#context-menu li:has-text('What if it were deleted')");
+  await page!.waitForFunction(`window.archdiff.drawn() === "whatif:delete:src/lib/log.ts"`);
+  // The title says what would break; the picture marks the module removed and the importer whose import breaks.
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent?.startsWith("What if: delete src/lib/log.ts — ⚠ 1 import would break, 1 call would lose its target")`);
+  const marks = (await page!.evaluate(`[...window.archdiff.nodes().values()].map((node) => [node.id, node.diff ?? null])`)) as [string, string | null][];
+  assert.deepEqual(marks.sort(), [["src/lib/log.ts", "removed"], ["src/lib/orders.ts", "warning"]]);
+  await page!.waitForFunction(`(document.querySelector("#markdown")?.textContent ?? "").includes("Broken by it")`);
+  // A change supposed is read, not drawn on.
+  assert.equal(await page!.isDisabled("#edit"), true);
+
+  // A function of a module's top level: the reader is asked for the new module, offered one named after the function beside the old.
+  await page!.goto(`${base}/#view=inside%3Asrc%2Flib%2Forders.ts`);
+  await page!.waitForFunction(`window.archdiff.drawn() === "inside:src/lib/orders.ts"`);
+  await page!.waitForTimeout(600);
+  const find = await screenPointOf("src/lib/orders.ts#findOrder");
+  await page!.mouse.click(find.x, find.y, { button: "right" });
+  await page!.waitForSelector("#context-menu:not([hidden])");
+  // The reader accepts the module the question offers (the page's own prompt, answered here without a dialog).
+  await page!.evaluate(`window.prompt = (question, offered) => offered`);
+  await page!.click("#context-menu li:has-text('What if it were split off…')");
+  await page!.waitForFunction(`window.archdiff.drawn() === "whatif:split:src/lib/orders.ts#findOrder>src/lib/findOrder.ts"`);
+  await page!.waitForFunction(`document.querySelector("#title-text")?.textContent === "What if: split findOrder off src/lib/orders.ts into src/lib/findOrder.ts — nothing would break"`);
+  const added = (await page!.evaluate(`[...window.archdiff.nodes().values()].filter((node) => node.diff === "added").map((node) => node.id)`)) as string[];
+  assert.deepEqual(added, ["src/lib/findOrder.ts"]);
+  // A method leaves with its class: its menu offers no split.
+  await page!.goBack();
+  await page!.waitForFunction(`window.archdiff.drawn() === "inside:src/lib/orders.ts"`);
+  await page!.waitForTimeout(600);
+  const method = await screenPointOf("src/lib/orders.ts#OrderService.place");
+  await page!.mouse.click(method.x, method.y, { button: "right" });
+  await page!.waitForSelector("#context-menu:not([hidden])");
+  const own = (await page!.evaluate(`[...document.querySelectorAll("#context-menu li")].map((li) => li.textContent)`)) as string[];
+  assert.ok(own.some((item) => item.startsWith("Impact: what a change to it reaches")) && !own.some((item) => item.startsWith("What if")), own.join(" | "));
+  await page!.keyboard.press("Escape");
+});

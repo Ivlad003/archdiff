@@ -2166,3 +2166,173 @@ test("impact --changed: every file changed since the base is a subject, the risk
     assert.equal(outside.status, 2);
     assert.match(outside.stderr, /not a git repository/);
   }));
+
+/** What `whatif --json` prints, as the tests read it. */
+interface WhatIfJson {
+  change: { op: string; module: string; to?: string; names?: string[] };
+  title: string;
+  layer: { before: string | null; after: string | null };
+  diff: { modulesAdded: string[]; modulesRemoved: string[]; nodesAdded: { id: string }[]; nodesRemoved: { id: string }[]; depsAdded: { from: string; to: string }[]; depsRemoved: { from: string; to: string }[]; callsAdded: { from: string; to: string }[]; layerEdgesAdded: { from: string; to: string; against?: true }[]; layerEdgesRemoved: { from: string; to: string }[]; externalsRemoved: string[] };
+  contract: boolean;
+  violations: { added: { from: string; to: string; fromLayer: string; toLayer: string }[]; removed: { from: string; to: string }[] };
+  cycles: { modules: { created: string[][]; removed: string[][]; changed: { before: string[]; after: string[] }[] }; layers: { created: string[][]; removed: string[][] } };
+  broken: { imports: { from: string; to: string; line: number }[]; calls: { from: string; to: string }[] };
+  findings: string[];
+}
+
+/** The sample with the contract of its layers: routes → lib → db, and db → lib. */
+function sampleWithContract(dir: string): void {
+  cpSync(fixture, dir, { recursive: true });
+  writeFileSync(join(dir, "ARCHITECTURE.md"), "# Architecture\n\n```mermaid\nflowchart LR\n  subgraph routes\n    r[src/routes/checkout.tsx]\n  end\n  subgraph lib\n    o[src/lib/orders.ts]\n    l[src/lib/log.ts]\n  end\n  subgraph db\n    s[src/db/store.ts]\n  end\n  r --> o\n  o --> s\n  o --> l\n  s --> l\n```\n");
+}
+
+/** `archdiff whatif … --json` on `dir`: the exit code and the report. */
+function whatif(dir: string, ...change: string[]): { status: number | null; report: WhatIfJson; stderr: string } {
+  const result = archdiff(["whatif", ...change, dir, "--json"]);
+
+  return { status: result.status, report: (result.stdout === "" ? null : JSON.parse(result.stdout)) as WhatIfJson, stderr: result.stderr };
+}
+
+test("whatif move: the module at its new path and in its new layer, as a review of the change; an import the contract forbids and a circle of layers are findings", () =>
+  withTempDir("archdiff-whatif-move-", (dir) => {
+    sampleWithContract(dir);
+    const before = readFileSync(join(dir, "src/db/store.ts"), "utf8");
+    // The store among the routes: lib would import routes, which the contract does not allow and which closes a circle of layers.
+    const { status, report, stderr } = whatif(dir, "move", "src/db/store.ts", "src/routes");
+    assert.equal(status, 1, stderr);
+    assert.deepEqual(report.change, { op: "move", module: "src/db/store.ts", to: "src/routes/store.ts" });
+    assert.equal(report.title, "move src/db/store.ts to src/routes/store.ts");
+    assert.deepEqual(report.layer, { before: "db", after: "routes" });
+    // The diff a review would draw: the module removed and added, its functions and its imports with it.
+    assert.deepEqual([report.diff.modulesRemoved, report.diff.modulesAdded], [["src/db/store.ts"], ["src/routes/store.ts"]]);
+    assert.deepEqual(report.diff.nodesAdded.map((node) => node.id), ["src/routes/store.ts#readOrder", "src/routes/store.ts#saveOrder"]);
+    assert.ok(report.diff.depsAdded.some((dep) => dep.from === "src/lib/orders.ts" && dep.to === "src/routes/store.ts") && report.diff.depsRemoved.some((dep) => dep.from === "src/lib/orders.ts" && dep.to === "src/db/store.ts"), JSON.stringify(report.diff.depsAdded));
+    assert.ok(report.diff.callsAdded.some((call) => call.from === "src/lib/orders.ts#placeOrder" && call.to === "src/routes/store.ts#saveOrder"), JSON.stringify(report.diff.callsAdded));
+    assert.deepEqual(report.diff.layerEdgesAdded, [{ from: "lib", to: "routes", against: true }]);
+    assert.deepEqual(report.diff.layerEdgesRemoved, [{ from: "lib", to: "db" }]);
+    assert.equal(report.contract, true);
+    assert.deepEqual(report.violations.added.map((violation) => [violation.from, violation.to, violation.fromLayer, violation.toLayer]), [["src/lib/orders.ts", "src/routes/store.ts", "lib", "routes"]]);
+    assert.deepEqual([report.cycles.layers.created, report.cycles.modules.created], [[["lib", "routes"]], []]);
+    assert.deepEqual(report.findings, ["1 import would go against ARCHITECTURE.md", "1 circle of layers would close"]);
+    // No file was touched.
+    assert.ok(existsSync(join(dir, "src/db/store.ts")) && !existsSync(join(dir, "src/routes/store.ts")));
+    assert.equal(readFileSync(join(dir, "src/db/store.ts"), "utf8"), before);
+    // The Markdown reads as a review does, with the contract and the cycles said; the picture marks the two places and names the line against the contract.
+    const markdown = archdiff(["whatif", "move", "src/db/store.ts", "src/routes/", dir]);
+    assert.equal(markdown.status, 1);
+    assert.ok(markdown.stdout.startsWith("<!-- archdiff:generated — what-if move:src/db/store.ts>src/routes/store.ts -->\n# What if: move src/db/store.ts to src/routes/store.ts\n"), markdown.stdout.slice(0, 200));
+    assert.ok(markdown.stdout.includes("The module would lie in layer **routes** (now **db**)."), markdown.stdout);
+    assert.ok(markdown.stdout.includes("## ⚠ The contract\n\n- would go against it: `src/lib/orders.ts:2` imports `src/routes/store.ts` — layer **lib** → **routes** is not in ARCHITECTURE.md\n"), markdown.stdout);
+    assert.ok(markdown.stdout.includes("## ⚠ Cycles\n\n- would close a circle of layers: lib ⇄ routes\n") && markdown.stdout.includes("## New dependencies between layers\n\n- **lib → routes** — against ARCHITECTURE.md\n"), markdown.stdout);
+    assert.ok(markdown.stdout.includes('src_lib_orders_ts -->|"against contract"| src_routes_store_ts') && markdown.stdout.includes("## Modules added\n\n- src/routes/store.ts\n"), markdown.stdout);
+    const picture = JSON.parse(archdiff(["diagram", "whatif:move:src/db/store.ts>src/routes", dir, "--format", "json"]).stdout) as { title: string; reason?: string; nodes: { id: string; diff?: string }[]; edges: { from: string; to: string; diff?: string; label?: string }[] };
+    assert.equal(picture.title, "What if: move src/db/store.ts to src/routes/store.ts");
+    assert.deepEqual(picture.nodes.filter((node) => node.diff).map((node) => [node.id, node.diff]).sort(), [["src/db/store.ts", "removed"], ["src/routes/store.ts", "added"]]);
+    assert.ok(picture.reason?.startsWith("layer db → routes; ⚠ 1 import would go against ARCHITECTURE.md"), picture.reason);
+    // A move within what the contract allows is news, not a finding: the log beside the store (lib → db is an arrow of the contract).
+    const allowed = whatif(dir, "move", "src/lib/log.ts", "src/db/log.ts");
+    assert.equal(allowed.status, 0, allowed.stderr);
+    assert.deepEqual([allowed.report.layer, allowed.report.findings, allowed.report.violations.added], [{ before: "lib", after: "db" }, [], []]);
+    // A move that cannot be supposed is a wrong call: no such module, the place it is at, a place that is taken.
+    assert.match(archdiff(["whatif", "move", "src/nowhere.ts", "src/db", dir]).stderr, /^archdiff: whatif: no module "src\/nowhere\.ts" \(archdiff views lists them\)\n$/);
+    assert.match(archdiff(["whatif", "move", "src/lib/log.ts", "src/lib", dir]).stderr, /^archdiff: whatif: src\/lib\/log\.ts is there already\n$/);
+    const taken = archdiff(["whatif", "move", "src/lib/log.ts", "src/lib/orders.ts", dir]);
+    assert.equal(taken.status, 2);
+    assert.match(taken.stderr, /whatif: there is a module at src\/lib\/orders\.ts already/);
+  }));
+
+test("whatif delete: the module gone from the graph, the imports and calls left without their target, a package no one imports any more", () =>
+  withTempDir("archdiff-whatif-delete-", (dir) => {
+    sampleWithContract(dir);
+    // The log is imported by orders.ts and called by placeOrder: both break.
+    const log = whatif(dir, "delete", "src/lib/log.ts");
+    assert.equal(log.status, 1, log.stderr);
+    assert.deepEqual(log.report.broken.imports, [{ from: "src/lib/orders.ts", to: "src/lib/log.ts", line: 3 }]);
+    assert.deepEqual(log.report.broken.calls.map((call) => [call.from, call.to]), [["src/lib/orders.ts#placeOrder", "src/lib/log.ts#log"]]);
+    assert.deepEqual(log.report.findings, ["1 import would break", "1 call would lose its target"]);
+    assert.deepEqual([log.report.diff.modulesRemoved, log.report.diff.nodesRemoved.map((node) => node.id), log.report.layer], [["src/lib/log.ts"], ["src/lib/log.ts#log"], { before: "lib", after: null }]);
+    const markdown = archdiff(["whatif", "delete", "src/lib/log.ts", dir]).stdout;
+    assert.ok(markdown.includes("## ⚠ Broken by it\n\n- `src/lib/orders.ts:3` imports `src/lib/log.ts`\n- `src/lib/orders.ts#placeOrder` calls `src/lib/log.ts#log` — src/lib/orders.ts:11\n"), markdown);
+    assert.ok(markdown.includes('src_lib_orders_ts["src/lib/orders.ts<br/>its import breaks"]') && markdown.includes("class src_lib_log_ts removed"), markdown);
+    assert.ok(existsSync(join(dir, "src/lib/log.ts")), "no file was touched");
+    // The route is imported by nothing: nothing breaks, and its layer no longer depends on lib.
+    const route = whatif(dir, "delete", "src/routes/checkout.tsx");
+    assert.equal(route.status, 0, route.stderr);
+    assert.deepEqual([route.report.findings, route.report.broken.imports, route.report.diff.layerEdgesRemoved], [[], [], [{ from: "routes", to: "lib" }]]);
+    assert.ok(archdiff(["whatif", "delete", "src/routes/checkout.tsx", dir]).stdout.includes("_No import would start or stop going against ARCHITECTURE.md._"));
+    // The store is the one module that imports node:fs: the package leaves with it.
+    assert.deepEqual(whatif(dir, "delete", "src/db/store.ts").report.diff.externalsRemoved, ["node:fs"]);
+    // An import against the contract that the deletion takes away is said as such.
+    writeFileSync(join(dir, "src/routes/peek.ts"), 'import { readOrder } from "@/db/store";\n\nexport function peek(): unknown {\n  return readOrder("a");\n}\n');
+    assert.equal(archdiff(["check", dir]).status, 1);
+    const peek = whatif(dir, "delete", "src/routes/peek.ts");
+    assert.deepEqual([peek.status, peek.report.violations.removed.map((violation) => [violation.from, violation.to])], [0, [["src/routes/peek.ts", "src/db/store.ts"]]]);
+    assert.ok(archdiff(["whatif", "delete", "src/routes/peek.ts", dir]).stdout.includes("- would no longer go against it: `src/routes/peek.ts` imports `src/db/store.ts` (layer routes → db)"));
+    // Without a contract that names layers the change is held against nothing, and says so.
+    rmSync(join(dir, "ARCHITECTURE.md"));
+    const free = archdiff(["whatif", "delete", "src/routes/peek.ts", dir]);
+    assert.equal(free.status, 0);
+    assert.ok(free.stdout.includes("_No ARCHITECTURE.md that names a layer: nothing to hold the change against._"), free.stdout);
+  }));
+
+test("whatif split: the functions in a new module, each import with the code that uses it; a split that closes a cycle or goes against the contract is a finding", () =>
+  withTempDir("archdiff-whatif-split-", (dir) => {
+    sampleWithContract(dir);
+    const edge = (edges: { from: string; to: string }[]): string[] => edges.map((item) => `${item.from} → ${item.to}`).sort();
+    // placeOrder and the validate it calls leave together: orders.ts imports the new module (its class calls placeOrder),
+    // the new module takes the log's import, which nothing left behind uses, and shares the store's with what stays.
+    const clean = whatif(dir, "split", "src/lib/orders.ts", "placeOrder,validate", "src/lib/place.ts");
+    assert.equal(clean.status, 0, clean.stderr);
+    assert.deepEqual(clean.report.change, { op: "split", module: "src/lib/orders.ts", names: ["placeOrder", "validate"], to: "src/lib/place.ts" });
+    assert.deepEqual([clean.report.diff.modulesAdded, clean.report.diff.modulesRemoved, clean.report.layer], [["src/lib/place.ts"], [], { before: "lib", after: "lib" }]);
+    assert.deepEqual(clean.report.diff.nodesAdded.map((node) => node.id), ["src/lib/place.ts#placeOrder", "src/lib/place.ts#validate"]);
+    assert.deepEqual(edge(clean.report.diff.depsAdded), ["src/lib/orders.ts → src/lib/place.ts", "src/lib/place.ts → src/db/store.ts", "src/lib/place.ts → src/lib/log.ts"]);
+    assert.deepEqual(edge(clean.report.diff.depsRemoved), ["src/lib/orders.ts → src/lib/log.ts"]);
+    assert.ok(edge(clean.report.diff.callsAdded).includes("src/lib/orders.ts#OrderService.place → src/lib/place.ts#placeOrder"), JSON.stringify(clean.report.diff.callsAdded));
+    assert.deepEqual([clean.report.findings, clean.report.cycles.modules.created, clean.report.violations.added], [[], [], []]);
+    assert.ok(archdiff(["whatif", "split", "src/lib/orders.ts", "placeOrder, validate", "src/lib/place.ts", dir]).stdout.includes("# What if: split placeOrder, validate off src/lib/orders.ts into src/lib/place.ts\n"));
+    // placeOrder alone: it calls validate, which stays, and the class that stays calls it — the two halves import each other.
+    const circle = whatif(dir, "split", "src/lib/orders.ts", "placeOrder", "src/lib/place.ts");
+    assert.equal(circle.status, 1, circle.stderr);
+    assert.deepEqual(circle.report.cycles.modules.created, [["src/lib/orders.ts", "src/lib/place.ts"]]);
+    assert.deepEqual(circle.report.findings, ["1 import cycle would close or grow"]);
+    assert.ok(edge(circle.report.diff.depsAdded).includes("src/lib/place.ts → src/lib/orders.ts") && edge(circle.report.diff.depsAdded).includes("src/lib/orders.ts → src/lib/place.ts"), JSON.stringify(circle.report.diff.depsAdded));
+    assert.ok(archdiff(["whatif", "split", "src/lib/orders.ts", "placeOrder", "src/lib/place.ts", dir]).stdout.includes("## ⚠ Cycles\n\n- would close a circle of modules: src/lib/orders.ts ⇄ src/lib/place.ts\n"));
+    // findOrder among the routes: the new module imports the store, routes → db, which the contract does not allow.
+    const against = whatif(dir, "split", "src/lib/orders.ts", "findOrder", "src/routes/find.ts");
+    assert.equal(against.status, 1, against.stderr);
+    assert.deepEqual(against.report.layer, { before: "lib", after: "routes" });
+    assert.deepEqual(against.report.violations.added.map((violation) => [violation.from, violation.to, violation.fromLayer, violation.toLayer]), [["src/routes/find.ts", "src/db/store.ts", "routes", "db"]]);
+    // orders.ts keeps its import of the store: placeOrder still saves through it.
+    assert.deepEqual([edge(against.report.diff.depsAdded), against.report.diff.depsRemoved], [["src/routes/find.ts → src/db/store.ts"], []]);
+    // A class leaves with its methods, and its importer follows it: the route binds OrderService alone.
+    const service = whatif(dir, "split", "src/lib/orders.ts", "OrderService", "src/lib/service.ts");
+    assert.deepEqual(service.report.diff.nodesAdded.map((node) => node.id), ["src/lib/service.ts#OrderService", "src/lib/service.ts#OrderService.constructor", "src/lib/service.ts#OrderService.nextId", "src/lib/service.ts#OrderService.place"]);
+    assert.deepEqual([edge(service.report.diff.depsAdded), edge(service.report.diff.depsRemoved)], [["src/lib/service.ts → src/lib/orders.ts", "src/routes/checkout.tsx → src/lib/service.ts"], ["src/routes/checkout.tsx → src/lib/orders.ts"]]);
+    assert.equal(service.status, 0, JSON.stringify(service.report.findings));
+    // A split that cannot be supposed: a name the module does not declare, every declaration, a module that exists, no source file.
+    const unknown = archdiff(["whatif", "split", "src/lib/orders.ts", "nope", "src/lib/x.ts", dir]);
+    assert.equal(unknown.status, 2);
+    assert.match(unknown.stderr, /^archdiff: whatif: src\/lib\/orders\.ts declares no "nope" at its top level \(it declares Order, placeOrder, validate, findOrder, OrderService\)\n$/);
+    assert.match(archdiff(["whatif", "split", "src/lib/log.ts", "log", "src/lib/x.ts", dir]).stderr, /every declaration of src\/lib\/log\.ts would leave it: that is a move \(whatif move src\/lib\/log\.ts src\/lib\/x\.ts\)/);
+    assert.match(archdiff(["whatif", "split", "src/lib/orders.ts", "findOrder", "src/lib/log.ts", dir]).stderr, /there is a module at src\/lib\/log\.ts already: a split makes a new one/);
+    assert.match(archdiff(["whatif", "split", "src/lib/orders.ts", "findOrder", "src/lib/find", dir]).stderr, /src\/lib\/find is no source file archdiff reads: a split makes a module/);
+  }));
+
+test("whatif refuses a change it does not know, an argument too few or too many, and a view key that is none; the view is one of the table's", () => {
+  const usage = /\(whatif move <module> <to>, whatif delete <module>, whatif split <module> <fn,fn…> <new module>\)\n$/;
+  const none = archdiff(["whatif"]);
+  assert.equal(none.status, 2);
+  assert.match(none.stderr, /^archdiff: whatif: a change is required /);
+  assert.match(none.stderr, usage);
+  assert.match(archdiff(["whatif", "rename", "a", "b"]).stderr, /^archdiff: whatif: unknown change "rename" /);
+  assert.match(archdiff(["whatif", "move", "src/lib/log.ts"]).stderr, /^archdiff: whatif move: 2 arguments required /);
+  assert.match(archdiff(["whatif", "delete", "src/lib/log.ts", fixture, "extra"]).stderr, /^archdiff: whatif: unexpected argument "extra" \(archdiff --help\)\n$/);
+  const key = archdiff(["diagram", "whatif:rename:a>b", fixture]);
+  assert.equal(key.status, 2);
+  assert.match(key.stderr, /diagram: "rename:a>b" is no what-if \(move:<path>><to>, delete:<path>, split:<path>#<fn>,<fn>><new path>\)/);
+  assert.ok(archdiff(["--help"]).stdout.includes("whatif:move:<path>><to>|delete:<path>|split:<path>#<fn>,<fn>><new"), "the help lists the view");
+  // A path typed with Windows' separators names the same change.
+  const typed = archdiff(["whatif", "delete", "src\\lib\\log.ts", fixture, "--json"]);
+  assert.equal((JSON.parse(typed.stdout) as WhatIfJson).change.module, "src/lib/log.ts");
+});

@@ -202,9 +202,9 @@ export async function getShape(ctx: RouteContext, { url, response }: RouteReques
   // The code as the picture's head has it: a branch's file from git, the working tree's from the disk.
   const head = codeRevision(parseView(url.searchParams.get("view") ?? ""), url.searchParams.get("head") || null);
   const readSource = (file: string): string | null => (!analysis.facts.has(file) ? null : head ? fileAt(root, head, file) : readFileSync(join(root, file), "utf8"));
-  // In a review or a comparison, a module's page says what the change, or each head, did to it.
+  // In a review, a what-if or a comparison, a module's page says what the change, or each head, did (or would do) to it.
   const { change } = picture.value;
-  const changed = node.kind !== "module" || !change ? "" : change.kind === "review" ? moduleChangeMarkdown(node.id, [{ head: "", diff: change.diff }], false) : moduleChangeMarkdown(node.id, change.heads, true);
+  const changed = node.kind !== "module" || !change ? "" : change.kind === "compare" ? moduleChangeMarkdown(node.id, change.heads, true) : moduleChangeMarkdown(node.id, [{ head: "", diff: change.diff }], false);
 
   return json(response, { markdown: changed ? `${nodeMarkdown(node, analysis, readSource)}\n${changed}` : nodeMarkdown(node, analysis, readSource) });
 }

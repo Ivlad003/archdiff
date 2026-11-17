@@ -37,6 +37,7 @@ import { writeTestSkeletons } from "./gherkin.ts";
 import { FEATURES_DIRECTORY as FEATURES_DIRECTORY_NAME } from "./spec.ts";
 import { DEFAULT_PICTURE_OPTIONS, depthWarning, pictureFlags, pictureOptionsHelp, readPictureOptions, type PictureOptions } from "./options.ts";
 import { metricsOf } from "./metrics.ts";
+import { whatIfKey, type WhatIfChange } from "./whatif.ts";
 import { counted } from "./words.ts";
 
 /** A flag a command knows: its name after `--`, and whether a value follows it. */
@@ -100,11 +101,12 @@ async function writePicture(call: Call, command: string, root: string, view: Vie
   const analysis = drawnAtHead(view.kind) && refs.head ? await analysisAt(root, refs.head) : await analyze(root);
   const picture = await drawPicture(analysis, { view, options, refs });
 
-  // A missing subject: the reason, and where the subjects are listed, unless the reason says so already (a machine's).
+  // A missing subject: the reason, and where the subjects are listed, unless the reason says so already (a machine's)
+  // or is of another kind (a what-if that cannot be supposed).
   if (picture.diagram.missing) {
     const reason = picture.diagram.reason ?? "";
 
-    return { code: fail(`${command}: ${reason}${/ lists them\)$/.test(reason) ? "" : " (archdiff views lists them)"}`), picture: null };
+    return { code: fail(`${command}: ${reason}${/ lists them\)$/.test(reason) || !reason.startsWith("no ") ? "" : " (archdiff views lists them)"}`), picture: null };
   }
 
   const text = format === "md" ? picture.markdown : format === "json" ? json(picture) : exportDiagram(picture.diagram, format, options.mermaid);
@@ -518,6 +520,50 @@ const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: "whatif",
+    usage: "move <module> <to> | delete <module> | split <module> <fn,fn…> <new module> [dir] [--json] [--format F] [--out FILE]",
+    help: [
+      "The architecture as it would be after a change, without touching a file: a",
+      "module moved to another path or directory (its layer is the new place's), a",
+      "module deleted, or functions of a module split off into a new one (the imports",
+      "follow the code that uses them). Reported as a review reports a change — the",
+      "modules, functions, imports and calls it would add and remove, with the picture",
+      "— and what it would break: the imports and calls left without their target, the",
+      "imports that would go against ARCHITECTURE.md or stop going against it, the",
+      "cycles it would close or break. --json: the same as data. Exit 1 when the change",
+      "would break an import or a call, go against the contract or close a cycle",
+    ],
+    arity: 5,
+    flags: [...OUTPUT_FLAGS, flag("json")],
+    async run(call) {
+      const [op, ...rest] = call.positional;
+      const forms = "whatif move <module> <to>, whatif delete <module>, whatif split <module> <fn,fn…> <new module>";
+      const takes = op === "move" ? 2 : op === "delete" ? 1 : op === "split" ? 3 : null;
+
+      if (takes === null) return fail(`whatif: ${op === undefined ? "a change is required" : `unknown change "${op}"`} (${forms})`);
+
+      if (rest.length < takes) return fail(`whatif ${op}: ${counted(takes, "argument")} required (${forms})`);
+
+      // The directory comes after the change's own arguments; one more is a typo.
+      if (rest.length > takes + 1) return fail(`whatif: unexpected argument "${rest[takes + 1]}" (archdiff --help)`);
+      const module = subjectOf(rest[0]!);
+      const names = (rest[1] ?? "").split(",").map((name) => name.trim()).filter((name) => name !== "");
+      const change: WhatIfChange = op === "move" ? { op, module, to: subjectOf(rest[1]!) } : op === "delete" ? { op: "delete", module } : { op: "split", module, names, to: subjectOf(rest[2]!) };
+
+      if (change.op === "split" && names.length === 0) return fail(`whatif split: name the functions to split off (${forms})`);
+      const format = call.has("json") ? "json" : formatOf(call, "whatif");
+
+      if (format === null) return 2;
+
+      // `json` is the report itself; the exit code says whether the change would break something.
+      const { code, picture } = await writePicture(call, "whatif", call.dir(1 + takes), { kind: "whatif", subject: whatIfKey(change) }, DEFAULT_PICTURE_OPTIONS, format, ({ change: found }) => `${JSON.stringify(found?.kind === "whatif" ? found.report : null, null, 2)}\n`);
+
+      if (code !== 0 || picture?.change?.kind !== "whatif") return code;
+
+      return picture.change.findings.length > 0 ? 1 : 0;
+    },
+  },
+  {
     name: "branches",
     usage: "[dir]",
     help: ["List the branches (local, then remote) with the base the comparisons start from"],
@@ -796,7 +842,7 @@ export function helpText(): string {
     for (const line of command.help) lines.push(`${" ".repeat(21)}${line}`);
   }
 
-  lines.push("  --version          Print the version", "", "Exit codes: 0 ok, 1 differences found (review, check), 2 wrong invocation or I/O error.");
+  lines.push("  --version          Print the version", "", "Exit codes: 0 ok, 1 differences found (review, check, whatif), 2 wrong invocation or I/O error.");
 
   return `${HELP_HEAD}${lines.join("\n")}\n`;
 }

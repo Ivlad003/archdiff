@@ -57,8 +57,8 @@ export interface Refs {
   heads: readonly string[];
 }
 
-/** What a review or a comparison found, as the page reads it for the title (the server sends the whole diff). */
-export type ChangeSummary = { kind: "review"; diff: { base: string; changedFiles: string[]; layerEdgesAdded: { from: string; to: string; against?: true }[] }; contract: boolean } | { kind: "compare"; base: string; heads: { head: string; diff: { layerEdgesAdded: { from: string; to: string }[] } }[] };
+/** What a review, a comparison or a what-if found, as the page reads it for the title (the server sends the whole diff). */
+export type ChangeSummary = { kind: "review"; diff: { base: string; changedFiles: string[]; layerEdgesAdded: { from: string; to: string; against?: true }[] }; contract: boolean } | { kind: "compare"; base: string; heads: { head: string; diff: { layerEdgesAdded: { from: string; to: string }[] } }[] } | { kind: "whatif"; findings: string[] };
 
 /** The head of the code as a query parameter after `joint` (`?` or `&`), empty for the working tree. */
 function headQuery(joint: string, head: string | null): string {

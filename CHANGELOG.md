@@ -36,6 +36,14 @@ The blast radius of a change.
 - On the page, a shape's right-click menu offers *Impact: what a change to it reaches* (a module, a function, a class), and the picture select lists it among the pictures of a subject.
 - The computation is `impactOf(analysis, subject, { depth, types })` in `src/impact.ts`, a pure module of the views layer: the command, the view and the picture read it, and another reader can.
 
+A change supposed, not made.
+
+- `archdiff whatif move <module> <to>`, `whatif delete <module>` and `whatif split <module> <fn,fn…> <new module>` (the view `whatif:<change>`): the architecture as it would be, recomputed on the graph without touching a file and reported as a review reports a change — the modules, functions, imports and calls it would add and remove, the picture, the dependencies between layers that would appear or go.
+- What it would break is said first: the imports and calls a deletion leaves without their target, the imports that would go against `ARCHITECTURE.md` and do not now (and those that do now and would not), the circles of modules and of layers that would close, break or change. Exit 1 when the change would break an import or a call, go against the contract or close a cycle; a change that cannot be supposed (no such module, a place that is taken, a name the module does not declare) is a wrong call that says why.
+- A move takes the layer `archdiff.json` gives the new path (a directory names the place, the file keeps its name). A split's imports follow the code that uses them: an importer imports the new module where it binds or calls a moved function, the new module takes the imports its functions use, and the two halves import each other where one calls the other — which is how a split closes a cycle.
+- On the page, a module's right-click menu offers *What if it were deleted* and *What if it moved…*, a top-level function's *What if it were split off…*; the what-if opens as a picture like a review does — the title says what would break, the Markdown panel holds the report, a module's page says what the change would do to it — and is not drawn on.
+- `src/whatif.ts`, a pure module of the views layer: `whatIfOf(analysis, change)` is the report as data (`--json` prints it).
+
 ## 0.6.0 — 2026-10-20
 
 The centre of the page shown as you choose — the canvas, a 3D scene, the Markdown page or the code — with the repository as a folder tree and the changed files alone; the code of any branch and the branches as a picture; an API as the code uses it, with a Postman collection written from the code and drawn against it; the architecture of a browser extension; the coding agent picked on the page; and what four test passes, two reviews and a storefront of 2348 files found, fixed.

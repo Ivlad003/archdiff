@@ -106,6 +106,8 @@ export const VIEW_KINDS = {
   commit: { subject: "required", question: "what one commit did to the architecture, against the commit before it: the modules, imports and calls it added, removed or changed", modules: true, change: true, form: "<sha>" },
   branches: { subject: "none", question: "where every branch left the base, the commits of its own, and how far it is ahead and behind", change: true, overview: "branches and their commits" },
   compare: { subject: "none", question: "what each of several branches did to the architecture against one base, side by side", modules: true, change: true },
+  // A change supposed, not made: drawn on the code the page shows, as a review's picture of what it would do.
+  whatif: { subject: "required", question: "what a move, a deletion or a split would do to the architecture: the modules, imports and calls it would add and remove, what it would break, and the contract and the cycles after it", modules: true, form: "move:<path>><to>|delete:<path>|split:<path>#<fn>,<fn>><new path>" },
 } as const satisfies Record<string, KindSpec>;
 
 export type ViewKind = keyof typeof VIEW_KINDS;
@@ -152,7 +154,8 @@ export function viewKey(view: View): string {
  * family, a listed scope such as `fns`).
  */
 export function subjectFile(view: View | null): { file: string; declaration: string | null } | null {
-  if (!view || view.subject === null) return null;
+  // A what-if's subject is a change, not a file.
+  if (!view || view.subject === null || view.kind === "whatif") return null;
   const at = view.subject.indexOf("#");
   const file = at === -1 ? view.subject : view.subject.slice(0, at);
 

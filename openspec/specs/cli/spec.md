@@ -8,7 +8,7 @@
 
 ### Requirement: The commands
 
-The system SHALL offer `analyze`, `views`, `diagram`, `metrics`, `run`, `apis` (the operations of an external API the code calls with their contracts as used), `postman` (a Postman collection of them, `--family` for one), `drawings` (also called `layouts`, its old name), `flow`, `plan`, `new` (`--no-git`: no repository and no first commit), `import`, `intent`, `check`, `spec` (`--tests [DIR]`: a test skeleton per Gherkin scenario, into `tests/` or `DIR`), `coverage`, `review`, `impact` (the blast radius of a module, a function or, with `--changed`, the files of a change: the impact specification), `branches`, `compare`, `history`, `web` and `--version`, as one table of commands from which `--help` is printed (each with its usage, its other names, help and flags); an unknown command, an unknown flag (with "did you mean" when a known flag is near), a missing required argument or an extra positional argument SHALL exit 2 with one plain line.
+The system SHALL offer `analyze`, `views`, `diagram`, `metrics`, `run`, `apis` (the operations of an external API the code calls with their contracts as used), `postman` (a Postman collection of them, `--family` for one), `drawings` (also called `layouts`, its old name), `flow`, `plan`, `new` (`--no-git`: no repository and no first commit), `import`, `intent`, `check`, `spec` (`--tests [DIR]`: a test skeleton per Gherkin scenario, into `tests/` or `DIR`), `coverage`, `review`, `impact` (the blast radius of a module, a function or, with `--changed`, the files of a change: the impact specification), `whatif` (`move`, `delete` or `split`: the architecture after a change that is not made — the what-if specification), `branches`, `compare`, `history`, `web` and `--version`, as one table of commands from which `--help` is printed (each with its usage, its other names, help and flags); an unknown command, an unknown flag (with "did you mean" when a known flag is near), a missing required argument or an extra positional argument SHALL exit 2 with one plain line.
 
 #### Scenario: An extra argument
 
@@ -36,7 +36,7 @@ The system SHALL draw `diagram <view> --head REF`, for a view that is no change,
 
 ### Requirement: Exit codes mean one thing
 
-The system SHALL exit 0 on success, 1 when a check found something (a new layer dependency in `review` or `compare`, an import against the contract in `check`, a run that threw in `run`), and 2 on a wrong call or an I/O error — a view of a subject the code does not have, an entry `run` cannot run (unknown, a method, another language, not exported), a repository that is not one when git is needed.
+The system SHALL exit 0 on success, 1 when a check found something (a new layer dependency in `review` or `compare`, an import against the contract in `check`, a run that threw in `run`, a change `whatif` supposes that would break an import or a call, go against the contract or close a cycle), and 2 on a wrong call or an I/O error — a view of a subject the code does not have, an entry `run` cannot run (unknown, a method, another language, not exported), a repository that is not one when git is needed.
 
 #### Scenario: A clean check
 

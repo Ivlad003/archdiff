@@ -1,8 +1,9 @@
 // What the menu of a right click on the canvas holds: on a shape, the
 // views it opens (its own, focus, impact, logic, the other pictures of its
-// subject), the selection, the agent and its code; on a line, where it
-// leads; on the empty canvas, the picture's own actions. menu.ts draws
-// the list at the pointer; app.ts opens it with these items.
+// subject), the changes to suppose of it (a what-if: a module deleted or
+// moved, a function split off), the selection, the agent and its code; on
+// a line, where it leads; on the empty canvas, the picture's own actions.
+// menu.ts draws the list at the pointer; app.ts opens it with these items.
 //
 // Entry point: `menuItems`.
 
@@ -28,7 +29,52 @@ function openLabel(key: string): string {
   return OPEN_LABELS[parseView(key)?.kind ?? ""] ?? `Open ${key}`;
 }
 
-/** The menu of a right click: on a shape (its views, the selection, the agent, its code), on a line, or on the empty canvas. */
+/** What the reader types for a what-if, as a path of the repository; null when nothing was typed or the question was dismissed. */
+function askPath(question: string, offered: string): string | null {
+  const typed = window.prompt(question, offered)?.trim().replace(/\\/g, "/") ?? "";
+
+  return typed === "" ? null : typed;
+}
+
+/** The what-ifs of a shape: a module deleted, a module moved where the reader says, a top-level function split off into a module the reader names. */
+function whatIfItems(kind: string, target: string, open: (key: string) => void): MenuItem[] {
+  const hash = target.indexOf("#");
+  const module = hash === -1 ? target : target.slice(0, hash);
+  const directory = module.slice(0, module.lastIndexOf("/") + 1);
+
+  if (kind === "module" || kind === "participant") {
+    return [
+      { label: "What if it were deleted", hint: "what breaks, the contract and the cycles after it", run: () => open(`whatif:delete:${target}`) },
+      {
+        label: "What if it moved…",
+        hint: "to a path or a directory you name",
+        run: () => {
+          const to = askPath(`Move ${target} to (a path, or a directory ending in /):`, directory);
+
+          if (to !== null) open(`whatif:move:${target}>${to}`);
+        },
+      },
+    ];
+  }
+
+  // A function of the module's top level; a method leaves with its class.
+  if (kind !== "fn" || hash === -1 || target.slice(hash + 1).includes(".")) return [];
+  const name = target.slice(hash + 1);
+
+  return [
+    {
+      label: "What if it were split off…",
+      hint: "into a new module you name",
+      run: () => {
+        const to = askPath(`Split ${name} off ${module} into the new module:`, `${directory}${name}${module.slice(module.lastIndexOf("."))}`);
+
+        if (to !== null) open(`whatif:split:${module}#${name}>${to}`);
+      },
+    },
+  ];
+}
+
+/** The menu of a right click: on a shape (its views, the changes to suppose of it, the selection, the agent, its code), on a line, or on the empty canvas. */
 export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
   const now = currentLink();
   const go = (key: string) => () => setLink({ ...now, view: key });
@@ -71,6 +117,11 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
 
       if (sibling.key !== own && kind !== "focus" && kind !== "impact" && kind !== "logic") items.push({ label: sibling.label, run: go(sibling.key) });
     }
+
+    // A change supposed, not made: its picture opens as a review's does.
+    const supposed = whatIfItems(node.kind, target, (key) => go(key)());
+
+    if (supposed.length > 0) items.push("—", ...supposed);
     items.push("—", { label: selection().includes(node.id) ? "Take out of the selection" : "Add to the selection", hint: "Shift+tap", run: () => toggleSelected(node.id) });
     items.push({ label: "Ask the agent about it", hint: tag?.tag ?? "no tag for this kind of shape", disabled: tag === null, run: () => askSelected([node.id]) });
     items.push({ label: "Dim all but its neighbours", run: () => page.canvas()?.dim(neighbourhoodOf(page.edges(), node.id)) });

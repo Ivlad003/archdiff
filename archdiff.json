@@ -39,6 +39,7 @@
       "src/cycles.ts",
       "src/metrics.ts",
       "src/impact.ts",
+      "src/whatif.ts",
       "src/machines.ts",
       "src/logic.ts",
       "src/project-map.ts"

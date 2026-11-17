@@ -7,8 +7,9 @@
 // comparison, a function's body for its logic, the review's diff for
 // `changes`, the changed files of an impact without a subject — then the view is drawn (viewOf), placed where the saved
 // drawing puts its shapes (layout), stamped with the revision and written
-// as Markdown. One picture per analysis and request: asking twice is a
-// lookup.
+// as Markdown. A what-if reads nothing at the edge: its report is
+// whatif.ts's, and what it found goes beside the picture as a review's
+// does. One picture per analysis and request: asking twice is a lookup.
 //
 // Sits at the edge, between the commands (cli.ts, server.ts) and the
 // views. Entry points: `drawPicture`, `PictureRequest`, `Picture`,
@@ -27,6 +28,7 @@ import type { PictureOptions } from "./options.ts";
 import { compareBranches, history, reviewOf } from "./review.ts";
 import { codeRevision, viewKey, type View } from "./view-keys.ts";
 import { viewOf, type EdgeReads } from "./views.ts";
+import { whatIfMarkdown, whatIfOf, type WhatIf } from "./whatif.ts";
 
 /**
  * The revisions a picture is drawn against: the base (null: the
@@ -48,8 +50,11 @@ export interface PictureRequest {
   refs: Refs;
 }
 
-/** What a review (of a range, or of one commit) or a comparison found, beside its picture: the exit code of the CLI and the page's title read it. */
-export type Change = { kind: "review"; diff: GraphDiff; contract: boolean; commit?: CommitInfo } | { kind: "compare"; base: string; heads: readonly Compared[] };
+/**
+ * What a review (of a range, or of one commit), a comparison or a what-if found, beside its picture: the exit code of
+ * the CLI and the page's title read it. A what-if's diff is of the code as it would be against the code as it is.
+ */
+export type Change = { kind: "review"; diff: GraphDiff; contract: boolean; commit?: CommitInfo } | { kind: "compare"; base: string; heads: readonly Compared[] } | { kind: "whatif"; diff: GraphDiff; contract: boolean; findings: readonly string[]; report: WhatIf };
 
 export interface Picture {
   /** The placed diagram, stamped with the revision it was drawn from. */
@@ -84,7 +89,11 @@ export function drawPicture(analysis: Analysis, request: PictureRequest): Promis
 }
 
 async function draw(analysis: Analysis, { view, options, refs }: PictureRequest, drawing: DrawingFile | null): Promise<Picture> {
-  const { reads, change, notes } = await readAtTheEdge(analysis, view, options, refs);
+  const read = await readAtTheEdge(analysis, view, options, refs);
+  const { reads, notes } = read;
+  // A what-if is computed on the analysis alone; what it found stands beside its picture as a review's diff does.
+  const supposed = view.kind === "whatif" ? whatIfOf(analysis, view.subject) : null;
+  const change: Change | undefined = supposed?.ok ? { kind: "whatif", diff: supposed.value.diff, contract: supposed.value.contract, findings: supposed.value.findings, report: supposed.value } : read.change;
   const content = viewOf(analysis, view, options, reads);
   // What the edge could not read for the picture (the changes outside git) is said after what the picture says itself.
   const said = notes.length > 0 ? { ...content, reason: [content.reason, ...notes].filter(Boolean).join("; ") } : content;
@@ -93,7 +102,7 @@ async function draw(analysis: Analysis, { view, options, refs }: PictureRequest,
   const revision = codeRevision(view, refs.head);
   const stamp = revision ? revisionStamp(analysis.root, revision) : revisionStamp(analysis.root);
   const diagram = stamp ? { ...placed, stamp } : placed;
-  const markdown = change?.kind === "review" ? reviewMarkdown(change.diff, diagram, change.contract, change.commit ?? null) : change?.kind === "compare" ? comparisonMarkdown(change.base, change.heads, diagram) : diagramMarkdown(diagram, analysis, options.mermaid);
+  const markdown = change?.kind === "review" ? reviewMarkdown(change.diff, diagram, change.contract, change.commit ?? null) : change?.kind === "compare" ? comparisonMarkdown(change.base, change.heads, diagram) : change?.kind === "whatif" ? whatIfMarkdown(change.report, diagram) : diagramMarkdown(diagram, analysis, options.mermaid);
 
   return change ? { diagram, markdown, drawing, change } : { diagram, markdown, drawing };
 }

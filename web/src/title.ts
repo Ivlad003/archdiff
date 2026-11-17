@@ -1,5 +1,5 @@
-// The title of the picture over the canvas (with what a review or a
-// comparison found), the crumbs back up to the overviews, and the line
+// The title of the picture over the canvas (with what a review, a
+// comparison or a what-if found), the crumbs back up to the overviews, and the line
 // under the canvas — the reason the picture looks as it does, or for a
 // moment a notice from a tool (a count of matches, a save, a file that
 // changed). app.ts sets the title and the reason on every load; a tool
@@ -29,9 +29,11 @@ export function showEmpty(note: { head: string; why: string } | null): void {
   empty.replaceChildren(...(note === null ? [] : [h("p", {}, h("strong", {}, note.head), note.why)]));
 }
 
-/** What a review or a comparison found, for the title: the files changed and the new layer dependencies (against the contract, when there is one). */
+/** What a review or a comparison found, for the title: the files changed and the new layer dependencies (against the contract, when there is one); a what-if: what the change would break. */
 function changeTitle(change: ChangeSummary | null): string {
   if (!change) return "";
+
+  if (change.kind === "whatif") return change.findings.length > 0 ? ` — ⚠ ${change.findings.join(", ")}` : " — nothing would break";
 
   if (change.kind === "compare") {
     const warnings = change.heads.filter((head) => head.diff.layerEdgesAdded.length > 0).length;

@@ -10,7 +10,8 @@
 // as a sequence diagram, placed), `focus:<path>[#<fn>]` (everything joined
 // to one shape across the modules). Lanes are layers elsewhere; the depth
 // is how far from the subject the picture goes. The question views live in
-// views-more.ts, the blast radius of a change in impact.ts.
+// views-more.ts, the blast radius of a change in impact.ts, a change
+// supposed and not made in whatif.ts.
 //
 // Pipeline: Analysis → View → Diagram → layout → canvas/exports/markdown.
 // Entry points: `parseView`, `viewKey`, `viewList`, `viewOf`, `entryPoints`.
@@ -27,6 +28,7 @@ import type { GuardFact } from "./extract/facts.ts";
 import { apiFamilies, apisView, postmanView, classesView, usageView, eventsView, hotspotsView, matrixView, messageHandlers, messageSends, packagesView, pathView, testsView, typeView } from "./views-more.ts";
 import { cyclesView } from "./cycles.ts";
 import { impactView } from "./impact.ts";
+import { whatIfView } from "./whatif.ts";
 import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
 import { logicList, logicView } from "./logic.ts";
@@ -1007,6 +1009,8 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
         return reads.review && reads.commit ? { ...diffDiagram(reads.review.diff, reads.review.base, reads.review.head), title: `Commit ${reads.commit.short}: ${reads.commit.subject}`, question: `what ${reads.commit.short} (${reads.commit.author}, ${reads.commit.date}) did to the architecture` } : unplaced(`Commit ${view.subject}`, [], [], [], { reason: "a commit is read from git" });
       case "compare":
         return reads.compare ? compareDiagram(reads.compare.base, reads.compare.heads, reads.compare.baseGraph, reads.compare.graphs, reads.compare.forks) : unplaced("Compare", [], [], [], { reason: "a comparison is read from git (archdiff compare --heads a,b)" });
+      case "whatif":
+        return whatIfView(analysis, view.subject);
       case "coverage":
         return coverageView(graph);
       case "intent":

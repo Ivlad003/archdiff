@@ -50,9 +50,9 @@ function overlaysMarks({ reads, view }: StepContext): boolean {
   return reads.diff !== undefined && view.kind !== "timeline" && view.kind !== "review" && view.kind !== "compare";
 }
 
-/** The pictures whose shapes carry a review's marks: the review's own marks, or those `changes` laid over the picture. */
+/** The pictures whose shapes carry a review's marks: the review's own marks (a what-if's are of the same kind), or those `changes` laid over the picture. */
 function marked(ctx: StepContext): boolean {
-  return overlaysMarks(ctx) || ctx.view.kind === "review" || ctx.view.kind === "compare";
+  return overlaysMarks(ctx) || ctx.view.kind === "review" || ctx.view.kind === "compare" || ctx.view.kind === "whatif";
 }
 
 /** The pictures the changed files cannot be told apart in: a grid or a chart placed by its view, a flowchart, a change of several revisions. */
