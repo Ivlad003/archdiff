@@ -1,6 +1,30 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-11-17
+
+A review that reads down to the logic and the lines, and an agent that explains what it shows as a tour the page plays; the page driven from the Chat tab; the architecture asked by the agent over MCP; the contract check with rules and a baseline, on the pull request itself; the blast radius of a change, and a change supposed without being made; Go, Java and C#; a VS Code extension; and the agents started on Windows, their programs and keys in the user's settings. What is incompatible with 0.6.0 comes first.
+
+**Highlights.**
+
+- A review reads down to the logic and the lines: `logic:<path>#<fn>` with `--changes` marks the steps and the arrows of a function that came, changed and went; on a picture of a change the page of a module or a function says what the change did to its logic, and the Code tab shows the lines that came and went on the file itself.
+- *explain* has the agent answer with a guided tour, which the page plays at once: per step a view, the shapes to look at on it — a way through them lit in its order — and a note that says what it shows, how it works and why. It is kept with the tours of the repository.
+- The Chat tab drives the page: a line that starts with a slash is a command (`/view`, `/as`, `/mix`, `/review`, `/split`, `/path` and the rest), `/grep` and `/diff` search the code and the change, and an agent shows the reader something with an `archdiff-do` block. `archdiff grep` is the search in the terminal.
+- `archdiff mcp` is an MCP server: a coding agent asks for the views and their pictures, the contract (`check`, `may_import`), the impact of a change, a review and a search of the code or of the change while it works. Claude Code is given the server with every run from the page.
+- The contract check: rules beside the layers (`"rules"` in archdiff.json: `naming`, `threshold`, `cycles`, `through`, `forbidden`), a baseline of the violations known (`check --baseline`), and an agent's run reported against the state before it. The GitHub Action keeps one comment on the pull request, the review under the verdict of the check.
+- `archdiff impact` and the view `impact:`: what depends on a module, a function or a class, step by step, with a risk score. `archdiff whatif move|delete|split`: the architecture as it would be and what the change would break, without touching a file.
+- Go, Java and C# are read, beside TypeScript, JavaScript, Python, Rust and PHP.
+- The page walks a change: the board of the uncommitted changes (`changes`), a slider over the commits of a range, three overlays read from git (churn, coupling, ownership), and guided tours.
+- The side panels fold away, are as wide as they are dragged and are drawers on a narrow window; the canvas toolbar folds; the legend lists what the picture shown holds.
+- The agents and the keys are the user's settings (*agents & keys…*, `~/.archdiff/settings.json`): the program of each agent and its model, agents of the user's own, the keys every run gets, OpenRouter. Codex, OpenCode and Claude Code start on Windows, and `archdiff run` works there and on Node 26.
+- A VS Code extension (`vscode/`, built to a `.vsix`; not part of the npm package): the page beside the editor, the view of this file and of this function, the check as problems.
+
+**Incompatible with 0.6.0.**
+
+- The GitHub Action: the input `fail-on-layer-coupling` is gone. `fail-on-check` (default true) fails the job when `archdiff check` finds an import the contract does not allow, in the whole code at the head and not only in the change.
+- `check --json`: the violations are listed in `violations`, each with its `rule`, its `problem` and whether the baseline knows it (`known`), beside `stale` and `baseline`; `ok` says that no violation is new. A file written by `check --json --out` of 0.6.0 has other keys and is not written over: remove it once. A failing check counts *violations of the intent* on stderr and in the report (it counted *imports that go against* it).
+- The Chat tab: a line that starts with a slash is a command of the page, and is never sent to the agent as a task.
+
+**Everything since 0.6.0**, by the work it came from:
 
 The panels give way to the canvas; the agents and the keys are the user's settings; and what a review of the page and a first run on Windows and Node 26 found (2026-11-17).
 
