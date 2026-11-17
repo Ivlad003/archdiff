@@ -120,6 +120,12 @@ export function grammarFor(path: string): Grammar {
 
   if (path.endsWith(".php")) return "php";
 
+  if (path.endsWith(".go")) return "go";
+
+  if (path.endsWith(".java")) return "java";
+
+  if (path.endsWith(".cs")) return "c-sharp";
+
   if (path.endsWith(".tsx")) return "tsx";
 
   if (/\.[cm]?ts$/.test(path)) return "typescript";
@@ -378,6 +384,10 @@ interface PlacedDecl {
 /** Statements that are no value code of a module or class: imports and module syntax, `pass`, Rust attributes (which belong to the item after them). */
 const NO_VALUE_CODE = new Set([
   "import_statement",
+  "import_declaration",
+  "package_clause",
+  "package_declaration",
+  "using_directive",
   "import_from_statement",
   "future_import_statement",
   "namespace_use_declaration",

@@ -15,9 +15,12 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { join, posix } from "node:path";
+import { CSharpResolver } from "./csharp-imports.ts";
 import type { FileFacts } from "./extract/facts.ts";
 import type { Resolution as LanguageResolution, SourceResolver } from "./imports.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
+import { GoResolver } from "./go-imports.ts";
+import { javaPackage, JavaResolver } from "./java-imports.ts";
 import { isSourceFile, languageOf } from "./languages.ts";
 import { PhpResolver } from "./php-imports.ts";
 import { PythonResolver } from "./python-imports.ts";
@@ -28,8 +31,8 @@ export type Resolution =
   /** `whole`: the import binds the module itself (Python's `from . import core`, Rust's `use crate::util`): a namespace of its names. */
   | { kind: "file"; path: string; whole?: true }
   | { kind: "package"; name: string }
-  /** The language's own library: Node's (`runtime` absent), Python's standard library, Rust's `std`, PHP's functions. */
-  | { kind: "builtin"; name: string; runtime?: "python" | "rust" | "php" }
+  /** The language's own library: Node's (`runtime` absent), Python's standard library, Rust's `std`, PHP's functions, a package of Go's or of the JDK, a namespace of .NET. */
+  | { kind: "builtin"; name: string; runtime?: "python" | "rust" | "php" | "go" | "java" | "csharp" }
   /** The importing file itself (Rust `use self::Kind::*`, a Python relative import of the package's own module): no dependency, nothing unresolved. */
   | { kind: "self" }
   /**
@@ -264,7 +267,7 @@ export function tsconfigResolver(root: string, _files: Iterable<string>): (from:
 }
 
 /** A language resolver's answer as the graph's. */
-function fromLanguage(resolution: LanguageResolution, specifier: string, runtime: "python" | "rust" | "php"): Resolution {
+function fromLanguage(resolution: LanguageResolution, specifier: string, runtime: "python" | "rust" | "php" | "go" | "java" | "csharp"): Resolution {
   switch (resolution.kind) {
     case "internal":
       // `from . import core`, `use crate::util::{self}`: the import binds the module itself, a namespace of its names.
@@ -276,6 +279,15 @@ function fromLanguage(resolution: LanguageResolution, specifier: string, runtime
       // Named as the language names it: Python's module (`os` of `os.path`), Rust's crate (`std` of `std::fs`), and
       // PHP's function itself (`strlen` of `App\strlen`: an unqualified call in a namespace falls back to the global one).
       const written = specifier.replace(/^(class|function|const|include) /, "");
+
+      // Go's own packages are named by their path (`net/http`), without the declaration (`net/http.HandleFunc`) or a blank import's mark.
+      if (runtime === "go") return { kind: "builtin", name: written.replace(/^_ /, "").replace(/\.\p{Lu}[\p{L}\p{N}_]*$/u, ""), runtime };
+
+      // The JDK's classes are named by their package (`java.util` of `java.util.List`).
+      if (runtime === "java") return { kind: "builtin", name: javaPackage(written.split(" ?? ").pop() ?? written), runtime };
+
+      // .NET's classes are named by their namespace (`System.Linq` of `using System.Linq;`, of `System.Linq.Enumerable`).
+      if (runtime === "csharp") return { kind: "builtin", name: written.endsWith(".*") ? written.slice(0, -2) : written.slice(0, Math.max(written.lastIndexOf("."), 0)) || written, runtime };
       const name = runtime === "php" ? (written.split("\\").pop() ?? written) : (written.split(runtime === "rust" ? "::" : ".")[0] ?? written);
 
       return { kind: "builtin", name, runtime };
@@ -292,9 +304,10 @@ function fromLanguage(resolution: LanguageResolution, specifier: string, runtime
 /**
  * A resolver over the repository's file list: `(from, specifier)` → where
  * it points, by the language of `from`: TypeScript/JavaScript here, Python,
- * Rust and PHP through the resolvers ported from keylang (PHP needs the
- * facts: its imports name declarations). `from` and the files are POSIX
- * paths relative to `root`.
+ * Rust and PHP through the resolvers ported from keylang, Go, Java and C#
+ * through their own (PHP, Go, Java and C# need the facts: their imports
+ * name declarations).
+ * `from` and the files are POSIX paths relative to `root`.
  */
 export function createResolver(root: string, files: Iterable<string>, facts: readonly FileFacts[] = [], tsconfigOf: (from: string) => TsconfigPaths | null = tsconfigResolver(root, files), workspaces: readonly Workspace[] = []): (from: string, specifier: string) => Resolution {
   const known = new Set(files);
@@ -303,6 +316,9 @@ export function createResolver(root: string, files: Iterable<string>, facts: rea
   let python: SourceResolver | null = null;
   let rust: SourceResolver | null = null;
   let php: SourceResolver | null = null;
+  let go: SourceResolver | null = null;
+  let java: SourceResolver | null = null;
+  let csharp: SourceResolver | null = null;
 
   return (from, specifier) => {
     switch (languageOf(from)) {
@@ -353,6 +369,18 @@ export function createResolver(root: string, files: Iterable<string>, facts: rea
         php ??= new PhpResolver(root, known, facts);
 
         return fromLanguage(php.resolve(from, specifier), specifier, "php");
+      case "go":
+        go ??= new GoResolver(root, known, facts);
+
+        return fromLanguage(go.resolve(from, specifier), specifier, "go");
+      case "java":
+        java ??= new JavaResolver(root, known, facts);
+
+        return fromLanguage(java.resolve(from, specifier), specifier, "java");
+      case "csharp":
+        csharp ??= new CSharpResolver(root, known, facts);
+
+        return fromLanguage(csharp.resolve(from, specifier), specifier, "csharp");
       default:
         return ecmascript(from, specifier);
     }

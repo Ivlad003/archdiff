@@ -246,3 +246,494 @@ export async function total(clients: AppClients) {
   assert.deepEqual(addItem!.returnsFrom, { callee: "clients.shopperBasketsV2.addItemToBasket", form: { kind: "value" }, path: ["data"], callLine: 2 });
   assert.deepEqual(total!.returnsFrom, { callee: "addItem", form: { kind: "name", name: "addItem" }, path: ["orderTotal"], callLine: 8 });
 });
+
+test("Go: the packages imported and every declaration used of them, structs with fields and methods, an interface's shape, calls by receiver, type and result, a method of a type of another file", async () => {
+  const facts = await extractAny(
+    "internal/orders/orders.go",
+    `// Package orders places orders.
+package orders
+
+import (
+	"net/http"
+
+	"example.com/shop/internal/store"
+)
+
+// Service places orders.
+type Service struct {
+	repo *store.Repo
+	Limits
+}
+
+// Placer is what a service does.
+type Placer interface {
+	Place(id string) error
+}
+
+// NewService makes a service.
+func NewService(repo *store.Repo) *Service {
+	return &Service{repo: repo}
+}
+
+// Place checks and saves an order.
+func (s *Service) Place(id string) error {
+	if err := validate(id); err != nil {
+		return err
+	}
+
+	for _, line := range s.lines(id) {
+		s.repo.Save(line)
+	}
+
+	audit := store.NewAudit()
+	audit.Record(id)
+
+	return nil
+}
+
+func (s *Service) lines(id string) []string { return nil }
+
+func Routes(service *Service, mux *http.ServeMux) {
+	mux.HandleFunc("/orders", service.handle)
+}
+
+func (c *Cache) Drop() {}
+
+func main() {
+	Routes(NewService(store.NewRepo()), http.NewServeMux())
+}
+`,
+  );
+  assert.equal(facts.doc, "Package orders places orders.");
+  assert.equal(facts.parseError, null);
+  // The two packages (a module object each), then a declaration per name used: `store.Repo` is `Repo` of that package,
+  // `validate`, `Limits` and `Cache` names of the file's own package another file may declare (optional: nothing missing when none does).
+  assert.deepEqual(
+    facts.imports.map((fact) => [fact.source, fact.bindings.map((binding) => `${binding.kind}:${binding.local}`).join(), fact.optional ?? false]),
+    [
+      ["net/http", "module:http", false],
+      ["example.com/shop/internal/store", "module:store", false],
+      [".validate", "named:validate", true],
+      ["example.com/shop/internal/store.NewAudit", "named:store::NewAudit", false],
+      ["example.com/shop/internal/store.NewRepo", "named:store::NewRepo", false],
+      ["net/http.NewServeMux", "named:http::NewServeMux", false],
+      ["example.com/shop/internal/store.Repo", "named:store::Repo", false],
+      [".Limits", "named:Limits", true],
+      ["net/http.ServeMux", "named:http::ServeMux", false],
+      [".Cache", "named:Cache", true],
+    ],
+  );
+  assert.deepEqual(facts.decls.map((decl) => [decl.kind, decl.name, decl.exported]), [["class", "Service", true], ["type", "Placer", true], ["fn", "NewService", true], ["fn", "Routes", true], ["class", "Cache", true], ["fn", "main", false]]);
+  const service = facts.decls.find((decl) => decl.name === "Service")!;
+  assert.equal(service.doc, "Service places orders.");
+  // An embedded type is a field named as itself, and the base its methods come from.
+  assert.deepEqual(service.fields, [{ name: "repo", class: "*store.Repo" }, { name: "Limits", class: "Limits" }]);
+  assert.equal(service.base, "Limits");
+  assert.deepEqual(service.members.map((member) => [member.name, member.exported, member.signature]), [["Place", true, "(id string) → error"], ["lines", false, "(id string) → []string"]]);
+  assert.deepEqual(facts.decls.find((decl) => decl.name === "Placer")!.shape, [{ name: "Place", optional: false, type: "(id string) => error" }]);
+  const place = service.members.find((member) => member.name === "Place")!;
+  assert.equal(place.branches, 2);
+  // By the receiver, by the type its field declares, by what the call that made the local returns; the guard as written.
+  assert.deepEqual(place.calls.map((call) => [call.callee, call.form.kind, (call.guards ?? []).map((guard) => `${guard.kind}:${guard.text}`).join(" > ")]), [
+    ["validate", "name", ""],
+    ["this.lines", "own", ""],
+    ["s.repo.Save", "typed", "loop:_, line := range s.lines(id)"],
+    ["store.NewAudit", "name", ""],
+    ["audit.Record", "result", ""],
+  ]);
+  assert.deepEqual(place.calls[2]!.form, { kind: "typed", type: "store::Repo", member: "Save" });
+  assert.deepEqual(place.calls[4]!.form, { kind: "result", of: { call: { kind: "name", name: "store::NewAudit" } }, member: "Record" });
+  assert.deepEqual(facts.decls.find((decl) => decl.name === "NewService")!.result, { class: "Service" });
+  // A handler handed to the router: the method of the parameter's type.
+  const routes = facts.decls.find((decl) => decl.name === "Routes")!;
+  assert.deepEqual(routes.calls.map((call) => [call.callee, call.form, (call.passes ?? []).map((pass) => [pass.arg, pass.callee, pass.form])]), [["mux.HandleFunc", { kind: "typed", type: "http::ServeMux", member: "HandleFunc" }, [[1, "service.handle", { kind: "typed", type: "Service", member: "handle" }]]]]);
+  // `Cache` is declared in another file of the package: this one holds a part of it, the method.
+  assert.deepEqual(facts.decls.find((decl) => decl.name === "Cache")!.members.map((member) => member.name), ["Drop"]);
+  assert.deepEqual(facts.symbols, [
+    { name: "Service", qualified: "internal/orders.Service", table: "class" },
+    { name: "Placer", qualified: "internal/orders.Placer", table: "class" },
+    { name: "NewService", qualified: "internal/orders.NewService", table: "function" },
+    { name: "Routes", qualified: "internal/orders.Routes", table: "function" },
+    { name: "Cache", qualified: "internal/orders.Cache", table: "class", part: true },
+    { name: "main", qualified: "internal/orders.main", table: "function" },
+  ]);
+  // Every top-level name is visible to the other files of the package, whatever its case.
+  assert.deepEqual([...facts.exports], ["Service", "Placer", "NewService", "Routes", "Cache", "main"]);
+});
+
+test("Go: a blank and a dot import, `init` and a package variable's initializer as the file's own code, the class of a variable, a conversion as no call, a file checked out with CRLF", async () => {
+  const source = `package store
+
+import (
+	_ "github.com/lib/pq"
+	. "example.com/shop/internal/util"
+	"database/sql"
+)
+
+var Default = NewRepo()
+var fallback Repo
+var ids = []int64{int64(len(name))}
+
+func init() {
+	sql.Register("memory", driver{})
+}
+
+func touch() {
+	Default.Save()
+	fallback.Save()
+	handlers[0]()
+}
+`;
+  const facts = await extractAny("store/store.go", source);
+  assert.deepEqual(facts.imports.slice(0, 3).map((fact) => [fact.source, fact.bindings.map((binding) => binding.local), fact.glob ?? false]), [["_ github.com/lib/pq", [], false], ["example.com/shop/internal/util", [], true], ["database/sql", ["sql"], false]]);
+  assert.ok(facts.unsupported.some((fact) => fact.reason.startsWith("dot import of `example.com/shop/internal/util`")));
+  // `init` is no declaration: the package's loading runs it, as it runs the initializers. `int64(…)` converts; `len` is the language's.
+  assert.deepEqual(facts.decls.map((decl) => decl.name), ["touch"]);
+  assert.deepEqual(facts.moduleCalls.map((call) => call.callee), ["NewRepo", "len", "sql.Register"]);
+  assert.deepEqual(facts.instances, [{ name: "Default", of: { call: { kind: "name", name: "NewRepo" } } }, { name: "fallback", class: "Repo" }]);
+  // A member called through a package variable is looked up on the class of its value; an element of a slice is a value.
+  assert.deepEqual(facts.decls[0]!.calls.map((call) => [call.callee, call.form]), [["Default.Save", { kind: "member", head: "Default", member: "Save" }], ["fallback.Save", { kind: "member", head: "fallback", member: "Save" }], ["handlers[0]", { kind: "value" }]]);
+  const crlf = await extractAny("store/store.go", source.replace(/\n/g, "\r\n"));
+  assert.deepEqual(crlf.decls.map((decl) => [decl.name, decl.line, decl.fingerprint]), facts.decls.map((decl) => [decl.name, decl.line, decl.fingerprint]));
+  assert.deepEqual(crlf.imports.map((fact) => fact.source), facts.imports.map((fact) => fact.source));
+});
+
+test("Java: the classes imported and the candidates of every class used without an import, a class with fields, methods, a constructor and nested types, calls by field, local, result and static import", async () => {
+  const source = `package shop.orders;
+
+import shop.store.OrderRepository;
+import shop.util.*;
+import static shop.util.Checks.require;
+import java.util.List;
+
+/**
+ * Places orders.
+ *
+ * @since 1.0
+ */
+public class OrderService extends BaseService implements Placer {
+    private final OrderRepository repository;
+    private List<Order> recent;
+
+    public OrderService(OrderRepository repository) {
+        super("orders");
+        this.repository = repository;
+    }
+
+    /** Places one order. */
+    @Override
+    public Order place(String id, long total) {
+        require(total >= 0);
+        Order order = new Order(id, total);
+
+        if (order.total() > Limits.MAX) {
+            audit(order);
+        } else {
+            this.repository.save(order);
+        }
+
+        var saved = repository.find(id);
+        saved.touch();
+        recent.forEach(this::audit);
+
+        return Orders.latest(repository);
+    }
+
+    private void audit(Order order) {
+        Line line = new Line(order.id());
+        line.print();
+    }
+
+    public static void main(String[] args) {
+        new OrderService(null).place("a", 1);
+    }
+
+    interface Placer {
+        Order place(String id, long total);
+    }
+
+    static class Line {
+        Line(String id) {
+        }
+
+        void print() {
+        }
+    }
+}
+`;
+  const facts = await extractAny("src/main/java/shop/orders/OrderService.java", source);
+  assert.equal(facts.parseError, null);
+  // The Javadoc of the type the file is named after, without its block tags.
+  assert.equal(facts.doc, "Places orders.");
+  // An import names a class; a static import the class its member is of; `.*` a package, which binds nothing. A class used
+  // without an import is one of the file's package or of a `.*` package, in the order Java tries them (optional: `java.lang` has the rest).
+  assert.deepEqual(
+    facts.imports.map((fact) => [fact.source, fact.bindings.map((binding) => binding.local).join(), fact.optional ?? false, fact.glob ?? false]),
+    [
+      ["shop.store.OrderRepository", "OrderRepository", false, false],
+      ["shop.util.*", "", false, true],
+      ["shop.util.Checks", "Checks", false, false],
+      ["java.util.List", "List", false, false],
+      ["shop.orders.Order ?? shop.util.Order", "Order", true, false],
+      ["shop.orders.Limits ?? shop.util.Limits", "Limits", true, false],
+      ["shop.orders.Orders ?? shop.util.Orders", "Orders", true, false],
+      ["shop.orders.BaseService ?? shop.util.BaseService", "BaseService", true, false],
+    ],
+  );
+  const [service] = facts.decls;
+  assert.deepEqual([service!.kind, service!.name, service!.exported, service!.base, service!.implements], ["class", "OrderService", true, "BaseService", ["Placer"]]);
+  assert.deepEqual(service!.fields, [{ name: "repository", class: "OrderRepository" }, { name: "recent", class: "List<Order>" }]);
+  assert.deepEqual(service!.members.map((member) => [member.kind, member.name, member.exported, member.static ?? false, member.signature]), [
+    ["fn", "constructor", true, false, "(OrderRepository repository)"],
+    ["fn", "place", true, false, "(String id, long total) → Order"],
+    ["fn", "audit", false, false, "(Order order) → void"],
+    ["fn", "main", true, true, "(String[] args) → void"],
+    ["type", "Placer", true, false, null],
+    ["class", "Line", true, false, null],
+  ]);
+  const member = (name: string) => service!.members.find((each) => each.name === name)!;
+  assert.deepEqual(member("constructor").calls.map((call) => [call.callee, call.form]), [["super", { kind: "super", member: "constructor" }]]);
+  assert.equal(member("place").doc, "Places one order.");
+  assert.deepEqual(member("place").result, { class: "Order" });
+  // A static import's member is the class's; a field's, a parameter's and a local's class as declared; a `var` made by a call is what the call returns; a capitalised name is a class.
+  assert.deepEqual(member("place").calls.map((call) => [call.callee, call.form, (call.guards ?? []).map((guard) => `${guard.kind}:${guard.text}`).join(" > ")]), [
+    ["require", { kind: "member", head: "Checks", member: "require" }, ""],
+    ["Order", { kind: "name", name: "Order" }, ""],
+    ["order.total", { kind: "typed", type: "Order", member: "total" }, ""],
+    ["audit", { kind: "own", member: "audit" }, "if:order.total() > Limits.MAX"],
+    ["this.repository.save", { kind: "typed", type: "OrderRepository", member: "save" }, "else:not order.total() > Limits.MAX"],
+    ["repository.find", { kind: "typed", type: "OrderRepository", member: "find" }, ""],
+    ["saved.touch", { kind: "result", of: { call: { kind: "typed", type: "OrderRepository", member: "find" } }, member: "touch" }, ""],
+    ["recent.forEach", { kind: "typed", type: "List", member: "forEach" }, ""],
+    ["Orders.latest", { kind: "member", head: "Orders", member: "latest" }, ""],
+  ]);
+  // A method reference handed over is a function passed.
+  assert.deepEqual(member("place").calls[7]!.passes?.map((pass) => [pass.arg, pass.callee, pass.form]), [[0, "this.audit", { kind: "own", member: "audit" }]]);
+  // An interface's method without a body is its shape: a call of it goes to the classes implementing it.
+  assert.deepEqual([member("Placer").shape, member("Placer").members], [[{ name: "place", optional: false, type: "(String id, long total) => Order" }], []]);
+  assert.deepEqual(member("Line").members.map((each) => each.name), ["constructor", "print"]);
+  // A nested type is declared under its outer class's name, and imported by its own.
+  assert.deepEqual(facts.symbols, [
+    { name: "OrderService", qualified: "shop.orders.OrderService", table: "class" },
+    { name: "Placer", qualified: "shop.orders.OrderService.Placer", table: "class" },
+    { name: "Line", qualified: "shop.orders.OrderService.Line", table: "class" },
+  ]);
+  assert.deepEqual(facts.exportRows, [{ name: "OrderService", kind: "class", local: null }, { name: "Placer", kind: "type", local: "OrderService.Placer" }, { name: "Line", kind: "class", local: "OrderService.Line" }]);
+  const crlf = await extractAny("src/main/java/shop/orders/OrderService.java", source.replace(/\n/g, "\r\n"));
+  assert.deepEqual([crlf.doc, crlf.decls[0]!.fingerprint, crlf.imports.map((fact) => fact.source)], [facts.doc, service!.fingerprint, facts.imports.map((fact) => fact.source)]);
+});
+
+test("Java: a record's components are fields and methods, an enum's constants fields, an initializer the class's own code, a method no class of the file declares one of a static `.*` import", async () => {
+  const facts = await extractAny(
+    "src/test/java/shop/OrderTest.java",
+    `package shop;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+record Order(String id, Customer customer) {
+    String label() { return customer().name(); }
+}
+
+enum Status { NEW, PAID; boolean open() { return this == NEW; } }
+
+class OrderTest {
+    private final Clock clock = Clock.fixed();
+
+    void labels() {
+        assertEquals("a", new Order("a", null).label());
+    }
+}
+`,
+  );
+  const [order, status, test] = facts.decls;
+  assert.deepEqual(order!.fields, [{ name: "id", class: "String" }, { name: "customer", class: "Customer" }]);
+  assert.deepEqual(order!.members.map((member) => [member.name, member.signature, member.result ?? null]), [["id", "() → String", { class: "String" }], ["customer", "() → Customer", { class: "Customer" }], ["label", "() → String", { class: "String" }]]);
+  // `customer().name()`: a member of what the record's own accessor returns.
+  assert.deepEqual(order!.members[2]!.calls.map((call) => [call.callee, call.form]), [["customer().name", { kind: "result", of: { call: { kind: "own", member: "customer" } }, member: "name" }], ["customer", { kind: "own", member: "customer" }]]);
+  assert.deepEqual([status!.kind, status!.fields, status!.members.map((member) => member.name)], ["class", [{ name: "NEW", class: "Status" }, { name: "PAID", class: "Status" }], ["open"]]);
+  assert.deepEqual(test!.calls.map((call) => [call.callee, call.form]), [["Clock.fixed", { kind: "member", head: "Clock", member: "fixed" }]]);
+  assert.deepEqual(test!.members[0]!.calls.map((call) => [call.callee, call.form]), [["assertEquals", { kind: "member", head: "Assertions", member: "assertEquals" }], ["new Order(\"a\", null).label", { kind: "typed", type: "Order", member: "label" }], ["Order", { kind: "name", name: "Order" }]]);
+});
+
+test("C#: the namespaces used and the candidates of every class named, a partial class with fields, properties, methods, a constructor and a nested type, calls by field, property, local, awaited result and alias", async () => {
+  const source = `using System;
+using Shop.Store;
+using Audit = Shop.Util.AuditLog;
+
+namespace Shop.Orders
+{
+    /// <summary>
+    /// Places orders.
+    /// </summary>
+    public partial class OrderService : BaseService, IPlacer
+    {
+        private readonly IOrderRepository _repository;
+        public Clock Clock { get; set; } = Clock.System();
+        public int Count => _repository.Count();
+
+        public OrderService(IOrderRepository repository) : base("orders")
+        {
+            _repository = repository;
+        }
+
+        /// <summary>Places one order.</summary>
+        public async Task<Order> PlaceAsync(string id, long total)
+        {
+            var order = new Order(id, total);
+
+            if (order.Total > Limits.Max)
+                Flag(order);
+            else
+                await this._repository.SaveAsync(order);
+
+            var saved = await _repository.FindAsync(id);
+            saved.Touch();
+            Clock.Tick();
+            Audit.Write(id);
+            order?.Ship();
+
+            return Orders.Latest(_repository);
+        }
+
+        private void Flag(Order order)
+        {
+            var line = new Line(order.Id);
+            line.Print();
+            Each(Flag);
+        }
+
+        public static void Main(string[] args)
+        {
+            new OrderService(null).PlaceAsync("a", 1);
+        }
+
+        private class Line
+        {
+            public Line(string id) { }
+            public void Print() { }
+        }
+    }
+
+    public interface IPlacer
+    {
+        Task<Order> PlaceAsync(string id, long total);
+    }
+}
+`;
+  const facts = await extractAny("Shop/Orders/OrderService.cs", source);
+  assert.equal(facts.parseError, null);
+  // The text of the `<summary>` of the type the file is named after.
+  assert.equal(facts.doc, "Places orders.");
+  // A `using` names a namespace and binds nothing; an alias its class. A class named in a type or called on is the candidates C#
+  // tries: the namespaces around the file's own, the global one, then each `using` — .NET's own left out (optional: the base library has the rest).
+  assert.deepEqual(
+    facts.imports.map((fact) => [fact.source, fact.bindings.map((binding) => binding.local).join(), fact.optional ?? false, fact.glob ?? false]),
+    [
+      ["System.*", "", false, true],
+      ["Shop.Store.*", "", false, true],
+      ["Shop.Util.AuditLog", "Audit", true, false],
+      ["Shop.Orders.Clock ?? Shop.Clock ?? Clock ?? Shop.Store.Clock", "Clock", true, false],
+      ["Shop.Orders.IOrderRepository ?? Shop.IOrderRepository ?? IOrderRepository ?? Shop.Store.IOrderRepository", "IOrderRepository", true, false],
+      ["Shop.Orders.Order ?? Shop.Order ?? Order ?? Shop.Store.Order", "Order", true, false],
+      ["Shop.Orders.Limits ?? Shop.Limits ?? Limits ?? Shop.Store.Limits", "Limits", true, false],
+      ["Shop.Orders.Orders ?? Shop.Orders ?? Orders ?? Shop.Store.Orders", "Orders", true, false],
+      ["Shop.Orders.BaseService ?? Shop.BaseService ?? BaseService ?? Shop.Store.BaseService", "BaseService", true, false],
+    ],
+  );
+  const [service, placer] = facts.decls;
+  // The first of the base list is the base unless it reads as an interface (`IPlacer`).
+  assert.deepEqual([service!.kind, service!.name, service!.exported, service!.base, service!.implements], ["class", "OrderService", true, "BaseService", ["IPlacer"]]);
+  assert.deepEqual(service!.fields, [{ name: "_repository", class: "IOrderRepository" }, { name: "Clock", class: "Clock" }, { name: "Count", class: "int" }]);
+  // A property with code is a member that runs on access; `{ get; set; }` is a field, its initializer the class's own code.
+  assert.deepEqual(service!.members.map((member) => [member.kind, member.name, member.exported, member.static ?? false, member.accessor ?? null, member.signature]), [
+    ["fn", "Count", true, false, "get", "() → int"],
+    ["fn", "constructor", true, false, null, "(IOrderRepository repository)"],
+    ["fn", "PlaceAsync", true, false, null, "(string id, long total) → Task<Order>"],
+    ["fn", "Flag", false, false, null, "(Order order) → void"],
+    ["fn", "Main", true, true, null, "(string[] args) → void"],
+    ["class", "Line", false, false, null, null],
+  ]);
+  assert.deepEqual(service!.calls.map((call) => [call.callee, call.form]), [["Clock.System", { kind: "typed", type: "Clock", member: "System" }]]);
+  const member = (name: string) => service!.members.find((each) => each.name === name)!;
+  assert.deepEqual(member("constructor").calls.map((call) => [call.callee, call.form]), [["base", { kind: "super", member: "constructor" }]]);
+  assert.equal(member("PlaceAsync").doc, "Places one order.");
+  // `Task<Order>` gives an Order once awaited.
+  assert.deepEqual(member("PlaceAsync").result, { class: "Order", promise: true });
+  assert.deepEqual(member("PlaceAsync").calls.map((call) => [call.callee, call.form, (call.guards ?? []).map((guard) => `${guard.kind}:${guard.text}`).join(" > ")]), [
+    ["Order", { kind: "name", name: "Order" }, ""],
+    ["Flag", { kind: "own", member: "Flag" }, "if:order.Total > Limits.Max"],
+    ["this._repository.SaveAsync", { kind: "typed", type: "IOrderRepository", member: "SaveAsync" }, "else:not order.Total > Limits.Max"],
+    ["_repository.FindAsync", { kind: "typed", type: "IOrderRepository", member: "FindAsync" }, ""],
+    ["saved.Touch", { kind: "result", of: { call: { kind: "typed", type: "IOrderRepository", member: "FindAsync" }, awaited: true }, member: "Touch" }, ""],
+    ["Clock.Tick", { kind: "typed", type: "Clock", member: "Tick" }, ""],
+    ["Audit.Write", { kind: "member", head: "Audit", member: "Write" }, ""],
+    ["order?.Ship", { kind: "typed", type: "Order", member: "Ship" }, ""],
+    ["Orders.Latest", { kind: "member", head: "Orders", member: "Latest" }, ""],
+  ]);
+  // A method group handed over is a function passed.
+  assert.deepEqual(member("Flag").calls[2]!.passes?.map((pass) => [pass.arg, pass.callee, pass.form]), [[0, "Flag", { kind: "own", member: "Flag" }]]);
+  assert.deepEqual([placer!.kind, placer!.shape, placer!.members], ["type", [{ name: "PlaceAsync", optional: false, type: "(string id, long total) => Task<Order>" }], []]);
+  // A `partial` class is a part: another file may hold the rest of it.
+  assert.deepEqual(facts.symbols, [
+    { name: "OrderService", qualified: "Shop.Orders.OrderService", table: "class", part: true },
+    { name: "Line", qualified: "Shop.Orders.OrderService.Line", table: "class" },
+    { name: "IPlacer", qualified: "Shop.Orders.IPlacer", table: "class" },
+  ]);
+  const crlf = await extractAny("Shop/Orders/OrderService.cs", source.replace(/\n/g, "\r\n"));
+  assert.deepEqual([crlf.doc, crlf.decls[0]!.fingerprint, crlf.imports.map((fact) => fact.source)], [facts.doc, service!.fingerprint, facts.imports.map((fact) => fact.source)]);
+});
+
+test("C#: top-level statements are the program's Main, a lambda's typed parameter a receiver, a `using static` class the home of a method no class declares, a record's parameters fields, a file-scoped namespace", async () => {
+  const program = await extractAny(
+    "Shop/Program.cs",
+    `using Microsoft.AspNetCore.Builder;
+using Shop.Orders;
+
+var app = WebApplication.CreateBuilder(args).Build();
+app.MapPost("/orders", (OrderRequest request, IOrders orders) => orders.Place(request.Id));
+app.MapGet("/health", Handlers.Health);
+Seed(app);
+app.Run();
+
+static void Seed(WebApplication app) { Database.Migrate(); }
+`,
+  );
+  assert.deepEqual(program.decls.map((decl) => [decl.kind, decl.name, decl.signature, decl.line, decl.endLine]), [["fn", "Main", "(string[] args)", 4, 10]]);
+  assert.deepEqual(program.decls[0]!.calls.map((call) => [call.callee, call.form.kind, (call.passes ?? []).map((pass) => pass.callee).join()]), [
+    ["WebApplication.CreateBuilder().Build", "result", ""],
+    ["WebApplication.CreateBuilder", "member", ""],
+    ["app.MapPost", "result", ""],
+    // The lambda's `orders` is declared an IOrders: the call goes to the classes implementing it. A member handed over reads
+    // as a method group whether it is a method or a property: the graph draws the ones that are functions.
+    ["orders.Place", "typed", "request.Id"],
+    ["app.MapGet", "result", "Handlers.Health"],
+    // A local function's calls are the program's own.
+    ["Seed", "bound", ""],
+    ["app.Run", "result", ""],
+    ["Database.Migrate", "member", ""],
+  ]);
+  const facts = await extractAny(
+    "Shop/Orders/Order.cs",
+    `global using Shop.Store;
+using static Shop.Util.Checks;
+
+namespace Shop.Orders;
+
+public record Order(string Id, Customer Customer)
+{
+    public string Label() { Require(Id != null); return Customer.Name(); }
+}
+
+public enum Status { New, Paid }
+
+public struct Point { public int X; }
+`,
+  );
+  assert.deepEqual(facts.imports.slice(0, 2).map((fact) => [fact.source, fact.text, fact.bindings.map((binding) => binding.local)]), [["Shop.Store.*", "global using Shop.Store;", []], ["Shop.Util.Checks", "using static Shop.Util.Checks;", ["Checks"]]]);
+  const [order, status, point] = facts.decls;
+  assert.deepEqual(order!.fields, [{ name: "Id", class: "string" }, { name: "Customer", class: "Customer" }]);
+  // `Require` is no method of the record, which extends nothing: the `using static` class's; `Customer.Name()` the member of the parameter's class.
+  assert.deepEqual(order!.members[0]!.calls.map((call) => [call.callee, call.form]), [["Require", { kind: "member", head: "Checks", member: "Require" }], ["Customer.Name", { kind: "typed", type: "Customer", member: "Name" }]]);
+  assert.deepEqual([status!.kind, status!.fields, point!.kind, point!.fields], ["class", [{ name: "New", class: "Status" }, { name: "Paid", class: "Status" }], "class", [{ name: "X", class: "int" }]]);
+  assert.deepEqual(facts.symbols?.map((symbol) => symbol.qualified), ["Shop.Orders.Order", "Shop.Orders.Status", "Shop.Orders.Point"]);
+});

@@ -774,10 +774,10 @@ test("imports resolve as the tools resolve them: baseUrl, a jsconfig, the longes
     assert.ok(archdiff(["diagram", "calls:backend/app/api.py#run", dir, "--format", "mermaid"]).stdout.includes("backend_app_api_py_run ==> backend_app_models_py_load"));
   }));
 
-test("Python, Rust and PHP are read with the same graph: imports resolve and calls are followed", () => {
+test("Python, Rust, PHP, Go, Java and C# are read with the same graph: imports resolve and calls are followed", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");
   const stats = JSON.parse(archdiff(["analyze", polyglot, "--json", "--no-cache"]).stdout) as { files: number; unresolvedImports: number; calls: number };
-  assert.equal(stats.files, 12);
+  assert.equal(stats.files, 35);
   assert.equal(stats.unresolvedImports, 0);
   const python = archdiff(["diagram", "calls:app/services/orders.py#place_order", polyglot, "--format", "mermaid"]).stdout;
   assert.ok(python.includes("app_services_orders_py_place_order ==> app_store_py_save_order"), python);
@@ -1803,6 +1803,147 @@ test("two entities with a field of one name are two machines: by the class the c
     const states = (view: string): string[] => (JSON.parse(archdiff(["diagram", view, dir, "--format", "json"]).stdout) as { machine: { states: { name: string }[] } }).machine.states.map((state) => state.name).sort();
     assert.deepEqual(states("machine:src/flows.ts#Payment.status"), ["failed", "pending", "settled"]);
     assert.deepEqual(states("machine:src/flows.js#order.status"), ["confirmed", "draft", "shipped"]);
+  }));
+
+test("Go: a package is its directory — a call reaches another file of the package, another package by its import path, a method written in another file than its type, and a handler handed to the router", () => {
+  const polyglot = join(root, "tests/fixtures/polyglot");
+  const diagram = (key: string, ...flags: string[]): string => archdiff(["diagram", key, polyglot, "--format", "mermaid", ...flags]).stdout;
+  // The import of a package names no file: each declaration used is a dependency on the file that declares it.
+  const modules = diagram("dir:go");
+  for (const line of ["go_cmd_shop_main_go --> go_internal_httpapi_handler_go", "go_internal_httpapi_handler_go --> go_internal_orders_orders_go", "go_internal_orders_orders_go --> go_internal_orders_validate_go", "go_internal_orders_orders_go --> go_internal_store_store_go", "go_internal_orders_find_go --> go_internal_orders_orders_go", "go_internal_orders_orders_test_go --> go_internal_orders_orders_go"]) assert.ok(modules.includes(line), `${line}\n${modules}`);
+  assert.ok(!modules.includes("go_cmd_shop_main_go --> go_internal_orders_validate_go"), modules);
+  // `main` is the entry; `handler.Place` given to `http.HandleFunc` is a function handed over (dashed), and its own calls follow.
+  assert.ok(archdiff(["views", polyglot]).stdout.includes("calls:go/cmd/shop/main.go#main\tmain (go/cmd/shop/main.go) — main"));
+  const calls = diagram("calls:go/cmd/shop/main.go#main", "--depth", "5");
+  for (const line of ["go_cmd_shop_main_go_main ==> go_internal_store_store_go_NewRepo", "go_cmd_shop_main_go_main -.-> go_internal_httpapi_handler_go_Handler_Place", "go_internal_httpapi_handler_go_Handler_Place ==> go_internal_orders_orders_go_Service_PlaceOrder", "go_internal_orders_orders_go_Service_PlaceOrder ==> go_internal_orders_validate_go_validate", "go_internal_orders_orders_go_Service_PlaceOrder ==> go_internal_store_store_go_Repo_Save"]) assert.ok(calls.includes(line), `${line}\n${calls}`);
+  // `FindOrder` and `lookup` are methods of `Service` written in find.go: `s.lookup()` is found there, `repo.Read()` on what `store.NewRepo()` returns.
+  const part = diagram("calls:go/internal/orders/find.go#Service.FindOrder");
+  assert.ok(part.includes("go_internal_orders_find_go_Service_FindOrder ==> go_internal_orders_find_go_Service_lookup") && part.includes("go_internal_orders_find_go_Service_lookup ==> go_internal_store_store_go_Repo_Read"), part);
+  // One box for the type, with the methods of both files; an interface with its methods; the fields' types as associations.
+  const classes = diagram("classes:go");
+  assert.equal(classes.split('["Service"]').length - 1, 1, classes);
+  assert.ok(classes.includes("+repo: *store.Repo") && classes.includes("+FindOrder(id string) returns (store.Order, bool)") && classes.includes("-lookup(id string)") && classes.includes("<<interface>>") && classes.includes("go_internal_orders_orders_go_Service --> go_internal_store_store_go_Repo : has"), classes);
+  // `_test.go` is a test file: the modules it imports are covered.
+  const tests = JSON.parse(archdiff(["diagram", "tests", polyglot, "--format", "json"]).stdout) as { nodes: { id: string; count?: number }[] };
+  assert.deepEqual(tests.nodes.filter((node) => node.id.startsWith("go/")).map((node) => [node.id, node.count]), [["go/cmd/shop/main.go", 0], ["go/internal/httpapi/handler.go", 0], ["go/internal/orders/find.go", 0], ["go/internal/orders/orders.go", 1], ["go/internal/orders/validate.go", 0], ["go/internal/store/store.go", 1]]);
+  // The body of a method as a flowchart: the statement of an `if` before its condition, a `switch` without a value by its cases.
+  const logic = diagram("logic:go/internal/httpapi/handler.go#Handler.Place");
+  assert.ok(logic.includes('n2{"switch"}') && logic.includes('n2 -->|"err != nil"| n3') && logic.includes('n2 -->|"default"| n4'), logic);
+  const placed = archdiff(["diagram", "logic:go/internal/orders/orders.go#Service.PlaceOrder", polyglot]).stdout;
+  assert.ok(placed.includes("| `err != nil: yes` | `validate` | **return order, err** |") && placed.includes("| `err != nil: no` | `validate`, `s.repo.Save` | **return order, nil** |"), placed);
+});
+
+test("Java: an import names a class wherever its file lies — a call reaches a class of the same package without an import, an interface's implementer, a nested class and a record's accessor; `main` is a method", () => {
+  const polyglot = join(root, "tests/fixtures/polyglot");
+  const base = "java/src/main/java/com/example/shop";
+  const id = (path: string): string => `${base}/${path}`.replace(/[^A-Za-z0-9]/g, "_");
+  const diagram = (key: string, ...flags: string[]): string => archdiff(["diagram", key, polyglot, "--format", "mermaid", ...flags]).stdout;
+  const modules = diagram("dir:java");
+  // By an import, by the package the file is in (`new Order(…)` in OrderService), and through `import com.example.shop.orders.*`.
+  for (const [from, to] of [["App.java", "web/OrderController.java"], ["orders/OrderService.java", "store/OrderRepository.java"], ["orders/OrderService.java", "orders/Order.java"], ["store/MemoryOrders.java", "orders/Order.java"]]) assert.ok(modules.includes(`${id(from!)} --> ${id(to!)}`), `${from} → ${to}\n${modules}`);
+  assert.ok(modules.includes(`java_src_test_java_com_example_shop_orders_OrderServiceTest_java --> ${id("orders/OrderService.java")}`), modules);
+  // `public static void main` of a class is an entry, as is a controller's method nothing calls.
+  const views = archdiff(["views", polyglot]).stdout;
+  assert.ok(views.includes(`calls:${base}/App.java#App.main\tmain (${base}/App.java) — main`) && views.includes(`calls:${base}/web/OrderController.java#OrderController.show\tshow (${base}/web/OrderController.java) — uncalled method of a handler`), views);
+  const calls = diagram(`calls:${base}/App.java#App.main`, "--depth", "4");
+  for (const [from, to] of [
+    ["App.java#App.main", "web/OrderController.java#OrderController.place"],
+    ["web/OrderController.java#OrderController.place", "orders/OrderService.java#OrderService.place"],
+    // `repository.save(order)` with `repository` an OrderRepository: the interface's one implementer.
+    ["orders/OrderService.java#OrderService.place", "store/MemoryOrders.java#MemoryOrders.save"],
+    // `Audit.record(order)`: a class nested in OrderService, named by its own name.
+    ["orders/OrderService.java#OrderService.place", "orders/OrderService.java#OrderService.Audit.record"],
+    ["orders/OrderService.java#OrderService.place", "orders/Order.java#Order.valid"],
+    // `order.id()`: the method a record has for its component.
+    ["web/OrderController.java#OrderController.render", "orders/Order.java#Order.id"],
+  ]) assert.ok(calls.includes(`${id(from!)} ==> ${id(to!)}`), `${from} → ${to}\n${calls}`);
+  // `orders.find(id).map(this::render)`: the method reference is a function handed over.
+  assert.ok(diagram(`calls:${base}/web/OrderController.java#OrderController.show`).includes(`${id("web/OrderController.java#OrderController.show")} ==> ${id("orders/OrderService.java#OrderService.find")}`));
+  const classes = diagram("classes:java");
+  assert.ok(classes.includes("<<interface>>") && classes.includes(`${id("store/OrderRepository.java#OrderRepository")} <|.. ${id("store/MemoryOrders.java#MemoryOrders")}`) && classes.includes("+repository: OrderRepository") && classes.includes("$main(String[] args) returns void") && classes.includes("-render(Order order) returns String"), classes);
+  // A file under src/test/ is a test file.
+  const tests = JSON.parse(archdiff(["diagram", "tests", polyglot, "--format", "json"]).stdout) as { nodes: { id: string; count?: number }[] };
+  assert.deepEqual(tests.nodes.filter((node) => node.id.startsWith("java/")).map((node) => [node.id.slice(base.length + 1), node.count]), [["App.java", 0], ["orders/Order.java", 0], ["orders/OrderService.java", 1], ["store/MemoryOrders.java", 1], ["store/OrderRepository.java", 0], ["web/OrderController.java", 0]]);
+  // The JDK is the language's library; nothing of the repository's own packages is missing.
+  const coverage = archdiff(["coverage", polyglot]).stdout;
+  assert.ok(coverage.includes("0 blind") && coverage.includes("0 unresolved imports"), coverage);
+  const logic = archdiff(["diagram", `logic:${base}/web/OrderController.java#OrderController.place`, polyglot]).stdout;
+  assert.ok(logic.includes("| `try: ok` | `orders.place`, `render` | **return render(order)** |") && logic.includes("| `try: error IllegalArgumentException refused` | `refused.getMessage` |"), logic);
+});
+
+test("Java's flowchart: a case that runs into the next and a rule that does not, a labelled continue, a synchronized block, a try with resources and its finally", () =>
+  withTempDir("archdiff-java-logic-", (dir) => {
+    writeFileSync(
+      join(dir, "Flow.java"),
+      'class Flow {\n    int run(Status status, java.util.List<String> items) {\n        switch (status) {\n            case NEW:\n                start();\n            case PAID:\n                ship();\n                break;\n            default:\n                skip();\n        }\n        outer:\n        for (String item : items) {\n            while (ready()) {\n                if (item.isEmpty()) continue outer;\n                work(item);\n            }\n        }\n        switch (status) {\n            case NEW -> start();\n            case PAID -> { ship(); return 2; }\n        }\n        synchronized (this) {\n            audit();\n        }\n        try (var lock = acquire()) {\n            return 1;\n        } catch (RuntimeException e) {\n            throw new IllegalStateException(e);\n        } finally {\n            done();\n        }\n    }\n}\n',
+    );
+    const logic = archdiff(["diagram", "logic:Flow.java#Flow.run", dir, "--format", "mermaid"]).stdout;
+    // `case NEW:` runs on into `case PAID:`; the `break` leaves; the default is apart.
+    for (const line of ['n1{"switch status"}', 'n1 -->|"NEW"| n2', "n2 --> n3", 'n1 -->|"PAID"| n3', 'n1 -->|"default"| n4', "n3 --> n5", "n4 --> n5"]) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    // `continue outer` goes back to the outer loop's header; the inner loop runs while its condition holds.
+    for (const line of ['n5{{"↻ String item : items"}}', 'n6{{"↻ ready()"}}', 'n6 -->|"while"| n7', 'n7 -->|"yes"| n5', "n8 --> n6"]) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    // A rule does not run into the next; a switch without a default may match nothing.
+    for (const line of ['n9 -->|"NEW"| n10', 'n9 -->|"PAID"| n11', "n11 --> n12", 'n9 -->|"no match"| n13', 'n13["synchronized (this)<br/>audit()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    // The finally runs after the return and after the throw.
+    for (const line of ['n14 -->|"ok"| n15', "n15 --> n16", 'n14 -->|"error RuntimeException e"| n17', "n17 --> n18", 'n16["done()"]', 'n18["done()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
+  }));
+
+test("C#: a using names a namespace — a class is found among the namespaces in scope and a global using's, a partial class is one class in two files, top-level statements are Main", () => {
+  const polyglot = join(root, "tests/fixtures/polyglot");
+  const id = (path: string): string => `csharp/Shop/${path}`.replace(/[^A-Za-z0-9]/g, "_");
+  const diagram = (key: string, ...flags: string[]): string => archdiff(["diagram", key, polyglot, "--format", "mermaid", ...flags]).stdout;
+  const modules = diagram("dir:csharp");
+  // By `using Shop.Orders;`, by the file's own namespace, and — Program.cs names MemoryOrders with no using of Shop.Store — by GlobalUsings.cs.
+  for (const [from, to] of [["Program.cs", "Web/OrdersController.cs"], ["Program.cs", "Store/MemoryOrders.cs"], ["Orders/OrderService.cs", "Store/IOrderRepository.cs"], ["Orders/OrderService.cs", "Orders/Order.cs"], ["Web/OrdersController.cs", "Orders/OrderService.cs"]]) assert.ok(modules.includes(`${id(from!)} --> ${id(to!)}`), `${from} → ${to}\n${modules}`);
+  // A partial class is named by the file called after it, not by its other part.
+  assert.ok(!modules.includes(`--> ${id("Orders/OrderService.Find.cs")}`), modules);
+  assert.ok(modules.includes(`csharp_Shop_Tests_OrderServiceTests_cs --> ${id("Orders/OrderService.cs")}`), modules);
+  assert.ok(archdiff(["views", polyglot]).stdout.includes("calls:csharp/Shop/Program.cs#Main\tMain (csharp/Shop/Program.cs) — main"));
+  const calls = diagram("calls:csharp/Shop/Program.cs#Main", "--depth", "4");
+  for (const [from, to, line] of [
+    // The lambda handed to MapPost calls the controller: its calls are the program's own; `controller.Show` is a method handed over.
+    ["Program.cs#Main", "Web/OrdersController.cs#OrdersController.Place", "==>"],
+    ["Program.cs#Main", "Web/OrdersController.cs#OrdersController.Show", "-.->"],
+    ["Web/OrdersController.cs#OrdersController.Place", "Orders/OrderService.cs#OrderService.Place", "==>"],
+    // `_repository.Save(order)` with `_repository` an IOrderRepository: the interface's one implementer.
+    ["Orders/OrderService.cs#OrderService.Place", "Store/MemoryOrders.cs#MemoryOrders.Save", "==>"],
+    // `Audit(order)` and `Find` are written in the other part of the class.
+    ["Orders/OrderService.cs#OrderService.Place", "Orders/OrderService.Find.cs#OrderService.Audit", "==>"],
+    ["Web/OrdersController.cs#OrdersController.Show", "Orders/OrderService.Find.cs#OrderService.Find", "==>"],
+    ["Orders/OrderService.cs#OrderService.Place", "Orders/Order.cs#Order.IsValid", "==>"],
+  ]) assert.ok(calls.includes(`${id(from!)} ${line} ${id(to!)}`), `${from} ${line} ${to}\n${calls}`);
+  // One box for the partial class, with the members of both files.
+  const classes = diagram("classes:csharp");
+  assert.equal(classes.split('["OrderService"]').length - 1, 1, classes);
+  assert.ok(classes.includes("+_repository: IOrderRepository") && classes.includes("+Find(string id) returns Order?") && classes.includes("-Audit(Order order) returns void") && classes.includes(`${id("Store/IOrderRepository.cs#IOrderRepository")} <|.. ${id("Store/MemoryOrders.cs#MemoryOrders")}`) && classes.includes("$Render(Order order) returns string"), classes);
+  // .NET is the language's library, a referenced package is named as the project file names it.
+  const externals = (JSON.parse(archdiff(["diagram", "module:csharp/Shop/Program.cs", polyglot, "--format", "json", "--packages"]).stdout) as { nodes: { id: string }[] }).nodes.map((node) => node.id);
+  assert.ok(externals.includes("pkg:Serilog") && externals.includes("pkg:Microsoft.AspNetCore"), externals.join());
+  // A file of a project named `….Tests` is a test file.
+  const tests = JSON.parse(archdiff(["diagram", "tests", polyglot, "--format", "json"]).stdout) as { nodes: { id: string; count?: number }[] };
+  assert.deepEqual(tests.nodes.filter((node) => node.id.startsWith("csharp/")).map((node) => [node.id.slice("csharp/Shop/".length), node.count]), [["GlobalUsings.cs", 0], ["Orders/Order.cs", 0], ["Orders/OrderService.Find.cs", 0], ["Orders/OrderService.cs", 1], ["Program.cs", 0], ["Store/IOrderRepository.cs", 0], ["Store/MemoryOrders.cs", 1], ["Web/OrdersController.cs", 0]]);
+  const coverage = archdiff(["coverage", polyglot]).stdout;
+  assert.ok(coverage.includes("0 blind") && coverage.includes("0 unresolved imports"), coverage);
+  const logic = archdiff(["diagram", "logic:csharp/Shop/Web/OrdersController.cs#OrdersController.Place", polyglot]).stdout;
+  assert.ok(logic.includes("| `try: ok` | `_orders.Place`, `Render` | **return Render(order)** |") && logic.includes("| `try: error (ArgumentException refused)` |"), logic);
+  // The program's own flowchart is read from its top-level statements; an expression-bodied method returns its expression.
+  assert.ok(diagram("logic:csharp/Shop/Program.cs#Main").includes('n4["app.Run()"]'));
+  assert.ok(diagram("logic:csharp/Shop/Orders/Order.cs#Order.IsValid").includes('(["return Total >= 0"])'));
+});
+
+test("C#'s flowchart: a section that runs into the next only when empty, a using and a lock, a foreach, a catch with a filter and a finally", () =>
+  withTempDir("archdiff-csharp-logic-", (dir) => {
+    writeFileSync(
+      join(dir, "Flow.cs"),
+      "class Flow\n{\n    int Run(Status status, List<string> items)\n    {\n        switch (status)\n        {\n            case Status.New:\n            case Status.Paid when items.Count > 0:\n                Ship();\n                break;\n            default:\n                Skip();\n                break;\n        }\n        foreach (var item in items)\n        {\n            if (item.Length == 0) continue;\n            Work(item);\n        }\n        using (var scope = Open())\n        {\n            Audit();\n        }\n        lock (_gate) { Count(); }\n        try { return 1; }\n        catch (InvalidOperationException e) when (e.Message != null) { throw new Failure(e); }\n        finally { Done(); }\n    }\n}\n",
+    );
+    const logic = archdiff(["diagram", "logic:Flow.cs#Flow.Run", dir, "--format", "mermaid"]).stdout;
+    // The two labels share the statements of the second; the default is apart; `break` leaves the switch.
+    for (const line of ['n1{"switch status"}', 'n1 -->|"Status.New"| n2', 'n1 -->|"Status.Paid when items.Count > 0"| n2', 'n1 -->|"default"| n3', 'n2["Ship()"]', "n2 --> n4", "n3 --> n4"]) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    for (const line of ['n4{{"↻ var item in items"}}', 'n4 -->|"each"| n5', 'n5{"item.Length == 0"}', 'n5 -->|"yes"| n4', 'n5 -->|"no"| n6', "n6 --> n4"]) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    // `using` and `lock` are a header before their block.
+    for (const line of ['n7["using (var scope = Open())<br/>Audit()"]', 'n8["lock (_gate)<br/>Count()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    for (const line of ['n9 -->|"ok"| n10', 'n10(["return 1"])', "n10 --> n11", 'n9 -->|"error (InvalidOperationException e)"| n12', 'n12(["throw new Failure(e)"])', 'n11["Done()"]', 'n13["Done()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
   }));
 
 test("Rust integration tests are crates of their own: `mod util;` and `use <crate>::` resolve from tests/", () => {

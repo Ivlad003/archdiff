@@ -3,9 +3,9 @@
 // know which files are source without loading any frontend or grammar.
 // Sits before both pipelines: config validation and file collection ask it
 // which files are source; the frontends and the graph ask it about language
-// rules (constructors, implicit members, case-insensitive names).
+// rules (constructors, implicit members, case-insensitive names, nested types).
 // Entry points: `LANGUAGES`, `languageOf`, `isSourceFile`,
-// `SOURCE_EXTENSIONS` and the per-file predicates below.
+// `SOURCE_EXTENSIONS` and the per-file predicates below (`nestedTypesInScope` and `rootMember` among them).
 
 /** What archdiff needs to know about one source language, without its grammar. */
 export interface LanguageInfo {
@@ -23,12 +23,37 @@ export interface LanguageInfo {
   caselessNames: boolean;
   /** Every type declaration is an interface (PHP): a call through a value typed with one is dispatched at run time to a class a binding may name. */
   interfaceTypes: boolean;
+  /** A type declared inside another is in scope by its own name in the file (Java, C#: `new Line()` inside `Order` makes an `Order.Line`). */
+  nestedTypes?: true;
+  /** Members every class has from the language's root class (Java's `toString`, an enum's `values`, C#'s `GetHashCode`): one a class of the repository does not declare is the language's. */
+  rootMember?: (name: string) => boolean;
 }
 
 const JS_IMPLICIT = new Set(["then", "next", "return", "throw", "toString", "valueOf", "toJSON"]);
 
+/** Go: the methods `fmt`, `errors` and the encoders call through an interface the code never names. */
+const GO_IMPLICIT = new Set(["String", "Error", "GoString", "Format", "Unwrap", "MarshalJSON", "UnmarshalJSON", "MarshalText", "UnmarshalText", "MarshalBinary", "UnmarshalBinary"]);
+
+/** Java: the methods the language and its library call through `Object`, `Comparable`, `Iterable`, `Runnable` and `AutoCloseable`. */
+const JAVA_IMPLICIT = new Set(["toString", "equals", "hashCode", "compareTo", "iterator", "close", "run", "call", "finalize"]);
+
+/** Java: what every class has from `Object`, and every enum from `Enum`. */
+const JAVA_ROOT = new Set(["toString", "equals", "hashCode", "getClass", "clone", "notify", "notifyAll", "wait", "finalize", "values", "valueOf", "ordinal", "name"]);
+
+/** C#: what every class has from `object`, and every enum from `Enum`. */
+const CSHARP_ROOT = new Set(["ToString", "Equals", "GetHashCode", "GetType", "MemberwiseClone", "ReferenceEquals", "HasFlag", "CompareTo"]);
+
+/** C#: the methods the language and its library call through `object`, `IDisposable`, `IEnumerable` and `IComparable`. */
+const CSHARP_IMPLICIT = new Set(["ToString", "Equals", "GetHashCode", "Dispose", "DisposeAsync", "GetEnumerator", "CompareTo"]);
+
 /** The table of supported languages, keyed by the name used in `archdiff.json`. */
 export const LANGUAGES = {
+  // C#: a constructor is the member `constructor`, as the frontend names it; a file is some types of its namespace, no directory's module.
+  csharp: { extensions: [".cs"], module: "file", index: new Array<string>(), constructor: "constructor", implicit: (name) => CSHARP_IMPLICIT.has(name), caselessNames: false, interfaceTypes: false, nestedTypes: true, rootMember: (name) => CSHARP_ROOT.has(name) },
+  // Go: a composite literal makes a value and runs no member; a file is no directory's module (the package is the directory).
+  go: { extensions: [".go"], module: "file", index: new Array<string>(), constructor: null, implicit: (name) => GO_IMPLICIT.has(name), caselessNames: false, interfaceTypes: false },
+  // Java: a constructor is the member `constructor`, as the frontend names it; a file is one type of its package, no directory's module.
+  java: { extensions: [".java"], module: "file", index: new Array<string>(), constructor: "constructor", implicit: (name) => JAVA_IMPLICIT.has(name), caselessNames: false, interfaceTypes: false, nestedTypes: true, rootMember: (name) => JAVA_ROOT.has(name) },
   javascript: { extensions: [".js", ".jsx", ".mjs", ".cjs"], module: "file", index: ["index"], constructor: "constructor", implicit: (name) => JS_IMPLICIT.has(name), caselessNames: false, interfaceTypes: false },
   // Dunder methods other than `__init__` run through syntax and built-ins: `with`, `for`, `str()`, operators, `x()`.
   python: { extensions: [".py"], module: "file", index: ["__init__"], constructor: "__init__", implicit: (name) => /^__.+__$/.test(name) && name !== "__init__", caselessNames: false, interfaceTypes: false },
@@ -97,6 +122,20 @@ export function interfaceTypes(file: string | null | undefined): boolean {
   const language = file ? languageOf(file) : undefined;
 
   return language !== undefined && LANGUAGES[language].interfaceTypes;
+}
+
+/** A type nested in another of `file` is in scope by its own name there. */
+export function nestedTypesInScope(file: string | null | undefined): boolean {
+  const language = file ? languageOf(file) : undefined;
+
+  return language !== undefined && (LANGUAGES[language] as LanguageInfo).nestedTypes === true;
+}
+
+/** A member every class declared in `file` has from its language, whether or not the class declares it. */
+export function rootMember(file: string | null | undefined, name: string): boolean {
+  const language = file ? languageOf(file) : undefined;
+
+  return language !== undefined && (LANGUAGES[language] as LanguageInfo).rootMember?.(name) === true;
 }
 
 /** A member of a class in `file` that the language calls without naming it. */

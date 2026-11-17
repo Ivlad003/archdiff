@@ -29,6 +29,7 @@ import { layerOf } from "./config.ts";
 import { operationOf, type ApiOperation } from "./apis.ts";
 import { SCAPI_TABLE } from "./scapi-table.ts";
 import { dottedForm, type Callee, type CallFact, type DeclFact, type FileFacts, type GuardFact, type ShapeFact, type ValueOfFact } from "./extract/facts.ts";
+import { languageOf, nestedTypesInScope, rootMember } from "./languages.ts";
 import type { Resolution } from "./resolve.ts";
 
 /** A file of the repository. */
@@ -389,6 +390,20 @@ function declareModules(b: Building): void {
     };
 
     for (const decl of file.decls) addDecl(decl);
+
+    // Java, C#: a type nested in another is named by its own name in the file, where no top-level declaration has it.
+    if (nestedTypesInScope(file.path)) {
+      const nest = (decl: DeclFact, parent: string): void => {
+        for (const member of decl.members) {
+          if (member.kind === "fn") continue;
+
+          if (!locals.has(member.name)) locals.set(member.name, nodeId(file.path, member.name, parent));
+          nest(member, `${parent}.${member.name}`);
+        }
+      };
+
+      for (const decl of file.decls) nest(decl, decl.name);
+    }
     // The lines of the file as `wc -l` counts them: a file that ends with a newline ends at the start of a line no one wrote.
     const module: Module = { id: file.path, layer: layerOf(file.path, b.config), decls, lines: file.endCol === 1 ? file.endLine - 1 : file.endLine, opaque: file.completeness === "opaque" };
 
@@ -430,8 +445,8 @@ function bindImports(b: Building): void {
         if (fact.url) dep.url = true;
         b.deps.push(dep);
       } else if (target.kind === "package" || target.kind === "builtin") {
-        // A package by its name; a language's own library by the language: `node:fs`, `py:os`, `rust:std`, `php:strlen`.
-        const id = `${target.kind === "package" ? "pkg" : target.runtime === undefined ? "node" : target.runtime === "python" ? "py" : target.runtime}:${target.name}`;
+        // A package by its name; a language's own library by the language: `node:fs`, `py:os`, `rust:std`, `php:strlen`, `go:net/http`, `java:java.util`, `dotnet:System.Linq`.
+        const id = `${target.kind === "package" ? "pkg" : target.runtime === undefined ? "node" : target.runtime === "python" ? "py" : target.runtime === "csharp" ? "dotnet" : target.runtime}:${target.name}`;
 
         if (!b.externals.has(id)) b.externals.set(id, { id, kind: target.kind, name: target.name });
         b.deps.push({ from: file.path, to: id, typeOnly, reexport: fact.reexport, line: fact.line });
@@ -467,10 +482,29 @@ class CallResolver {
   private readonly implementers = new Map<string, string[]>();
   /** The facts of each file, by its path. */
   private readonly files = new Map<string, FileFacts>();
+  /** The other declarations of a class written in several files (a Go type and the files that add methods to it, a C# `partial class`), by class node. */
+  private readonly parts = new Map<string, string[]>();
 
   constructor(b: Building, exports: ExportTable) {
     this.b = b;
     this.exports = exports;
+    // The class nodes of each qualified name, per language: one class once a declaration of the name is a part (`QualifiedSymbol.part`).
+    const named = new Map<string, { ids: string[]; parted: boolean }>();
+
+    for (const file of b.facts) {
+      for (const symbol of file.symbols ?? []) {
+        const id = nodeId(file.path, symbol.name);
+
+        if (symbol.table !== "class" || b.nodes.get(id)?.kind !== "class") continue;
+        const key = `${languageOf(file.path) ?? ""}\0${symbol.qualified}`;
+        const group = named.get(key) ?? { ids: [], parted: false };
+        group.ids.push(id);
+        group.parted ||= symbol.part === true;
+        named.set(key, group);
+      }
+    }
+
+    for (const { ids, parted } of named.values()) if (parted && ids.length > 1) for (const id of ids) this.parts.set(id, ids.filter((other) => other !== id));
 
     for (const file of b.facts) {
       this.files.set(file.path, file);
@@ -580,10 +614,10 @@ class CallResolver {
     const owner = enclosingClass ? this.b.nodes.get(enclosingClass) : undefined;
 
     if (!owner) return { gap: "dynamic" };
-    const base = this.declarationOf(owner, "class")?.base;
+    const base = this.baseOf(owner, "class");
 
     if (!base) return { gap: "unknown-member" };
-    const parent = this.nameTarget(owner.module, base.replace(/<.*$/, ""));
+    const parent = this.nameTarget(base.module, base.name.replace(/<.*$/, ""));
 
     // A base of a package's (`extends Component`): its member is the package's.
     if (!("id" in parent)) return memberOfGlobal(parent, "unknown-member");
@@ -627,7 +661,7 @@ class CallResolver {
 
     if (dispatched.length > 0) return { ids: dispatched };
 
-    if (this.externalAncestor(typeId)) return { gap: "external" };
+    if (this.externalAncestor(typeId) || this.ofLanguage(typeId, member)) return { gap: "external" };
 
     return { gap: this.b.nodes.get(typeId)?.kind === "type" ? "interface" : "unknown-member" };
   }
@@ -728,7 +762,7 @@ class CallResolver {
     if (found) return { id: found };
 
     // `$this->assertSame()` in a test extending PHPUnit's TestCase, `this.setState()` in a React component: the package's member.
-    return this.externalAncestor(enclosingClass) ? { gap: "external" } : { gap: "unknown-member" };
+    return this.externalAncestor(enclosingClass) || this.ofLanguage(enclosingClass, member) ? { gap: "external" } : { gap: "unknown-member" };
   }
 
   /** `ns.f` of a namespace import (the export `f`), or `x.m` of a declaration or an import (its member). */
@@ -760,7 +794,14 @@ class CallResolver {
 
     if (found) return { id: found };
 
-    return this.externalAncestor(owner.id) ? { gap: "external" } : { gap: "unknown-member" };
+    return this.externalAncestor(owner.id) || this.ofLanguage(owner.id, member) ? { gap: "external" } : { gap: "unknown-member" };
+  }
+
+  /** A member every class has from its language's root class (Java's `toString`, an enum's `values`): the language's own when no class of the chain declares it. */
+  private ofLanguage(classId: string, member: string): boolean {
+    const owner = this.b.nodes.get(classId);
+
+    return owner !== undefined && rootMember(owner.module, member);
   }
 
   /**
@@ -804,6 +845,9 @@ class CallResolver {
     const direct = nodeId(owner.module, member, owner.parent ? `${owner.parent}.${owner.name}` : owner.name);
 
     if (this.b.nodes.has(direct)) return direct;
+
+    // A class written in several files: the member may be declared in another part of it.
+    for (const part of this.parts.get(classId) ?? []) if (this.b.nodes.has(`${part}.${member}`)) return `${part}.${member}`;
     const fact = this.declarationOf(owner);
 
     // PHP: a trait the class uses (`use Logs;`) — its methods are the class's own, found before the base's.
@@ -815,10 +859,10 @@ class CallResolver {
     }
 
     // The base class: the extractor records it by name on the class declaration.
-    const base = fact?.base;
+    const base = this.baseOf(owner);
 
     if (!base) return null;
-    const baseTarget = this.nameTarget(owner.module, base);
+    const baseTarget = this.nameTarget(base.module, base.name);
 
     return "id" in baseTarget ? this.memberOf(baseTarget.id, member, depth + 1) : null;
   }
@@ -828,12 +872,27 @@ class CallResolver {
     const owner = this.b.nodes.get(classId);
 
     if (!owner || depth > MAX_HOPS) return false;
-    const base = this.declarationOf(owner, "class")?.base;
+    const base = this.baseOf(owner, "class");
 
     if (!base) return false;
-    const target = this.nameTarget(owner.module, base.replace(/<.*$/, ""));
+    const target = this.nameTarget(base.module, base.name.replace(/<.*$/, ""));
 
     return "id" in target ? this.externalAncestor(target.id, depth + 1) : target.gap === "external";
+  }
+
+  /**
+   * The base a class extends as written, with the module that writes the name (it is resolved there): the class's own
+   * declaration's, else that of another part of it (a Go type declares its embedded base once, in one file).
+   */
+  private baseOf(owner: Declaration, kind?: DeclFact["kind"]): { module: string; name: string } | null {
+    for (const id of [owner.id, ...(this.parts.get(owner.id) ?? [])]) {
+      const node = this.b.nodes.get(id);
+      const base = node ? this.declarationOf(node, kind)?.base : undefined;
+
+      if (node && base) return { module: node.module, name: base };
+    }
+
+    return null;
   }
 
   /** The top-level declaration fact of a node, by its module and name (of a kind, when given). */
