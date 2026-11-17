@@ -513,6 +513,11 @@ export function eventsView(analysis: Analysis): PictureContent {
  */
 const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$|_test\.(py|rs|php)$|(^|\/)tests?(_[^/]*)?\.py$|(^|\/)conftest\.py$|Test\.php$/;
 
+/** Whether a module is a test file, by the conventions above: the tests view tells them so, and the impact of a change (impact.ts) names the tests to run by it. */
+export function isTestModule(id: string): boolean {
+  return TEST_MODULE.test(id);
+}
+
 /** Which modules the tests import: every non-test module in its layer's lane, with the number of test files importing it; one no test imports is marked. */
 export function testsView(graph: Graph): PictureContent {
   const tests = [...graph.modules.keys()].filter((id) => TEST_MODULE.test(id));

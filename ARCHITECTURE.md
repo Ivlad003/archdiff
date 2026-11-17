@@ -2,7 +2,7 @@
 
 archdiff's own contract, kept by archdiff: `archdiff check` fails when an import crosses the layers against the arrows below, `archdiff diagram intent` draws this file against the code. A subgraph is a layer, a node is a module (its path, then what it does), an arrow is an import. The modules named here are the ones that stand for their layer; `archdiff.json` places every other file in its layer by path.
 
-The direction of the arrows is the direction of the pipeline: the entry points (bin, cli, server, page) go through the edge (git, the files and the processes a command reads or runs: the picture of a view with its saved drawing, a review's revisions, a run, the specs, a scaffold) to the products (views, exports), which read the placed picture (diagram), which reads the analysis (core), which reads the language frontends (extract). The views are pure: what they need from git or a file the edge reads for them. Nothing below imports anything above it except types.
+The direction of the arrows is the direction of the pipeline: the entry points (bin, cli, server, page) go through the edge (git, the files and the processes a command reads or runs: the picture of a view with its saved drawing, a review's revisions, a run, the specs, a scaffold, the stdin and stdout of the MCP server with the tools it serves an agent) to the products (views, exports), which read the placed picture (diagram), which reads the analysis (core), which reads the language frontends (extract). The views are pure: what they need from git or a file the edge reads for them. Nothing below imports anything above it except types.
 
 ```mermaid
 flowchart LR
@@ -28,6 +28,8 @@ flowchart LR
     n_src_spec_ts["src/spec.ts<br>the specs and features of the repository, the agent's task for them, the OpenSpec CLI"]
     n_src_scaffold_ts["src/scaffold.ts<br>a project from scratch with its intent and first commit"]
     n_src_gherkin_ts["src/gherkin.ts<br>Gherkin features as data, and test skeletons written from them"]
+    n_src_mcp_ts["src/mcp.ts<br>the Model Context Protocol over stdio: the handshake, the list of tools, a call; knows nothing of archdiff"]
+    n_src_mcp_tools_ts["src/mcp-tools.ts<br>the tools an agent asks: views, diagram, check, may_import, impact, review, each from the code as it is now"]
   end
   subgraph n_views["views — one picture per question, and the reports; pure functions of the analysis"]
     n_src_views_ts["src/views.ts<br>the structural views and viewOf: the chain of pure steps after a view"]
@@ -42,6 +44,7 @@ flowchart LR
     n_src_machines_ts["src/machines.ts<br>state machines: declared by a library, or written with literal states"]
     n_src_logic_ts["src/logic.ts<br>a function's body as a flowchart with its paths as rules, and the list of branching functions"]
     n_src_project_map_ts["src/project-map.ts<br>the whole repository as dots and lines for the page's project map"]
+    n_src_impact_ts["src/impact.ts<br>what a change to a module or a function reaches: importers and callers by distance, the tests to run"]
   end
   subgraph n_exports["exports — the picture as text and files"]
     n_src_export_index_ts["src/export/index.ts<br>Mermaid, draw.io, Excalidraw, ArchiMate, JSON"]
@@ -86,6 +89,7 @@ flowchart LR
     n_tests_cli_test_ts["tests/cli.test.ts<br>the commands on the fixtures"]
     n_tests_routing_test_ts["tests/routing.test.ts<br>the layout and the router: no line through a shape"]
     n_tests_extract_test_ts["tests/extract.test.ts<br>the language frontends on snippets"]
+    n_tests_mcp_test_ts["tests/mcp.test.ts<br>the MCP server through its real stdin and stdout"]
   end
   subgraph n_scripts["scripts — build and pack"]
     n_scripts_build_web_mjs["scripts/build-web.mjs<br>bundles the page into dist/web"]
@@ -124,6 +128,14 @@ flowchart LR
   n_src_picture_ts --> n_src_analyze_ts
   n_src_picture_ts --> n_src_extract_logic_ts
   n_src_review_ts --> n_src_diff_ts
+  n_src_cli_ts --> n_src_mcp_ts
+  n_src_cli_ts --> n_src_mcp_tools_ts
+  n_src_mcp_tools_ts --> n_src_picture_ts
+  n_src_mcp_tools_ts --> n_src_review_ts
+  n_src_mcp_tools_ts --> n_src_impact_ts
+  n_src_mcp_tools_ts --> n_src_intent_ts
+  n_src_impact_ts --> n_src_views_more_ts
+  n_src_impact_ts --> n_src_graph_ts
   n_src_cli_ts --> n_src_run_ts
   n_src_run_ts --> n_src_flow_ts
   n_src_run_ts --> n_src_extract_bodies_ts

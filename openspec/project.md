@@ -7,7 +7,7 @@ Live architecture diagrams of a TypeScript, JavaScript, Python, Rust or PHP repo
 - Node 22+, TypeScript (strict, ESM, type stripping in development; compiled to `dist/` by `prepack`).
 - tree-sitter grammars as WASM (`web-tree-sitter`) for parsing; worker threads for parallel extraction; a gzipped fact cache in `.archdiff/`.
 - The page: one HTML file, Excalidraw as the canvas, `marked` + `DOMPurify` for Markdown, built with esbuild.
-- Tests: `node:test` through the real CLI and HTTP API; Playwright with the system Chrome for the page.
+- Tests: `node:test` through the real CLI, HTTP API and MCP server; Playwright with the system Chrome for the page.
 
 ## Conventions
 
@@ -32,3 +32,4 @@ Live architecture diagrams of a TypeScript, JavaScript, Python, Rust or PHP repo
 - `machines`: state machines, explicit and implicit, and the guards of calls.
 - `run`: a real run of an entry with the storages mocked.
 - `logic`: a function's body as a flowchart, its paths as rules.
+- `mcp`: the MCP server for a coding agent — the protocol over stdio, the tools, the impact of a change, an import asked of the contract.

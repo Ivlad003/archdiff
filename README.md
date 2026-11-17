@@ -34,6 +34,7 @@ The package is `@ivlad003/archdiff` on npm (npm refused the bare name as too clo
 | `archdiff plan <view> [dir] [--json] [--out FILE]` | The task drawn on the saved drawing of a view: new shapes as modules or functions, arrows as imports or calls, deleted shapes as removals, notes — Markdown for an agent | 0 |
 | `archdiff spec [dir] [--json] [--prompt V\|all\|update] [--validate] [--tests [DIR]]` | The specification: list it, print the agent's task, validate it, or write a test skeleton per Gherkin scenario (into `tests/`, or `DIR`) | 0 / 1 |
 | `archdiff web [dir] [--port N] [--host H] [--base REF] [--agent claude\|cursor\|codex\|opencode] [--no-watch]` | The page: views on the left, one Excalidraw canvas (reading, and drawing on demand), and the Markdown, code, coverage and data flow of what is picked; the Chat tab runs the coding agent picked there (`--agent`: the one picked first); without `--port` it takes 7080 or the next free port above it; `--host` binds another interface than localhost; `--no-watch` keeps the page as it is when a file changes | 0 |
+| `archdiff mcp [dir]` | An MCP server on stdin and stdout for a coding agent: the tools `views`, `diagram`, `check`, `may_import`, `impact` and `review`, each answered from the code as it is now and changing nothing ([below](#asked-by-the-agent-the-mcp-server)) | 0 |
 
 Exit code `2` is a wrong invocation or an I/O error. Every command that writes a report takes `--out FILE`: a new file, or one archdiff wrote before (its generated mark, or a command's JSON of the same shape); never a directory or a file of someone else's, though it mentions archdiff.
 
@@ -107,6 +108,51 @@ Draw the change on a view in `✎ edit`: a shape with a name is a new module (`s
 
 The agent is picked at the top of the Chat tab, among those installed on this computer: Claude Code (`claude -p … --permission-mode acceptEdits`), Cursor (`cursor-agent -p --trust …`), Codex (`codex exec --json` in its workspace-write sandbox) and OpenCode (`opencode run --format json --auto`); the page remembers the pick, and a follow-up goes on with the agent that holds the session. `archdiff web --agent codex` (or `"agent"` in `archdiff.json`) is the one picked first, else the first installed; `"agent"` may also be `{ "command": ["…"], "resume": "--resume", "protocol": "stream-json" }` for another CLI that prints Claude's stream-json (or `"codex"`, `"opencode"`: their events). With "none" picked, or none installed, the tab only writes the task (`archdiff plan` does the same from the terminal). Nothing runs by itself: every run starts from the button with the prompt as shown, every prompt is kept in `.archdiff/tasks/`, one run goes at a time, and the server refuses a request from a page of another site.
 
+## Asked by the agent: the MCP server
+
+`archdiff mcp` serves the same analysis to a coding agent while it works, over the [Model Context Protocol](https://modelcontextprotocol.io) on stdin and stdout: the agent asks a question when it has one, instead of getting pictures in its prompt.
+
+| Tool | Arguments | What it answers |
+| --- | --- | --- |
+| `views` | `kind`, `changed`, `base`, `head` | The list `archdiff views` prints, `key<TAB>title` per line; `kind` keeps one kind (`module`, `calls`…), `changed` the views of the files changed since the base |
+| `diagram` | `view`, the picture options (`depth`, `limit`, `weight`, `hubs`, `packages`, `expand`, `hide`, `overlay`, `changes`, `only`, `changed`, `mermaid`, `lanes`, `types`), `base`, `head`, `heads` | One view by its key (`layers`, `module:src/x.ts`, `calls:src/x.ts#fn`, `cycles`…) as Markdown with Mermaid, as `archdiff diagram` writes it; the options are the one table, by the names the API's query gives them |
+| `check` | none | What `archdiff check` reports: the imports against the contract with their files and lines, what is planned and not built, what is built beyond it |
+| `may_import` | `from`, `to` | Whether the contract lets one module import another, asked before the import is written. Each end is a path (a file still to be written is placed by its path) or a layer's name. *Allowed* (one layer, or an arrow of the contract across the two, which is named), *Not allowed* (with the layers the importer may use), or *Not judged* (a layer the contract does not name, or no contract) |
+| `impact` | `target`, `depth` | Who depends on a module (`src/db/store.ts`) or a function (`src/db/store.ts#saveOrder`): the importers and the callers, and who imports and calls those, up to `depth` steps away (3 unless said), each with the file and line of its import or call; and every test file that reaches it by calls or by imports, however far — the tests to run after the change |
+| `review` | `base`, `head` | The architectural diff of the working tree (or a head) against a base, as `archdiff review` writes it: what was added, removed and changed, and the new dependencies between layers, marked when the contract forbids them |
+
+Every answer is of the code as it is now: a call reads the analysis again (the fact cache keeps that fast), so the agent's own edits are in its next answer. The tools only read — none changes the code, the contract or a drawing. A wrong call is a JSON-RPC error (`-32602`) carrying the message the CLI gives for the same mistake (`diagram: unknown view "nope"`, `diagram: no module "src/none.ts" (archdiff views lists them)`); a tool that ran and failed (a review outside git) answers with the reason, marked `isError`.
+
+Register it once with the agent, which then starts the server itself:
+
+```bash
+claude mcp add archdiff -- npx -y @ivlad003/archdiff mcp   # Claude Code; --scope project writes .mcp.json for the whole team
+codex mcp add archdiff -- npx -y @ivlad003/archdiff mcp    # Codex
+```
+
+or in the agent's own file — Claude Code's `.mcp.json` at the root of the repository, Codex's `~/.codex/config.toml` (or `.codex/config.toml` of a trusted project), OpenCode's `opencode.json`:
+
+```json
+{ "mcpServers": { "archdiff": { "command": "npx", "args": ["-y", "@ivlad003/archdiff", "mcp"] } } }
+```
+
+```toml
+[mcp_servers.archdiff]
+command = "npx"
+args = ["-y", "@ivlad003/archdiff", "mcp"]
+```
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": { "servers": { "archdiff": { "type": "local", "command": ["npx", "-y", "@ivlad003/archdiff", "mcp"] } } }
+}
+```
+
+An OpenCode from before the `servers` key takes the same entry directly under `"mcp"`. With archdiff installed (`npm i -g @ivlad003/archdiff`) the command is `archdiff mcp`, which starts faster than `npx`. The server reads the directory it is started in, which these agents make the repository; `archdiff mcp path/to/repo` names another.
+
+The protocol is written by hand — no SDK, the package keeps its two runtime dependencies: JSON-RPC 2.0, one message per line, `initialize`, `ping`, `tools/list` and `tools/call`, no HTTP transport. It speaks the revisions that open with the `initialize` handshake (2024-11-05 to 2025-11-25); a client of the 2026-07-28 revision, which has no handshake, probes with `server/discover`, is told the method is not found, and falls back to the handshake as that revision prescribes.
+
 ## Layers
 
 Without configuration a module's layer is its top directory, or `src/<dir>` under `src/`. `archdiff.json` at the root names them explicitly:
@@ -173,7 +219,7 @@ The behaviour is specified twice, for tools and for people: `openspec/specs/<cap
 ```bash
 npm install
 npm run typecheck
-npm test          # the CLI and the HTTP API, through the real binary
+npm test          # the CLI, the HTTP API and the MCP server, through the real binary
 npm run test:web  # the page in headless Chrome (playwright-core; skipped without Chrome)
 node bin/archdiff.js web .
 ```

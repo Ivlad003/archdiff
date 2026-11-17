@@ -28,9 +28,11 @@ import { analysisAt, history, reviewOf } from "./review.ts";
 import { defaultBase, isIgnored, listBranches, mergeBase, revisionStamp } from "./git.ts";
 import { CACHE_DIRECTORY } from "./cache.ts";
 import { serve } from "./server.ts";
+import { serveMcp } from "./mcp.ts";
+import { archdiffTools, MCP_INSTRUCTIONS } from "./mcp-tools.ts";
 import { drawnAtHead, usesDepth, viewSyntax, viewsOfFiles } from "./view-keys.ts";
 import { parseView, viewList, viewOf, type View } from "./views.ts";
-import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "./intent.ts";
+import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, judgesLayers, nothingToCheck, parseIntent, writeIntent } from "./intent.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
 import { listSpecs, specPrompt, specSubject, validateSpecs } from "./spec.ts";
 import { writeTestSkeletons } from "./gherkin.ts";
@@ -679,14 +681,9 @@ const COMMANDS: readonly Command[] = [
     async run(call) {
       const analysis = await analyze(call.dir(0));
 
-      if (!analysis.intent) {
-        process.stderr.write(`archdiff check: no ${INTENT_FILE}, nothing to check against (archdiff intent --init)\n`);
-
-        return 0;
-      }
-
+      // No contract, or one that names no layer: said in the words the `check` tool of `mcp` says it in.
       if (!judgesLayers(analysis.intent)) {
-        process.stderr.write(`archdiff check: ${INTENT_FILE} names no layer (no Mermaid flowchart with a subgraph, or a module in one): nothing to check against (archdiff intent --init --force)\n`);
+        process.stderr.write(`archdiff check: ${nothingToCheck(analysis.intent)}\n`);
 
         return 0;
       }
@@ -734,6 +731,23 @@ const COMMANDS: readonly Command[] = [
       if (agentFlag === true) return fail("web: --agent needs claude, cursor, codex or opencode");
       const agent = typeof agentFlag === "string" ? agentFromConfig(agentFlag) : null;
       await serve(call.dir(0), { port, host: call.text("host") ?? "127.0.0.1", base: call.text("base"), agent, watch: !call.has("no-watch") });
+
+      return 0;
+    },
+  },
+  {
+    name: "mcp",
+    usage: "[dir]",
+    help: ["Serve the architecture to a coding agent over the Model Context Protocol, on", "stdin and stdout: the tools views, diagram, check, may_import, impact and review,", "each answered from the code as it is now and changing nothing. The agent starts", "it: claude mcp add archdiff -- npx -y @ivlad003/archdiff mcp (the README has", "Codex and OpenCode)"],
+    arity: 1,
+    flags: [],
+    async run(call) {
+      const root = call.dir(0);
+
+      // Started by hand in a terminal it would wait in silence: an agent starts it and speaks on its stdin.
+      if (process.stdin.isTTY) process.stderr.write("archdiff mcp: waiting for an MCP client on stdin; a coding agent starts this command itself (the README says how to register it). Ctrl+C stops it\n");
+      // Until the agent closes the input: stdout carries the protocol's messages alone.
+      await serveMcp({ name: "archdiff", version: (require("../package.json") as { version: string }).version, instructions: MCP_INSTRUCTIONS, tools: archdiffTools(root) });
 
       return 0;
     },
