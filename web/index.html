@@ -241,11 +241,12 @@
             <span id="agent-name" class="muted"></span>
           </div>
           <details id="chat-help" class="help"><summary>how the chat works</summary><p class="muted">Draw the change on this view (✎ edit: a shape with a name is a new module or function, an arrow is an import or a call, a deleted shape is a removal, text is a note), save, then <em>code this</em>: the drawing goes into ARCHITECTURE.md (the contract) and the agent builds it. <em>improve the diagram</em> asks the agent to review the contract; <em>from document</em> turns a design note into it. The agent may ask you a question with options. Nothing runs by itself.</p></details>
-          <div class="row">
+          <div class="row buttons">
             <button id="code-this" title="Fold the drawing of this view into ARCHITECTURE.md and have the agent build what is not built yet (/code)">code this</button>
             <button id="improve-diagram" title="Ask the agent to review ARCHITECTURE.md: names, missing links, layers, what the document leaves open (/diagram)">improve the diagram</button>
             <button id="from-document" title="Paste a design note, an ISD or a spec; the agent writes the architecture from it (/doc)">from document</button>
             <button id="plan" class="small" title="Only read the task from the drawing, without touching the contract">read the task</button>
+            <button id="explain-this" class="small" title="Have the agent explain this picture, or the shapes picked on it, as a tour: steps through the pictures with the shapes lit and a note on each — what it shows, how it works, why (/explain)">explain</button>
             <button id="checks" class="small" title="Run the contract check and the commands archdiff.json names in &quot;checks&quot; (npm test, …) now; they also run after every agent run">run checks</button>
           </div>
           <textarea id="document" hidden placeholder="Paste the document here (a design note, an ISD, a spec in prose, or Markdown with a Mermaid flowchart), then press Ctrl+Enter or the button below."></textarea>

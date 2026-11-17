@@ -16,7 +16,11 @@
 // writes the same commands in an `archdiff-do` block of its answer to show
 // the reader something; the page runs the ones an agent may.
 //
-// Entry points: `askAbout`, `runTask`, `setAgentName`, `agentNameOf`, `loadAgents`,
+// An explanation is asked for as a tour (src/explain.ts): the agent's
+// answer holds an `archdiff-tour` block, which the page keeps as a guided
+// tour and plays at once — the pictures, the shapes lit, a note a step.
+//
+// Entry points: `askAbout`, `explain`, `runTask`, `setAgentName`, `agentNameOf`, `loadAgents`,
 // `loadTasks`, `askAgent`, `agentCommand`, `runChecksNow`, `stopRun`,
 // `pickAgent`, and the elements `taskField`, `runButton`, `runState`,
 // `transcript`.
@@ -27,6 +31,7 @@ import { revealDetails } from "./layout.ts";
 import { page } from "./page.ts";
 import { readOnlyView, setLink, currentLink } from "./link.ts";
 import { CHAT_COMMANDS, doCommands, parseCommandLine } from "../../src/chat-commands.ts";
+import { explainedName, explainPrompt, tourInAnswer } from "../../src/explain.ts";
 import { pictureQueryText } from "../../src/options.ts";
 import { tagsIn } from "../../src/shape-keys.ts";
 
@@ -53,12 +58,17 @@ function row(kind: string, text: string): HTMLDivElement {
   return h("div", { class: `ev ${kind}${judged && text.startsWith("✘") ? " failed" : judged && text.startsWith("✔") ? " passed" : ""}` }, text);
 }
 
+/** An agent's text as the transcript shows it: a tour it wrote is played on the page, and its JSON is no reading. */
+function readable(text: string): string {
+  return text.replace(/```archdiff-tour[ \t]*\r?\n[\s\S]*?```/g, "_The tour is on the page: the bar under the title steps through it._");
+}
+
 /** The answer of the turn, rendered as Markdown under its folded steps. */
 function showAnswer(text: string): void {
   if (!turn) return;
   turn.answered = true;
   turn.answer.className = "answer ev result";
-  page.renderMarkdown(turn.answer, text);
+  page.renderMarkdown(turn.answer, readable(text));
   turn.summary.textContent = `${turn.count} ${turn.count === 1 ? "step" : "steps"} (tools, thoughts) — click to unfold`;
 }
 
@@ -80,7 +90,7 @@ function appendEvent(kind: string, text: string): void {
     // The result is the answer, shown in full; an empty one leaves the last text as the answer at the exit.
     if (text.trim() !== "") showAnswer(text);
   } else if (turn && kind !== "check" && kind !== "report" && kind !== "exit") {
-    turn.steps.append(row(kind, text));
+    turn.steps.append(row(kind, kind === "text" ? readable(text) : text));
     turn.count++;
     const line = text.split("\n")[0] ?? "";
     turn.summary.textContent = `${turn.count} ${turn.count === 1 ? "step" : "steps"} · ${line.length > 90 ? `${line.slice(0, 90)}…` : line}`;
@@ -180,7 +190,7 @@ function isCommand(text: string): boolean {
  * may both carry the block): the page shows what the agent asks it to, and a line of the transcript says which
  * command that was — or why it was not run.
  */
-function doForAgent(text: string, run: { done: Set<string>; queue: Promise<void> }): void {
+function doForAgent(text: string, run: { done: Set<string>; queue: Promise<void>; toured: boolean }): void {
   for (const line of doCommands(text)) {
     if (run.done.has(line)) continue;
     run.done.add(line);
@@ -192,6 +202,59 @@ function doForAgent(text: string, run: { done: Set<string>; queue: Promise<void>
     );
   }
 }
+
+/**
+ * The tour of an agent's answer (an `archdiff-tour` block), once per run: kept as a guided tour of the repository and
+ * played from its first step — the link names the tour, and the page does the rest as for a tour a reader recorded.
+ * A block that is no tour is said in the transcript with what is wrong in it.
+ */
+function playExplained(text: string, run: { done: Set<string>; queue: Promise<void>; toured: boolean }): void {
+  const found = run.toured ? null : tourInAnswer(text);
+
+  if (!found) return;
+  run.toured = true;
+
+  if ("problem" in found) return void transcript.append(row("do failed", `↳ the tour is not played — ${found.problem}`));
+  const { title, steps } = found.tour;
+  const name = explainedName(title, Date.now());
+  const kept = steps.map((step) => ({ link: new URLSearchParams({ view: step.view }).toString(), select: step.select, note: step.note, ...(step.path ? { path: true as const } : {}) }));
+  run.queue = run.queue.then(() =>
+    api.saveTour(name, title, kept).then(
+      () => {
+        transcript.append(row("do", `↳ the tour "${title}" is played: ${steps.length} ${steps.length === 1 ? "step" : "steps"}, ‹ and › under the title step through them; it is kept in the tours menu`));
+        location.hash = `tour=${encodeURIComponent(name)}&step=1`;
+      },
+      (error: unknown) => void transcript.append(row("do failed", `↳ the tour is not played — ${error instanceof Error ? error.message : String(error)}`)),
+    ),
+  );
+}
+
+/**
+ * Has the agent explain — what `words` name, the shapes given, or the picture alone — as a tour (`explainPrompt`):
+ * the answer's tour is played by the page. Without an agent the task with its context goes into the task box, and
+ * the run's line says that an agent picked here is what plays the tour.
+ */
+export function explain(subjects: { tag: string; label: string }[], words = ""): void {
+  page.showTab("chat");
+  revealDetails();
+
+  if (agentName !== null && busy()) return;
+  const state = currentLink();
+  const shapes = subjects.map((subject) => `${subject.label} (${subject.tag})`).join(", ");
+  const picture = readOnlyView(state.view) ? `the picture \`${state.view}\`` : `the picture I am looking at: @view:${state.view}`;
+  const what = [words.trim(), shapes === "" ? "" : `these shapes: ${shapes}`, words.trim() === "" && shapes === "" ? picture : `It is on ${picture}`].filter((part) => part !== "").join(". ");
+  const prompt = explainPrompt(what);
+  const shown = `explain: ${words.trim() !== "" ? words.trim() : subjects.length > 0 ? subjects.map((subject) => subject.label).join(", ") : "this picture"}`;
+
+  if (agentName) return runTask(prompt, null, shown);
+  runState.textContent = "no agent: writing the task of the explanation into the task box…";
+  void withContext(prompt).then((text) => {
+    taskField.value = text;
+    runState.textContent = "no agent picked: the task of the explanation is in the box — pick an agent above to have its tour played here";
+  });
+}
+
+element<HTMLButtonElement>("explain-this").addEventListener("click", () => page.explainPicked());
 
 // ── A question about the picture or the selected shapes ──────────────────────
 
@@ -544,7 +607,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
     .then(({ id, task, agent }) => {
       runState.textContent = `running ${labelOf(agent)} (${id}); task saved to ${task}`;
       const run = { id, sessionId: resume, stopped: false, agent, close: () => {} };
-      const shownByAgent = { done: new Set<string>(), queue: Promise.resolve() };
+      const shownByAgent = { done: new Set<string>(), queue: Promise.resolve(), toured: false };
       currentRun = run;
       run.close = api.agentEvents(
         id,
@@ -556,6 +619,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
           if (event.kind === "text" || event.kind === "result") {
             showQuestion(event.text, run);
             doForAgent(event.text, shownByAgent);
+            playExplained(event.text, shownByAgent);
           }
 
           // The shapes of the files the agent touches light up as it works, like a run passing through them.

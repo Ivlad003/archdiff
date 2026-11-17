@@ -15,7 +15,7 @@ import type { MenuItem } from "./menu.ts";
 import { siblingViews } from "./navigation.ts";
 import { page } from "./page.ts";
 import { copyText, showCode } from "./panel.ts";
-import { askSelected, deeperView, labelOf, select, selection, showEdge, toggleSelected } from "./picking.ts";
+import { askSelected, deeperView, explainSelected, labelOf, select, selection, showEdge, toggleSelected } from "./picking.ts";
 import { toggleProjectMap } from "./project-map.ts";
 import { reviewBase } from "./review.ts";
 import { fitPresentation } from "./presentation.ts";
@@ -124,6 +124,7 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
     if (supposed.length > 0) items.push("—", ...supposed);
     items.push("—", { label: selection().includes(node.id) ? "Take out of the selection" : "Add to the selection", hint: "Shift+tap", run: () => toggleSelected(node.id) });
     items.push({ label: "Ask the agent about it", hint: tag?.tag ?? "no tag for this kind of shape", disabled: tag === null, run: () => askSelected([node.id]) });
+    items.push({ label: "Explain it, step by step", hint: "a tour the agent writes", disabled: tag === null, run: () => explainSelected([node.id]) });
     items.push({ label: "Dim all but its neighbours", run: () => page.canvas()?.dim(neighbourhoodOf(page.edges(), node.id)) });
     items.push("—", { label: "Show the code", disabled: !node.ref?.file, run: () => void showCode(node) });
     items.push({ label: "Copy the name", hint: target, run: () => void copyText(target) });
@@ -142,6 +143,7 @@ export function menuItems(id: string | null, lines: PickedLine[]): MenuItem[] {
 
   return [
     { label: "Ask the agent about this picture", run: () => askSelected([]) },
+    { label: "Explain this picture, step by step", hint: "a tour the agent writes", run: () => explainSelected([]) },
     { label: "Project map", hint: "p", run: () => toggleProjectMap(true) },
     { label: "Fit the picture", hint: "0", run: () => fitPresentation() },
     { label: "Clear the selection", hint: "Esc", disabled: selection().length === 0, run: () => select([]) },

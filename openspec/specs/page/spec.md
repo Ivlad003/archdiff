@@ -425,3 +425,17 @@ A line that starts with a slash and a word, in the question row, the task box or
 
 - **WHEN** the reader types `/ov` in the question row and presses Enter
 - **THEN** the field holds "/overlay " and nothing is run
+
+### Requirement: Explain, from where the reader is
+
+The system SHALL offer an explanation as a tour from the Chat tab's *explain* button (the shapes picked, else the picture), from the menu of a shape (*Explain it, step by step*) and of the picture, from the strip of a selection, and by the command `/explain [what]`, whose words say what to explain. `/path <shape> <shape> …` SHALL light a way through shapes of the picture in the order named, an agent's block may hold it, and a name that is on no shape SHALL be refused by name; `/select` SHALL pick the shapes its names are on and say which names are on none.
+
+#### Scenario: A way by a command
+
+- **WHEN** the reader types `/path routes db` on the layers
+- **THEN** `routes` and `db` are picked, the lines from `routes` through `lib` to `db` are lit, and the transcript reads "The way through routes → db is lit."
+
+#### Scenario: A name on no shape
+
+- **WHEN** the reader types `/select routes nowhere`
+- **THEN** `routes` is picked and the transcript reads "Picked routes. No shape of this picture is named nowhere."

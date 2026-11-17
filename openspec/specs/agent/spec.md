@@ -186,3 +186,26 @@ The system SHALL start Claude Code, from the page, with archdiff's own MCP serve
 
 - **WHEN** a task is run with Claude Code
 - **THEN** its arguments hold `--mcp-config` with a server `archdiff` whose command is node and whose arguments are archdiff's entry, `mcp` and the repository's path, and `--allowedTools` lists `mcp__archdiff`
+
+### Requirement: An explanation is a tour the agent writes
+
+The system SHALL, when the reader asks for an explanation — of the picture, of shapes picked on it, or of what they name — give the agent a task that names what to explain (the shapes and the picture as tags, expanded into their context), tells it to change no file, and asks for the answer as one fenced `archdiff-tour` block of JSON: a title and three to eight steps in the order to read them, each with the key of a view, the IDs of the shapes of that view to look at, whether they are a way to follow in that order, and a note in Markdown that says what the step shows, how it works and why. The page SHALL read the first such block of the run's answer once: a block that is JSON with one to twenty steps, each naming a view, SHALL be kept as a guided tour of the repository under a name made of `explained-`, the words of its title and a mark of the moment, and played from its first step; a block that is not SHALL be said in the transcript with what is wrong in it, and nothing played. The transcript SHALL show a line in place of the tour's JSON. Without an agent picked the task SHALL be written into the task box.
+
+#### Scenario: The picture explained
+
+- **WHEN** the reader presses *explain* on the layers of the sample and the agent answers with a tour of three steps
+- **THEN** the tour "How an order is placed" opens at step 1 of 3 on the layers with `routes`, `lib` and `db` picked and the lines between them lit, its note under the title, and the transcript reads that the tour is played and shows none of its JSON
+
+#### Scenario: A block that is no tour
+
+- **WHEN** the agent's block holds a step whose view is "no such view"
+- **THEN** the transcript says the tour is not played: step 2 names no view
+
+### Requirement: A way through shapes is lit in its order
+
+A step of a tour whose `path` is true, and the command `/path <shape> <shape> …`, SHALL light the shortest chain of lines from each shape to the next — along the arrows where there is such a chain, against them where there is none — with every shape on the way, and list the lines walked in the Markdown panel under "Path: a → b → c"; two shapes no chain joins SHALL be said in the list. A tour's file SHALL keep `path` as true or leave it out, and refuse another value; `archdiff tour` SHALL write such a step's shapes as "The way: a → b → c".
+
+#### Scenario: A way through what lies between
+
+- **WHEN** a step on the call tree of the checkout's `action` names `action`, `placeOrder` and `saveOrder` as a way
+- **THEN** the lines from `action` to `placeOrder` through `OrderService.place`, and on to `saveOrder`, are lit and listed

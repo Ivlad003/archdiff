@@ -20,7 +20,7 @@ import { element, h } from "./dom.ts";
 import { currentLink, setLink, stepHash, type Link } from "./link.ts";
 import { page } from "./page.ts";
 import { copyText } from "./panel.ts";
-import { select, selection } from "./picking.ts";
+import { select, selection, showPath } from "./picking.ts";
 import { notice } from "./title.ts";
 import { offerWalk } from "./walk.ts";
 
@@ -130,10 +130,14 @@ export function tourDrawn(link: Link): void {
   if (embedded || link.tour === null) return;
   const shown = tour?.steps[link.step - 1] ?? null;
 
-  if (shown && entered && entered.name === link.tour && entered.step === link.step) {
+  // A step just opened, and a step whose own picture is drawn anew (the code changed, an agent's run ended): its shapes
+  // are shown again. A picture the reader walked off to keeps what the reader picked.
+  if (shown && ((entered && entered.name === link.tour && entered.step === link.step) || stepHash(link) === shown.link)) {
     const ids = shown.select.filter((id) => page.nodes().has(id));
 
-    if (ids.length > 0) select(ids, ids.length === 1);
+    // A step whose shapes are a way to follow lights the lines from each to the next; any other selects them.
+    if (shown.path && ids.length > 1) showPath(ids);
+    else if (ids.length > 0) select(ids, ids.length === 1);
   }
 
   entered = null;

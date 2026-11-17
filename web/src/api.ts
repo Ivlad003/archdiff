@@ -133,6 +133,8 @@ export interface Branch {
 export interface TourStep {
   link: string;
   select: string[];
+  /** The shapes are a way to follow in their order: the lines from each to the next are lit. */
+  path?: true;
   note: string;
 }
 

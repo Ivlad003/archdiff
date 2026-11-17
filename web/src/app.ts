@@ -41,7 +41,7 @@ import { updateMinimap } from "./minimap.ts";
 import { showOptions } from "./options-panel.ts";
 import { bindPage } from "./page.ts";
 import { loadCoverage, markdownPanel, renderMarkdown, setMarkdown, setPicturePage, showCode, showTab } from "./panel.ts";
-import { givePlaceBack, openShape, resetSelection, select, selection, tap } from "./picking.ts";
+import { explainSelected, givePlaceBack, openShape, resetSelection, select, selection, tap } from "./picking.ts";
 import { applyPresentation, markPresentation, presentationState } from "./presentation.ts";
 import { mapDots, mapSettled, refreshProjectMap } from "./project-map.ts";
 import { loadBranches, loadHeadRefs, showReviewBars } from "./review.ts";
@@ -81,6 +81,7 @@ bindPage({
   // After an agent run the code changed: the views, the stats and the coverage.
   loadViews: reloadCode,
   command: runCommandLine,
+  explainPicked: () => explainSelected(),
 });
 
 /** What the canvas does on a tap, a double tap, its own selection (a box in the editor) and a right click. */

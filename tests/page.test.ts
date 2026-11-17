@@ -1924,3 +1924,70 @@ test("the Chat tab drives the page: a slash line is a command with or without an
       assert.equal(await page!.evaluate(`window.archdiff.canvas() === null || document.body.dataset.mode !== "edit"`), true);
     },
   ));
+
+test("an explanation is a tour the agent writes and the page plays: the pictures step by step, the way through the shapes lit, a note on each; it is kept with the tours", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-explain-",
+    (explainDir) => writeFileSync(join(explainDir, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" } })),
+    async (explainBase) => {
+      await page!.setViewportSize({ width: 1900, height: 1000 });
+      await page!.goto(`${explainBase}/#view=layers`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "layers"`);
+      await page!.click("#tabs button[data-tab='chat']");
+      await page!.waitForFunction(`document.querySelector("#agent-select").value === "fake"`);
+      // The picture explained: the agent answers with a tour, and the page plays it from its first step.
+      await page!.click("#explain-this");
+      await page!.waitForFunction(`location.hash.includes("tour=explained-how-an-order-is-placed-") && location.hash.includes("step=1") && !document.querySelector("#tour").hidden && window.archdiff.drawn() === "layers" && window.archdiff.selected().join(",") === "routes,lib,db"`, undefined, { timeout: 20_000 });
+      assert.equal(await page!.textContent("#tour-title"), "How an order is placed");
+      assert.equal(await page!.evaluate(`document.querySelectorAll("#tour-steps option").length`), 3);
+      assert.ok(((await page!.textContent("#tour-note")) ?? "").includes("the route knows nothing of the store"));
+      // The step's shapes are a way: the lines from each to the next are lit, and listed.
+      const way = (await page!.textContent("#markdown")) ?? "";
+      assert.ok(way.includes("Path: routes → lib → db") && way.includes("routes → lib") && way.includes("lib → db"), way);
+      // The transcript says the tour is played, and shows no JSON of it.
+      await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev.do")].some((row) => row.textContent.includes('the tour "How an order is placed" is played: 3 steps'))`);
+      await page!.waitForFunction(`document.querySelector("#transcript").textContent.includes("The tour is on the page")`, undefined, { timeout: 15_000 });
+      assert.equal(await page!.evaluate(`document.querySelector("#transcript").textContent.includes('"steps"')`), false);
+      assert.match((await page!.textContent("#transcript .ev.you")) ?? "", /^▸ explain: this picture$/);
+
+      // The next step: the call tree, the way from the route to the store lit through what lies between.
+      await page!.click("#tour-next");
+      await page!.waitForFunction(`window.archdiff.drawn() === "calls:src/routes/checkout.tsx#action" && window.archdiff.selected().join(",") === "src/routes/checkout.tsx#action,src/lib/orders.ts#placeOrder,src/db/store.ts#saveOrder"`, undefined, { timeout: 15_000 });
+      const calls = (await page!.textContent("#markdown")) ?? "";
+      assert.ok(calls.includes("Path: action → placeOrder → saveOrder") && calls.includes("OrderService.place"), calls);
+      // The last: a function's logic, with nothing picked on it.
+      await page!.click("#tour-next");
+      await page!.waitForFunction(`window.archdiff.drawn() === "logic:src/lib/orders.ts#validate" && document.querySelector("#tour-next").disabled`, undefined, { timeout: 15_000 });
+      assert.ok(((await page!.textContent("#tour-note")) ?? "").includes("negative total"));
+
+      // The tour is kept beside the others, its second step a way; a step whose way is no yes or no is refused.
+      const kept = (await (await fetch(`${explainBase}/api/tours`)).json()) as { tours: { name: string; title: string; steps: number }[] };
+      assert.deepEqual(kept.tours.map((each) => [each.title, each.steps]), [["How an order is placed", 3]]);
+      const tour = (await (await fetch(`${explainBase}/api/tour?name=${kept.tours[0]!.name}`)).json()) as { steps: { link: string; select: string[]; path?: boolean }[] };
+      assert.deepEqual(tour.steps.map((step) => [step.link, step.path ?? false]), [["view=layers", true], ["view=calls%3Asrc%2Froutes%2Fcheckout.tsx%23action", true], ["view=logic%3Asrc%2Flib%2Forders.ts%23validate", false]]);
+      assert.equal((await fetch(`${explainBase}/api/tour?name=broken`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "x", steps: [{ link: "view=layers", select: [], note: "", path: "yes" }] }) })).status, 400);
+
+      // Off the tour: a way through shapes by a command, and a name that is on no shape said.
+      await page!.click("#tour-end");
+      await page!.waitForFunction(`!location.hash.includes("tour=")`);
+      const command = async (line: string, done: string): Promise<string> => {
+        const before = (await page!.evaluate(`document.querySelectorAll("#transcript > *").length`)) as number;
+        await page!.fill("#ask", line);
+        await page!.press("#ask", "Enter");
+        await page!.waitForFunction(`document.querySelectorAll("#transcript > *").length >= ${before + 2} && (${done})`, undefined, { timeout: 15_000 });
+
+        return ((await page!.evaluate(`[...document.querySelectorAll("#transcript > *")].at(-1).textContent`)) as string).trim();
+      };
+      await command("/view layers", `window.archdiff.drawn() === "layers"`);
+      assert.equal(await command("/path routes db", `window.archdiff.selected().join(",") === "routes,db"`), "The way through routes → db is lit.");
+      assert.ok(((await page!.textContent("#markdown")) ?? "").includes("Path: routes → db"));
+      assert.equal(await command("/path routes nowhere", `true`), "⚠ no shape of this picture is named nowhere");
+      assert.equal(await command("/select routes nowhere", `window.archdiff.selected().join(",") === "routes"`), "Picked routes. No shape of this picture is named nowhere.");
+      // With words: what to explain is the reader's own.
+      // (A run starts the transcript afresh, so its row is waited for by what it says.)
+      await page!.fill("#ask", "/explain how an order is refused");
+      await page!.press("#ask", "Enter");
+      await page!.waitForFunction(`[...document.querySelectorAll("#transcript .ev.you")].some((row) => row.textContent === "▸ explain: how an order is refused")`, undefined, { timeout: 15_000 });
+      await page!.waitForFunction(`location.hash.includes("tour=explained-how-an-order-is-placed-") && location.hash.includes("step=1")`, undefined, { timeout: 20_000 });
+    },
+  ));

@@ -201,3 +201,18 @@ Feature: The page
     Then the field holds "/overlay "
     When the fake agent answers with an archdiff-do block of "/view layer:db", "/as markdown" and "/edit"
     Then the page shows the db layer as its page and the transcript says the edit is the reader's to run
+
+  Scenario: An explanation is a tour the agent writes and the page plays
+    Given the sample with the fake agent picked and the page open on "layers"
+    When I press "explain" in the Chat tab
+    Then the tour "How an order is placed" opens at step 1 of 3 with routes, lib and db picked as a way and its note under the title
+    And the transcript says the tour is played and shows none of its JSON
+    When I press the next step
+    Then the call tree of the checkout's action is drawn with the way from action through placeOrder to saveOrder lit
+    When I press the next step
+    Then the logic of validate is drawn with the note about a negative total
+    And the tours of the repository list "How an order is placed" with 3 steps
+    When I leave the tour and type "/path routes db" on the layers
+    Then the way from routes through lib to db is lit
+    When I type "/select routes nowhere"
+    Then routes is picked and the transcript says no shape is named nowhere

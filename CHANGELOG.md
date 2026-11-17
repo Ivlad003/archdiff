@@ -106,6 +106,12 @@ The page driven from the Chat tab (2026-11-17).
 - Claude Code is given archdiff's own MCP server on the repository with every run (`--mcp-config`, its tools allowed), so it asks the analysis — a view, the impact of a change, a search of the code or of the change — while it works. The other agents take the server from their own configuration, as before.
 - A slash and a word that is no command is answered with the list, and never sent to an agent as a task.
 
+An explanation, step by step (2026-11-17).
+
+- *explain* — the Chat tab's button, a shape's and the picture's menu, the selection's strip, `/explain [what]` — has the agent explain the picture, the shapes picked or what the reader names, as a guided tour: three to eight steps in the order to read them, each a view, the shapes to look at on it and a note that says what it shows, how it works and why. The agent answers with an `archdiff-tour` block (`src/explain.ts` describes the task and reads the answer); the page keeps it with the tours of the repository and plays it at once — the pictures change, the shapes light, the note stands under the title, ‹ and › step through it — and the transcript shows no JSON of it. A block that is no tour is said there with what is wrong in it.
+- A step of a tour may be a way (`"path": true`): the shapes are followed in their order, the shortest chain of lines from each to the next lit and listed. `/path <shape> <shape> …` lights such a way by hand, and an agent may write it. `archdiff tour` writes such a step as "The way: a → b → c".
+- `/select` says which of the names it was given is on no shape of the picture; it used to leave them out without a word.
+
 ## 0.6.0 — 2026-10-20
 
 The centre of the page shown as you choose — the canvas, a 3D scene, the Markdown page or the code — with the repository as a folder tree and the changed files alone; the code of any branch and the branches as a picture; an API as the code uses it, with a Postman collection written from the code and drawn against it; the architecture of a browser extension; the coding agent picked on the page; and what four test passes, two reviews and a storefront of 2348 files found, fixed.

@@ -36,6 +36,20 @@ if (/ask the user/i.test(prompt) && at === -1) {
   line({ type: "assistant", message: { content: [{ type: "text", text: `Noted: ${prompt.slice(0, 40)}.` }] } });
 }
 
+// A task of an explanation (it names the block a tour is written in): a tour of three steps through the sample — the
+// layers as a way, the call of the checkout down to the store as a way, and a function's logic — as an agent writes it.
+if (prompt.includes("```archdiff-tour")) {
+  const tour = {
+    title: "How an order is placed",
+    steps: [
+      { view: "layers", select: ["routes", "lib", "db"], path: true, note: "A request goes **routes → lib → db**: the route knows nothing of the store." },
+      { view: "calls:src/routes/checkout.tsx#action", select: ["src/routes/checkout.tsx#action", "src/lib/orders.ts#placeOrder", "src/db/store.ts#saveOrder"], path: true, note: "`action` has the service place the order, and `placeOrder` saves it (`src/lib/orders.ts:10`)." },
+      { view: "logic:src/lib/orders.ts#validate", select: [], note: "An order with a negative total is refused before it is saved." },
+    ],
+  };
+  line({ type: "assistant", message: { content: [{ type: "text", text: `Here is the tour.\n\`\`\`archdiff-tour\n${JSON.stringify(tour)}\n\`\`\`\nThree steps: the layers, the calls, the guard.` }] } });
+}
+
 // A prompt that has the agent show something on the page: the commands it names (`do-commands: /view layers; /as 3d`),
 // written as an agent writes them, one a line in an archdiff-do block.
 const shown = prompt.match(/do-commands: ([^\n]+)/);

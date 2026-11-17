@@ -11,12 +11,12 @@
 // clear of it with its picture, which goes back when the drawer does.
 //
 // Entry points: `tap`, `openShape`, `select`, `toggleSelected`,
-// `pickShape`, `askSelected`, `showEdge`, `walk`, `resetSelection`,
+// `pickShape`, `askSelected`, `explainSelected`, `showPath`, `showEdge`, `walk`, `resetSelection`,
 // `givePlaceBack`, `selection`, `lastPicked`, `tools`, `labelOf`.
 
 import { api, type Shape } from "./api.ts";
 import { chainBetween, chainFrom, neighbourhoodOf } from "./chains.ts";
-import { askAbout } from "./chat.ts";
+import { askAbout, explain } from "./chat.ts";
 import { h, element } from "./dom.ts";
 import { VIEW_LINK, type PickedLine } from "./editor.tsx";
 import { detailsCover, onDetailsClosed, releaseDetails, revealDetails } from "./layout.ts";
@@ -240,6 +240,7 @@ function renderSelection(): void {
   for (const id of selected) strip.append(h("button", { class: "chip", title: "Centre on it; Shift+click takes it out of the selection", on: { click: (event) => (event.shiftKey ? toggleSelected(id) : page.canvas()?.centreOn(id)) } }, labelOf(id)));
   strip.append(
     h("button", { class: "act", title: "Ask the agent about the selected shapes (the Chat tab): their code and calls go along as context", on: { click: () => askSelected() } }, "ask about them"),
+    h("button", { class: "act", title: "Have the agent explain the selected shapes as a tour: steps through the pictures, each with what it shows and why", on: { click: () => explainSelected() } }, "explain"),
     h("button", { class: "act", title: "Dim everything but the selected shapes and their neighbours", on: { click: () => page.canvas()?.dim([...new Set(selected.flatMap((id) => neighbourhoodOf(page.edges(), id)))]) } }, "dim others"),
     h("button", { class: "act", title: "Clear the selection (Esc)", on: { click: () => select([]) } }, "clear"),
   );
@@ -313,7 +314,51 @@ export function askSelected(ids: readonly string[] = selected.length > 0 ? selec
   askAbout(ids.map((id) => nodes.get(id)).filter((node): node is Shape => node !== undefined).map(tagOf).filter((tag): tag is { tag: string; label: string } => tag !== null));
 }
 
+/** Has the agent explain the shapes — the selection, else the picked shape, else the picture alone — or what `words` name, as a tour the page plays (chat.ts). */
+export function explainSelected(ids: readonly string[] = selected.length > 0 ? selected : picked ? [picked] : [], words = ""): void {
+  const nodes = page.nodes();
+  explain(ids.map((id) => nodes.get(id)).filter((node): node is Shape => node !== undefined).map(tagOf).filter((tag): tag is { tag: string; label: string } => tag !== null), words);
+}
+
 // ── Chains ───────────────────────────────────────────────────────────────────
+
+/**
+ * A way through shapes in the order given — a step of a tour, the `/path` command: the shortest chain of lines from
+ * each to the next is lit (with the arrows where it can be, against them where it must), and the Markdown panel lists
+ * the lines walked. Fewer than two shapes of the picture are a selection.
+ */
+export function showPath(ids: readonly string[]): void {
+  const on = ids.filter((id) => page.nodes().has(id));
+
+  if (on.length < 2) return select([...on], true);
+  selected = [...on];
+  renderSelection();
+  revealDetails();
+  const edges = page.edges();
+  const lit = new Set<string>(on);
+  const lines = [`# Path: ${on.map(labelOf).join(" → ")}`, ""];
+  let walked = 0;
+
+  for (let i = 0; i + 1 < on.length; i++) {
+    const chain = chainBetween(edges, on[i]!, on[i + 1]!, true) ?? chainBetween(edges, on[i]!, on[i + 1]!, false);
+
+    if (!chain) {
+      lines.push(`- no chain of lines joins ${labelOf(on[i]!)} and ${labelOf(on[i + 1]!)} in this picture`);
+      continue;
+    }
+
+    for (const step of chain) {
+      lit.add(lineElementId(edges, step.index));
+      lit.add(step.edge.from);
+      lit.add(step.edge.to);
+      lines.push(`${++walked}. ${labelOf(step.edge.from)} → **${labelOf(step.edge.to)}**${step.edge.kind === "dependency" ? "" : ` (${step.edge.kind})`}`);
+    }
+  }
+
+  page.canvas()?.highlight([...lit]);
+  setMarkdown(markdownPanel, `${lines.join("\n")}\n`);
+  renderNeighbours(null);
+}
 
 /** Lights the shortest chain of lines between two shapes and writes it to the Markdown panel. */
 function showChain(from: string, to: string): void {

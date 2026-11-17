@@ -2487,3 +2487,12 @@ html.dark #transcript .answer.failed {
   text-align: left;
   vertical-align: top;
 }
+
+/* The Chat tab's row of buttons: in a narrow panel the buttons go on to a second row, none of them broken in two. */
+#chat .row.buttons {
+  flex-wrap: wrap;
+}
+
+#chat .row.buttons button {
+  white-space: nowrap;
+}

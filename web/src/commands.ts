@@ -21,7 +21,7 @@ import { element } from "./dom.ts";
 import { showPanel, toggleFullCanvas } from "./layout.ts";
 import { currentLink, detailPresets, PRESENTATIONS, PRESETS, refsOf, setLink, type Detail, type Link, type Presentation } from "./link.ts";
 import { page } from "./page.ts";
-import { select } from "./picking.ts";
+import { explainSelected, select, showPath } from "./picking.ts";
 import { toggleSplit, toggleTool } from "./toolbar.ts";
 import { commandsHelp, parseCommandLine } from "../../src/chat-commands.ts";
 import { OVERLAYS } from "../../src/options.ts";
@@ -224,12 +224,28 @@ const HANDLERS: Record<string, Handler> = {
     return open({ lanes }, `The lanes are ${lanes}.`);
   },
   select: (argument) => {
-    const ids = [...new Set(words(argument).flatMap(shapesNamed))];
+    const asked = words(argument);
+    const ids = [...new Set(asked.flatMap(shapesNamed))];
+    // A name that is on no shape of this picture is said, not dropped: the reader asked for it.
+    const unknown = asked.filter((word) => shapesNamed(word).length === 0);
 
     if (ids.length === 0) throw new Error(`no shape of this picture is named ${code(argument)}`);
     select(ids, true);
 
-    return `Picked ${ids.length === 1 ? code(ids[0]!) : `${ids.length} shapes`}.`;
+    return `Picked ${ids.length === 1 ? code(ids[0]!) : `${ids.length} shapes`}.${unknown.length > 0 ? ` No shape of this picture is named ${unknown.map(code).join(", ")}.` : ""}`;
+  },
+  path: (argument) => {
+    const asked = words(argument);
+    const unknown = asked.filter((word) => shapesNamed(word).length === 0);
+
+    if (unknown.length > 0) throw new Error(`no shape of this picture is named ${unknown.map(code).join(", ")}`);
+
+    if (asked.length < 2) throw new Error("path: two or more shapes of the picture, in the order of the way");
+    // Each name is one shape: the one it names exactly, else the first that has it.
+    const ids = asked.map((word) => shapesNamed(word)[0]!);
+    showPath(ids);
+
+    return `The way through ${ids.map(code).join(" → ")} is lit.`;
   },
   find: (argument) => {
     const field = element<HTMLInputElement>("find");
@@ -325,6 +341,11 @@ const HANDLERS: Record<string, Handler> = {
   ask: (argument) => {
     if (argument === "") throw new Error("ask: a question");
     askAgent(argument);
+
+    return "";
+  },
+  explain: (argument) => {
+    explainSelected(undefined, argument);
 
     return "";
   },

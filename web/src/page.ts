@@ -27,6 +27,8 @@ export interface PageContext {
   showCode(node: Shape): Promise<void>;
   load(): Promise<void>;
   loadViews(): Promise<void>;
+  /** Has the agent explain the shapes picked on the picture (the picture alone, with none) as a tour: the Chat tab's button, which the selection is picking.ts's to know. */
+  explainPicked(): void;
   /** Runs a command line of the Chat tab (`/view layers`; commands.ts) for the reader or for an agent's answer, and gives what it says of itself as Markdown; rejects with the reason when it cannot. */
   command(line: string, by: "reader" | "agent"): Promise<string>;
 }

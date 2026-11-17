@@ -45,6 +45,8 @@ export interface TourStep {
   link: string;
   /** The shapes selected at the step, by the IDs the picture gives them. */
   select: string[];
+  /** The shapes are a way to follow in their order: the lines from each to the next are lit. */
+  path?: true;
   /** What the step says, in Markdown. */
   note: string;
 }
@@ -106,7 +108,9 @@ export function parseTour(value: JsonValue, name: string): Tour {
 
       if (!isJsonString(note) || note.length > LIMITS.note) throw new Error(`tour: "note" of step ${i + 1} must be text of at most ${LIMITS.note} characters`);
 
-      return { link, select: [...select], note };
+      if (step["path"] !== undefined && typeof step["path"] !== "boolean") throw new Error(`tour: "path" of step ${i + 1} must be true or false`);
+
+      return step["path"] === true ? { link, select: [...select], path: true, note } : { link, select: [...select], note };
     }),
     saved: new Date().toISOString(),
   };
@@ -223,7 +227,7 @@ export async function tourMarkdown(root: string, tour: Tour, file: string): Prom
       lines.push(...(diagram.nodes.length > 0 ? ["```mermaid", toMermaid(diagram, options.mermaid).trimEnd(), "```", ""] : [`_${diagram.reason ?? "nothing to draw"}_`, ""]));
       const picked = step.select.map((id) => diagram.nodes.find((node) => node.id === id)?.label.split("\n")[0] ?? id);
 
-      if (picked.length > 0) lines.push(`Picked: ${picked.map((label) => `**${label}**`).join(", ")}.`, "");
+      if (picked.length > 0) lines.push(step.path && picked.length > 1 ? `The way: ${picked.map((label) => `**${label}**`).join(" → ")}.` : `Picked: ${picked.map((label) => `**${label}**`).join(", ")}.`, "");
     } catch (error) {
       lines.push(`## ${i + 1}. ${new URLSearchParams(step.link).get("view") ?? "?"}`, "", ...(step.note.trim() === "" ? [] : [step.note.trim(), ""]), `_The picture of this step could not be drawn: ${error instanceof Error ? error.message : String(error)}_`, "");
     }

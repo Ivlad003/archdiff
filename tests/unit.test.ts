@@ -15,6 +15,7 @@ import { OVERVIEW_GROUP, VIEW_KINDS, listGroup, listGroups, overviews, parseView
 import { collectionOf, matchRequests, pathSegments, routesOf, type Route } from "../src/collections.ts";
 import { SCAPI_TABLE } from "../src/scapi-table.ts";
 import { agentCommands, CHAT_COMMANDS, commandsHelp, doCommands, parseCommandLine } from "../src/chat-commands.ts";
+import { explainedName, explainPrompt, tourInAnswer, TOUR_BLOCK } from "../src/explain.ts";
 import { AGENT_PROTOCOL } from "../src/intent.ts";
 
 test("the picture options read the same from flags and from a query, and write back to the same query", () => {
@@ -529,4 +530,32 @@ test("the Chat tab's commands are one table: a line is read by it, the help and 
   // The lines of an agent's blocks, in order; what is no command line in them is left out, and so is a block of another kind.
   assert.deepEqual(doCommands("Look:\n```archdiff-do\n/view layers\n\nsee above\n/as 3d\n```\nand\n```archdiff-do\r\n/mix src/a.ts\r\n```\n```sh\n/usr/bin/true\n```"), ["/view layers", "/as 3d", "/mix src/a.ts"]);
   assert.deepEqual(doCommands("no block here: /view layers"), []);
+});
+
+test("an explanation is asked for as a tour and read from the agent's answer: its steps with their views, shapes, ways and notes; a block that is no tour says what is wrong", () => {
+  // The task names what to explain and the block to answer in.
+  const task = explainPrompt("how an order is saved. It is on the picture I am looking at: @view:layers");
+  assert.ok(task.includes("What to explain: how an order is saved.") && task.includes("```archdiff-tour") && task.includes("change no file"));
+  assert.equal(TOUR_BLOCK, "archdiff-tour");
+  // The tour of an answer: what a step leaves out is nothing selected, no way, no note.
+  const answer = 'Here.\n```archdiff-tour\n{"title": " How it goes ", "steps": [{"view": "layers", "select": ["routes", "db"], "path": true, "note": "Down the layers."}, {"view": "logic:src/lib/orders.ts#validate"}]}\n```\nTwo steps.';
+  assert.deepEqual(tourInAnswer(answer), { tour: { title: "How it goes", steps: [{ view: "layers", select: ["routes", "db"], path: true, note: "Down the layers." }, { view: "logic:src/lib/orders.ts#validate", select: [], path: false, note: "" }] } });
+  assert.deepEqual(tourInAnswer('```archdiff-tour\n{"steps": [{"view": "layers"}]}\n```'), { tour: { title: "An explanation", steps: [{ view: "layers", select: [], path: false, note: "" }] } });
+  // An answer without the block is no tour; a block that is none says why.
+  assert.equal(tourInAnswer("The order is saved by `saveOrder`.\n```mermaid\nflowchart LR\n```"), null);
+  const problemOf = (block: string): string => {
+    const read = tourInAnswer(`\`\`\`archdiff-tour\n${block}\n\`\`\``);
+
+    return read && "problem" in read ? read.problem : "no problem";
+  };
+  assert.match(problemOf("{ not json"), /^the tour is no JSON: /);
+  assert.equal(problemOf('{"title": "x"}'), 'the tour needs "steps": a list');
+  assert.equal(problemOf('{"steps": []}'), "the tour needs one to 20 steps, not 0");
+  assert.equal(problemOf('{"steps": [{"view": "layers"}, {"view": "no such view"}]}'), 'step 2 names no view ("no such view" is none: archdiff views lists them)');
+  assert.equal(problemOf('{"steps": [{"note": "x"}]}'), 'step 1 names no view (it needs "view": archdiff views lists them)');
+  assert.equal(problemOf('{"steps": [{"view": "layers", "select": "routes"}]}'), '"select" of step 1 must be a list of shape IDs');
+  // The name of its file: the words of the title, and the moment.
+  assert.equal(explainedName("How an order is placed!", 1_000_000), "explained-how-an-order-is-placed-lfls");
+  assert.equal(explainedName("…", 36), "explained-tour-10");
+  assert.match(explainedName("A very long title that goes on and on and on and on past the room a file name has", 1), /^explained-[a-z0-9-]{1,40}-1$/);
 });
