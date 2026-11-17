@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 — 2026-11-17
+
+The page, easier to read and to find one's way in: the branches of a review as a list to search, the code in the colours of its language on a tab that comes at the press, a hint for every control, English or Ukrainian, and a look of its own; and a release that publishes itself from its tag.
+
+**Highlights.**
+
+- The heads of a review are a list to search — a row a branch, cut as its name or its last commit's subject is typed, the ticked ones as chips in the bar — and the server lists a hundred branches in a sixth of a second instead of nearly four, during which it answered nothing else.
+- A tap on a shape brings the Code tab at the press, naming the file it reads; the code wears the colours of its language, and a bar under the header says the page is waiting.
+- Every button, tab and mark says what it is for in a bubble beside it; the violet dot of a file says it is in the picture on the canvas.
+- The page speaks English or Ukrainian (*Language* in the settings window, kept with the user's settings).
+- One look for every control, light and dark; the header takes a second row in a narrow window rather than losing the controls at its end.
+- A tag `v<version>` publishes the package to npm by trusted publishing: no token in the repository, no code typed by hand.
+
+**Incompatible with 0.7.0.**
+
+- For whoever scripts the page: an entry of the views list is found by `data-view` (its key); its `title` is its hint now.
+- The picture's options are under *options ▾*; the ⚙ of the header opens the settings.
+
+**Everything since 0.7.0**, by the work it came from:
 
 ### The page: easier to read, in two languages, in a look of its own
 
