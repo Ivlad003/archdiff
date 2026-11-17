@@ -2,7 +2,7 @@
 
 ## Purpose
 
-What archdiff reads of each language beyond TypeScript and JavaScript whose unit of code is not the file: where a package or a namespace is many files, an import names a declaration, and the file that declares it is the dependency. The analysis specification holds what every language shares; this one what Go adds.
+What archdiff reads of the languages whose unit of code is not the file: where a package or a namespace is many files, an import names a declaration, and the file that declares it is the dependency. The analysis specification holds what every language shares; this one what Go and Java add.
 
 ## Requirements
 
@@ -46,3 +46,39 @@ The system SHALL treat a Go function named `main` as an entry point and a file n
 
 - **WHEN** `archdiff diagram logic:go/internal/orders/orders.go#Service.PlaceOrder` runs on the polyglot fixture
 - **THEN** the rules are `err != nil: yes` ending with `return order, err` after `validate`, and `err != nil: no` ending with `return order, nil` after `validate` and `s.repo.Save`
+
+### Requirement: A Java import names a class
+
+The system SHALL resolve a Java import to the file that declares the class of that qualified name among the analysed files (a nested class by its own qualified name), whatever directory holds it; a class of `src/test` or of another module declaring the same name SHALL yield to the one of the importing file's own source set. A class a file uses without importing it SHALL be looked for in the file's own package, then in each package it imports with `.*`, in that order, and SHALL be nothing missing when none declares it. A static import SHALL be a dependency on the class its member is of; an import of a package with `.*` SHALL add no dependency of its own. A name no file declares SHALL be the JDK's when its package starts with `java.`, `javax.` or `jdk.` (an external `java:<package>`), an unresolved import when a file of the repository declares that package, else a package named by the first three elements of its Java package.
+
+#### Scenario: A class of the same package and of a wildcard import
+
+- **WHEN** `OrderService.java` of the polyglot fixture runs `new Order(id, total)` with `Order` declared beside it and no import, and `MemoryOrders.java` imports `com.example.shop.orders.*` and names `Order`
+- **THEN** both modules import `orders/Order.java`, and `archdiff analyze` reports 0 unresolved imports
+
+### Requirement: Java declarations are types and their members
+
+The system SHALL record a Java class, enum and record as a class with its fields and their types as written (a record's components and an enum's constants among them), its base and the interfaces it implements, and an interface and an annotation as a type with its methods' signatures and the interfaces it extends; a method as a member, a constructor as the member `constructor`, a type nested in another as a member of it — in scope by its own name in the file and imported by it — and a record's component as a method of the record too. An interface's method without a body SHALL be its shape only, so a call of it goes to the classes implementing the interface. `public` SHALL be exported, as an interface's member is. A field's initializer and an initializer block SHALL be the class's own code.
+
+#### Scenario: A record and a nested class
+
+- **WHEN** `OrderController.render` calls `order.id()` on the record `Order(String id, long total)`, and `OrderService.place` calls `Audit.record(order)` with `Audit` nested in `OrderService`
+- **THEN** the calls resolve to `Order.id` and `OrderService.Audit.record`
+
+### Requirement: Java calls follow the declared classes
+
+The system SHALL resolve a Java call of a method written without a receiver to the class's own method, to that of a class around it, to the class a static import names, or — in a class that extends nothing, in a file with a static `.*` import — to that import's class; `this.m()`, `super.m()`, `super(…)` and `this(…)`; a method of a field, a parameter or a local by the class its declaration writes, of a `var` by what `new` or the call that made it gives, of a cast, of `new X()`, of a class named for a static method (a capitalised name nothing binds; one written with its package too), and of what a call returns. `new X(…)` SHALL be a call line to the class; a method reference among the arguments (`this::audit`, `Orders::first`) SHALL be a `ref` line. A method every class has from `Object` or `Enum` that the class and its bases do not declare SHALL be the language's (`external`), not a blind spot. A call through a lambda's parameter, a generic's element or an inherited field SHALL be a gap of a member of a value.
+
+#### Scenario: A call through an interface
+
+- **WHEN** `OrderService.place` calls `repository.save(order)` with `repository` declared as the interface `OrderRepository`, which `MemoryOrders` implements
+- **THEN** `calls:…/App.java#App.main` reaches `MemoryOrders.save` through `OrderController.place` and `OrderService.place`
+
+### Requirement: Java entry points, tests and control flow
+
+The system SHALL treat the method `main` of a Java class as an entry point, a public method of a controller, handler, listener or the like that nothing calls as one, and a file under `src/test/` or named `*Test.java`, `*Tests.java` or `*IT.java` as a test file; it SHALL count the branches of every Java method (`if`, a loop, a `switch`, a `try` as one each), carry on every call its guards (a case by its label, a `catch` by what it catches), and draw `logic:<path>#<Class.method>` for it: a `case A:` group running into the next unless it leaves, a `case A ->` rule never, `synchronized (x)` as an action before its block, a `try` with resources as a `try`.
+
+#### Scenario: A switch of groups and a switch of rules
+
+- **WHEN** a method holds `switch (s) { case NEW: start(); case PAID: ship(); break; default: skip(); }` and `switch (s) { case NEW -> start(); case PAID -> { ship(); return 2; } }`
+- **THEN** the first draws `NEW` into `start()` and on into `ship()`, `PAID` into `ship()` and `default` apart; the second one arrow per rule and `no match` carrying on

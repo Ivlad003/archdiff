@@ -508,10 +508,10 @@ export function eventsView(analysis: Analysis): PictureContent {
 
 /**
  * A test file, by the conventions of each language: a `tests/` or `__tests__/` directory, `x.test.ts`,
- * `x.spec.js` or `x_test.js`, `test_x.py`, Django's `tests.py`, `conftest.py`, `x_test.rs`, `XTest.php`, `x_test.go`. Not a
+ * `x.spec.js` or `x_test.js`, `test_x.py`, Django's `tests.py`, `conftest.py`, `x_test.rs`, `XTest.php`, `x_test.go`, `XTest.java` (and `src/test/`). Not a
  * module whose name only contains the word (`ab-test.ts`, an A/B test).
  */
-const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$|_test\.(py|rs|php|go)$|(^|\/)tests?(_[^/]*)?\.py$|(^|\/)conftest\.py$|Test\.php$/;
+const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$|_test\.(py|rs|php|go)$|(^|\/)tests?(_[^/]*)?\.py$|(^|\/)conftest\.py$|Test\.php$|(Tests?|IT)\.java$/;
 
 /** Which modules the tests import: every non-test module in its layer's lane, with the number of test files importing it; one no test imports is marked. */
 export function testsView(graph: Graph): PictureContent {

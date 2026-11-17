@@ -122,7 +122,7 @@ export function logicView(analysis: Analysis, scope: string | null, fact: LogicF
 
   if (fact === undefined) return unplaced(`Logic of ${fnLabel(fn)}`, [], [], [], { reason: "the logic is read from the function's file when the picture is drawn (archdiff diagram logic:<path>#<fn>, or the page)" });
 
-  if (!fact) return unplaced(`Logic of ${fnLabel(fn)}`, [], [], [], { reason: `the body of ${fnLabel(fn)} could not be read: ${fn.module} is not TypeScript, JavaScript, Python or Go, or the function was not found at line ${fn.line}` });
+  if (!fact) return unplaced(`Logic of ${fnLabel(fn)}`, [], [], [], { reason: `the body of ${fnLabel(fn)} could not be read: ${fn.module} is not TypeScript, JavaScript, Python, Go or Java, or the function was not found at line ${fn.line}` });
   const nodes: Shape[] = fact.nodes.map((step) => {
     const kind: Shape["kind"] = step.kind === "start" ? "start" : step.kind === "decision" || step.kind === "loop" ? "decision" : step.kind === "action" ? "action" : "end";
     const node: Shape = { id: step.id, kind, label: step.kind === "loop" ? `↻ ${step.text}` : step.text, ref: { file: fn.module, line: step.line, endLine: step.endLine }, x: 0, y: 0, w: 0, h: 0 };

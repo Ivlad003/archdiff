@@ -9,14 +9,14 @@
 // tree-sitter queries; Python with a walk, its comparison node having no
 // fields to query by.
 //
-// Shared by the TypeScript, Python and Go frontends (source → FileFacts):
+// Shared by the TypeScript, Python, Go and Java frontends (source → FileFacts):
 // `guardsOf` annotates every call fact, `collectStates` and
 // `collectMachines` fill `FileFacts.states` and `FileFacts.machines`
 // (TypeScript and Python only). Entry points: `guardsOf`, `countBranches`,
 // `headerOf`, `short`, `unwrapped`,
 // `collectTsStates`, `collectPyStates`, `collectTsMachines`,
 // `collectPyMachines`, `enclosingDeclaration`, `TS_CONTROL`, `PY_CONTROL`,
-// `GO_CONTROL`.
+// `GO_CONTROL`, `JAVA_CONTROL`.
 
 import type { GuardFact, MachineFact, StateFact } from "./facts.ts";
 import { query, startCol, type Grammar, type Language, type Node } from "./treesitter.ts";
@@ -90,6 +90,23 @@ export const GO_CONTROL: ControlGrammar = {
   equality: tsEquality,
 };
 
+/** Java: `else` is followed by the statement itself; a `switch` is an expression whose groups (`case A:`) and rules (`case A ->`) are its cases; a `try` may open resources. */
+export const JAVA_CONTROL: ControlGrammar = {
+  ifs: new Set(["if_statement"]),
+  consequence: "consequence",
+  elses: new Set(),
+  alternative: "alternative",
+  loops: new Set(["for_statement", "enhanced_for_statement", "while_statement", "do_statement"]),
+  switches: new Set(["switch_expression"]),
+  cases: new Set(["switch_block_statement_group", "switch_rule"]),
+  tries: new Set(["try_statement", "try_with_resources_statement"]),
+  catches: new Set(["catch_clause", "finally_clause"]),
+  ternaries: new Set(["ternary_expression"]),
+  functions: new Set(["method_declaration", "constructor_declaration", "compact_constructor_declaration", "lambda_expression"]),
+  classes: new Set(["class_declaration", "interface_declaration", "enum_declaration", "record_declaration"]),
+  equality: tsEquality,
+};
+
 /** `a === b` or `a == b`: a binary expression with an equality operator. */
 function tsEquality(node: Node): [Node, Node] | null {
   if (node.type !== "binary_expression") return null;
@@ -118,7 +135,8 @@ export function short(text: string): string {
 
 /** The condition of a branch or loop, as the code writes it: `if (x > 1)` → `x > 1`, `for (const a of b)` → `const a of b`, Python's `if x > 1:` → `x > 1`. */
 export function headerOf(node: Node): string {
-  const condition = node.childForFieldName("condition") ?? node.childForFieldName("value");
+  // Java's `for (Order each : orders)` holds what it walks as its value: its header is the whole of it, read below.
+  const condition = node.childForFieldName("condition") ?? (node.type === "enhanced_for_statement" ? null : node.childForFieldName("value"));
 
   if (condition) return short(unwrapped(condition.text));
   // A loop header without a condition field (`for (…)`, `for x in y:`): the text up to its body.
@@ -186,10 +204,10 @@ export function guardsOf(node: Node, stop: Node, grammar: ControlGrammar): Guard
 
       if (!body || body.id === child.id || body.startIndex <= node.startIndex) chain.push({ kind: "loop", text: headerOf(at), id: at.startIndex });
     } else if (grammar.cases.has(at.type)) {
-      // What the case names: a value, Python's pattern, the type of a Go type switch, the channel operation of a `select`.
-      const value = at.childForFieldName("value") ?? at.namedChildren.find((candidate) => candidate.type === "case_pattern") ?? at.childForFieldName("type") ?? at.childForFieldName("communication");
+      // What the case names: a value, Python's pattern, the type of a Go type switch, the channel operation of a `select`, Java's label (`case NEW`, `default`).
+      const value = at.childForFieldName("value") ?? at.namedChildren.find((candidate) => candidate.type === "case_pattern" || candidate.type === "switch_label") ?? at.childForFieldName("type") ?? at.childForFieldName("communication");
 
-      if (!value || value.id !== child.id) chain.push({ kind: "case", text: value ? short(value.text) : "default", id: at.startIndex });
+      if (!value || value.id !== child.id) chain.push({ kind: "case", text: value ? short(value.text).replace(/^case\s+/, "") : "default", id: at.startIndex });
     } else if (grammar.tries.has(at.type)) {
       const body = at.childForFieldName("body");
 

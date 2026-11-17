@@ -8,11 +8,11 @@ Turn the source files of a repository into a graph of modules, functions, classe
 
 ### Requirement: Source files are parsed into facts
 
-The system SHALL parse every TypeScript, JavaScript, Python, Rust, PHP and Go source file git lists (or the directory holds, without git) with tree-sitter and record per file its declarations with line ranges, its imports, its exports, its calls and the calls it could not name, as `FileFacts`. A file over 1.5 MB SHALL be skipped but kept as an opaque module so imports of it resolve.
+The system SHALL parse every TypeScript, JavaScript, Python, Rust, PHP, Go and Java source file git lists (or the directory holds, without git) with tree-sitter and record per file its declarations with line ranges, its imports, its exports, its calls and the calls it could not name, as `FileFacts`. A file over 1.5 MB SHALL be skipped but kept as an opaque module so imports of it resolve.
 
 #### Scenario: A repository with several languages
 
-- **WHEN** `archdiff analyze` runs on a repository holding `.ts`, `.js`, `.py`, `.rs`, `.php` and `.go` files
+- **WHEN** `archdiff analyze` runs on a repository holding `.ts`, `.js`, `.py`, `.rs`, `.php`, `.go` and `.java` files
 - **THEN** every file is listed with its functions, classes and types, and the output names the count of files, modules, layers, functions, classes and types
 
 #### Scenario: A file too large to parse
@@ -27,7 +27,7 @@ The system SHALL parse every TypeScript, JavaScript, Python, Rust, PHP and Go so
 
 ### Requirement: Imports resolve per language
 
-The system SHALL resolve relative and aliased imports to files (TypeScript `paths`, `baseUrl` and `rootDirs` from the nearest `tsconfig.json` or `jsconfig.json` with its `extends` merged as the compiler merges them, the pattern with the longest prefix taken; `.js` to `.ts`, index files; a package of a monorepo imported by its name to its source; Python packages, from the repository's root, `src/` and a project directory with a pyproject.toml, setup.py, setup.cfg or manage.py; Rust modules and facade re-exports; PHP namespaces; Go import paths over the `go.mod` files, as the languages specification says) and name packages and built-ins as externals. An import that resolves to nothing SHALL be listed as unresolved with its reason, never guessed: an alias whose file is missing is no package. A file of the repository that is no source (JSON, a stylesheet) SHALL be neither a module nor unresolved, nor an optional specifier that names no source. `import { type A }` SHALL be of types only unless the tsconfig sets `verbatimModuleSyntax`, and so SHALL a Python import under `if TYPE_CHECKING:`; a line of types only is drawn dashed.
+The system SHALL resolve relative and aliased imports to files (TypeScript `paths`, `baseUrl` and `rootDirs` from the nearest `tsconfig.json` or `jsconfig.json` with its `extends` merged as the compiler merges them, the pattern with the longest prefix taken; `.js` to `.ts`, index files; a package of a monorepo imported by its name to its source; Python packages, from the repository's root, `src/` and a project directory with a pyproject.toml, setup.py, setup.cfg or manage.py; Rust modules and facade re-exports; PHP namespaces; Go import paths over the `go.mod` files and Java qualified names, as the languages specification says) and name packages and built-ins as externals. An import that resolves to nothing SHALL be listed as unresolved with its reason, never guessed: an alias whose file is missing is no package. A file of the repository that is no source (JSON, a stylesheet) SHALL be neither a module nor unresolved, nor an optional specifier that names no source. `import { type A }` SHALL be of types only unless the tsconfig sets `verbatimModuleSyntax`, and so SHALL a Python import under `if TYPE_CHECKING:`; a line of types only is drawn dashed.
 
 #### Scenario: A tsconfig path alias
 
@@ -103,7 +103,7 @@ The system SHALL place every module in a layer: with `layers` in `archdiff.json`
 
 ### Requirement: Entry points are known from the code and the frameworks
 
-The system SHALL treat as entry points exported functions under `bin/`, the functions a browser extension's scripts hand to a browser event's `addListener` (`chrome.runtime.onConnect`, a port's `onMessage`), labelled with the role `manifest.json` gives the script (background, content script, side panel, popup, options, devtools), functions named `main`, React Router route exports, SFCC cartridge hooks, the files a `package.json` names, the files `archdiff.json` `entries` names, exported functions nothing in the repository calls, and the public methods of a class in a module a framework calls into (a controller, handler, command, job, listener, middleware, route or resolver, by its path) that nothing in the repository calls and that call something themselves.
+The system SHALL treat as entry points exported functions under `bin/`, the functions a browser extension's scripts hand to a browser event's `addListener` (`chrome.runtime.onConnect`, a port's `onMessage`), labelled with the role `manifest.json` gives the script (background, content script, side panel, popup, options, devtools), functions named `main` (in Java, the method `main` of a class), React Router route exports, SFCC cartridge hooks, the files a `package.json` names, the files `archdiff.json` `entries` names, exported functions nothing in the repository calls, and the public methods of a class in a module a framework calls into (a controller, handler, command, job, listener, middleware, route or resolver, by its path) that nothing in the repository calls and that call something themselves.
 
 #### Scenario: A React Router route module
 

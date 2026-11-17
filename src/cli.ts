@@ -740,7 +740,7 @@ const COMMANDS: readonly Command[] = [
   },
 ];
 
-const HELP_HEAD = `archdiff: live diagrams of a TypeScript, JavaScript, Python, Rust, PHP or Go repository, and the architectural diff of a change
+const HELP_HEAD = `archdiff: live diagrams of a TypeScript, JavaScript, Python, Rust, PHP, Go or Java repository, and the architectural diff of a change
 
 Usage: archdiff <command> [options] [dir]
 

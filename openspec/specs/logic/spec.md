@@ -8,7 +8,7 @@ The business logic of a function as a picture: its body as a flowchart with the 
 
 ### Requirement: Every function counts its branches
 
-The system SHALL record on every function and method of a TypeScript, JavaScript, Python or Go file how many branching statements its body holds (`if` and `elif`, a `switch` or `match` as one, a loop, a `try`), nested functions included, and carry the count on the graph node.
+The system SHALL record on every function and method of a TypeScript, JavaScript, Python, Go or Java file how many branching statements its body holds (`if` and `elif`, a `switch` or `match` as one, a loop, a `try`), nested functions included, and carry the count on the graph node.
 
 #### Scenario: A checkout with a loop, a branch and a try
 

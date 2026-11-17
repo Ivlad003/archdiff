@@ -29,7 +29,7 @@ import { layerOf } from "./config.ts";
 import { operationOf, type ApiOperation } from "./apis.ts";
 import { SCAPI_TABLE } from "./scapi-table.ts";
 import { dottedForm, type Callee, type CallFact, type DeclFact, type FileFacts, type GuardFact, type ShapeFact, type ValueOfFact } from "./extract/facts.ts";
-import { languageOf } from "./languages.ts";
+import { languageOf, nestedTypesInScope, rootMember } from "./languages.ts";
 import type { Resolution } from "./resolve.ts";
 
 /** A file of the repository. */
@@ -390,6 +390,20 @@ function declareModules(b: Building): void {
     };
 
     for (const decl of file.decls) addDecl(decl);
+
+    // Java: a type nested in another is named by its own name in the file, where no top-level declaration has it.
+    if (nestedTypesInScope(file.path)) {
+      const nest = (decl: DeclFact, parent: string): void => {
+        for (const member of decl.members) {
+          if (member.kind === "fn") continue;
+
+          if (!locals.has(member.name)) locals.set(member.name, nodeId(file.path, member.name, parent));
+          nest(member, `${parent}.${member.name}`);
+        }
+      };
+
+      for (const decl of file.decls) nest(decl, decl.name);
+    }
     // The lines of the file as `wc -l` counts them: a file that ends with a newline ends at the start of a line no one wrote.
     const module: Module = { id: file.path, layer: layerOf(file.path, b.config), decls, lines: file.endCol === 1 ? file.endLine - 1 : file.endLine, opaque: file.completeness === "opaque" };
 
@@ -647,7 +661,7 @@ class CallResolver {
 
     if (dispatched.length > 0) return { ids: dispatched };
 
-    if (this.externalAncestor(typeId)) return { gap: "external" };
+    if (this.externalAncestor(typeId) || this.ofLanguage(typeId, member)) return { gap: "external" };
 
     return { gap: this.b.nodes.get(typeId)?.kind === "type" ? "interface" : "unknown-member" };
   }
@@ -748,7 +762,7 @@ class CallResolver {
     if (found) return { id: found };
 
     // `$this->assertSame()` in a test extending PHPUnit's TestCase, `this.setState()` in a React component: the package's member.
-    return this.externalAncestor(enclosingClass) ? { gap: "external" } : { gap: "unknown-member" };
+    return this.externalAncestor(enclosingClass) || this.ofLanguage(enclosingClass, member) ? { gap: "external" } : { gap: "unknown-member" };
   }
 
   /** `ns.f` of a namespace import (the export `f`), or `x.m` of a declaration or an import (its member). */
@@ -780,7 +794,14 @@ class CallResolver {
 
     if (found) return { id: found };
 
-    return this.externalAncestor(owner.id) ? { gap: "external" } : { gap: "unknown-member" };
+    return this.externalAncestor(owner.id) || this.ofLanguage(owner.id, member) ? { gap: "external" } : { gap: "unknown-member" };
+  }
+
+  /** A member every class has from its language's root class (Java's `toString`, an enum's `values`): the language's own when no class of the chain declares it. */
+  private ofLanguage(classId: string, member: string): boolean {
+    const owner = this.b.nodes.get(classId);
+
+    return owner !== undefined && rootMember(owner.module, member);
   }
 
   /**

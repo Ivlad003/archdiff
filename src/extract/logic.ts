@@ -13,11 +13,11 @@
 // the `logic:<path>#<fn>` view (logic.ts), which draws it and lists the
 // paths from the start to every exit as the rules of the function.
 //
-// TypeScript, JavaScript, Python and Go, over the control grammars of
+// TypeScript, JavaScript, Python, Go and Java, over the control grammars of
 // control.ts. Entry points: `readLogic`, `LogicFact`, `LogicStep`,
 // `LogicEdge`.
 
-import { GO_CONTROL, headerOf, PY_CONTROL, short, TS_CONTROL, unwrapped, type ControlGrammar } from "./control.ts";
+import { GO_CONTROL, headerOf, JAVA_CONTROL, PY_CONTROL, short, TS_CONTROL, unwrapped, type ControlGrammar } from "./control.ts";
 import { collapse, grammarFor, withTree, type Grammar, type Node } from "./treesitter.ts";
 
 /** One box of the flowchart. */
@@ -66,7 +66,7 @@ const STATEMENT_CHARS = 56;
 
 /** The node types of one language's statements, beside the control grammar. */
 interface LogicGrammar {
-  lang: "ts" | "py" | "go";
+  lang: "ts" | "py" | "go" | "java";
   control: ControlGrammar;
   returns: ReadonlySet<string>;
   throws: ReadonlySet<string>;
@@ -81,11 +81,11 @@ interface LogicGrammar {
   silent: ReadonlySet<string>;
   calls: ReadonlySet<string>;
   /** How a switch (`control.switches`, but Python's `match`) is written: its cases, and whether one that does not leave runs into the next. */
-  cases: { of(node: Node): Node[]; fallThrough: boolean };
+  cases: { of(node: Node): Node[]; fallThrough(clause: Node): boolean };
 }
 
 /** `case a:` and `default:` under the switch's body, each with its statements after the value: a case without `break` runs into the next. */
-const TS_CASES: LogicGrammar["cases"] = { of: (node) => (node.childForFieldName("body")?.namedChildren ?? []).filter((clause) => clause.type === "switch_case" || clause.type === "switch_default"), fallThrough: true };
+const TS_CASES: LogicGrammar["cases"] = { of: (node) => (node.childForFieldName("body")?.namedChildren ?? []).filter((clause) => clause.type === "switch_case" || clause.type === "switch_default"), fallThrough: () => true };
 
 const TS_LOGIC: LogicGrammar = {
   lang: "ts",
@@ -128,16 +128,34 @@ const GO_LOGIC: LogicGrammar = {
   wrappers: new Set(),
   silent: new Set(["type_declaration", "empty_statement", "comment"]),
   calls: new Set(["call_expression"]),
-  cases: { of: (node) => node.namedChildren.filter((clause) => GO_CONTROL.cases.has(clause.type)), fallThrough: false },
+  cases: { of: (node) => node.namedChildren.filter((clause) => GO_CONTROL.cases.has(clause.type)), fallThrough: () => false },
+};
+
+/** Java: a `switch` holds groups (`case A:`, which run into the next) or rules (`case A ->`, which do not); `synchronized (x) { … }` runs its block under a header. */
+const JAVA_LOGIC: LogicGrammar = {
+  lang: "java",
+  control: JAVA_CONTROL,
+  returns: new Set(["return_statement"]),
+  throws: new Set(["throw_statement"]),
+  breaks: new Set(["break_statement"]),
+  continues: new Set(["continue_statement"]),
+  blocks: new Set(["block", "constructor_body"]),
+  wrappers: new Set(["synchronized_statement"]),
+  silent: new Set(["class_declaration", "interface_declaration", "enum_declaration", "record_declaration", "line_comment", "block_comment"]),
+  calls: new Set(["method_invocation", "object_creation_expression", "explicit_constructor_invocation"]),
+  cases: { of: (node) => (node.childForFieldName("body")?.namedChildren ?? []).filter((clause) => JAVA_CONTROL.cases.has(clause.type)), fallThrough: (clause) => clause.type === "switch_block_statement_group" },
 };
 
 /** What a case of a switch names (null: the default), and the statements it runs: the clause's children but what it names. */
 function caseOf(clause: Node): { label: string | null; statements: Node[] } {
   // A value (`case "a":`), the types of a Go type switch (`case int, string:`), the channel operation of a `select`.
   const named = [clause.childForFieldName("value"), ...clause.childrenForFieldName("type"), clause.childForFieldName("communication")].filter((each) => each !== null);
-  const ids = new Set(named.map((each) => each.id));
+  // Java writes labels before the statements (`case NEW:`, `case "a", "b" ->`, `default`).
+  const labels = clause.namedChildren.filter((child) => child.type === "switch_label");
+  const ids = new Set([...named, ...labels].map((each) => each.id));
+  const texts = [...named.map((each) => each.text), ...labels.map((each) => each.text.replace(/^case\s+/, "")).filter((text) => text !== "default")];
 
-  return { label: named.length === 0 ? null : short(named.map((each) => each.text).join(", ")), statements: clause.namedChildren.filter((child) => !ids.has(child.id) && child.type !== "comment") };
+  return { label: texts.length === 0 ? null : short(texts.join(", ")), statements: clause.namedChildren.filter((child) => !ids.has(child.id) && !child.type.includes("comment")) };
 }
 
 /** A dangling arrow out of a built node, waiting for the next node to point at. */
@@ -171,8 +189,10 @@ function calleesIn(node: Node, grammar: LogicGrammar): string[] {
     if (at.id !== node.id && grammar.control.functions.has(at.type)) continue;
 
     if (grammar.calls.has(at.type)) {
-      const callee = at.childForFieldName("function") ?? at.childForFieldName("constructor");
-      const name = callee ? collapse(callee.text) : "";
+      // What is called: a function expression, a class made with `new`, or (Java) a method named on an object.
+      const callee = at.childForFieldName("function") ?? at.childForFieldName("constructor") ?? at.childForFieldName("type");
+      const object = at.type === "method_invocation" ? at.childForFieldName("object") : null;
+      const name = at.type === "method_invocation" ? collapse(`${object ? `${object.text}.` : ""}${at.childForFieldName("name")?.text ?? ""}`) : callee ? collapse(callee.text) : "";
 
       // An error being built (`new Error(…)`, `ValueError(…)`) is the exit's own text, not a call the rules list.
       if (name !== "" && !out.includes(name) && !/^(?:[A-Z]\w*)?(?:Error|Exception)$/.test(name)) out.push(name);
@@ -306,7 +326,7 @@ class Builder {
     // `break` and `continue` (`break outer` the loop so labelled) leave through the `finally` blocks opened inside the loop.
     if (grammar.breaks.has(node.type) || grammar.continues.has(node.type)) {
       // The label a jump names: a field of the statement, or (Go) its one child.
-      const named = node.childForFieldName("label")?.text ?? node.namedChildren.find((child) => child.type === "label_name")?.text ?? null;
+      const named = node.childForFieldName("label")?.text ?? node.namedChildren.find((child) => child.type === "label_name" || child.type === "identifier")?.text ?? null;
       const isBreak = grammar.breaks.has(node.type);
       const frame = [...this.frames].reverse().find((each) => (named !== null ? each.label === named : isBreak || each.kind === "loop"));
 
@@ -415,10 +435,10 @@ class Builder {
    */
   private switchOf(node: Node, open: Exit[], label: string | null): Exit[] {
     const { cases } = this.grammar;
-    const value = node.childForFieldName("value");
+    const value = node.childForFieldName("value") ?? node.childForFieldName("condition");
     // Go's `select` chooses among channel operations and `switch { … }` among conditions: no value to name.
     const head = node.type === "select_statement" ? "select" : `switch ${short(unwrapped(value?.text ?? ""))}`.trim();
-    const decision = this.add("decision", head, node, value ? calleesIn(value, this.grammar) : cases.fallThrough ? calleesIn(node, this.grammar) : []);
+    const decision = this.add("decision", head, node, value ? calleesIn(value, this.grammar) : []);
     this.link(open, decision.id);
     const frame: Frame = { kind: "switch", head: null, breaks: [], label, finallies: this.finallies.length };
     this.frames.push(frame);
@@ -432,7 +452,7 @@ class Builder {
       const entry: Exit[] = [...fall, { from: decision.id, label: label ?? "default" }];
       const exits = statements.length === 0 ? entry : this.statements(statements, entry);
 
-      if (cases.fallThrough) fall = exits;
+      if (cases.fallThrough(clause)) fall = exits;
       else done.push(...exits);
     }
 
@@ -555,7 +575,7 @@ export async function readLogic(path: string, source: string, name: string, line
     return null;
   }
 
-  const grammar = g === "python" ? PY_LOGIC : g === "typescript" || g === "tsx" || g === "javascript" ? TS_LOGIC : g === "go" ? GO_LOGIC : null;
+  const grammar = g === "python" ? PY_LOGIC : g === "typescript" || g === "tsx" || g === "javascript" ? TS_LOGIC : g === "go" ? GO_LOGIC : g === "java" ? JAVA_LOGIC : null;
 
   if (!grammar) return null;
 

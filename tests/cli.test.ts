@@ -774,10 +774,10 @@ test("imports resolve as the tools resolve them: baseUrl, a jsconfig, the longes
     assert.ok(archdiff(["diagram", "calls:backend/app/api.py#run", dir, "--format", "mermaid"]).stdout.includes("backend_app_api_py_run ==> backend_app_models_py_load"));
   }));
 
-test("Python, Rust, PHP and Go are read with the same graph: imports resolve and calls are followed", () => {
+test("Python, Rust, PHP, Go and Java are read with the same graph: imports resolve and calls are followed", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");
   const stats = JSON.parse(archdiff(["analyze", polyglot, "--json", "--no-cache"]).stdout) as { files: number; unresolvedImports: number; calls: number };
-  assert.equal(stats.files, 19);
+  assert.equal(stats.files, 26);
   assert.equal(stats.unresolvedImports, 0);
   const python = archdiff(["diagram", "calls:app/services/orders.py#place_order", polyglot, "--format", "mermaid"]).stdout;
   assert.ok(python.includes("app_services_orders_py_place_order ==> app_store_py_save_order"), python);
@@ -1832,6 +1832,61 @@ test("Go: a package is its directory — a call reaches another file of the pack
   const placed = archdiff(["diagram", "logic:go/internal/orders/orders.go#Service.PlaceOrder", polyglot]).stdout;
   assert.ok(placed.includes("| `err != nil: yes` | `validate` | **return order, err** |") && placed.includes("| `err != nil: no` | `validate`, `s.repo.Save` | **return order, nil** |"), placed);
 });
+
+test("Java: an import names a class wherever its file lies — a call reaches a class of the same package without an import, an interface's implementer, a nested class and a record's accessor; `main` is a method", () => {
+  const polyglot = join(root, "tests/fixtures/polyglot");
+  const base = "java/src/main/java/com/example/shop";
+  const id = (path: string): string => `${base}/${path}`.replace(/[^A-Za-z0-9]/g, "_");
+  const diagram = (key: string, ...flags: string[]): string => archdiff(["diagram", key, polyglot, "--format", "mermaid", ...flags]).stdout;
+  const modules = diagram("dir:java");
+  // By an import, by the package the file is in (`new Order(…)` in OrderService), and through `import com.example.shop.orders.*`.
+  for (const [from, to] of [["App.java", "web/OrderController.java"], ["orders/OrderService.java", "store/OrderRepository.java"], ["orders/OrderService.java", "orders/Order.java"], ["store/MemoryOrders.java", "orders/Order.java"]]) assert.ok(modules.includes(`${id(from!)} --> ${id(to!)}`), `${from} → ${to}\n${modules}`);
+  assert.ok(modules.includes(`java_src_test_java_com_example_shop_orders_OrderServiceTest_java --> ${id("orders/OrderService.java")}`), modules);
+  // `public static void main` of a class is an entry, as is a controller's method nothing calls.
+  const views = archdiff(["views", polyglot]).stdout;
+  assert.ok(views.includes(`calls:${base}/App.java#App.main\tmain (${base}/App.java) — main`) && views.includes(`calls:${base}/web/OrderController.java#OrderController.show\tshow (${base}/web/OrderController.java) — uncalled method of a handler`), views);
+  const calls = diagram(`calls:${base}/App.java#App.main`, "--depth", "4");
+  for (const [from, to] of [
+    ["App.java#App.main", "web/OrderController.java#OrderController.place"],
+    ["web/OrderController.java#OrderController.place", "orders/OrderService.java#OrderService.place"],
+    // `repository.save(order)` with `repository` an OrderRepository: the interface's one implementer.
+    ["orders/OrderService.java#OrderService.place", "store/MemoryOrders.java#MemoryOrders.save"],
+    // `Audit.record(order)`: a class nested in OrderService, named by its own name.
+    ["orders/OrderService.java#OrderService.place", "orders/OrderService.java#OrderService.Audit.record"],
+    ["orders/OrderService.java#OrderService.place", "orders/Order.java#Order.valid"],
+    // `order.id()`: the method a record has for its component.
+    ["web/OrderController.java#OrderController.render", "orders/Order.java#Order.id"],
+  ]) assert.ok(calls.includes(`${id(from!)} ==> ${id(to!)}`), `${from} → ${to}\n${calls}`);
+  // `orders.find(id).map(this::render)`: the method reference is a function handed over.
+  assert.ok(diagram(`calls:${base}/web/OrderController.java#OrderController.show`).includes(`${id("web/OrderController.java#OrderController.show")} ==> ${id("orders/OrderService.java#OrderService.find")}`));
+  const classes = diagram("classes:java");
+  assert.ok(classes.includes("<<interface>>") && classes.includes(`${id("store/OrderRepository.java#OrderRepository")} <|.. ${id("store/MemoryOrders.java#MemoryOrders")}`) && classes.includes("+repository: OrderRepository") && classes.includes("$main(String[] args) returns void") && classes.includes("-render(Order order) returns String"), classes);
+  // A file under src/test/ is a test file.
+  const tests = JSON.parse(archdiff(["diagram", "tests", polyglot, "--format", "json"]).stdout) as { nodes: { id: string; count?: number }[] };
+  assert.deepEqual(tests.nodes.filter((node) => node.id.startsWith("java/")).map((node) => [node.id.slice(base.length + 1), node.count]), [["App.java", 0], ["orders/Order.java", 0], ["orders/OrderService.java", 1], ["store/MemoryOrders.java", 1], ["store/OrderRepository.java", 0], ["web/OrderController.java", 0]]);
+  // The JDK is the language's library; nothing of the repository's own packages is missing.
+  const coverage = archdiff(["coverage", polyglot]).stdout;
+  assert.ok(coverage.includes("0 blind") && coverage.includes("0 unresolved imports"), coverage);
+  const logic = archdiff(["diagram", `logic:${base}/web/OrderController.java#OrderController.place`, polyglot]).stdout;
+  assert.ok(logic.includes("| `try: ok` | `orders.place`, `render` | **return render(order)** |") && logic.includes("| `try: error IllegalArgumentException refused` | `refused.getMessage` |"), logic);
+});
+
+test("Java's flowchart: a case that runs into the next and a rule that does not, a labelled continue, a synchronized block, a try with resources and its finally", () =>
+  withTempDir("archdiff-java-logic-", (dir) => {
+    writeFileSync(
+      join(dir, "Flow.java"),
+      'class Flow {\n    int run(Status status, java.util.List<String> items) {\n        switch (status) {\n            case NEW:\n                start();\n            case PAID:\n                ship();\n                break;\n            default:\n                skip();\n        }\n        outer:\n        for (String item : items) {\n            while (ready()) {\n                if (item.isEmpty()) continue outer;\n                work(item);\n            }\n        }\n        switch (status) {\n            case NEW -> start();\n            case PAID -> { ship(); return 2; }\n        }\n        synchronized (this) {\n            audit();\n        }\n        try (var lock = acquire()) {\n            return 1;\n        } catch (RuntimeException e) {\n            throw new IllegalStateException(e);\n        } finally {\n            done();\n        }\n    }\n}\n',
+    );
+    const logic = archdiff(["diagram", "logic:Flow.java#Flow.run", dir, "--format", "mermaid"]).stdout;
+    // `case NEW:` runs on into `case PAID:`; the `break` leaves; the default is apart.
+    for (const line of ['n1{"switch status"}', 'n1 -->|"NEW"| n2', "n2 --> n3", 'n1 -->|"PAID"| n3', 'n1 -->|"default"| n4', "n3 --> n5", "n4 --> n5"]) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    // `continue outer` goes back to the outer loop's header; the inner loop runs while its condition holds.
+    for (const line of ['n5{{"↻ String item : items"}}', 'n6{{"↻ ready()"}}', 'n6 -->|"while"| n7', 'n7 -->|"yes"| n5', "n8 --> n6"]) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    // A rule does not run into the next; a switch without a default may match nothing.
+    for (const line of ['n9 -->|"NEW"| n10', 'n9 -->|"PAID"| n11', "n11 --> n12", 'n9 -->|"no match"| n13', 'n13["synchronized (this)<br/>audit()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    // The finally runs after the return and after the throw.
+    for (const line of ['n14 -->|"ok"| n15', "n15 --> n16", 'n14 -->|"error RuntimeException e"| n17', "n17 --> n18", 'n16["done()"]', 'n18["done()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
+  }));
 
 test("Rust integration tests are crates of their own: `mod util;` and `use <crate>::` resolve from tests/", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");
