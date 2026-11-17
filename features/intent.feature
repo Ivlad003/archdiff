@@ -15,6 +15,13 @@ Feature: The contract: ARCHITECTURE.md
     Then the exit code is 1
     And the report says "`src/routes/health.ts:2` imports `src/db/store.ts`: layer **routes** → **db** is not in the intent"
 
+  Scenario: The check's report as JSON
+    Given the shop-api project with health.ts in routes importing store.ts in db
+    When I run "archdiff check --json"
+    Then the exit code is 1
+    And stdout holds only the report, whose one violation names src/routes/health.ts, line 2, src/db/store.ts and the layers routes and db
+    And the note "1 import goes against the intent" is on stderr
+
   Scenario: A design note becomes the contract
     Given a Markdown note with a Mermaid flowchart whose subgraphs are http and app
     When I run "archdiff import note.md"

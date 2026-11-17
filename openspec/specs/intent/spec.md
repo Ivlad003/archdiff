@@ -38,6 +38,11 @@ The system SHALL, with `archdiff check`, exit 1 when the code imports between tw
 - **WHEN** `src/routes/health.ts` imports `src/db/store.ts` and the contract has no arrow from `routes` to `db`
 - **THEN** `archdiff check` exits 1 and says "`src/routes/health.ts:2` imports `src/db/store.ts`: layer **routes** → **db** is not in the intent"
 
+#### Scenario: The report as JSON
+
+- **WHEN** `archdiff check --json` runs on the same code
+- **THEN** it exits 1, stdout holds only the report — its `violations` the one entry `{ from: "src/routes/health.ts", to: "src/db/store.ts", fromLayer: "routes", toLayer: "db", line: 2 }`, beside `planned`, `plannedEdges`, `beyond`, `unintended` and `ok` — and the note goes to stderr; with nothing to check against, stdout stays empty
+
 ### Requirement: The contract follows the drawing and the configuration follows the contract
 
 The system SHALL fold a drawing's planned modules, functions, layers, arrows and removals into the contract (`archdiff intent --view <view>`, "code this" on the page), naming the ends of drawn arrows with the layers the code gives them, and write `archdiff.json` `layers` from the contract's layers (a directory as the glob, the files themselves where another layer lives below the directory; the contract's layers first).

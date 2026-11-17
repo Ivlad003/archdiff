@@ -326,3 +326,17 @@ The system SHALL open, from *agents & keys…* beside the Chat tab's picker, a w
 
 - **WHEN** the window is open and the reader presses "f"
 - **THEN** the panels stay as they are, and Escape closes the window
+
+### Requirement: The page tells an editor that hosts it which code to open
+
+The system SHALL, when the page is opened with `?host=1` inside a frame, post to its parent window every place of the code it would bring to the front on its Code tab — the code of a tapped shape, a `file:line` clicked in a page, a function of a module's list — as `{ type: "archdiff:open", file, line, endLine?, head? }` (the file as a path in the repository, the lines from 1, `head` the revision shown when it is not the working tree), and fill the Code tab without bringing it to the front or opening the details; the message SHALL say nothing but the place. Without the flag, or in a window of its own, the page SHALL show the code on its Code tab as ever. `?embed=1` hides the header and the side panels, and the view is in the hash, so a host shows a view by the address alone.
+
+#### Scenario: A shape tapped in a hosted page
+
+- **WHEN** a page of another origin frames `/?host=1#view=module:src/lib/orders.ts` and the reader taps the module's shape
+- **THEN** the framing page receives `{ type: "archdiff:open", file: "src/lib/orders.ts", line: 1 }` from the server's origin, and the framed page's Markdown tab stays in front
+
+#### Scenario: The flag without a host
+
+- **WHEN** the same address is open in a window of its own and the reader taps the shape
+- **THEN** the Code tab comes to the front with the file

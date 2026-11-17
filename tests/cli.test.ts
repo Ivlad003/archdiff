@@ -1413,6 +1413,15 @@ test("new scaffolds a project with its intent and first commit; import, intent a
     assert.equal(failing.status, 1, failing.stdout);
     assert.ok(failing.stdout.includes("`src/routes/health.ts:2` imports `src/db/store.ts`: layer **routes** → **db** is not in the intent"), failing.stdout);
     assert.ok(failing.stdout.includes("- `src/domain/types.ts`"), "the unbuilt module is not listed");
+    // The same report as JSON, for a tool (an editor's diagnostics): alone on stdout, the note on stderr, the exit code the same.
+    const failingJson = archdiff(["check", target, "--json"]);
+    assert.equal(failingJson.status, 1, failingJson.stderr);
+    assert.equal(failingJson.stderr, "archdiff check: 1 import goes against the intent\n");
+    const report = JSON.parse(failingJson.stdout) as { ok: boolean; violations: unknown[]; planned: string[]; plannedEdges: string[]; beyond: string[]; unintended: string[] };
+    assert.equal(report.ok, false);
+    assert.deepEqual(report.violations, [{ from: "src/routes/health.ts", to: "src/db/store.ts", fromLayer: "routes", toLayer: "db", line: 2 }]);
+    assert.ok(report.planned.includes("src/domain/types.ts"), failingJson.stdout);
+    assert.ok(Array.isArray(report.plannedEdges) && Array.isArray(report.beyond) && Array.isArray(report.unintended), failingJson.stdout);
     const drawn = JSON.parse(archdiff(["diagram", "intent", target, "--format", "json"]).stdout) as { nodes: { id: string; diff?: string }[]; edges: { from: string; to: string; diff?: string }[] };
     assert.equal(drawn.nodes.find((node) => node.id === "src/db/store.ts")?.diff, undefined);
     assert.equal(drawn.edges.find((edge) => edge.from === "src/routes/health.ts" && edge.to === "src/db/store.ts")?.diff, "warning");
@@ -1744,6 +1753,9 @@ test("review against the contract: a new layer dependency ARCHITECTURE.md forbid
     const nothing = archdiff(["check", dir]);
     assert.equal(nothing.status, 0);
     assert.ok(nothing.stderr.includes("ARCHITECTURE.md names no layer"), nothing.stderr);
+    // Nothing to check against is no report: `--json` leaves stdout empty too, which a tool reads as no finding.
+    const nothingJson = archdiff(["check", dir, "--json"]);
+    assert.deepEqual([nothingJson.status, nothingJson.stdout], [0, ""], nothingJson.stderr);
     writeFileSync(join(dir, "ARCHITECTURE.md"), contract);
     // A module that calls fetch is a storage by what it does, without a name or a package that says so.
     writeFileSync(join(dir, "src/lib/remote.ts"), `export async function load(id: string): Promise<unknown> {\n  const response = await fetch(\`/api/\${id}\`);\n  return response.json();\n}\n`);

@@ -129,3 +129,12 @@ Feature: The page
     Then the panels stay as they are and the window is closed
     When I run the task "Say done."
     Then the answer "Done." is rendered
+
+  Scenario: An editor that hosts the page is told which code to open
+    Given a page of another origin that frames the page with "?host=1" on "module:src/lib/orders.ts"
+    When I tap the module's shape in the frame
+    Then the framing page is told to open src/lib/orders.ts at line 1
+    And the framed page keeps its Markdown tab in front, with the code on its Code tab
+    Given the same address in a window of its own
+    When I tap the module's shape
+    Then the Code tab comes to the front with the file
