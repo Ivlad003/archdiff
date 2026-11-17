@@ -58,7 +58,7 @@ export function labelOf(id: string): string {
 /** The shape pages asked for: a page that comes after a newer pick is dropped, so the panel is the last shape's. */
 let pageLoads = 0;
 
-async function showNode(id: string | null): Promise<void> {
+async function showNode(id: string | null, front = true): Promise<void> {
   const mine = ++pageLoads;
   const state = currentLink();
   const node = id === null ? null : page.nodes().get(id);
@@ -96,7 +96,8 @@ async function showNode(id: string | null): Promise<void> {
   }
 
   setMarkdown(markdownPanel, markdown);
-  showTab("markdown");
+
+  if (front) showTab("markdown");
   renderNeighbours(node);
   await showCode(node);
 }
@@ -249,9 +250,11 @@ function renderSelection(): void {
 /**
  * Selects shapes: one is picked (its page, its neighbours), two light the
  * shortest chain of lines between them, more list themselves with the lines among
- * them; an empty list clears everything back to the picture's page.
+ * them; an empty list clears everything back to the picture's page. The page
+ * of what is selected comes to the front, unless `front` is false: a command
+ * of the Chat tab fills it behind the transcript, which the reader keeps.
  */
-export function select(ids: string[], centre = false): void {
+export function select(ids: string[], centre = false, front = true): void {
   selected = ids.filter((id) => page.nodes().has(id));
   page.canvas()?.highlight(selected);
   renderSelection();
@@ -265,9 +268,9 @@ export function select(ids: string[], centre = false): void {
 
     if (centre) page.canvas()?.centreOn(picked);
     keepInSight(picked);
-    void showNode(picked);
-  } else if (selected.length === 2) showChain(selected[0]!, selected[1]!);
-  else if (selected.length > 2) showSelection();
+    void showNode(picked, front);
+  } else if (selected.length === 2) showChain(selected[0]!, selected[1]!, front);
+  else if (selected.length > 2) showSelection(front);
   else {
     // Nothing picked: nothing to dim around either.
     page.canvas()?.dim(null);
@@ -290,7 +293,7 @@ export function toggleSelected(id: string): void {
 }
 
 /** The page of several selected shapes: what each is, and the lines among them in this picture. */
-function showSelection(): void {
+function showSelection(front = true): void {
   const nodes = page.nodes();
   const lines = [
     `# ${selected.length} shapes selected`,
@@ -304,7 +307,8 @@ function showSelection(): void {
   const among = page.edges().filter((edge) => selected.includes(edge.from) && selected.includes(edge.to) && edge.kind !== "lifeline");
   lines.push("", `## Lines among them (${among.length})`, "", ...(among.length === 0 ? ["none in this picture"] : among.map((edge) => `- ${labelOf(edge.from)} → **${labelOf(edge.to)}**${edge.kind === "dependency" ? "" : ` (${edge.kind})`}`)), "", "_Shift+tap or Ctrl+tap adds or removes a shape; **ask about them** sends them to the agent; **dim others** keeps their neighbourhood._");
   setMarkdown(markdownPanel, `${lines.join("\n")}\n`);
-  showTab("markdown");
+
+  if (front) showTab("markdown");
   renderNeighbours(null);
 }
 
@@ -325,12 +329,13 @@ export function explainSelected(ids: readonly string[] = selected.length > 0 ? s
 /**
  * A way through shapes in the order given — a step of a tour, the `/path` command: the shortest chain of lines from
  * each to the next is lit (with the arrows where it can be, against them where it must), and the Markdown panel lists
- * the lines walked. Fewer than two shapes of the picture are a selection.
+ * the lines walked. Fewer than two shapes of the picture are a selection. The tab in front stays where it is: a way is
+ * asked for from the Chat tab or shown under a tour's note.
  */
 export function showPath(ids: readonly string[]): void {
   const on = ids.filter((id) => page.nodes().has(id));
 
-  if (on.length < 2) return select([...on], true);
+  if (on.length < 2) return select([...on], true, false);
   selected = [...on];
   renderSelection();
   revealDetails();
@@ -361,7 +366,7 @@ export function showPath(ids: readonly string[]): void {
 }
 
 /** Lights the shortest chain of lines between two shapes and writes it to the Markdown panel. */
-function showChain(from: string, to: string): void {
+function showChain(from: string, to: string, front = true): void {
   const edges = page.edges();
   const directed = chainBetween(edges, from, to, true);
   const chain = directed ?? chainBetween(edges, from, to, false);
@@ -370,7 +375,8 @@ function showChain(from: string, to: string): void {
   if (!chain) {
     page.canvas()?.highlight([from, to]);
     setMarkdown(markdownPanel, `${title}\n\nNo chain of lines joins them in this picture, in either direction.\n`);
-    showTab("markdown");
+
+    if (front) showTab("markdown");
 
     return;
   }
@@ -388,7 +394,8 @@ function showChain(from: string, to: string): void {
 
   for (const [i, step] of chain.entries()) lines.push(`${i + 1}. ${labelOf(step.edge.from)} → **${labelOf(step.edge.to)}**${step.edge.kind === "dependency" ? "" : ` (${step.edge.kind})`}`);
   setMarkdown(markdownPanel, `${lines.join("\n")}\n`);
-  showTab("markdown");
+
+  if (front) showTab("markdown");
 }
 
 /** Where a shape's code is, as a `file:line` code span for a page; empty for a shape without code. */

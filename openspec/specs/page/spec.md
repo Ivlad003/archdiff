@@ -428,7 +428,7 @@ A line that starts with a slash and a word, in the question row, the task box or
 
 ### Requirement: Explain, from where the reader is
 
-The system SHALL offer an explanation as a tour from the Chat tab's *explain* button (the shapes picked, else the picture), from the menu of a shape (*Explain it, step by step*) and of the picture, from the strip of a selection, and by the command `/explain [what]`, whose words say what to explain. `/path <shape> <shape> …` SHALL light a way through shapes of the picture in the order named, an agent's block may hold it, and a name that is on no shape SHALL be refused by name; `/select` SHALL pick the shapes its names are on and say which names are on none.
+The system SHALL offer an explanation as a tour from the Chat tab's *explain* button (the shapes picked, else the picture), from the menu of a shape (*Explain it, step by step*) and of the picture, from the strip of a selection, and by the command `/explain [what]`, whose words say what to explain. `/path <shape> <shape> …` SHALL light a way through shapes of the picture in the order named, an agent's block may hold it, and a name that is on no shape SHALL be refused by name; `/select` SHALL pick the shapes its names are on and say which names are on none. A command that picks shapes or lights a way SHALL leave the Chat tab in front, the page of what it picked filled in the Markdown tab behind it.
 
 #### Scenario: A way by a command
 
@@ -438,4 +438,4 @@ The system SHALL offer an explanation as a tour from the Chat tab's *explain* bu
 #### Scenario: A name on no shape
 
 - **WHEN** the reader types `/select routes nowhere`
-- **THEN** `routes` is picked and the transcript reads "Picked routes. No shape of this picture is named nowhere."
+- **THEN** `routes` is picked, the transcript reads "Picked routes. No shape of this picture is named nowhere.", and the Chat tab is still in front once the page of `routes` is filled

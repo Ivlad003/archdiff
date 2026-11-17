@@ -110,7 +110,7 @@ An explanation, step by step (2026-11-17).
 
 - *explain* — the Chat tab's button, a shape's and the picture's menu, the selection's strip, `/explain [what]` — has the agent explain the picture, the shapes picked or what the reader names, as a guided tour: three to eight steps in the order to read them, each a view, the shapes to look at on it and a note that says what it shows, how it works and why. The agent answers with an `archdiff-tour` block (`src/explain.ts` describes the task and reads the answer); the page keeps it with the tours of the repository and plays it at once — the pictures change, the shapes light, the note stands under the title, ‹ and › step through it — and the transcript shows no JSON of it. A block that is no tour is said there with what is wrong in it.
 - A step of a tour may be a way (`"path": true`): the shapes are followed in their order, the shortest chain of lines from each to the next lit and listed. `/path <shape> <shape> …` lights such a way by hand, and an agent may write it. `archdiff tour` writes such a step as "The way: a → b → c".
-- `/select` says which of the names it was given is on no shape of the picture; it used to leave them out without a word.
+- `/select` says which of the names it was given is on no shape of the picture; it used to leave them out without a word. It leaves the Chat tab in front, the page of what it picked filled behind the transcript: the panel went over to the Markdown tab — at once for several shapes, a moment after the answer for one — and the reader had to come back to type the next command.
 
 ## 0.6.0 — 2026-10-20
 

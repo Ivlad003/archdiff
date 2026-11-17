@@ -216,3 +216,4 @@ Feature: The page
     Then the way from routes through lib to db is lit
     When I type "/select routes nowhere"
     Then routes is picked and the transcript says no shape is named nowhere
+    And the Chat tab is still in front once the page of routes is filled

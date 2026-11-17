@@ -1983,6 +1983,13 @@ test("an explanation is a tour the agent writes and the page plays: the pictures
       assert.ok(((await page!.textContent("#markdown")) ?? "").includes("Path: routes → db"));
       assert.equal(await command("/path routes nowhere", `true`), "⚠ no shape of this picture is named nowhere");
       assert.equal(await command("/select routes nowhere", `window.archdiff.selected().join(",") === "routes"`), "Picked routes. No shape of this picture is named nowhere.");
+      // The page of what a command picked is filled behind the transcript — the way's list gives place to the shape's
+      // page — and the Chat tab stays in front, for one shape (its page comes a moment later) and for several.
+      await page!.waitForFunction(`!document.querySelector("#markdown").textContent.includes("Path:")`, undefined, { timeout: 15_000 });
+      assert.equal(await page!.evaluate(`document.querySelector(".panel.active").id`), "chat");
+      assert.equal(await command("/select routes db", `window.archdiff.selected().join(",") === "routes,db"`), "Picked 2 shapes.");
+      assert.ok(((await page!.textContent("#markdown")) ?? "").includes("Chain: routes → db"));
+      assert.equal(await page!.evaluate(`document.querySelector(".panel.active").id`), "chat");
       // With words: what to explain is the reader's own.
       // (A run starts the transcript afresh, so its row is waited for by what it says.)
       await page!.fill("#ask", "/explain how an order is refused");

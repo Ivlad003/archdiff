@@ -230,7 +230,8 @@ const HANDLERS: Record<string, Handler> = {
     const unknown = asked.filter((word) => shapesNamed(word).length === 0);
 
     if (ids.length === 0) throw new Error(`no shape of this picture is named ${code(argument)}`);
-    select(ids, true);
+    // The page of what is picked is filled behind the transcript: the Chat tab, where the command was typed, stays in front.
+    select(ids, true, false);
 
     return `Picked ${ids.length === 1 ? code(ids[0]!) : `${ids.length} shapes`}.${unknown.length > 0 ? ` No shape of this picture is named ${unknown.map(code).join(", ")}.` : ""}`;
   },
