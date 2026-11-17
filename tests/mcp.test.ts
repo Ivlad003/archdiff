@@ -159,7 +159,8 @@ test("tools/list names the six tools, each with what it answers, the schema of i
   );
   assert.equal(diagram.properties["depth"]!.type, "integer");
   assert.equal(diagram.properties["hubs"]!.type, "boolean");
-  assert.deepEqual(diagram.properties["overlay"]!.items?.enum, ["tests", "storages", "heat", "instability"]);
+  // The overlays of the one table, the three read from git among them.
+  assert.deepEqual(diagram.properties["overlay"]!.items?.enum, ["tests", "storages", "heat", "instability", "churn", "coupling", "ownership"]);
   assert.ok(diagram.properties["mermaid"]!.enum?.includes("flowchart"));
   assert.deepEqual(listed.find((tool) => tool.name === "may_import")!.inputSchema.required, ["from", "to"]);
   assert.deepEqual(Object.keys(listed.find((tool) => tool.name === "check")!.inputSchema.properties), []);
@@ -220,7 +221,7 @@ test("a wrong call is a JSON-RPC error carrying the CLI's message, and the serve
   // An option is refused as the API's query refuses it: by the name the table gives it.
   await refused("diagram", { view: "layers", depth: 1.5 }, "diagram: depth must be a whole number");
   await refused("diagram", { view: "layers", limit: 0 }, "diagram: limit must be a whole number of at least 1");
-  await refused("diagram", { view: "layers", overlay: ["glow"] }, 'diagram: unknown overlay "glow" (tests, storages, heat, instability)');
+  await refused("diagram", { view: "layers", overlay: ["glow"] }, 'diagram: unknown overlay "glow" (tests, storages, heat, instability, churn, coupling, ownership)');
   await refused("diagram", { view: "layers", hubs: "maybe" }, "diagram: hubs must be 1 or 0");
   await refused("diagram", { view: "layers", depth: true }, "diagram: depth must be a whole number");
   await refused("diagram", { view: "layers", expand: "src/x.ts", mermaid: ["pie"] }, "diagram: mermaid must be one of auto, flowchart, c4, quadrant, pie, gitgraph, mindmap, state");
