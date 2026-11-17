@@ -59,7 +59,7 @@ The system SHALL offer "code this" (the drawing into the contract, then the agen
 
 ### Requirement: A question is answered, not built
 
-The system SHALL send a question typed in the Chat tab's first row to the agent with the instruction to answer and change no file, with the selected shapes attached as tags (`@module:`, `@fn:`, `@logic:`, …) and, when the box is ticked, the current picture as `@view:<key>` with its options, every tag expanded into its Markdown; without an agent the question with its context SHALL go into the task box. The transcript SHALL show the question, fold the agent's tool calls and thoughts under one summary line, render the result as the answer, and list the checks and the exit under it.
+The system SHALL send a question typed in the Chat tab's first row to the agent with the instruction to answer and change no file, with the selected shapes attached as tags (`@module:`, `@fn:`, `@logic:`, …) and, when the box is ticked, the current picture as `@view:<key>` with its options, every tag expanded into its Markdown; without an agent the question with its context SHALL go into the task box. The transcript SHALL show the question, fold the agent's tool calls and thoughts under one summary line, render the result as the answer, and list the checks, the run's report and the exit under it.
 
 #### Scenario: A question about the picture
 
@@ -92,6 +92,25 @@ The system SHALL, when an agent's run ends, run the contract check (held against
 
 - **WHEN** archdiff.json names a command that exits 0 and one that writes "boom" and exits 3, and a run ends
 - **THEN** the run's events hold "✔ archdiff check: the code follows ARCHITECTURE.md", a ✔ line for the first command and a ✘ line "(exit 3)" ending in "boom", then the exit
+
+### Requirement: A run is reported against the state before it
+
+The system SHALL, when a run is started from the page, record the violations the contract check finds at that moment — the imports against the contract's layers and the violations of the rules of `archdiff.json`, whether the baseline knows them or not — and, when the run ends, append to its events after the checks and before the exit, as events of the kind `report`, which of them the run fixed ("✔ the run fixed N violations"), which survive it ("• N violations survive the run", saying how many the baseline knows and marking each of those) and which it added ("✘ the run added N violations"), each violation on a line of its own with its file and line, the first ten of a group and then how many more there are. A violation SHALL be the same before and after by its rule, the module it is in and what that imports, not by its line. A group with no violation SHALL not be said, and a run that neither started with a violation nor left one SHALL add no such event; when the violations cannot be told (a configuration that does not read) the run SHALL go on without a report. The Chat tab SHALL show these events under the checks, not folded with the agent's steps: what was fixed in the colour of a check that passed, what was added in the colour of one that failed.
+
+#### Scenario: A run fixes one violation and adds another
+
+- **WHEN** the code has two imports against the contract and one of a rule that the baseline knows, and a run removes one of the imports and writes a new import against the contract
+- **THEN** the run's events hold, after the contract check, "✔ the run fixed 1 violation" with the import removed, "• 2 violations survive the run (1 known, in archdiff-baseline.json)" with the two left, and "✘ the run added 1 violation" with the new one, then the exit
+
+#### Scenario: A run that changes nothing
+
+- **WHEN** a run edits no file of a repository with three violations
+- **THEN** its events hold "• 3 violations survive the run" and nothing of fixing or adding
+
+#### Scenario: Code that follows its contract
+
+- **WHEN** a run starts and ends with no violation
+- **THEN** its events hold the checks and no report
 
 ### Requirement: Every agent's stream is read like Claude's
 

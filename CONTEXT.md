@@ -255,3 +255,7 @@ _Avoid_: prompt, clarification
 **Check**:
 The contract and the commands of the repository, run after an agent run and on request.
 _Avoid_: test (for the whole), gate
+
+**Run report**:
+What an agent run did to the violations the code had when it started: the ones it fixed, the ones that survive it, the ones it added.
+_Avoid_: diff (of violations), delta

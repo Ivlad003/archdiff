@@ -1,9 +1,10 @@
 // The contract check through the real CLI and the HTTP API on copies of
 // tests/fixtures/sample: the baseline of known violations — written,
 // honoured, and shrunk as the code is fixed — in the command, the page's
-// check and the checks after an agent's run; and the rules of
-// archdiff.json, each kind violated and satisfied, with the messages of a
-// rule written wrong.
+// check and the checks after an agent's run; the rules of archdiff.json,
+// each kind violated and satisfied, with the messages of a rule written
+// wrong; and an agent's run reported against the violations before it
+// (tests/fixtures/fake-edit.mjs fixes one and adds another).
 //
 // Entry point: run by `npm test`.
 
@@ -347,3 +348,62 @@ test("the rules need no contract on the page: the check and the checks after a r
       assert.deepEqual(events.map((event) => event.text), ["✘ archdiff check\n1 violation of the rules of archdiff.json\nsrc/db/store.ts:1 imports node:fs: layer db is not to import node:fs (rule forbidden:db)"]);
     },
   ));
+
+/** report.ts without its import of the log: db → lib is fixed, db → routes stays. */
+const REPORT_FIXED = 'import { action } from "../routes/checkout.tsx";\n\nexport function report(): unknown {\n  return action({ total: 1 });\n}\n';
+
+/** The task that has the fake agent (tests/fixtures/fake-edit.mjs) write `files`, by their paths from the root. */
+function editTask(files: Record<string, string>): string {
+  return ["Tidy the imports.", ...Object.entries(files).map(([path, content]) => `write: ${path} ${JSON.stringify(content)}`)].join("\n");
+}
+
+/**
+ * A copy of the sample for a run's report: the contract, two imports against it in report.ts, a rule the store
+ * breaks (which the baseline knows), and the agent that edits as its task says.
+ */
+function prepareRun(dir: string): void {
+  writeFileSync(join(dir, "ARCHITECTURE.md"), CONTRACT);
+  writeFileSync(join(dir, "src/db/report.ts"), REPORT);
+  writeFileSync(join(dir, "archdiff.json"), JSON.stringify({ layers: LAYERS, rules: [{ kind: "forbidden", from: "db", imports: "fs" }], agent: { name: "editor", command: [process.execPath, join(root, "tests/fixtures/fake-edit.mjs")] } }));
+  writeFileSync(join(dir, "archdiff-baseline.json"), JSON.stringify({ violations: [{ rule: "forbidden:db", from: "src/db/store.ts", to: "node:fs" }] }));
+}
+
+/** What a run of the report's test is expected to say under its checks. */
+const RUN_REPORT = [
+  "✔ the run fixed 1 violation\n  src/db/report.ts:2 imports src/lib/log.ts: layer db → lib is not in the intent",
+  "• 2 violations survive the run (1 known, in archdiff-baseline.json)\n  src/db/report.ts:1 imports src/routes/checkout.tsx: layer db → routes is not in the intent\n  src/db/store.ts:1 imports node:fs: layer db is not to import node:fs (rule forbidden:db) (known)",
+  "✘ the run added 1 violation\n  src/routes/peek.ts:1 imports src/db/store.ts: layer routes → db is not in the intent",
+];
+
+test("an agent run is reported against the state before it: the violations it fixed, the ones that survive, the ones it added", () =>
+  withOwnServer("archdiff-run-report-", prepareRun, async (origin, dir) => {
+    const run = async (prompt: string): Promise<{ kind: string; text: string }[]> => {
+      const started = await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt, resume: null }) });
+      const body = await started.text();
+      assert.equal(started.status, 200, body);
+
+      return (await (await fetch(`${origin}/api/agent/events?id=${(JSON.parse(body) as { id: string }).id}`)).text()).split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => JSON.parse(chunk.slice(6)) as { kind: string; text: string });
+    };
+    // The agent drops report.ts's import of the log (one violation fixed) and writes a route that reads the store (one added).
+    const events = await run(editTask({ "src/db/report.ts": REPORT_FIXED, "src/routes/peek.ts": PEEK }));
+    assert.equal(readFileSync(join(dir, "src/db/report.ts"), "utf8"), REPORT_FIXED, "the agent edited the repository");
+    // The checks first, as they were; then the report, of layers and rules alike; then the exit.
+    assert.deepEqual(events.map((event) => event.kind), ["init", "tool", "tool", "result", "check", "report", "report", "report", "exit"]);
+    assert.equal(events[4]!.text, "✘ archdiff check\n2 new violations of ARCHITECTURE.md and the rules of archdiff.json; 1 known violation in archdiff-baseline.json\nsrc/db/report.ts:1 imports src/routes/checkout.tsx: layer db → routes is not in the intent\nsrc/routes/peek.ts:1 imports src/db/store.ts: layer routes → db is not in the intent");
+    assert.deepEqual(events.filter((event) => event.kind === "report").map((event) => event.text), RUN_REPORT);
+    // A run that changes nothing of them: they survive, and nothing is said of fixing or adding.
+    const idle = await run("Change nothing.");
+    assert.deepEqual(idle.filter((event) => event.kind === "report").map((event) => event.text), ["• 3 violations survive the run (1 known, in archdiff-baseline.json)\n  src/db/report.ts:1 imports src/routes/checkout.tsx: layer db → routes is not in the intent\n  src/routes/peek.ts:1 imports src/db/store.ts: layer routes → db is not in the intent\n  src/db/store.ts:1 imports node:fs: layer db is not to import node:fs (rule forbidden:db) (known)"]);
+    // A violation whose line moved is the same one: it survives, at its new line.
+    const moved = await run(editTask({ "src/db/report.ts": `// moved\n${REPORT_FIXED}` }));
+    assert.match(moved.find((event) => event.kind === "report")!.text, /^• 3 violations survive the run .*\n {2}src\/db\/report\.ts:2 imports src\/routes\/checkout\.tsx/);
+    // The last violations fixed: the run says so, and with nothing left the next run has nothing to report.
+    const clean = await run(`${editTask({ "src/db/report.ts": "export const report = 1;\n", "src/db/store.ts": "export const rows = new Map<string, unknown>();\n\nexport function readOrder(id: string): unknown {\n  return rows.get(id) ?? null;\n}\n\nexport function saveOrder(order: { id: string }): void {\n  rows.set(order.id, order);\n}\n" })}\nremove: src/routes/peek.ts`);
+    assert.deepEqual(clean.filter((event) => event.kind === "report").map((event) => event.text.split("\n")[0]), ["✔ the run fixed 3 violations"]);
+    assert.deepEqual((await run("Change nothing.")).filter((event) => event.kind === "report"), []);
+    // A long list is cut at ten lines, with the count of the rest: a dozen routes that read the store, added at once.
+    const routes = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`src/routes/peek${String(i).padStart(2, "0")}.ts`, 'import "../db/store.ts";\n']));
+    const many = (await run(editTask(routes))).filter((event) => event.kind === "report").map((event) => event.text.split("\n"));
+    assert.equal(many.length, 1);
+    assert.deepEqual([many[0]![0], many[0]![1], many[0]!.length, many[0]!.at(-1)], ["✘ the run added 12 violations", "  src/routes/peek00.ts:1 imports src/db/store.ts: layer routes → db is not in the intent", 12, "  … and 2 more: archdiff check lists them"]);
+  }));

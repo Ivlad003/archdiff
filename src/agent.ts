@@ -17,8 +17,8 @@
 //
 // Sits at the I/O edge beside the server: Plan Markdown → process →
 // AgentEvent[]. Entry points: `agentFromConfig`, `AgentRunner`,
-// `parseAgentLine`, `eventReader`, `installedAgents`, `AGENTS`,
-// `isAgentName`, `PROTOCOLS`.
+// `AfterRun`, `parseAgentLine`, `eventReader`, `installedAgents`,
+// `AGENTS`, `isAgentName`, `PROTOCOLS`.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -129,7 +129,8 @@ function blotted(text: string, secrets: readonly string[]): string {
 /** One event of a run, as the page shows it. */
 export interface AgentEvent {
   seq: number;
-  kind: "text" | "tool" | "result" | "init" | "raw" | "stderr" | "exit" | "check";
+  /** `check`: a check run after the agent; `report`: what the run did to the violations of the contract. */
+  kind: "text" | "tool" | "result" | "init" | "raw" | "stderr" | "exit" | "check" | "report";
   text: string;
   sessionId?: string;
   /** The files a tool event names (file_path, path, notebook_path of a tool_use), repository-relative when they are under it: the page lights their shapes. */
@@ -335,6 +336,9 @@ function opencodeReader(): EventReader {
   return { read, finish: () => (last === "" ? null : { kind: "result", text: last }) };
 }
 
+/** What follows an agent's exit, its events appended to the run before the exit: the checks, and what the run did to the violations it started with. */
+export type AfterRun = () => Promise<Omit<AgentEvent, "seq">[]>;
+
 /** One run of an agent: its events so far, who is waiting for more, and the process. */
 export class AgentRun {
   readonly id: string;
@@ -348,7 +352,7 @@ export class AgentRun {
   private readonly child: ChildProcess;
   private readonly secrets: readonly string[];
 
-  constructor(id: string, child: ChildProcess, sessionId: string | null, afterRun: (() => Promise<Omit<AgentEvent, "seq">[]>) | null = null, reader: EventReader = eventReader("stream-json"), agent = "", quiet: RegExp | null = null, secrets: readonly string[] = []) {
+  constructor(id: string, child: ChildProcess, sessionId: string | null, afterRun: AfterRun | null = null, reader: EventReader = eventReader("stream-json"), agent = "", quiet: RegExp | null = null, secrets: readonly string[] = []) {
     this.id = id;
     this.child = child;
     this.sessionId = sessionId;
@@ -375,7 +379,7 @@ export class AgentRun {
       const answer = reader.finish();
 
       if (answer) this.push(answer);
-      // The checks run after the agent, before the run is over: their events reach whoever listens, then the exit.
+      // The checks run after the agent, before the run is over: their events and the run's report reach whoever listens, then the exit.
       void (afterRun ? afterRun() : Promise.resolve([])).catch((error: unknown): Omit<AgentEvent, "seq">[] => [{ kind: "stderr", text: `checks: ${error instanceof Error ? error.message : String(error)}` }]).then((events) => {
         for (const event of events) this.push(event);
         this.done = true;
@@ -416,20 +420,19 @@ export class AgentRun {
 export class AgentRunner {
   readonly runs = new Map<string, AgentRun>();
   private readonly root: string;
-  private readonly afterRun: (() => Promise<Omit<AgentEvent, "seq">[]>) | null;
   private next = 1;
 
-  /** `afterRun`: what runs once the agent exits (the checks), its events appended to the run before the exit. */
-  constructor(root: string, afterRun: (() => Promise<Omit<AgentEvent, "seq">[]>) | null = null) {
+  constructor(root: string) {
     this.root = root;
-    this.afterRun = afterRun;
   }
 
   /**
    * Starts `spec` on `prompt`; `resume` continues that session — by the agent's flag, or its own resume command.
-   * Throws when the command cannot be started here (`installedAgents` says so beforehand, and why).
+   * `afterRun` is what follows the agent's exit (the checks, the run's report: whoever starts the run knows what
+   * it started from), its events appended to the run before the exit. Throws when the command cannot be started
+   * here (`installedAgents` says so beforehand, and why).
    */
-  start(spec: AgentSpec, prompt: string, resume: string | null, checks = true): AgentRun {
+  start(spec: AgentSpec, prompt: string, resume: string | null, afterRun: AfterRun | null = null): AgentRun {
     const command = resume && spec.resumeCommand ? spec.resumeCommand.map((part) => (part === "{session}" ? resume : part)) : spec.command;
     const started = commandStart(command[0]!);
 
@@ -445,7 +448,7 @@ export class AgentRunner {
     args.push(prompt);
     const child = spawn(started.value.file, args, { cwd: this.root, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...spec.env }, windowsHide: true });
     const id = `run-${this.next++}`;
-    const run = new AgentRun(id, child, resume, checks ? this.afterRun : null, eventReader(spec.protocol), spec.name, spec.quiet ?? null, spec.secrets ?? []);
+    const run = new AgentRun(id, child, resume, afterRun, eventReader(spec.protocol), spec.name, spec.quiet ?? null, spec.secrets ?? []);
     this.runs.set(id, run);
 
     return run;
@@ -454,7 +457,7 @@ export class AgentRunner {
   /** Runs `prompt` to its end and gives the result text (the agent's final answer), or the texts joined when there is no result event. */
   runToResult(spec: AgentSpec, prompt: string, timeoutMs = 180_000): Promise<string> {
     // A question to the agent (mocks, a document): no checks after it.
-    const run = this.start(spec, prompt, null, false);
+    const run = this.start(spec, prompt, null);
 
     return new Promise((resolve) => {
       const timer = setTimeout(() => run.stop(), timeoutMs);

@@ -9,16 +9,17 @@
 // new ones, which fail the check, the known ones, and the entries of the
 // baseline that no longer occur. The report is written here once — as
 // Markdown, as lines of text and as JSON — for the CLI, the page and the
-// checks after an agent's run.
+// checks after an agent's run; and two checks are set against each other
+// (`runReport`): what an agent's run fixed, what survives it, what it added.
 //
 // Type-only imports are no violation of a rule, as they are none of the
 // layers: nothing of them runs. Pure functions of the analysis: the
 // baseline is read at the edge and handed in. Entry points: `checkCode`,
 // `ContractCheck`, `checkMarkdown`, `checkSummary`, `checkJson`,
-// `violationLine`, `LAYERS_RULE`.
+// `violationLine`, `runReport`, `RunReport`, `LAYERS_RULE`.
 
 import type { Analysis } from "./analyze.ts";
-import { againstBaseline, type Baseline, type KnownViolation, type Violation } from "./baseline.ts";
+import { againstBaseline, violationKey, type Baseline, type KnownViolation, type Violation } from "./baseline.ts";
 import { CONFIG_FILE } from "./config.ts";
 import { importCycles } from "./cycles.ts";
 import type { ModuleMetrics } from "./diagram.ts";
@@ -200,6 +201,24 @@ export function checkCode(analysis: Analysis, baseline: Baseline | null): Contra
   const held = againstBaseline(violations, baseline);
 
   return { report, rules, violations, ...held, baseline: baseline?.file ?? null, ok: held.fresh.length === 0 };
+}
+
+/** What a run did to the violations of the code: the ones it fixed, the ones that survive it, the ones it added. */
+export interface RunReport {
+  /** The violations of before that the code no longer has, as they were. */
+  fixed: Violation[];
+  /** The violations of now that were there before, at their lines of now. */
+  survived: Violation[];
+  /** The violations of now that were not there before. */
+  added: Violation[];
+}
+
+/** The violations after a run against those before it, each known by what it is (`violationKey`), as the baseline knows them: a line that moved makes no violation new. */
+export function runReport(before: readonly Violation[], after: readonly Violation[]): RunReport {
+  const had = new Set(before.map(violationKey));
+  const has = new Set(after.map(violationKey));
+
+  return { fixed: before.filter((violation) => !has.has(violationKey(violation))), survived: after.filter((violation) => had.has(violationKey(violation))), added: after.filter((violation) => !had.has(violationKey(violation))) };
 }
 
 /** Markdown's marks taken out of a sentence, for a line of plain text. */

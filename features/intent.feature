@@ -92,6 +92,21 @@ Feature: The contract: ARCHITECTURE.md
     When I press "SQLite"
     Then the agent's session resumes with "SQLite"
 
+  Scenario: A run is reported against the state before it
+    Given code with two imports against the contract
+    And an agent that removes one of them and writes a new import against the contract
+    When I run a task in the Chat tab
+    Then under the checks the transcript says "✔ the run fixed 1 violation"
+    And "• 1 violation survives the run"
+    And "✘ the run added 1 violation"
+    And each names its violations with their file and line
+
+  Scenario: A run that leaves the violations as they were
+    Given code with two imports against the contract
+    When I run a task that edits no file
+    Then under the checks the transcript says "• 2 violations survive the run"
+    And nothing of fixing or adding
+
   Scenario: Round trip of the contract
     Given a contract with entities in a label such as "&lt;string | null&gt; &amp; retries"
     When it is written and read again

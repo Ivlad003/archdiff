@@ -28,7 +28,7 @@ flowchart LR
     n_src_spec_ts["src/spec.ts<br>the specs and features of the repository, the agent's task for them, the OpenSpec CLI"]
     n_src_scaffold_ts["src/scaffold.ts<br>a project from scratch with its intent and first commit"]
     n_src_gherkin_ts["src/gherkin.ts<br>Gherkin features as data, and test skeletons written from them"]
-    n_src_checks_ts["src/checks.ts<br>the checks after an agent's run: the contract check held against the baseline it reads, and the commands it runs"]
+    n_src_checks_ts["src/checks.ts<br>the checks after an agent's run: the contract check held against the baseline it reads, the commands it runs, and the run's report against the violations before it"]
   end
   subgraph n_views["views — one picture per question, and the reports; pure functions of the analysis"]
     n_src_views_ts["src/views.ts<br>the structural views and viewOf: the chain of pure steps after a view"]
@@ -134,6 +134,7 @@ flowchart LR
   n_src_routes_pictures_ts --> n_src_project_map_ts
   n_src_extract_logic_ts --> n_src_extract_control_ts
   n_src_server_ts --> n_src_checks_ts
+  n_src_routes_agent_ts --> n_src_checks_ts
   n_src_checks_ts --> n_src_violations_ts
   n_src_checks_ts --> n_src_baseline_ts
   n_src_cli_ts --> n_src_violations_ts
