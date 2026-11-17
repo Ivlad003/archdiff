@@ -40,14 +40,14 @@ The system SHALL offer `archdiff mcp [dir]`, which reads JSON-RPC 2.0 messages f
 - **WHEN** a `tools/call` and `notifications/cancelled` naming its id arrive together
 - **THEN** the call gets no answer, and the next request is answered
 
-### Requirement: Six tools that only read, answered from the code as it is now
+### Requirement: Eight tools that only read, answered from the code as it is now
 
-The system SHALL list six tools — `views`, `diagram`, `check`, `may_import`, `impact`, `review` — each with a title, a description saying what it answers and when to ask it, the JSON Schema of its arguments (no argument beyond those it names) and the hint that it only reads. A tool SHALL answer with one text. Every call SHALL read the analysis of the working tree again (calls that arrive while one is being made share it), so a file edited between two calls is in the second answer. No tool SHALL change the code, the contract or a drawing.
+The system SHALL list eight tools — `views`, `diagram`, `check`, `may_import`, `impact`, `review`, `search_code`, `search_diff` — each with a title, a description saying what it answers and when to ask it, the JSON Schema of its arguments (no argument beyond those it names) and the hint that it only reads. A tool SHALL answer with one text. Every call SHALL read the analysis of the working tree again (calls that arrive while one is being made share it), so a file edited between two calls is in the second answer. No tool SHALL change the code, the contract or a drawing.
 
 #### Scenario: The list
 
 - **WHEN** a client sends `tools/list`
-- **THEN** the tools are `views`, `diagram`, `check`, `may_import`, `impact` and `review`, each with `annotations.readOnlyHint` true
+- **THEN** the tools are `views`, `diagram`, `check`, `may_import`, `impact`, `review`, `search_code` and `search_diff`, each with `annotations.readOnlyHint` true
 
 #### Scenario: An edit between two calls
 
@@ -143,3 +143,17 @@ A call that was wrong — a tool the server does not have, an argument the tool 
 
 - **WHEN** `review` is called in a directory that is not a git repository
 - **THEN** the answer is a result with `isError` true and the text "… is not a git repository"
+
+### Requirement: search_code and search_diff list the lines that have a text
+
+The system SHALL answer `search_code` with every line of the analysed source files that has `pattern` — the text as it is, the case counting when it holds a capital, or a regular expression written between slashes with its flags — each with its file and line, at most 200 listed and the rest counted; and `search_diff` with every line the change added (+) or removed (−) that has it, for the working tree (or `head`) against `base` (the merge-base with the main line unless given), a line added at its own line of the head's file and a line removed at the line it stood before, the working tree's untracked files counted as added. A pattern that is empty or no regular expression SHALL be refused as a wrong call.
+
+#### Scenario: A name in the code
+
+- **WHEN** `search_code` is called with `/save\w+\(/` on the sample
+- **THEN** the answer counts the lines and lists `src/lib/orders.ts:10` with `saveOrder(order);`
+
+#### Scenario: A change that has no such line
+
+- **WHEN** `search_diff` is called with `saveOrder` and base `HEAD` on a working tree without changes
+- **THEN** the answer is "No line of the change since HEAD has `saveOrder`."

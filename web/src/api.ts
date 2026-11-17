@@ -301,6 +301,10 @@ export const api = {
 
     return response.text();
   },
+  /** What the change the picture shows did to one file, on the file as the Code tab has it: the lines that came, and the lines that went before a line; `since` null for a picture of no change. */
+  fileDiff: (path: string, view: string, options: PictureOptions, refs: Refs) => get<{ since: string | null; hunks: { at: number; removed: string[]; added: { from: number; to: number } | null }[] }>(`/api/diff?path=${encodeURIComponent(path)}&view=${encodeURIComponent(view)}${pictureQueryText(options)}${refsQuery(refs)}`),
+  /** The lines of the code the picture is of that have a text, or (`inChange`) the lines its change added and removed: the list as Markdown, and the lines themselves. */
+  grep: (pattern: string, inChange: boolean, view: string, options: PictureOptions, refs: Refs) => get<{ markdown: string; matches: { file: string; line: number; text: string; sign?: "+" | "-" }[]; more: number; files: number }>(`/api/grep?q=${encodeURIComponent(pattern)}${inChange ? "&diff=1" : ""}&view=${encodeURIComponent(view)}${pictureQueryText(options)}${refsQuery(refs)}`),
   coverage: (head: string | null = null) => get<{ markdown: string; ratio: number; gaps: number; calls: number }>(`/api/coverage${headQuery("?", head)}`),
   /** The download of the Postman collection of the SCAPI operations the code calls, or of one family's. */
   postmanUrl: (family: string | null, head: string | null = null) => `/api/postman${family ? `?family=${encodeURIComponent(family)}` : ""}${headQuery(family ? "&" : "?", head)}`,

@@ -2410,3 +2410,80 @@ html.dark #settings-note.wrong {
   padding: 1px 7px;
   font-size: 11px;
 }
+
+/* The Code tab on a picture of a change: the lines that came, and the lines that went, where they stood. */
+#code .line.new,
+#reader-code .line.new {
+  background: #e6f4e7;
+}
+
+#code .line.new.hit,
+#reader-code .line.new.hit {
+  background: #d9edc8;
+}
+
+#code .line.gone,
+#reader-code .line.gone {
+  background: #fdecea;
+  color: #8e2a2a;
+  text-decoration: line-through;
+  text-decoration-color: rgba(142, 42, 42, 0.45);
+}
+
+#code .line.gone .n,
+#reader-code .line.gone .n {
+  color: #c62828;
+  text-decoration: none;
+  display: inline-block;
+}
+
+html.dark #code .line.new,
+html.dark #reader-code .line.new {
+  background: #1d3524;
+}
+
+html.dark #code .line.new.hit,
+html.dark #reader-code .line.new.hit {
+  background: #33401c;
+}
+
+html.dark #code .line.gone,
+html.dark #reader-code .line.gone {
+  background: #3a1f1f;
+  color: #e6a5a5;
+  text-decoration-color: rgba(230, 165, 165, 0.45);
+}
+
+html.dark #code .line.gone .n,
+html.dark #reader-code .line.gone .n {
+  color: #ef9a9a;
+}
+
+/* The transcript: a command an agent ran on the page, and a command that could not be done. */
+#transcript .ev.do {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+#transcript .ev.do.failed,
+#transcript .answer.failed {
+  color: #c62828;
+}
+
+html.dark #transcript .ev.do.failed,
+html.dark #transcript .answer.failed {
+  color: #ef9a9a;
+}
+
+#transcript .answer table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+#transcript .answer td,
+#transcript .answer th {
+  padding: 2px 8px 2px 0;
+  text-align: left;
+  vertical-align: top;
+}

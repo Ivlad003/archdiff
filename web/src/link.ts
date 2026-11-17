@@ -82,6 +82,13 @@ export function readOnlyView(view: string): boolean {
   return kind === "review" || kind === "compare" || kind === "commit" || kind === "branches" || kind === "whatif" || kind === "changes";
 }
 
+/** Whether the picture of a link shows a change with two ends — a review, one commit, the commit the timeline is at, the uncommitted changes, or the changes laid over another picture: the Code tab then marks the lines that came and went. */
+export function showsChange(link: Link): boolean {
+  const kind = parseView(link.view)?.kind;
+
+  return link.changes || link.changed || kind === "review" || kind === "commit" || kind === "changes" || (kind === "timeline" && link.at !== null);
+}
+
 /** The revision whose code the page shows (null: the working tree), as `codeRevision` says for the link's view. */
 export function codeHead(link: Link): string | null {
   return codeRevision(parseView(link.view), link.head, link.at);

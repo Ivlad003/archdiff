@@ -184,3 +184,20 @@ Feature: The page
     Given the same address in a window of its own
     When I tap the module's shape
     Then the Code tab comes to the front with the file
+
+  Scenario: The Chat tab drives the page
+    Given the sample with a change in its working tree, the page open on "layers" and no agent picked
+    When I type "/view layer:lib", "/as markdown", "/as canvas" and "/mix orders" in the question row
+    Then the layer opens, is shown as its page and as the canvas again, and orders.ts is opened in place
+    When I type "/split layers", then "/split off"
+    Then a second picture shows the layers beside the first, and goes
+    When I type "/grep saveOrder"
+    Then the transcript lists the lines with their places, a place opens the code, and the shapes of the files are lit
+    When I type "/diff order.total"
+    Then the transcript lists the line the change removed and the line it added
+    When I type "/nope"
+    Then the transcript says it is no command, and no agent is started
+    When I type "/ov" and press Enter
+    Then the field holds "/overlay "
+    When the fake agent answers with an archdiff-do block of "/view layer:db", "/as markdown" and "/edit"
+    Then the page shows the db layer as its page and the transcript says the edit is the reader's to run

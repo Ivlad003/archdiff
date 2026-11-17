@@ -212,6 +212,33 @@ export interface LogicData {
   truncated?: true;
   /** More rules than the table lists. */
   moreRules?: number;
+  /** With `changes`: the body's logic held against what it was at the base. */
+  changes?: LogicChanges;
+}
+
+/** A step of a function's logic a change touched: what it is and where, and for one that lives on, what of it is new and what it had that is gone. */
+export interface LogicStepChange {
+  kind: "decision" | "loop" | "action" | "return" | "throw";
+  text: string;
+  /** Its line: in the head's file, or in the base's for a step that is gone. */
+  line: number;
+  /** A changed step: the statements it has that the base had not (a condition, an exit, a line of an action). */
+  came?: string[];
+  /** A changed step: the statements the base had in its place that are gone. */
+  went?: string[];
+}
+
+/** What a change did to a function's logic: the steps added, removed and changed, and the rules (the paths from the start to an exit) that came and went. */
+export interface LogicChanges {
+  /** The revision the body is held against, as a review names it. */
+  since: string;
+  /** The function was not there at the base: all of it is new. */
+  isNew?: true;
+  added: LogicStepChange[];
+  removed: LogicStepChange[];
+  changed: LogicStepChange[];
+  rulesAdded: LogicRule[];
+  rulesRemoved: LogicRule[];
 }
 
 /** A rule of a function: one way through it — the branches taken in order (`total < 0: yes`), the calls on the way, and how it ends. */

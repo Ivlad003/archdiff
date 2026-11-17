@@ -168,3 +168,21 @@ The system SHALL keep the user's settings in `<home>/.archdiff/settings.json` (`
 
 - **WHEN** the server is bound to every address and the settings are asked for through another address than this computer's own
 - **THEN** the answer is 403 and says the settings are read and changed on the computer archdiff runs on
+
+### Requirement: An agent shows the reader something on the page
+
+Every run's protocol SHALL tell the agent the commands of the page it may write — the ones that show something: a view, how it is shown, the detail and the options of the picture, an overlay, modules opened in place, a selection, a search of the code or of the change, a review, a comparison, a commit, the board, an impact, a function's logic, a second picture — and how: one fenced `archdiff-do` block, one command a line. The page SHALL run the commands of such a block in the agent's text or result in order, each once per run, and say in the transcript which command it ran and what the command said; a command the table does not give an agent (one that draws, exports, picks an agent, stops a run, opens the settings or starts a run) SHALL be refused, and the transcript SHALL say so. The protocol SHALL also name `archdiff grep` for a search in the shell.
+
+#### Scenario: An agent opens a view
+
+- **WHEN** an agent's answer holds an `archdiff-do` block with `/view layer:db`, `/as markdown` and `/edit`
+- **THEN** the page shows the layer `db` as its page, and the transcript reads "↳ /view layer:db — Opened layer:db.", "↳ /as markdown — The view is shown as its page." and "↳ /edit — ⚠ /edit is the reader's to run, not an agent's"
+
+### Requirement: Claude Code is given archdiff's MCP server
+
+The system SHALL start Claude Code, from the page, with archdiff's own MCP server configured for the run — this archdiff's entry, `mcp`, on the repository the page shows, as one `--mcp-config` argument before the list of allowed tools — and SHALL add the server's tools (`mcp__archdiff`) to the tools Claude Code may use without asking. Another agent SHALL be started as before, with its own configuration.
+
+#### Scenario: A run of Claude Code
+
+- **WHEN** a task is run with Claude Code
+- **THEN** its arguments hold `--mcp-config` with a server `archdiff` whose command is node and whose arguments are archdiff's entry, `mcp` and the repository's path, and `--allowedTools` lists `mcp__archdiff`

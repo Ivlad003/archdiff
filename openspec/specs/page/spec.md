@@ -387,3 +387,41 @@ The system SHALL, when the page is opened with `?host=1` inside a frame, post to
 
 - **WHEN** the same address is open in a window of its own and the reader taps the shape
 - **THEN** the Code tab comes to the front with the file
+
+### Requirement: The Code tab shows a change on the file
+
+On a picture of a change (a review, a commit's view, the timeline at a commit, the uncommitted changes, or *changes since base* over any picture) the Code tab SHALL show the file as the change's head has it with the change laid on it: the lines that came tinted, the lines that went standing where they stood, struck out and without a number, and a first line that names the base and counts both; the text the copy button takes SHALL be the file's own. On a picture of no change, and when git refuses the diff, the file SHALL be shown plain. A view a page names in a code span by its key with a subject (`logic:src/lib/orders.ts#placeOrder`) SHALL open that view on a press, with *changes since base* on when the picture left was one of a change.
+
+#### Scenario: A changed file in a review
+
+- **WHEN** the reader picks `src/lib/orders.ts` on the review of a change that added its line 10 and rewrote its line 17
+- **THEN** the Code tab's first line reads "src/lib/orders.ts — since <base>: +2 −1 lines", lines 10 and 17 are tinted, and the line that went stands before line 17 without a number
+
+#### Scenario: From a module's page to a function's logic
+
+- **WHEN** the reader presses "logic:src/lib/orders.ts#placeOrder" on the module's page in a review
+- **THEN** the flowchart of `placeOrder` opens with `changes=1` in the link, the new guard and its exit marked added
+
+### Requirement: The Chat tab drives the page
+
+A line that starts with a slash and a word, in the question row, the task box or the follow-up, SHALL be a command of the page and never a task for an agent: it SHALL run whether an agent is picked or not, its line SHALL stand in the transcript with what the command said of itself under it, and what cannot be done — a word that names no command, an argument the command does not take, a name that fits no view or several — SHALL be said there with the reason. The commands SHALL be the one table of `src/chat-commands.ts`: a view by its key or by words of its title; how it is shown; the detail, the depth, the fold limit, the weight, the hubs, the packages, the overlays, the changes, the changed files, a preset; modules opened in place and closed; the lanes; a selection and a find on the picture; a review, a comparison, a commit, the board, an impact, a function's logic; a second picture beside the first, on a view of its own; an export; the dim tool, the full canvas, a side panel, the editor; and the tab's own — a question, the agent picked, a stop, the checks, the contract built, reviewed and written from a document, the settings. `/help` SHALL list them, and `/help <command>` one. While a command's name is typed the commands that start so SHALL be suggested under the field; Tab or Enter SHALL take the one marked, and Enter on a name typed whole SHALL run it. `/grep <text>` SHALL list the lines of the code the page shows that have the text, and `/diff <text>` the lines the change of the picture added and removed (the change since the default base, on a picture of none), each with its `file:line`, which opens the code, and SHALL light the shapes of the files found.
+
+#### Scenario: A view, a mode and a module opened in place
+
+- **WHEN** the reader types `/view layer:lib`, then `/as markdown`, `/as canvas` and `/mix orders`, with no agent picked
+- **THEN** the layer opens, is shown as its page and as the canvas again, and `src/lib/orders.ts` is opened in place with its functions as shapes; the transcript says what each did
+
+#### Scenario: A search of the code and of the change
+
+- **WHEN** the reader types `/grep saveOrder`, then `/diff order.total` on a working tree that rewrote one line with it
+- **THEN** the first lists the lines of the code with their places and lights the shapes of their files, and the second lists the line removed and the line added at `src/lib/orders.ts:17`
+
+#### Scenario: What is no command
+
+- **WHEN** the reader types `/nope`
+- **THEN** the transcript reads "/nope is no command (/help lists them)" and no agent is started
+
+#### Scenario: A suggestion
+
+- **WHEN** the reader types `/ov` in the question row and presses Enter
+- **THEN** the field holds "/overlay " and nothing is run

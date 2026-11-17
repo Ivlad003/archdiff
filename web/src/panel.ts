@@ -25,10 +25,10 @@ import { element, remember, rememberList, remembered, rememberedList } from "./d
 import { flowText } from "./flow-tab.ts";
 import { hosted, tellHost } from "./host.ts";
 import { revealDetails } from "./layout.ts";
-import { codeHead, currentLink, setLink } from "./link.ts";
+import { codeHead, currentLink, refsOf, setLink, showsChange } from "./link.ts";
 import { fnView, functionsOf, isFilePath } from "./modules.ts";
 import { moduleOfId } from "../../src/shape-keys.ts";
-import { isSourceFile } from "../../src/view-keys.ts";
+import { isSourceFile, parseView } from "../../src/view-keys.ts";
 import { page } from "./page.ts";
 import { loadSpecs, specTextOf } from "./spec-tab.ts";
 
@@ -272,6 +272,17 @@ export function renderMarkdown(target: HTMLElement, markdown: string, navigation
       code.title = "Show the code";
       code.addEventListener("click", () => void showCode({ id: text, kind: "module", label: text, ref: { file: match[1]!, line: match[2] ? Number(match[2]) : 1 }, x: 0, y: 0, w: 0, h: 0 }));
     }
+
+    // A view a page names by its key with a subject (`logic:src/x.ts#fn`) opens it — from a picture of a change with the
+    // changes laid over, so a function's flowchart comes with the marks of what the change did to it.
+    if (!match && text.includes(":") && parseView(text)?.subject && page.nodes().size > 0) {
+      code.classList.add("link");
+      code.title = "Open this view";
+      code.addEventListener("click", () => {
+        const link = currentLink();
+        setLink({ ...link, view: text, changes: link.changes || showsChange(link) });
+      });
+    }
   }
 }
 
@@ -333,6 +344,8 @@ function spotOf(node: Shape): CodeSpot | null {
  * The code of a spot in `target`: the file, line by line with its numbers, the spot's lines marked when it says so;
  * the first marked line comes back, for the caller to scroll to. A file asked for after this one draws instead: the
  * code of the spot asked last, however slow the first was. Null when the file could not be read: the element says so.
+ * On a picture of a change the file wears the change: the lines that came are tinted, the lines that went stand where
+ * they stood, struck out and without a number — the diff read in its place, not beside it.
  */
 export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<HTMLElement | null> {
   const { file } = spot;
@@ -340,9 +353,12 @@ export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<H
   codeLoads.set(target, mine);
 
   let text: string;
+  const link = currentLink();
+  // The change's lines are asked for with the file; a picture of no change, or a diff git refuses, leaves the file plain.
+  const changed = showsChange(link) ? api.fileDiff(file, link.view, link, refsOf(link)).catch(() => null) : null;
 
   try {
-    text = await api.file(file, codeHead(currentLink()));
+    text = await api.file(file, codeHead(link));
   } catch (error) {
     if (mine !== codeLoads.get(target)) return null;
     target.textContent = error instanceof Error ? error.message : String(error);
@@ -350,6 +366,8 @@ export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<H
 
     return null;
   }
+
+  const diff = await changed;
 
   if (mine !== codeLoads.get(target)) return null;
 
@@ -360,10 +378,32 @@ export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<H
   target.dataset["text"] = text;
   const lines = text.split("\n");
   let first: HTMLElement | null = null;
+  const came = new Set<number>();
+  const went = new Map<number, string[]>();
+
+  for (const hunk of diff?.hunks ?? []) {
+    for (let at = hunk.added?.from ?? 1; hunk.added && at <= hunk.added.to; at++) came.add(at);
+
+    if (hunk.removed.length > 0) went.set(hunk.at, [...(went.get(hunk.at) ?? []), ...hunk.removed]);
+  }
+
+  /** The base's lines that stood before the head's line `at`, struck out; they have no number of their own. */
+  const gone = (at: number): void => {
+    for (const was of went.get(at) ?? []) {
+      const line = document.createElement("span");
+      line.className = "line gone";
+      const number = document.createElement("span");
+      number.className = "n";
+      number.textContent = "−";
+      line.append(number, was);
+      target.append(line);
+    }
+  };
 
   for (let i = 0; i < lines.length; i++) {
+    gone(i + 1);
     const line = document.createElement("span");
-    line.className = `line${mark && i + 1 >= from && i + 1 <= to ? " hit" : ""}`;
+    line.className = `line${mark && i + 1 >= from && i + 1 <= to ? " hit" : ""}${came.has(i + 1) ? " new" : ""}`;
     const number = document.createElement("span");
     number.className = "n";
     number.textContent = String(i + 1);
@@ -373,7 +413,11 @@ export async function renderCode(target: HTMLElement, spot: CodeSpot): Promise<H
     if (i + 1 === from) first = line;
   }
 
-  target.prepend(Object.assign(document.createElement("div"), { className: "muted", textContent: `${file}${from > 1 ? `:${from}` : ""}` }));
+  // Lines gone from the end of the file stand after its last line.
+  for (const at of [...went.keys()].filter((key) => key > lines.length).sort((a, b) => a - b)) gone(at);
+  const removed = [...went.values()].reduce((sum, each) => sum + each.length, 0);
+  const since = diff?.since ? ` — since ${diff.since}: ${came.size === 0 && removed === 0 ? "this file is as it was" : `+${came.size} −${removed} ${came.size + removed === 1 ? "line" : "lines"}`}` : "";
+  target.prepend(Object.assign(document.createElement("div"), { className: "muted", textContent: `${file}${from > 1 ? `:${from}` : ""}${since}` }));
 
   return first;
 }

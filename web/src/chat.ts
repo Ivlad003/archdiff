@@ -9,8 +9,16 @@
 // the contract, and the previous tasks. Takes the page as its context
 // (page.ts).
 //
+// A line that starts with a slash, in any of the tab's fields, is a
+// command of the page (src/chat-commands.ts names them, commands.ts does
+// them): it runs with or without an agent, its answer stands in the
+// transcript, and the commands are suggested as they are typed. An agent
+// writes the same commands in an `archdiff-do` block of its answer to show
+// the reader something; the page runs the ones an agent may.
+//
 // Entry points: `askAbout`, `runTask`, `setAgentName`, `agentNameOf`, `loadAgents`,
-// `loadTasks`, and the elements `taskField`, `runButton`, `runState`,
+// `loadTasks`, `askAgent`, `agentCommand`, `runChecksNow`, `stopRun`,
+// `pickAgent`, and the elements `taskField`, `runButton`, `runState`,
 // `transcript`.
 
 import { api } from "./api.ts";
@@ -18,6 +26,7 @@ import { element, h } from "./dom.ts";
 import { revealDetails } from "./layout.ts";
 import { page } from "./page.ts";
 import { readOnlyView, setLink, currentLink } from "./link.ts";
+import { CHAT_COMMANDS, doCommands, parseCommandLine } from "../../src/chat-commands.ts";
 import { pictureQueryText } from "../../src/options.ts";
 import { tagsIn } from "../../src/shape-keys.ts";
 
@@ -87,7 +96,7 @@ function appendEvent(kind: string, text: string): void {
 }
 
 /** The contract and the configured checks, run now and shown in the transcript. */
-async function runChecksNow(): Promise<void> {
+export async function runChecksNow(): Promise<void> {
   const button = element<HTMLButtonElement>("checks");
   button.disabled = true;
   runState.textContent = "running the checks…";
@@ -135,6 +144,55 @@ async function withContext(prompt: string): Promise<string> {
   }
 }
 
+// ── The commands: a slash line of the reader's, a block of an agent's ─────────
+
+/** What a command said of itself, in the transcript under the line that asked for it; a failure reads as one. */
+function said(markdown: string, failed = false): void {
+  const answer = h("div", { class: `answer ev result${failed ? " failed" : ""}` });
+  page.renderMarkdown(answer, markdown);
+  transcript.append(answer);
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+/** Runs a slash line of the reader's: the page does what it says, and what the command says of itself stands in the transcript. */
+function runSlash(line: string): void {
+  transcript.append(row("you", `▸ ${line.trim()}`));
+  page.showTab("chat");
+  void page.command(line, "reader").then(
+    (answer) => {
+      if (answer !== "") said(answer);
+    },
+    (error: unknown) => said(`⚠ ${error instanceof Error ? error.message : String(error)}`, true),
+  );
+}
+
+/**
+ * Whether a field's text is meant as a command: a slash and a word at its start. A word that names no command is one
+ * all the same — a command mistyped, which the page answers with the list; it is never sent to an agent as a task.
+ * A path (`/src/x.ts is wrong`) is no command: a slash follows its first word.
+ */
+function isCommand(text: string): boolean {
+  return parseCommandLine(text) !== null || /^\/[a-z]+(\s|$)/i.test(text.trim());
+}
+
+/**
+ * The commands of an agent's `archdiff-do` blocks, run in order, each once per run (the agent's text and its result
+ * may both carry the block): the page shows what the agent asks it to, and a line of the transcript says which
+ * command that was — or why it was not run.
+ */
+function doForAgent(text: string, run: { done: Set<string>; queue: Promise<void> }): void {
+  for (const line of doCommands(text)) {
+    if (run.done.has(line)) continue;
+    run.done.add(line);
+    run.queue = run.queue.then(() =>
+      page.command(line, "agent").then(
+        (answer) => void transcript.append(row("do", `↳ ${line}${answer === "" ? "" : ` — ${answer.replace(/[`*]/g, "").split("\n")[0]}`}`)),
+        (error: unknown) => void transcript.append(row("do failed", `↳ ${line} — ⚠ ${error instanceof Error ? error.message : String(error)}`)),
+      ),
+    );
+  }
+}
+
 // ── A question about the picture or the selected shapes ──────────────────────
 
 const askInput = element<HTMLInputElement>("ask");
@@ -175,6 +233,14 @@ export function askAbout(subjects: { tag: string; label: string }[]): void {
 function askQuestion(): void {
   const question = askInput.value.trim();
 
+  // A command, not a question: the page does it, agent or none.
+  if (isCommand(question)) {
+    askInput.value = "";
+    runSlash(question);
+
+    return;
+  }
+
   // A turn still going takes no second task: the question stays in its field, to be asked when the run's line says it ended.
   if (question === "" || (agentName !== null && busy())) return;
   const state = currentLink();
@@ -196,9 +262,20 @@ function askQuestion(): void {
   });
 }
 
+/** A question put to the agent as the question row puts it (the `/ask` command). */
+export function askAgent(question: string): void {
+  askInput.value = question;
+  askQuestion();
+}
+
 element<HTMLButtonElement>("ask-go").addEventListener("click", askQuestion);
 askInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") askQuestion();
+  // While a suggestion is offered, Enter takes it (the handler below); else it asks.
+  if (event.key === "Enter" && !enterCompletes(askInput)) {
+    suggest.hidden = true;
+    askQuestion();
+  }
+
   event.stopPropagation();
 });
 
@@ -207,8 +284,23 @@ const suggest = element<HTMLUListElement>("tag-suggest");
 let suggestFor: HTMLTextAreaElement | HTMLInputElement | null = null;
 let suggestIndex = 0;
 
-function tagAtCursor(field: HTMLTextAreaElement | HTMLInputElement): { start: number; query: string } | null {
+/**
+ * Whether Enter in `field` takes the suggestion offered: one is offered there, and it is not what the field holds
+ * already — a command typed whole is run by Enter, not written a second time.
+ */
+function enterCompletes(field: HTMLTextAreaElement | HTMLInputElement): boolean {
+  if (suggest.hidden || suggestFor !== field) return false;
+  const offered = suggest.querySelectorAll("li")[suggestIndex]?.querySelector("code")?.textContent;
+
+  return offered !== undefined && offered !== null && offered !== field.value.trim();
+}
+
+function tagAtCursor(field: HTMLTextAreaElement | HTMLInputElement): { start: number; query: string; command?: true } | null {
   const upTo = field.value.slice(0, field.selectionStart ?? field.value.length);
+  // A slash and the start of a name, with nothing before it: a command being typed.
+  const command = upTo.match(/^\/([a-z]*)$/);
+
+  if (command) return { start: 0, query: command[1] ?? "", command: true };
   const match = upTo.match(/@([\w:/#.\-]*)$/);
 
   return match ? { start: upTo.length - match[0].length, query: match[1] ?? "" } : null;
@@ -223,7 +315,8 @@ async function showSuggestions(field: HTMLTextAreaElement | HTMLInputElement): P
     return;
   }
 
-  const { tags } = await api.tags(at.query);
+  // The commands whose name starts as typed, from the table; the tags from the server.
+  const tags = at.command ? CHAT_COMMANDS.filter((command) => command.name.startsWith(at.query)).slice(0, 14).map((command) => ({ tag: `/${command.name}`, title: `${command.args ? ` ${command.args} ` : " "}— ${command.does}` })) : (await api.tags(at.query)).tags;
   suggest.replaceChildren();
   suggestFor = field;
   suggestIndex = 0;
@@ -261,7 +354,7 @@ function insertTag(tag: string): void {
   suggestFor.focus();
 }
 
-for (const field of [element<HTMLTextAreaElement>("task"), element<HTMLInputElement>("followup")]) {
+for (const field of [element<HTMLTextAreaElement>("task"), element<HTMLInputElement>("followup"), askInput]) {
   field.addEventListener("input", () => void showSuggestions(field));
   field.addEventListener("blur", () => setTimeout(() => (suggest.hidden = true), 150));
   field.addEventListener("keydown", (event: Event) => {
@@ -274,6 +367,8 @@ for (const field of [element<HTMLTextAreaElement>("task"), element<HTMLInputElem
       suggestIndex = (suggestIndex + (key === "ArrowDown" ? 1 : items.length - 1)) % Math.max(1, items.length);
       items.forEach((item, i) => item.classList.toggle("active", i === suggestIndex));
     } else if (key === "Enter" || key === "Tab") {
+      // Enter on a command typed whole is the field's own, to run it.
+      if (key === "Enter" && !enterCompletes(field)) return;
       event.preventDefault();
       const code = items[suggestIndex]?.querySelector("code")?.textContent;
 
@@ -358,8 +453,8 @@ function showQuestion(text: string, run: { sessionId: string | null }): boolean 
   return true;
 }
 
-/** The Chat tab's commands, by button or by a slash line in the task field. */
-async function runCommand(command: "code" | "diagram" | "doc", argument: string): Promise<void> {
+/** The Chat tab's own commands — the contract built from the drawing, reviewed by the agent, written from a document — by button or by a slash line. */
+export async function agentCommand(command: "code" | "diagram" | "doc", argument: string): Promise<void> {
   const state = currentLink();
 
   // "code this" folds the drawing into the contract before the run: not while another run edits the repository.
@@ -425,17 +520,11 @@ function showRunError(error: unknown): void {
 }
 
 export function runTask(written: string, resume: string | null, shown: string = written): void {
+  // A slash line is a command, not a task: the page does it, with an agent picked or none.
+  if (isCommand(written)) return runSlash(written);
+
   if (!agentName || written.trim() === "" || busy()) return;
   element<HTMLDivElement>("question").hidden = true;
-
-  // A slash line is a command, not a task.
-  const slash = written.trim().match(/^\/(code|diagram|doc)\b\s*([\s\S]*)$/);
-
-  if (slash) {
-    void runCommand(slash[1] as "code" | "diagram" | "doc", slash[2] ?? "").catch(showRunError);
-
-    return;
-  }
   const state = currentLink();
   setRunning(true);
   runState.textContent = `running ${labelOf(agentName)}…`;
@@ -455,6 +544,7 @@ export function runTask(written: string, resume: string | null, shown: string = 
     .then(({ id, task, agent }) => {
       runState.textContent = `running ${labelOf(agent)} (${id}); task saved to ${task}`;
       const run = { id, sessionId: resume, stopped: false, agent, close: () => {} };
+      const shownByAgent = { done: new Set<string>(), queue: Promise.resolve() };
       currentRun = run;
       run.close = api.agentEvents(
         id,
@@ -463,7 +553,10 @@ export function runTask(written: string, resume: string | null, shown: string = 
 
           if (event.kind !== "init") appendEvent(event.kind, event.text);
 
-          if (event.kind === "text" || event.kind === "result") showQuestion(event.text, run);
+          if (event.kind === "text" || event.kind === "result") {
+            showQuestion(event.text, run);
+            doForAgent(event.text, shownByAgent);
+          }
 
           // The shapes of the files the agent touches light up as it works, like a run passing through them.
           if (event.files && page.canvas()) {
@@ -503,9 +596,9 @@ export function runTask(written: string, resume: string | null, shown: string = 
 }
 
 element<HTMLButtonElement>("plan").addEventListener("click", () => void readTask().catch(showRunError));
-element<HTMLButtonElement>("code-this").addEventListener("click", () => void runCommand("code", "").catch(showRunError));
-element<HTMLButtonElement>("improve-diagram").addEventListener("click", () => void runCommand("diagram", "").catch(showRunError));
-element<HTMLButtonElement>("from-document").addEventListener("click", () => void runCommand("doc", ""));
+element<HTMLButtonElement>("code-this").addEventListener("click", () => void agentCommand("code", "").catch(showRunError));
+element<HTMLButtonElement>("improve-diagram").addEventListener("click", () => void agentCommand("diagram", "").catch(showRunError));
+element<HTMLButtonElement>("from-document").addEventListener("click", () => void agentCommand("doc", ""));
 
 const documentGo = async (): Promise<void> => {
   const text = element<HTMLTextAreaElement>("document").value.trim();
@@ -536,19 +629,36 @@ element<HTMLTextAreaElement>("document").addEventListener("keydown", (event) => 
 });
 runButton.addEventListener("click", () => runTask(taskField.value, null));
 taskField.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey || /^\/(code|diagram|doc)\b/.test(taskField.value.trim()))) {
+  // Enter runs a command as it stands (a suggestion offered takes the key first); a task is run by Ctrl+Enter.
+  if (event.key === "Enter" && !enterCompletes(taskField) && (event.ctrlKey || event.metaKey || isCommand(taskField.value))) {
     event.preventDefault();
-    runTask(taskField.value, null);
+    suggest.hidden = true;
+    const written = taskField.value;
+
+    if (isCommand(written)) taskField.value = "";
+    runTask(written, null);
   }
 });
-stopButton.addEventListener("click", () => {
-  if (!currentRun) return;
+
+/** Stops the run that is going; whether there was one. */
+export function stopRun(): boolean {
+  if (!currentRun || !running) return false;
   currentRun.stopped = true;
   void api.stopAgent(currentRun.id);
-});
+
+  return true;
+}
+
+stopButton.addEventListener("click", () => void stopRun());
 followup.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && followup.value.trim() !== "" && currentRun) {
-    const message = followup.value.trim();
+  if (event.key !== "Enter" || followup.value.trim() === "" || enterCompletes(followup)) return;
+  suggest.hidden = true;
+  const message = followup.value.trim();
+
+  if (isCommand(message)) {
+    followup.value = "";
+    runSlash(message);
+  } else if (currentRun) {
     followup.value = "";
     runTask(message, currentRun.sessionId);
   }
@@ -616,6 +726,20 @@ export async function loadAgents(): Promise<void> {
   const picked = remembered === "" ? null : usable(remembered) ? remembered : offered.default;
   agentSelect.value = picked ?? "";
   setAgentName(picked);
+}
+
+/** Picks the agent `name` names (its name or its label; `none` for none) as the picker does, and says which; thrown when it is not offered or cannot run here. */
+export function pickAgent(name: string): string {
+  const asked = name.trim().toLowerCase();
+  const option = [...agentSelect.options].find((each) => (asked === "none" ? each.value === "" : each.value.toLowerCase() === asked || (agentLabels.get(each.value) ?? "").toLowerCase() === asked));
+
+  if (!option) throw new Error(`agent: one of ${[...agentSelect.options].map((each) => each.value || "none").join(", ")}`);
+
+  if (option.disabled) throw new Error(`${labelOf(option.value)} cannot run here: the settings say why (/settings)`);
+  agentSelect.value = option.value;
+  agentSelect.dispatchEvent(new Event("change"));
+
+  return option.value === "" ? "No agent: the tasks are only written." : `The tasks and the questions go to ${labelOf(option.value)}.`;
 }
 
 agentSelect.addEventListener("change", () => {

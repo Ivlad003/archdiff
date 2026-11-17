@@ -23,6 +23,7 @@ flowchart LR
   end
   subgraph n_edge["edge — what a command reads from git and the files, and the processes it runs"]
     n_src_picture_ts["src/picture.ts<br>the picture of a view: what it reads at the edge, drawn, placed at the saved drawing, stamped, as Markdown"]
+    n_src_search_ts["src/search.ts<br>the lines of the code, or of a change, that have a text: for the Chat tab, the CLI's grep and the agent's tools"]
     n_src_review_ts["src/review.ts<br>a change read from git: a review, several heads, every commit of a range"]
     n_src_run_ts["src/run.ts<br>a real run of an entry with the storages mocked, traced function by function"]
     n_src_spec_ts["src/spec.ts<br>the specs and features of the repository, the agent's task for them, the OpenSpec CLI"]
@@ -48,6 +49,7 @@ flowchart LR
     n_src_whatif_ts["src/whatif.ts<br>a change supposed, not made: the graph after a move, a deletion or a split, set against the graph as it is — its diff, the contract and the cycles after it, what it breaks"]
     n_src_machines_ts["src/machines.ts<br>state machines: declared by a library, or written with literal states"]
     n_src_logic_ts["src/logic.ts<br>a function's body as a flowchart with its paths as rules, and the list of branching functions"]
+    n_src_logic_diff_ts["src/logic-diff.ts<br>what a change did to a function's logic: two flowcharts matched statement by statement"]
     n_src_project_map_ts["src/project-map.ts<br>the whole repository as dots and lines for the page's project map"]
     n_src_violations_ts["src/violations.ts<br>what check finds — imports against the layers, violations of the rules — held against the baseline: the new, the known, the fixed; the report as Markdown, text and JSON"]
   end

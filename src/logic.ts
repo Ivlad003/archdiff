@@ -7,12 +7,18 @@
 // it ends. The flowchart is read from the file on demand (extract/logic.ts,
 // by picture.ts at the edge), not kept in the facts.
 //
+// With `changes` the body is held against what it was at the base
+// (logic-diff.ts): the steps that are new or changed wear the marks of a
+// review, the steps and the arrows that are gone are drawn where they
+// hung, and the page lists what came and went — steps, and rules.
+//
 // Pure functions of the analysis and the fact read for the view. Entry
-// points: `logicView`, `logicList`.
+// points: `logicView`, `logicList`, `logicChanges`, `LogicBefore`.
 
 import type { Analysis } from "./analyze.ts";
-import type { PictureContent, Line, Shape, LogicData, LogicRule } from "./diagram.ts";
+import type { PictureContent, Line, Shape, LogicChanges, LogicData, LogicRule, LogicStepChange } from "./diagram.ts";
 import type { LogicEdge, LogicFact, LogicStep } from "./extract/logic.ts";
+import { arrowKey, logicDelta, type LogicDelta } from "./logic-diff.ts";
 import { moduleOf, type Declaration } from "./graph.ts";
 import { lane, unplaced } from "./nodes.ts";
 import { counted } from "./words.ts";
@@ -113,8 +119,66 @@ function calleeOf(analysis: Analysis, fnId: string, step: LogicStep): string | n
   return (branching ?? calls[0])?.to ?? null;
 }
 
-/** One function's body as a flowchart; the `logic` list when `scope` is null. */
-export function logicView(analysis: Analysis, scope: string | null, fact: LogicFact | null | undefined): PictureContent {
+/** The body of a function as the base of a change had it: its flowchart (null: the function was not there, or could not be read), and what the base is called. */
+export interface LogicBefore {
+  fact: LogicFact | null;
+  since: string;
+}
+
+/** A step as a change lists it. */
+function stepChange(step: LogicStep, more: Pick<LogicStepChange, "came" | "went"> = {}): LogicStepChange {
+  return { kind: step.kind as LogicStepChange["kind"], text: step.text, line: step.line, ...more };
+}
+
+/** A rule as one line, to tell two rules apart. */
+function ruleKey(rule: LogicRule): string {
+  return `${rule.conditions.join(" \u2227 ")} \u21d2 ${rule.kind} ${rule.outcome} [${rule.calls.join(", ")}]`;
+}
+
+/**
+ * What the change from `before` did to the logic `fact` has now: the steps and the rules that came and went, and the
+ * marks for the picture (`delta`; null when the function is new, all of it added).
+ */
+export function logicChanges(fact: LogicFact, before: LogicBefore): { changes: LogicChanges; delta: LogicDelta | null } {
+  const rules = rulesOf(fact).rules;
+
+  if (!before.fact) {
+    const steps = fact.nodes.filter((step) => step.kind !== "start" && step.kind !== "end");
+
+    return { changes: { since: before.since, isNew: true, added: steps.map((step) => stepChange(step)), removed: [], changed: [], rulesAdded: rules, rulesRemoved: [] }, delta: null };
+  }
+
+  const delta = logicDelta(before.fact, fact);
+  const had = rulesOf(before.fact).rules;
+  const hadKeys = new Set(had.map(ruleKey));
+  const hasKeys = new Set(rules.map(ruleKey));
+  const byLine = (a: LogicStepChange, b: LogicStepChange): number => a.line - b.line;
+
+  return {
+    changes: {
+      since: before.since,
+      added: delta.added.map((step) => stepChange(step)).sort(byLine),
+      removed: delta.removed.map((step) => stepChange(step)).sort(byLine),
+      changed: delta.changed.map(({ step, came, went }) => stepChange(step, { came, went })).sort(byLine),
+      rulesAdded: rules.filter((rule) => !hadKeys.has(ruleKey(rule))),
+      rulesRemoved: had.filter((rule) => !hasKeys.has(ruleKey(rule))),
+    },
+    delta,
+  };
+}
+
+/** How many of a change's steps and rules came, went and changed, in a line; that nothing did, when nothing did. */
+function changesNote(changes: LogicChanges): string {
+  if (changes.isNew) return `new since ${changes.since}: every step is added`;
+  const steps = changes.added.length + changes.removed.length + changes.changed.length;
+
+  if (steps === 0 && changes.rulesAdded.length === 0 && changes.rulesRemoved.length === 0) return `the logic is as it was at ${changes.since}`;
+
+  return `since ${changes.since}: steps +${changes.added.length} \u2212${changes.removed.length} ~${changes.changed.length}, rules +${changes.rulesAdded.length} \u2212${changes.rulesRemoved.length}`;
+}
+
+/** One function's body as a flowchart; the `logic` list when `scope` is null. With `before`, held against the base's. */
+export function logicView(analysis: Analysis, scope: string | null, fact: LogicFact | null | undefined, before?: LogicBefore): PictureContent {
   if (scope === null) return logicListView(analysis);
   const fn = analysis.graph.nodes.get(scope);
 
@@ -136,6 +200,25 @@ export function logicView(analysis: Analysis, scope: string | null, fact: LogicF
     return node;
   });
   const edges: Line[] = fact.edges.map((edge) => (edge.label === undefined ? { from: edge.from, to: edge.to, kind: "flow" } : { from: edge.from, to: edge.to, kind: "flow", label: edge.label }));
+  const held = before ? logicChanges(fact, before) : null;
+
+  // The marks of the change: what is new and what reads otherwise on the head's steps; what is gone drawn where it hung.
+  if (held) {
+    const marks = new Map<string, Shape["diff"]>(held.delta ? [...held.delta.added.map((step): [string, Shape["diff"]] => [step.id, "added"]), ...held.delta.changed.map(({ step }): [string, Shape["diff"]] => [step.id, "changed"])] : fact.nodes.filter((step) => step.kind !== "start" && step.kind !== "end").map((step): [string, Shape["diff"]] => [step.id, "added"]));
+
+    for (const node of nodes) {
+      const mark = marks.get(node.id);
+
+      if (mark) node.diff = mark;
+    }
+
+    for (const edge of edges) if (!held.delta || held.delta.arrowsAdded.has(arrowKey(edge))) edge.diff = "added";
+
+    for (const step of held.delta?.removed ?? []) nodes.push({ id: step.id, kind: step.kind === "decision" || step.kind === "loop" ? "decision" : step.kind === "action" ? "action" : "end", label: step.kind === "loop" ? `\u21bb ${step.text}` : step.text, diff: "removed", x: 0, y: 0, w: 0, h: 0 });
+
+    for (const edge of held.delta?.arrowsRemoved ?? []) edges.push({ from: edge.from, to: edge.to, kind: "flow", diff: "removed", ...(edge.label === undefined ? {} : { label: edge.label }) });
+  }
+
   const decisions = fact.nodes.filter((step) => step.kind === "decision").length;
   const loops = fact.nodes.filter((step) => step.kind === "loop").length;
   const exits = fact.nodes.filter((step) => step.kind === "return" || step.kind === "throw").length;
@@ -145,9 +228,11 @@ export function logicView(analysis: Analysis, scope: string | null, fact: LogicF
   if (fact.truncated) logic.truncated = true;
 
   if (more > 0) logic.moreRules = more;
-  const notes = [`${decisions} ${decisions === 1 ? "decision" : "decisions"}, ${loops} ${loops === 1 ? "loop" : "loops"}, ${exits} ${exits === 1 ? "exit" : "exits"}; ${rules.length}${more > 0 ? "+" : ""} ${rules.length === 1 && more === 0 ? "rule" : "rules"} (paths from the start to an exit), listed in the Markdown`, fact.truncated ? "the body is longer than the picture holds: the rest was left out" : ""].filter(Boolean);
 
-  return unplaced(`Logic of ${fnLabel(fn)} (${fn.module})`, nodes, edges, [], { logic, reason: notes.join("; ") });
+  if (held) logic.changes = held.changes;
+  const notes = [held ? changesNote(held.changes) : "", `${decisions} ${decisions === 1 ? "decision" : "decisions"}, ${loops} ${loops === 1 ? "loop" : "loops"}, ${exits} ${exits === 1 ? "exit" : "exits"}; ${rules.length}${more > 0 ? "+" : ""} ${rules.length === 1 && more === 0 ? "rule" : "rules"} (paths from the start to an exit), listed in the Markdown`, fact.truncated ? "the body is longer than the picture holds: the rest was left out" : ""].filter(Boolean);
+
+  return unplaced(`Logic of ${fnLabel(fn)} (${fn.module})${held ? ` — changes since ${held.changes.since}` : ""}`, nodes, edges, [], { logic, reason: notes.join("; ") });
 }
 
 /** The functions with branches, one shape each in its module's lane, labelled with how much it branches; a tap opens its flowchart. */

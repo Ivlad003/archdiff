@@ -9,7 +9,7 @@
 // Entry point: run by `npm test`.
 
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -18,7 +18,7 @@ import { commandStart, findCommand, shimTarget, userBins } from "../src/agent-co
 import type { JsonValue } from "../src/json.ts";
 import { agentSpecs, changedSettings, NO_SETTINGS, readSettings, settingsFrom, settingsPath, writeSettings } from "../src/settings.ts";
 import { withTempDir } from "./temp-dir.ts";
-import { fakeCommand, homeOf, startWeb, withOwnServer } from "./web-server.ts";
+import { fakeCommand, homeOf, startWeb, TEST_BIN, withOwnServer } from "./web-server.ts";
 
 const root = join(import.meta.dirname, "..");
 const fixture = join(root, "tests/fixtures/sample");
@@ -292,4 +292,28 @@ test("the settings are read and changed on the computer archdiff runs on: anothe
       started.server.kill();
     }
   });
+});
+
+test("Claude Code is given archdiff's own MCP server on the repository, its tools allowed, so that it asks the analysis while it works", async () => {
+  // A `claude` on the test PATH that tells what it was started with.
+  const placed = fakeCommand(TEST_BIN, "claude", join(root, "tests/fixtures/fake-env.mjs"));
+
+  try {
+    await withOwnServer("archdiff-claude-mcp-", () => undefined, async (origin, dir) => {
+      const started = (await (await fetch(`${origin}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ view: "layers", prompt: "say what you were started with", resume: null, agent: "claude" }) })).json()) as { id: string };
+      const stream = await (await fetch(`${origin}/api/agent/events?id=${started.id}`)).text();
+      const texts = stream.split("\n\n").filter((chunk) => chunk.startsWith("data: ")).map((chunk) => (JSON.parse(chunk.slice(6)) as { text: string }).text);
+      const args = JSON.parse(texts.find((text) => text.startsWith("args: "))?.slice("args: ".length) ?? "[]") as string[];
+      // The server: this archdiff's own entry, `mcp`, on the repository the page shows.
+      const config = JSON.parse(args[args.indexOf("--mcp-config") + 1] ?? "{}") as { mcpServers?: { archdiff?: { command: string; args: string[] } } };
+      assert.equal(config.mcpServers?.archdiff?.command, process.execPath, stream);
+      assert.deepEqual(config.mcpServers?.archdiff?.args, [join(root, "bin", "archdiff.js"), "mcp", dir]);
+      // Its tools are among the ones Claude Code may use without asking, and the list ends before the task.
+      const allowed = args.slice(args.indexOf("--allowedTools") + 1, args.indexOf("--"));
+      assert.ok(allowed.includes("mcp__archdiff") && allowed.includes("Bash(archdiff:*)"), JSON.stringify(allowed));
+      assert.ok(args.indexOf("--mcp-config") < args.indexOf("--allowedTools"), "the configuration is one argument, before the list of tools");
+    });
+  } finally {
+    for (const left of [placed, `${placed}.cmd`, join(TEST_BIN, "node_modules")]) rmSync(left, { recursive: true, force: true });
+  }
 });

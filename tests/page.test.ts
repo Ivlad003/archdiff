@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { withTempDir } from "./temp-dir.ts";
+import { changedSample } from "./changed-sample.ts";
 import { homeOf, startWeb, withOwnServer } from "./web-server.ts";
 
 const root = join(import.meta.dirname, "..");
@@ -1800,3 +1801,126 @@ test("an editor that frames the page with ?host=1 is told the place of the code 
   await page!.mouse.up();
   await page!.waitForFunction(`document.querySelector(".panel.active").id === "code" && (document.querySelector("#code")?.textContent ?? "").includes("placeOrder")`, undefined, { timeout: 8000 });
 });
+
+test("a review reads down to the logic and the lines: a module's page names its changed functions, the Code tab shows the lines that came and went, and a function's flowchart wears the change", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer("archdiff-page-logic-diff-", changedSample, async (changedBase) => {
+    await page!.setViewportSize({ width: 1900, height: 1000 });
+    await page!.goto(`${changedBase}/#view=review`);
+    await page!.waitForFunction(`window.archdiff.drawn() === "review"`);
+    await page!.waitForTimeout(600);
+    // The changed module, picked: its page says what the change did to the logic of each function it touched.
+    const orders = await screenPointOf("src/lib/orders.ts");
+    await page!.mouse.click(orders.x, orders.y);
+    await page!.waitForFunction(`(document.querySelector("#markdown")?.textContent ?? "").includes("What the change did to the logic of its functions")`);
+    assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#markdown code.link")].map((code) => code.textContent).filter((text) => text.startsWith("logic:"))`), ["logic:src/lib/orders.ts#placeOrder", "logic:src/lib/orders.ts#validate"]);
+    // Its file wears the change: the two lines that came tinted, the line that went where it stood, without a number.
+    await page!.waitForFunction(`document.querySelectorAll("#code .line.new").length === 2 && document.querySelectorAll("#code .line.gone").length === 1`);
+    assert.match((await page!.textContent("#code .muted")) ?? "", /^src\/lib\/orders\.ts — since \S+: \+2 −1 lines$/);
+    assert.equal(await page!.textContent("#code .line.gone"), '−  if (order.total < 0) throw new Error("negative");');
+    assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#code .line.new .n")].map((number) => number.textContent)`), ["10", "17"]);
+    // What is copied is the file, not the lines that went.
+    assert.ok(!((await page!.evaluate(`document.querySelector("#code").dataset.text`)) as string).includes("order.total < 0"));
+
+    // A function named on the page opens its flowchart with the changes laid over: the new guard and its exit marked.
+    await page!.click("#tabs button[data-tab='markdown']");
+    await page!.click(`#markdown code.link:text-is("logic:src/lib/orders.ts#placeOrder")`);
+    await page!.waitForFunction(`window.archdiff.drawn() === "logic:src/lib/orders.ts#placeOrder" && location.hash.includes("changes=1")`);
+    assert.deepEqual(await page!.evaluate(`[...window.archdiff.nodes().values()].filter((node) => node.diff).map((node) => node.diff + " " + node.label).sort()`), ["added readOrder(id)", 'added throw new Error("placed twice")']);
+    assert.match((await page!.textContent("#title-text")) ?? "", /Logic of placeOrder .* — changes since/);
+    assert.ok(((await page!.textContent("#markdown")) ?? "").includes("Steps +2 −0 ~0; rules +2 −1."));
+    // The legend is of this picture: its steps, and the marks of the change on it.
+    assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#legend > span")].map((entry) => entry.textContent.trim()).filter((text) => ["added", "removed", "changed"].includes(text))`), ["added", "removed"]);
+
+    // A picture of no change: the file is plain.
+    await page!.goto(`${changedBase}/#view=layer%3Alib`);
+    await page!.waitForFunction(`window.archdiff.drawn() === "layer:lib"`);
+    await page!.waitForTimeout(400);
+    const plain = await screenPointOf("src/lib/orders.ts");
+    await page!.mouse.click(plain.x, plain.y);
+    // The file drawn anew for this picture: its first line names it, and no change.
+    await page!.waitForFunction(`document.querySelector("#code .muted")?.textContent === "src/lib/orders.ts"`);
+    assert.equal(await page!.evaluate(`document.querySelectorAll("#code .line.new, #code .line.gone").length`), 0);
+  }));
+
+test("the Chat tab drives the page: a slash line is a command with or without an agent — a view, how it is shown, modules opened in place, a search of the code and of the change — suggested as it is typed; an agent's commands are run, the ones it may", { skip: !CHROME && "no Chrome installed" }, () =>
+  withOwnServer(
+    "archdiff-page-commands-",
+    (commandsDir) => {
+      changedSample(commandsDir);
+      writeFileSync(join(commandsDir, "archdiff.json"), JSON.stringify({ layers: { routes: ["src/routes/**"], lib: ["src/lib/**"], db: ["src/db/**"] }, agent: { name: "fake", command: [process.execPath, join(root, "tests/fixtures/fake-agent.mjs")], resume: "--resume" } }));
+    },
+    async (commandsBase) => {
+      await page!.setViewportSize({ width: 1900, height: 1000 });
+      await page!.goto(`${commandsBase}/#view=layers`);
+      await page!.waitForFunction(`window.archdiff.drawn() === "layers"`);
+      await page!.click("#tabs button[data-tab='chat']");
+      // "none" picked: the commands need no agent.
+      await page!.selectOption("#agent-select", "");
+      /** Types a line in the question row and sends it; the last thing the transcript says then. */
+      const command = async (line: string, done: string): Promise<string> => {
+        const before = (await page!.evaluate(`document.querySelectorAll("#transcript > *").length`)) as number;
+        await page!.fill("#ask", line);
+        await page!.press("#ask", "Enter");
+        await page!.waitForFunction(`document.querySelectorAll("#transcript > *").length >= ${before + 2} && (${done})`, undefined, { timeout: 15_000 });
+
+        return ((await page!.evaluate(`[...document.querySelectorAll("#transcript > *")].at(-1).textContent`)) as string).trim();
+      };
+
+      // A view by its key, and by words of its title; how it is shown; modules opened in place; an overlay.
+      assert.equal(await command("/view layer:lib", `window.archdiff.drawn() === "layer:lib"`), "Opened layer:lib.");
+      assert.equal(await command("/view layer db", `window.archdiff.drawn() === "layer:db"`), "Opened layer:db.");
+      assert.equal(await command("/as markdown", `location.hash.includes("as=markdown")`), "The view is shown as its page.");
+      assert.equal(await command("/as canvas", `!location.hash.includes("as=")`), "The view is shown as the canvas.");
+      assert.equal(await command("/view layer:lib", `window.archdiff.drawn() === "layer:lib"`), "Opened layer:lib.");
+      assert.equal(await command("/mix orders", `location.hash.includes("expand=") && [...window.archdiff.nodes().keys()].includes("src/lib/orders.ts#placeOrder")`), "Opened in place: src/lib/orders.ts.");
+      assert.equal(await command("/unmix", `!location.hash.includes("expand=")`), "The modules opened in place are closed.");
+      assert.equal(await command("/overlay tests", `location.hash.includes("overlay=tests")`), "Laid over the picture: tests.");
+      assert.equal(await command("/overlay none", `!location.hash.includes("overlay=")`), "No overlay.");
+      // Another diagram beside this one: the second picture, on a view of its own.
+      assert.equal(await command("/split layers", `document.body.classList.contains("split") && document.querySelector("#split-frame").src.endsWith("?embed=1#view=layers")`), "Beside this picture: layers.");
+      assert.equal(await command("/split off", `!document.body.classList.contains("split")`), "One picture again.");
+
+      // A search of the code: the lines with their places, which open the code; the shapes of their files lit.
+      const found = await command("/grep saveOrder", `document.querySelectorAll("#transcript .answer code.link").length > 0`);
+      assert.match(found, /^\d+ lines of the code, in \d+ files, have saveOrder:/);
+      assert.match(found, /src\/db\/store\.ts:\d+ — export function saveOrder/);
+      assert.match(found, /shapes? of th(at|ose) files? (is|are) lit on the picture\.$/);
+      await page!.locator("#transcript .answer code.link", { hasText: /^src\/db\/store\.ts:\d+$/ }).first().click();
+      await page!.waitForFunction(`(document.querySelector("#code .muted")?.textContent ?? "").startsWith("src/db/store.ts:")`);
+      await page!.click("#tabs button[data-tab='chat']");
+      // A search of the change: what it added and what it removed.
+      const changed = await command("/diff order.total", `[...document.querySelectorAll("#transcript > *")].at(-1).textContent.includes("order.total")`);
+      assert.match(changed, /^2 lines of the change since \S+, in 1 file, have order\.total:/);
+      assert.ok(changed.includes("src/lib/orders.ts:17 + if (order.total <= 0)") && changed.includes("src/lib/orders.ts:17 − if (order.total < 0)"), changed);
+      // A regular expression between slashes; one that is none says so.
+      assert.match(await command("/grep /place\\w+\\(/", `true`), /lines? of the code/);
+      assert.match(await command("/grep /(/", `true`), /^⚠ not a regular expression/);
+
+      // The review, and a function's logic by words of its name.
+      assert.match(await command("/review", `window.archdiff.drawn() === "review"`), /^The review of the working tree against the base\.$/);
+      assert.equal(await command("/logic validate", `window.archdiff.drawn() === "logic:src/lib/orders.ts#validate"`), "The logic of src/lib/orders.ts#validate.");
+
+      // What is no command, or takes no such argument, says so — and is never sent to an agent.
+      assert.equal(await command("/nope", `true`), "⚠ /nope is no command (/help lists them)");
+      assert.equal(await command("/as hologram", `true`), "⚠ as: one of canvas, 3d, markdown, code");
+      assert.match(await command("/view no such view anywhere", `true`), /^⚠ no view has/);
+      assert.ok((await command("/help", `document.querySelectorAll("#transcript .answer table tr").length > 30`)).includes("/grep <text | /regex/>"));
+      assert.equal(await page!.evaluate(`document.querySelector("#run-state").textContent.includes("running")`), false);
+
+      // The commands are suggested as they are typed: the ones whose name starts so, and Enter takes the first.
+      await page!.fill("#ask", "");
+      await page!.type("#ask", "/ov");
+      await page!.waitForFunction(`!document.querySelector("#tag-suggest").hidden && document.querySelector("#tag-suggest li code")?.textContent === "/overlay"`);
+      await page!.press("#ask", "Enter");
+      assert.equal(await page!.inputValue("#ask"), "/overlay ");
+      await page!.fill("#ask", "");
+
+      // An agent shows the reader something: its commands are run in order — the ones it may; a command of the reader's own is refused.
+      await page!.selectOption("#agent-select", "fake");
+      await page!.fill("#task", "Show me the db layer. do-commands: /view layer:db; /as markdown; /edit");
+      await page!.click("#run");
+      await page!.waitForFunction(`window.archdiff.drawn() === "layer:db" && location.hash.includes("as=markdown") && document.querySelectorAll("#transcript .ev.do").length === 3`, undefined, { timeout: 15_000 });
+      assert.deepEqual(await page!.evaluate(`[...document.querySelectorAll("#transcript .ev.do")].map((row) => row.textContent)`), ["↳ /view layer:db — Opened layer:db.", "↳ /as markdown — The view is shown as its page.", "↳ /edit — ⚠ /edit is the reader's to run, not an agent's"]);
+      assert.equal(await page!.evaluate(`window.archdiff.canvas() === null || document.body.dataset.mode !== "edit"`), true);
+    },
+  ));

@@ -36,6 +36,12 @@ if (/ask the user/i.test(prompt) && at === -1) {
   line({ type: "assistant", message: { content: [{ type: "text", text: `Noted: ${prompt.slice(0, 40)}.` }] } });
 }
 
+// A prompt that has the agent show something on the page: the commands it names (`do-commands: /view layers; /as 3d`),
+// written as an agent writes them, one a line in an archdiff-do block.
+const shown = prompt.match(/do-commands: ([^\n]+)/);
+
+if (shown) line({ type: "assistant", message: { content: [{ type: "text", text: `Here it is on the page.\n\`\`\`archdiff-do\n${shown[1].split(";").map((command) => command.trim()).join("\n")}\n\`\`\`` }] } });
+
 // A prompt that asks the agent to take its time: a run still going when the next one is asked for.
 const wait = prompt.match(/wait-ms: (\d+)/);
 

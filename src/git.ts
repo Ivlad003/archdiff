@@ -11,7 +11,7 @@
 // `changedFiles`, `changedSources`, `changedPaths`, `worktreeDiff`, `treeAt`, `mergeBase`, `forkPoint`, `commitOf`,
 // `defaultBase`, `listBranches`, `branchGraph`, `commitsBetween`,
 // `commitInfo`, `commitFiles`, `fileHistory`, `gitStats`, `fileAt`,
-// `revisionStamp`, `commitFirst`.
+// `fileHunks`, `changedLines`, `revisionStamp`, `commitFirst`.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -712,4 +712,133 @@ export function commitFirst(dir: string, message: string): void {
 
     if (!result.ok) throw new Error(`git ${name}: ${result.error}`);
   }
+}
+
+/** A stretch of a file a change touched, as the head's file has it: the lines that are new there, and the base's lines that are gone, which stood before the head's line `at`. */
+export interface DiffHunk {
+  /** The head's line the gone lines stood before (one past the last line, for lines gone from the end). */
+  at: number;
+  removed: string[];
+  /** The head's lines that are new or rewritten; null where lines only went. */
+  added: { from: number; to: number } | null;
+}
+
+/** Lines gone that one file's hunks carry, at most: a file rewritten whole is read as it is. */
+const GONE_LINES = 4000;
+
+/**
+ * What a change did to one file, laid on the file as the head has it (`head` null: the working tree): git's own diff
+ * without context, read into the lines that came and the lines that went. A file the base had not is all new; one
+ * git knows nothing of (not tracked yet) likewise. Throws git's words when it refuses (no such ref, no repository).
+ */
+export function fileHunks(root: string, base: string, head: string | null, path: string): DiffHunk[] {
+  assertRef(base);
+
+  if (head !== null) assertRef(head);
+  const diff = git(root, ["diff", "--relative", "--no-color", "--no-ext-diff", "--no-renames", "-U0", base, ...(head === null ? [] : [head]), "--", path]);
+
+  if (!diff.ok) throw new Error(diff.error);
+  const hunks: DiffHunk[] = [];
+  let gone = 0;
+
+  for (const raw of diff.out.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const range = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+
+    if (range) {
+      const start = Number(range[1]);
+      const count = range[2] === undefined ? 1 : Number(range[2]);
+      // Lines that only went are named by the head's line before them.
+      hunks.push(count === 0 ? { at: start + 1, removed: [], added: null } : { at: start, removed: [], added: { from: start, to: start + count - 1 } });
+    } else if (hunks.length > 0 && line.startsWith("-") && gone++ < GONE_LINES) hunks.at(-1)!.removed.push(line.slice(1));
+  }
+
+  // Not tracked yet, so git's diff says nothing of it: every line of the working tree's file is new.
+  if (hunks.length === 0 && head === null && contentAt(root, base, path) === null && existsSync(join(root, path))) {
+    const lines = readFileSync(join(root, path), "utf8").replace(/\n$/, "").split("\n").length;
+
+    return [{ at: 1, removed: [], added: { from: 1, to: lines } }];
+  }
+
+  return hunks;
+}
+
+/** One line a change added or removed: its file, its place in the head's file (its own number for a line added, the line it stood before for one removed) and what it says. */
+export interface ChangedLine {
+  file: string;
+  line: number;
+  sign: "+" | "-";
+  text: string;
+}
+
+/** Lines of a change read for a search, at most. */
+const CHANGED_LINES = 200_000;
+
+/**
+ * Every line the change from `base` to `head` (null: the working tree) added and removed, file by file, read from one
+ * diff of git without context; of the working tree's files git does not track yet (and does not ignore), every line.
+ * Throws git's words when it refuses.
+ */
+export function changedLines(root: string, base: string, head: string | null): ChangedLine[] {
+  assertRef(base);
+
+  if (head !== null) assertRef(head);
+  const diff = git(root, ["diff", "--relative", "--no-color", "--no-ext-diff", "--no-renames", "-U0", base, ...(head === null ? [] : [head]), "--"]);
+
+  if (!diff.ok) throw new Error(diff.error);
+  const lines: ChangedLine[] = [];
+  let file = "";
+  let was = 0;
+  let now = 0;
+  // Inside a hunk a line is its text behind a sign; between hunks the lines are the file's header.
+  let left = 0;
+  const named = (path: string): string => path.replace(/^"|"$/g, "").replace(/^[ab]\//, "");
+
+  for (const raw of diff.out.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+
+    if (left === 0) {
+      const range = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+
+      if (range) {
+        const came = range[4] === undefined ? 1 : Number(range[4]);
+        now = Number(range[3]);
+        // Lines that only went are named by the head's line before them: they stood before the next one.
+        was = came === 0 ? now + 1 : now;
+        left = (range[2] === undefined ? 1 : Number(range[2])) + came;
+      } else if (line.startsWith("--- ") && line !== "--- /dev/null") file = named(line.slice(4));
+      else if (line.startsWith("+++ ") && line !== "+++ /dev/null") file = named(line.slice(4));
+
+      continue;
+    }
+
+    // "\ No newline at end of file" is no line of the file.
+    if (line.startsWith("\\")) continue;
+    left--;
+
+    if (lines.length >= CHANGED_LINES) continue;
+
+    if (line.startsWith("-")) lines.push({ file, line: was, sign: "-", text: line.slice(1) });
+    else if (line.startsWith("+")) lines.push({ file, line: now++, sign: "+", text: line.slice(1) });
+  }
+
+  // The working tree's new files git does not track yet are part of the change: every line of a text file among them came.
+  const untracked = head === null ? git(root, ["ls-files", "--others", "--exclude-standard", "-z"]) : null;
+
+  for (const path of untracked?.ok ? untracked.out.split("\0").filter((name) => name !== "") : []) {
+    if (lines.length >= CHANGED_LINES) break;
+    let text: string;
+
+    try {
+      text = readFileSync(join(root, path), "utf8");
+    } catch {
+      continue;
+    }
+
+    // A file of bytes, or one too long to be read as a change, is left out.
+    if (text.length > 1_500_000 || text.slice(0, 8000).includes("\0")) continue;
+    text.replace(/\r?\n$/, "").split(/\r?\n/).forEach((line, index) => lines.push({ file: path, line: index + 1, sign: "+", text: line }));
+  }
+
+  return lines;
 }

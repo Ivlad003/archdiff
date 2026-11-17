@@ -15,22 +15,24 @@
 //
 // Sits at the edge, between the commands (cli.ts, server.ts) and the
 // views. Entry points: `drawPicture`, `PictureRequest`, `Picture`,
-// `Change`, `Refs`, `NO_REFS`.
+// `Change`, `Refs`, `NO_REFS`, `changeRange`, `logicChangesOf`,
+// `logicChangesIn`.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
 import { CACHE_DIRECTORY } from "./cache.ts";
-import { layout, type Diagram } from "./diagram.ts";
+import { layout, type Diagram, type LogicChanges } from "./diagram.ts";
 import { comparisonMarkdown, reviewMarkdown, shortCommits, type Compared, type GraphDiff } from "./diff.ts";
 import { boardMarkdown, boardOf, groupMarkdown, type Board } from "./board.ts";
 import { readLogic, type LogicFact } from "./extract/logic.ts";
-import { branchGraph, changedPaths, commitInfo, commitOf, commitsBetween, defaultBase, EMPTY_TREE, gitStats, mergeBase, revisionStamp, worktreeDiff, type CommitInfo } from "./git.ts";
+import { branchGraph, changedPaths, commitInfo, commitOf, commitsBetween, defaultBase, EMPTY_TREE, fileAt, gitStats, mergeBase, revisionStamp, worktreeDiff, type CommitInfo } from "./git.ts";
 import { isSourceFile } from "./languages.ts";
 import { positionsOf, readDrawing, type DrawingFile } from "./drawings.ts";
 import { diagramMarkdown } from "./markdown.ts";
 import { GIT_OVERLAYS, type PictureOptions } from "./options.ts";
-import { compareBranches, history, reviewOf, reviewOfCommit } from "./review.ts";
+import { logicChanges } from "./logic.ts";
+import { compareBranches, history, reviewOf, reviewOfCommit, type ReviewResult } from "./review.ts";
 import { codeRevision, viewKey, type View } from "./view-keys.ts";
 import { whatIfMarkdown, whatIfOf, type WhatIf } from "./whatif.ts";
 import { entryPoints, viewOf, type EdgeReads } from "./views.ts";
@@ -234,7 +236,20 @@ async function readForView(analysis: Analysis, view: View, options: PictureOptio
   const reads: EdgeReads = {};
   const notes: string[] = [];
 
-  if (view.kind === "logic" && view.subject !== null) reads.logic = await logicOf(analysis, view.subject);
+  if (view.kind === "logic" && view.subject !== null) {
+    reads.logic = await logicOf(analysis, view.subject, refs.head);
+
+    // Held against the base: the function's body as the base had it. What git refuses is said once, below.
+    if (options.changes && reads.logic) {
+      try {
+        const result = await reviewOf(analysis, refs.base, refs.head);
+        const [base] = result.diff.base.split("..") as [string];
+        reads.logicBefore = { fact: await logicOf(result.base, view.subject, base), since: shortCommits(base) };
+      } catch (error) {
+        notes.push(`⚠ the changes are not laid over: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
 
   // The impact of a change: the files changed since the base, as a review reads them, each a subject.
   if (view.kind === "impact" && view.subject === null) {
@@ -242,7 +257,9 @@ async function readForView(analysis: Analysis, view: View, options: PictureOptio
     reads.impact = { files: diff.changedFiles, since: shortCommits(diff.base) };
   }
 
-  if (options.changes || options.changed) {
+  // A function's logic wears the marks of its own change (above): the review's are of modules and functions, and a
+  // step that calls a new function is no new step.
+  if ((options.changes || options.changed) && !(view.kind === "logic" && view.subject !== null)) {
     try {
       reads.diff = (await reviewOf(analysis, refs.base, refs.head)).diff;
     } catch (error) {
@@ -254,18 +271,112 @@ async function readForView(analysis: Analysis, view: View, options: PictureOptio
   return { reads, notes };
 }
 
-/** The flowchart of a function, read from its file now; null when the file or the function cannot be read. */
-async function logicOf(analysis: Analysis, id: string): Promise<LogicFact | null> {
+/**
+ * The flowchart of a function, read from its file as the analysis's revision has it (`ref` null: the working tree,
+ * from the disk; else from git — a function's lines are the revision's, and so must its file be); null when the file
+ * or the function cannot be read.
+ */
+async function logicOf(analysis: Analysis, id: string, ref: string | null): Promise<LogicFact | null> {
   const node = analysis.graph.nodes.get(id);
 
   if (!node || node.kind !== "fn") return null;
-  let source: string;
+  let source: string | null;
 
   try {
-    source = readFileSync(join(analysis.root, node.module), "utf8");
+    source = ref === null ? readFileSync(join(analysis.root, node.module), "utf8") : fileAt(analysis.root, ref, node.module);
   } catch {
     return null;
   }
 
-  return readLogic(node.module, source, node.parent ? `${node.parent}.${node.name}` : node.name, node.line);
+  return source === null ? null : readLogic(node.module, source, node.parent ? `${node.parent}.${node.name}` : node.name, node.line);
+}
+
+/**
+ * The two revisions the change of a picture runs between (`head` null: the working tree): a review's, a commit's and
+ * the one before it, the commit the timeline is at, the last commit for the board of the uncommitted changes, and the
+ * base of the changes laid over any other picture. Null for a picture that shows no change (a comparison has several).
+ * Throws git's words when it refuses.
+ */
+export function changeRange(root: string, { view, options, refs }: PictureRequest): { base: string; head: string | null } | null {
+  if (view.kind === "commit" || (view.kind === "timeline" && refs.at)) {
+    const commit = commitInfo(root, (view.kind === "commit" ? view.subject : refs.at) ?? "");
+
+    return commit ? { base: commit.parent, head: commit.sha } : null;
+  }
+
+  if (view.kind === "changes") return { base: lastCommit(root), head: null };
+
+  return view.kind === "review" || options.changes || options.changed ? { base: refs.base ?? mergeBase(root, refs.head ?? "HEAD"), head: refs.head } : null;
+}
+
+/** The review behind the change of a picture, as the picture itself reads it (so asked for once): its two analyses and their diff; null for a picture of no change. */
+function changeBehind(current: Analysis, { view, options, refs }: PictureRequest): Promise<ReviewResult> | null {
+  const { root } = current;
+
+  if (view.kind === "commit" || (view.kind === "timeline" && refs.at)) {
+    const commit = commitInfo(root, (view.kind === "commit" ? view.subject : refs.at) ?? "");
+
+    return !commit ? null : view.kind === "commit" ? reviewOf(current, commit.parent, commit.sha) : reviewOfCommit(root, commit.parent, commit.sha);
+  }
+
+  if (view.kind === "changes") return reviewOf(current, lastCommit(root), null);
+
+  return view.kind === "review" || options.changes || options.changed ? reviewOf(current, refs.base, refs.head) : null;
+}
+
+/** How many functions of a module have their logic held against the base on the module's page. */
+const MODULE_LOGIC = 12;
+
+/** The body of a function at the head of a change held against its body at the base; null when the head's cannot be read. */
+async function logicHeld(result: ReviewResult, range: { base: string; head: string | null }, id: string): Promise<LogicChanges | null> {
+  const fact = await logicOf(result.head, id, range.head);
+
+  return fact ? logicChanges(fact, { fact: await logicOf(result.base, id, range.base), since: shortCommits(range.base) }).changes : null;
+}
+
+/** Whether a change touched the body of a function: it is new, or its body reads otherwise. */
+function bodyTouched(diff: GraphDiff, id: string): boolean {
+  return diff.nodesAdded.some((node) => node.id === id) || diff.nodesChanged.some((node) => node.id === id && (node.what ?? []).includes("body"));
+}
+
+/**
+ * What the change a picture shows did to the logic of one function: its body at the change's head held against its
+ * body at the base. `current` is the working tree's analysis. Null when the picture shows no change, the change left
+ * the function as it was, the function has no body archdiff reads, or git refuses.
+ */
+export async function logicChangesOf(current: Analysis, request: PictureRequest, id: string): Promise<LogicChanges | null> {
+  try {
+    const range = changeRange(current.root, request);
+    const result = range && (await changeBehind(current, request));
+
+    // A function the change left as it was has nothing to say here: its page is its own.
+    return range && result && bodyTouched(result.diff, id) ? await logicHeld(result, range, id) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The same for the functions of one module the change touched (the first `MODULE_LOGIC` in the order of the file):
+ * what a module's page says of its logic in a review. Empty for a picture of no change.
+ */
+export async function logicChangesIn(current: Analysis, request: PictureRequest, module: string): Promise<{ id: string; changes: LogicChanges }[]> {
+  try {
+    const range = changeRange(current.root, request);
+    const result = range && (await changeBehind(current, request));
+
+    if (!range || !result) return [];
+    const touched = [...result.diff.nodesAdded, ...result.diff.nodesChanged].filter((node) => node.kind === "fn" && node.module === module && bodyTouched(result.diff, node.id)).sort((a, b) => a.line - b.line);
+    const held: { id: string; changes: LogicChanges }[] = [];
+
+    for (const node of touched.slice(0, MODULE_LOGIC)) {
+      const changes = await logicHeld(result, range, node.id);
+
+      if (changes) held.push({ id: node.id, changes });
+    }
+
+    return held;
+  } catch {
+    return [];
+  }
 }

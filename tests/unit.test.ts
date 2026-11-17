@@ -14,6 +14,8 @@ import { attempt, ok, wrong } from "../src/result.ts";
 import { OVERVIEW_GROUP, VIEW_KINDS, listGroup, listGroups, overviews, parseView, subjectFile, tagOf, viewsOfFiles, type ViewEntry, type ViewKind } from "../src/view-keys.ts";
 import { collectionOf, matchRequests, pathSegments, routesOf, type Route } from "../src/collections.ts";
 import { SCAPI_TABLE } from "../src/scapi-table.ts";
+import { agentCommands, CHAT_COMMANDS, commandsHelp, doCommands, parseCommandLine } from "../src/chat-commands.ts";
+import { AGENT_PROTOCOL } from "../src/intent.ts";
 
 test("the picture options read the same from flags and from a query, and write back to the same query", () => {
   const flags = new Map<string, string | true>([["depth", "2"], ["limit", "30"], ["no-hubs", true], ["overlay", "tests,heat"], ["expand", "src/a.ts,src/b.ts"], ["changes", true], ["only-changes", true], ["mermaid", "c4"], ["lanes", "columns"]]);
@@ -501,4 +503,30 @@ test("the file of a subject and the views of some files are read by one codec: f
   assert.deepEqual(kept, ["layers", "layer:lib", "dir:src/lib", "module:src/lib/log.ts", "cycles", "cycles:fns", "classes", "metrics:lib", "apis:ShopperBasketsV1", "postman:postman/cart.postman_collection.json", "coverage"]);
   // No file at all: the overviews, the scopes and the families alone.
   assert.deepEqual(viewsOfFiles(list, new Set()).map((item) => item.key), ["layers", "cycles", "cycles:fns", "classes", "apis:ShopperBasketsV1", "postman:postman/cart.postman_collection.json", "coverage"]);
+});
+
+test("the Chat tab's commands are one table: a line is read by it, the help and the agent's protocol are written from it, and an agent's block gives its lines", () => {
+  // A slash, a name of the table, and what follows it; anything else is no command.
+  const view = parseCommandLine("  /view  calls:src/x.ts#fn  ");
+  assert.deepEqual([view?.command.name, view?.argument], ["view", "calls:src/x.ts#fn"]);
+  assert.deepEqual([parseCommandLine("/unmix")?.command.name, parseCommandLine("/unmix")?.argument], ["unmix", ""]);
+  assert.equal(parseCommandLine("/nope x"), null);
+  assert.equal(parseCommandLine("view layers"), null);
+  assert.equal(parseCommandLine("/src/lib/orders.ts is wrong"), null);
+  // Every name once, in small letters, with a line that says what it does.
+  assert.equal(new Set(CHAT_COMMANDS.map((command) => command.name)).size, CHAT_COMMANDS.length);
+  assert.ok(CHAT_COMMANDS.every((command) => /^[a-z]+$/.test(command.name) && command.does.length > 10));
+  // The help lists every command; one command's help is its own row; a name that is none has no help.
+  const help = commandsHelp() ?? "";
+  assert.ok(CHAT_COMMANDS.every((command) => help.includes(`\`/${command.name}`)));
+  assert.match(commandsHelp("as") ?? "", /\| `\/as canvas \\\| 3d \\\| markdown \\\| code` \| Show the view/);
+  assert.equal(commandsHelp("nope"), null);
+  // An agent is told the commands that show something, and none that writes, picks an agent or starts a run.
+  const told = agentCommands();
+  assert.ok(told.includes("```archdiff-do") && told.includes("`/view <key | words>`") && told.includes("`/grep <text | /regex/>`"));
+  assert.ok(["edit", "code", "agent", "stop", "export", "settings", "check", "ask"].every((name) => !told.includes(`\`/${name}`)), told);
+  assert.ok(AGENT_PROTOCOL.includes(told) && AGENT_PROTOCOL.includes("archdiff grep <text> --diff"));
+  // The lines of an agent's blocks, in order; what is no command line in them is left out, and so is a block of another kind.
+  assert.deepEqual(doCommands("Look:\n```archdiff-do\n/view layers\n\nsee above\n/as 3d\n```\nand\n```archdiff-do\r\n/mix src/a.ts\r\n```\n```sh\n/usr/bin/true\n```"), ["/view layers", "/as 3d", "/mix src/a.ts"]);
+  assert.deepEqual(doCommands("no block here: /view layers"), []);
 });

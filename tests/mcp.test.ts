@@ -135,12 +135,12 @@ test("initialize agrees on the revision and names the server; ping answers; a no
   assert.deepEqual(client.stray, []);
 });
 
-test("tools/list names the six tools, each with what it answers, the schema of its arguments and the read-only hint; a picture's options are the one table", async () => {
+test("tools/list names the eight tools, each with what it answers, the schema of its arguments and the read-only hint; a picture's options are the one table", async () => {
   const client = connect(fixture);
   const listed = (await client.request("tools/list")).result?.["tools"] as { name: string; title: string; description: string; inputSchema: { type: string; properties: Record<string, { type: string; enum?: string[]; items?: { enum?: string[] } }>; required?: string[]; additionalProperties: boolean }; annotations: { readOnlyHint: boolean } }[];
   assert.deepEqual(
     listed.map((tool) => tool.name),
-    ["views", "diagram", "check", "may_import", "impact", "review"],
+    ["views", "diagram", "check", "may_import", "impact", "review", "search_code", "search_diff"],
   );
 
   for (const tool of listed) {
@@ -202,6 +202,11 @@ test("every tool answers on the fixture: the views, a picture with its options, 
   assert.ok(type.includes("# Impact of src/lib/orders.ts\n\n`src/lib/orders.ts#Order` is a type: nothing calls it, it flows by imports") && type.includes("- `src/db/store.ts` — db — src/db/store.ts:2\n"), type);
   // The working tree against its own commit.
   assert.match(await client.ask("review", { base: "HEAD" }), /^<!-- archdiff:generated — review since HEAD -->\n# Architecture changes since HEAD\n/);
+  // A search of the code: the lines with their places; of the change, which here changed nothing.
+  const searched = await client.ask("search_code", { pattern: "/save\\w+\\(/" });
+  assert.match(searched, /^\*\*\d+ lines\*\* of the code, in \d+ files, have `\/save\\w\+\\\(\/`:\n\n/);
+  assert.ok(searched.includes("- `src/db/store.ts:") && searched.includes("- `src/lib/orders.ts:10` — `saveOrder(order);`"), searched);
+  assert.equal(await client.ask("search_diff", { pattern: "saveOrder", base: "HEAD" }), "No line of the change since HEAD has `saveOrder`.");
   const { code, stderr } = await client.close();
   assert.equal(code, 0, stderr);
   assert.deepEqual(client.stray, []);
@@ -233,7 +238,7 @@ test("a wrong call is a JSON-RPC error carrying the CLI's message, and the serve
   await refused("impact", { target: "src/none.ts" }, 'impact: no module or function "src/none.ts" (archdiff views lists them)');
   await refused("impact", { target: "src/db/store.ts", depth: 0 }, "impact: depth must be a whole number of at least 1");
   await refused("impact", { target: 5 }, 'impact: "target" must be a string');
-  await refused("frobnicate", undefined, "Unknown tool: frobnicate (views, diagram, check, may_import, impact, review)");
+  await refused("frobnicate", undefined, "Unknown tool: frobnicate (views, diagram, check, may_import, impact, review, search_code, search_diff)");
   assert.deepEqual((await client.request("tools/call", { name: "views", arguments: [] })).error, { code: -32602, message: "views: the arguments must be an object" });
   // A method the server does not have — the probe of a later revision among them — is not found, so that client falls back to the handshake.
   assert.deepEqual((await client.request("server/discover", {})).error, { code: -32601, message: "Method not found: server/discover" });

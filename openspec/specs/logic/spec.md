@@ -51,3 +51,27 @@ The system SHALL list every function with branches in `archdiff views` (`logic:<
 
 - **WHEN** `archdiff diagram logic` runs on the machines fixture
 - **THEN** the title is "Logic: 7 functions with branches" and `checkout` carries "3 branches"
+
+### Requirement: A function's logic is held against the base
+
+The system SHALL, for `logic:<path>#<fn>` with `changes` (`--changes`, the page's *changes since base*), read the function's body at the base of the change — the link's base, else where the head left the main line — and at the head, each from its own revision's file, and hold the two flowcharts against each other statement by statement in the order the code writes them: a condition, an exit, or one line of an action is a statement; a statement gone and a statement come of one kind between two that both have, more than half of whose words agree, are one statement rewritten. A step none of whose statements was there SHALL be marked added, a step with some statements new or some of the base's gone from it changed, and a step of the base of which nothing is left SHALL be drawn as removed with the arrows that hung on it; an arrow SHALL be new or gone only between statements that were, and are, in different steps, so that a statement added to a box marks that box and none after it. The page SHALL list, above the rules, the steps that came, went and changed — a changed one with the statements new to it and the ones gone from it — and the rules that came and went; the title SHALL end with "— changes since <base>" and the reason SHALL count them. A function that was not there at the base SHALL be all added; one whose steps and rules are as they were SHALL say so. The review's own marks SHALL not be laid over a function's logic.
+
+#### Scenario: A guard added
+
+- **WHEN** `placeOrder` gains `if (readOrder(id)) throw new Error("placed twice")` and `archdiff diagram logic:src/lib/orders.ts#placeOrder --changes --base HEAD` runs
+- **THEN** the page reads "Steps +2 −0 ~0; rules +2 −1.", lists "+ decision `readOrder(id)` — line 10" and "+ throw", the two steps are marked added in the picture, and the arrow that led straight on is drawn as removed
+
+#### Scenario: A condition rewritten
+
+- **WHEN** `validate` tests `order.total <= 0` where it tested `order.total < 0`
+- **THEN** the page lists "~ decision at line 17: + `order.total <= 0`; − `order.total < 0`" and no step is added or removed
+
+#### Scenario: A statement added to a box
+
+- **WHEN** one statement is added before four that two boxes held
+- **THEN** the one box that holds the new statement is changed, with that statement as what came, and no arrow is new or gone
+
+#### Scenario: A function the change left alone
+
+- **WHEN** the logic of `findOrder`, which the change did not touch, is drawn with `--changes`
+- **THEN** the page says every step and every rule is as it was

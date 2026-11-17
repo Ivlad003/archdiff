@@ -20,17 +20,19 @@ import { EXPORT_EXTENSION, EXPORT_FORMATS, EXPORT_MEDIA_TYPE, exportDiagram, typ
 import { toExcalidraw } from "../export/excalidraw.ts";
 import { planFromScene, taskMarkdown } from "../plan.ts";
 import { mergeScene, parseDrawing, readDrawing, writeDrawing, type SceneElement } from "../drawings.ts";
-import { commitFiles, commitInfo, fileAt } from "../git.ts";
+import { commitFiles, commitInfo, fileAt, fileHunks, mergeBase } from "../git.ts";
 import { moduleChangeMarkdown, shortCommits } from "../diff.ts";
-import { commitMarkdown, edgeMarkdown, nodeMarkdown } from "../markdown.ts";
+import { commitMarkdown, edgeMarkdown, logicChangesLine, logicChangesMarkdown, nodeMarkdown } from "../markdown.ts";
+import { changeRange, logicChangesIn, logicChangesOf } from "../picture.ts";
 import { isJsonObject, isJsonString, parseJson } from "../json.ts";
 import { reviewOf } from "../review.ts";
+import { foundMarkdown, searchChange, searchCode } from "../search.ts";
 import { parseView, viewList } from "../views.ts";
 import { viewsOfFiles } from "../view-keys.ts";
 import { codeRevision, tagOf } from "../view-keys.ts";
 import { projectMap } from "../project-map.ts";
 import { commitOfShape, standsFor, tagView, tagsIn } from "../shape-keys.ts";
-import { failed, json, optionsOf, problem, send, type RouteContext, type RouteRequest } from "./context.ts";
+import { failed, json, optionsOf, problem, requestOf, send, type RouteContext, type RouteRequest } from "./context.ts";
 
 export async function postDrawing(ctx: RouteContext, { url, body, response }: RouteRequest): Promise<void> {
   const { root } = ctx;
@@ -206,7 +208,78 @@ export async function getShape(ctx: RouteContext, { url, response }: RouteReques
   const { change } = picture.value;
   const changed = node.kind !== "module" || !change ? "" : change.kind === "compare" ? moduleChangeMarkdown(node.id, change.heads, true) : moduleChangeMarkdown(node.id, [{ head: "", diff: change.diff }], false);
 
-  return json(response, { markdown: changed ? `${nodeMarkdown(node, analysis, readSource)}\n${changed}` : nodeMarkdown(node, analysis, readSource) });
+  // On a picture of a change: what the change did to the logic — of a function, its steps and rules that came and
+  // went; of a module, a line for each of its functions the change touched.
+  const request = (node.kind === "fn" && node.ref?.id) || node.kind === "module" ? requestOf(url.searchParams, ctx.options.base) : null;
+  // The flowchart wears the same marks where its own base is the picture's: a review, or the changes laid over a picture.
+  const sameBase = request?.ok && (request.value.view.kind === "review" || request.value.options.changes || request.value.options.changed);
+  const named = (id: string): string => (sameBase ? `\`logic:${id}\`` : `\`${id}\``);
+  let logicPage = "";
+
+  if (request?.ok && node.kind === "fn") {
+    const logic = await logicChangesOf(await ctx.fresh(), request.value, node.ref!.id!);
+
+    if (logic) logicPage = `\n${logicChangesMarkdown(logic, "##").join("\n")}\n${sameBase ? `\nThe flowchart with these marks: ${named(node.ref!.id!)}.\n` : ""}`;
+  } else if (request?.ok) {
+    const held = await logicChangesIn(await ctx.fresh(), request.value, node.id);
+
+    if (held.length > 0) logicPage = `\n## What the change did to the logic of its functions\n\n${held.map(({ id, changes }) => `- ${named(id)} — ${logicChangesLine(changes)}`).join("\n")}\n${sameBase ? "\nA function named here opens its flowchart with the marks of the change.\n" : ""}`;
+  }
+
+  return json(response, { markdown: `${nodeMarkdown(node, analysis, readSource)}${changed ? `\n${changed}` : ""}${logicPage}` });
+}
+
+export async function getGrep(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
+  // The Chat tab's `/grep` and `/diff`: the lines of the code the page shows, or of the change the picture is of
+  // (of the change since the default base, for a picture of none), that have a text — as a list the transcript shows.
+  const pattern = url.searchParams.get("q") ?? "";
+  const request = requestOf(url.searchParams, ctx.options.base);
+
+  if (!request.ok) return failed(response, request);
+
+  try {
+    if (url.searchParams.get("diff") === "1") {
+      const head = request.value.refs.head;
+      const range = changeRange(ctx.root, request.value) ?? { base: request.value.refs.base ?? mergeBase(ctx.root, head ?? "HEAD"), head };
+      const result = searchChange(ctx.root, range.base, range.head, pattern);
+
+      return result.ok ? json(response, { ...result.value, markdown: foundMarkdown(result.value, pattern, `the change since ${shortCommits(range.base)}`) }) : failed(response, result);
+    }
+
+    const analysis = await codeOf(ctx, url.searchParams, response);
+
+    if (!analysis) return;
+    const head = codeRevision(request.value.view, request.value.refs.head, request.value.refs.at ?? null);
+    const result = searchCode(analysis, pattern, head);
+
+    return result.ok ? json(response, { ...result.value, markdown: foundMarkdown(result.value, pattern, head ? `the code at ${head}` : "the code") }) : failed(response, result);
+  } catch (error) {
+    return problem(response, 400, error instanceof Error ? error.message : String(error));
+  }
+}
+
+/** Whether a path names a file inside the repository, as the routes of a file take it: no step out, no `.git`, no package of node_modules. */
+function repositoryPath(file: string): boolean {
+  return file !== "" && !file.split("/").some((segment) => segment === "" || segment === "." || segment === "..") && !file.startsWith(".git/") && !file.includes("node_modules/");
+}
+
+export async function getDiff(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
+  // What the change the picture shows did to one file, laid on the file as the Code tab shows it: the lines that came
+  // and the lines that went. A picture of no change has none (`since` null).
+  const file = url.searchParams.get("path") ?? "";
+
+  if (!repositoryPath(file)) return problem(response, 404, "not a file of the repository");
+  const request = requestOf(url.searchParams, ctx.options.base);
+
+  if (!request.ok) return failed(response, request);
+
+  try {
+    const range = changeRange(ctx.root, request.value);
+
+    return json(response, range ? { since: shortCommits(range.base), hunks: fileHunks(ctx.root, range.base, range.head, file) } : { since: null, hunks: [] });
+  } catch (error) {
+    return problem(response, 400, error instanceof Error ? error.message : String(error));
+  }
 }
 
 export async function getLine(ctx: RouteContext, { url, response }: RouteRequest): Promise<void> {
@@ -343,6 +416,8 @@ export const routes: Record<string, (ctx: RouteContext, request: RouteRequest) =
   "GET /api/shape": getShape,
   "GET /api/line": getLine,
   "GET /api/file": getFile,
+  "GET /api/diff": getDiff,
+  "GET /api/grep": getGrep,
   "GET /api/coverage": getCoverage,
   "GET /api/postman": getPostman,
   "GET /api/changes": getChanges,

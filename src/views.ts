@@ -31,7 +31,7 @@ import { impactView } from "./impact.ts";
 import { whatIfView } from "./whatif.ts";
 import { metricsView } from "./metrics.ts";
 import { machinesOf, machinesView, machineView } from "./machines.ts";
-import { logicList, logicView } from "./logic.ts";
+import { logicList, logicView, type LogicBefore } from "./logic.ts";
 import { apiLanesOf, depEdges, externalNode, fnNode, grow, lane, lanesOf, moduleNode, operationNode, unplaced } from "./nodes.ts";
 import { defaultDepth, foldLimit, viewKey, type View, type ViewEntry } from "./view-keys.ts";
 import { runSteps } from "./pipeline.ts";
@@ -61,6 +61,8 @@ export interface EdgeReads {
   git?: GitStats;
   /** The flowchart of the function of a `logic:` view; null when its body could not be read. */
   logic?: LogicFact | null;
+  /** `changes` on a `logic:` view: the function's flowchart at the base, to hold the body against. */
+  logicBefore?: LogicBefore;
   review?: { diff: GraphDiff; base: Graph; head: Graph };
   compare?: { base: string; heads: readonly Compared[]; baseGraph: Graph; graphs: ReadonlyMap<string, Graph>; forks: ReadonlyMap<string, Graph> };
   /** The commit of a `commit:` view: who made it, when, and what it says. */
@@ -1034,7 +1036,7 @@ export function viewOf(analysis: Analysis, view: View, options: PictureOptions =
         // Of one subject; without one, of the files of a change, which picture.ts reads from git.
         return impactView(analysis, view.subject, { depth, limit, types: options.types }, reads.impact);
       case "logic":
-        return logicView(analysis, view.subject, reads.logic);
+        return logicView(analysis, view.subject, reads.logic, reads.logicBefore);
       case "events":
         return eventsView(analysis);
       case "messages":

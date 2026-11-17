@@ -165,3 +165,22 @@ The system SHALL, when the head has `ARCHITECTURE.md` (a ref's own, as that revi
 
 - **WHEN** a change adds a db → lib import the contract allows and a routes → db import it forbids
 - **THEN** the review lists "db → lib — allowed by ARCHITECTURE.md" and "⚠ routes → db — against ARCHITECTURE.md" and exits 1
+
+### Requirement: A review reads down to the logic and the lines
+
+On a picture of a change — a review, a commit's view, the commit the timeline is at, the board of the uncommitted changes, or `changes` laid over another picture — the system SHALL end the page of a module with a line for each of its functions the change added or whose body it changed (the first twelve in the order of the file): the function and what the change did to its logic in numbers, the steps added, removed and changed and the rules that came and went; and SHALL put on the page of such a function the list of those steps and rules. In a review and under `changes` the function SHALL be named by the key of its logic view, which opens its flowchart with the change laid over it. `GET /api/diff?path=<file>` with the picture's query SHALL give the change's lines on the file as its head has it — for each stretch the head's lines that are new and the base's lines that are gone, with the line they stood before — and `since: null` with no stretch for a picture of no change; a path out of the repository SHALL be refused with 404.
+
+#### Scenario: A module's functions in a review
+
+- **WHEN** the review of the working tree is open and the page of `src/lib/orders.ts`, whose `placeOrder` and `validate` changed, is asked for
+- **THEN** it ends with "`logic:src/lib/orders.ts#placeOrder` — steps +2 −0 ~0, rules +2 −1" and "`logic:src/lib/orders.ts#validate` — steps +0 −0 ~1, rules +2 −2"
+
+#### Scenario: The lines of a file
+
+- **WHEN** `/api/diff?view=review&path=src/lib/orders.ts` is asked for after line 10 was added and line 17 rewritten
+- **THEN** it answers two stretches: line 10 new with nothing gone, and line 17 new with the line it replaced
+
+#### Scenario: A picture of no change
+
+- **WHEN** `/api/diff?view=layers&path=src/lib/orders.ts` is asked for
+- **THEN** the answer is `since: null` and no stretch

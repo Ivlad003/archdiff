@@ -224,9 +224,21 @@ function watchSources(root: string, onChange: (path: string) => void): string | 
   }
 }
 
-/** Claude Code may run the checks of archdiff.json (and archdiff) on its own; another agent follows its own rules. */
-function withAllowedTools(spec: AgentSpec, config: Config): AgentSpec {
-  return spec.name === "claude" ? { ...spec, allowedTools: allowedToolsFor(config.checks) } : spec;
+/** The name archdiff's own MCP server has for the agent it is given to. */
+const MCP_NAME = "archdiff";
+
+/**
+ * Claude Code may run the checks of archdiff.json (and archdiff) on its own, and is given archdiff's MCP server —
+ * this archdiff, on this repository — so that it asks the analysis while it works: a view, the impact of a change,
+ * a search of the code or of the change (`--mcp-config`, its tools allowed). Another agent follows its own rules and
+ * its own configuration.
+ */
+function withAllowedTools(spec: AgentSpec, config: Config, root: string): AgentSpec {
+  if (spec.name !== "claude") return spec;
+  const entry = process.argv[1];
+  const mcp = entry ? JSON.stringify({ mcpServers: { [MCP_NAME]: { command: process.execPath, args: [entry, "mcp", root] } } }) : null;
+
+  return { ...spec, command: mcp ? [...spec.command, "--mcp-config", mcp] : spec.command, allowedTools: [...allowedToolsFor(config.checks), ...(mcp ? [`mcp__${MCP_NAME}`] : [])] };
 }
 
 /** The agent a run names among those offered, or the default (the one given, else the first installed); why not, else. */
@@ -364,7 +376,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   const agents = (): OfferedAgent[] => {
     const settings = readSettings();
 
-    return installedAgents(agentSpecs(settings.ok ? settings.value : NO_SETTINGS, given)).map((offered) => ({ ...offered, spec: withAllowedTools(offered.spec, config) }));
+    return installedAgents(agentSpecs(settings.ok ? settings.value : NO_SETTINGS, given)).map((offered) => ({ ...offered, spec: withAllowedTools(offered.spec, config, root) }));
   };
   // The runner is made once the first run is asked for; what follows a run (the checks, its report) is the route's that starts it.
   let runner: AgentRunner | null = null;

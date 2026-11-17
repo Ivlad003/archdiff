@@ -26,7 +26,8 @@
       "src/mcp.ts",
       "src/mcp-tools.ts",
       "src/checks.ts",
-      "src/tours.ts"
+      "src/tours.ts",
+      "src/search.ts"
     ],
     "views": [
       "src/views.ts",
@@ -47,6 +48,7 @@
       "src/whatif.ts",
       "src/machines.ts",
       "src/logic.ts",
+      "src/logic-diff.ts",
       "src/project-map.ts",
       "src/violations.ts"
     ],

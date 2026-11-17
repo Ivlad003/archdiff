@@ -36,3 +36,14 @@ Feature: The logic of a function
   Scenario: A tag of a view or of a function's logic
     When "@view:layer:lib and @logic:src/lib/orders.ts#validate" is expanded through the API
     Then the context holds the Markdown of the layer and the rules of validate
+
+  Scenario: A function's logic held against the base
+    Given the sample as a repository whose working tree adds a guard to placeOrder and makes validate stricter
+    When I run "archdiff diagram logic:src/lib/orders.ts#placeOrder --changes --base HEAD"
+    Then the title ends with "changes since HEAD"
+    And the page reads "Steps +2 −0 ~0; rules +2 −1." and lists the new decision "readOrder(id)" and its throw
+    And the two new steps are marked added in the picture
+    When I run it for "validate"
+    Then the page lists "~ decision at line 17: + `order.total <= 0`; − `order.total < 0`"
+    When I run it for "findOrder"
+    Then the page says every step and every rule is as it was

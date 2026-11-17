@@ -27,6 +27,8 @@ export interface PageContext {
   showCode(node: Shape): Promise<void>;
   load(): Promise<void>;
   loadViews(): Promise<void>;
+  /** Runs a command line of the Chat tab (`/view layers`; commands.ts) for the reader or for an agent's answer, and gives what it says of itself as Markdown; rejects with the reason when it cannot. */
+  command(line: string, by: "reader" | "agent"): Promise<string>;
 }
 
 /** The page, once bound; a use before that names the key, which is a bug of the module's loading order. */

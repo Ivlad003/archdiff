@@ -107,3 +107,22 @@ The system SHALL describe the options of a picture once (`src/options.ts`: depth
 
 - **WHEN** the flags `--depth 2 --no-hubs --overlay tests,heat --lanes columns` are read, written as a query and read again
 - **THEN** both readings are equal and the query is `depth=2&hubs=0&overlay=tests%2Cheat&lanes=columns`
+
+### Requirement: grep searches the code and a change
+
+The system SHALL offer `archdiff grep <text> [dir]`, which prints every line of the analysed source files that has the text — as it is, the case counting when it holds a capital; as a regular expression when written between slashes or with `--regex` — as a list of `file:line` and the line, at most 200 with the rest counted, `--head REF` reading that revision's files; with `--diff`, every line the change added (+) or removed (−): the working tree, or `--head`, against `--base` (the merge-base with the main line unless given), the working tree's untracked files counted as added. `--json` SHALL print the lines as data. The exit code SHALL be 0 when a line has it, 1 when none has, and 2 for a text that is empty or no regular expression, or a ref git does not know.
+
+#### Scenario: The code
+
+- **WHEN** `archdiff grep saveorder` runs on the sample
+- **THEN** the list holds `src/lib/orders.ts:11` with `saveOrder(order);`, and `archdiff grep SaveOrder` exits 1 with "No line of the code has `SaveOrder`."
+
+#### Scenario: The change
+
+- **WHEN** `validate` tests `order.total <= 0` where it tested `order.total < 0`, and `archdiff grep order.total --diff --base HEAD` runs
+- **THEN** it prints the line removed and the line added, both at `src/lib/orders.ts:17`, with − and +
+
+#### Scenario: A broken expression
+
+- **WHEN** `archdiff grep "(" --regex` runs
+- **THEN** the exit code is 2 and stderr says "grep: not a regular expression"

@@ -18,6 +18,7 @@
 // `importVerdict`, `importVerdictText`, `intentFromCode`, `INTENT_FILE`.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { agentCommands } from "./chat-commands.ts";
 import { join } from "node:path";
 import type { Analysis } from "./analyze.ts";
 import { moduleOf, type Graph } from "./graph.ts";
@@ -391,6 +392,8 @@ export const AGENT_PROTOCOL = `## Working with archdiff
 
 - \`${INTENT_FILE}\` holds the intended architecture as a Mermaid flowchart: a subgraph is a layer, a node's label is a file path (then what it does), an arrow is an import. It is the contract: when you add a module or an import between layers, add it there too; when the task is about the diagram itself, edit only that file and keep the Mermaid valid.
 - When a decision is the user's to make — a name, a library, a split, a trade-off — do not guess. Write exactly one fenced block \`\`\`archdiff-question with JSON {"question": "…", "options": ["…", "…"]} (two to four short options) and stop; the answer comes as your next message.
+- ${agentCommands()}
+- \`archdiff grep <text>\` in the shell lists every line of the code that has the text, and \`archdiff grep <text> --diff\` every line the change since the base added or removed.
 - Finish with the files you changed as a list of \`file:line\`.`;
 
 /** The prompt that turns a document (a design note, an ISD, a spec in prose) into the Mermaid block of the intent. */

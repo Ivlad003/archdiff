@@ -44,6 +44,7 @@ import { DEFAULT_PICTURE_OPTIONS, depthWarning, pictureFlags, pictureOptionsHelp
 import { loadConfig } from "./config.ts";
 import { listTours, loadTour, tourMarkdown, toursDirectory } from "./tours.ts";
 import { metricsOf } from "./metrics.ts";
+import { foundMarkdown, searchChange, searchCode } from "./search.ts";
 import { whatIfKey, type WhatIfChange } from "./whatif.ts";
 import { counted } from "./words.ts";
 
@@ -491,6 +492,44 @@ const COMMANDS: readonly Command[] = [
       if (code !== 0 || picture?.change?.kind !== "review") return code;
 
       return reviewFindings(picture.change.diff, picture.change.contract).length > 0 ? 1 : 0;
+    },
+  },
+  {
+    name: "grep",
+    usage: "<text | /regex/> [dir] [--regex] [--diff] [--base REF] [--head REF] [--json]",
+    help: [
+      "Every line of the analysed source files that has the text, with its file and line. A capital in the text",
+      "makes the case count; a regular expression goes between slashes (/save\\w+/i), or plain with --regex (a",
+      "shell that reads a leading slash as a path, as Git Bash does, takes that one). With --diff, every line the",
+      "change added (+) or removed (−): the working tree, or --head REF, against --base REF (the merge-base with",
+      "the main line unless given). At most 200 lines are listed, the rest counted. Exit 1 when no line has it.",
+    ],
+    arity: 2,
+    flags: [...REF_FLAGS, flag("diff"), flag("json"), flag("regex")],
+    async run(call) {
+      const pattern = call.has("regex") ? `/${call.positional[0] ?? ""}/` : (call.positional[0] ?? "");
+      const root = call.dir(1);
+      const refs = refsOf(call);
+      let result;
+      let where: string;
+
+      try {
+        if (call.has("diff")) {
+          const base = refs.base ?? mergeBase(root, refs.head ?? "HEAD");
+          result = searchChange(root, base, refs.head, pattern);
+          where = `the change since ${shortCommits(base)}`;
+        } else {
+          result = searchCode(refs.head ? await analysisAt(root, refs.head) : await analyze(root), pattern, refs.head);
+          where = refs.head ? `the code at ${refs.head}` : "the code";
+        }
+      } catch (error) {
+        return fail(`grep: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      if (!result.ok) return fail(`grep: ${result.problem.message}`);
+      process.stdout.write(call.has("json") ? `${JSON.stringify(result.value, null, 2)}\n` : `${foundMarkdown(result.value, pattern, where)}\n`);
+
+      return result.value.matches.length === 0 ? 1 : 0;
     },
   },
   {

@@ -6,7 +6,8 @@
 // and `may_import` asks the contract about one import before it is
 // written; `impact` names who depends on a module or a function and the
 // tests that reach it; `review` is the architectural diff of the work so
-// far. Every tool only reads: none changes the code, the contract or a
+// far; `search_code` and `search_diff` list the lines of the code, or of
+// the change, that have a text. Every tool only reads: none changes the code, the contract or a
 // drawing (the fact cache under .archdiff/ is written, as by any command).
 //
 // An answer is of the code as it is now: every call reads the analysis
@@ -22,7 +23,7 @@
 
 import { analyze, type Analysis } from "./analyze.ts";
 import { shortCommits } from "./diff.ts";
-import { commitOf } from "./git.ts";
+import { commitOf, mergeBase } from "./git.ts";
 import { IMPACT_DEPTH, impactOf, type Impact } from "./impact.ts";
 import { readBaseline } from "./baseline.ts";
 import { importVerdict, importVerdictText, INTENT_FILE, judgesLayers, nothingToCheck } from "./intent.ts";
@@ -32,6 +33,7 @@ import { DEFAULT_PICTURE_OPTIONS, PICTURE_OPTIONS, readPictureOptions, type Pict
 import { drawPicture, type Refs } from "./picture.ts";
 import { ok, wrong, type Result } from "./result.ts";
 import { analysisAt, reviewOf } from "./review.ts";
+import { foundMarkdown, searchChange, searchCode } from "./search.ts";
 import { drawnAtHead, parseView, VIEW_KINDS, viewSyntax, viewsOfFiles } from "./view-keys.ts";
 import { checkCode, checkMarkdown } from "./violations.ts";
 import { viewList } from "./views.ts";
@@ -356,6 +358,34 @@ export function archdiffTools(root: string): McpTool[] {
         if (!refs.ok) return refs;
 
         return ok((await drawPicture(await fresh(), { view: { kind: "review", subject: null }, options: DEFAULT_PICTURE_OPTIONS, refs: refs.value })).markdown);
+      },
+    ),
+    tool(
+      "search_code",
+      "Search the code",
+      "Every line of the analysed source files that has a text, with its file and line: where a name is used, where a message is written. `pattern` is the text as it is (a capital in it makes the case count), or a regular expression between slashes (`/save\\w+/i`). At most 200 lines are listed, the rest counted.",
+      { pattern: { type: "string", description: "the text, or /a regular expression/ with its flags" } },
+      ["pattern"],
+      async (args) => {
+        const result = searchCode(await fresh(), typeof args["pattern"] === "string" ? args["pattern"] : "");
+
+        return result.ok ? ok(foundMarkdown(result.value, String(args["pattern"]), "the code")) : wrong(`search_code: ${result.problem.message}`);
+      },
+    ),
+    tool(
+      "search_diff",
+      "Search the change",
+      "Every line the change added or removed that has a text — the working tree (or `head`) against `base` (the merge-base with the main line unless given) — each with its file, its line and whether it came (+) or went (−): what the change did to a name, where a call was added. `pattern` as for `search_code`.",
+      { pattern: { type: "string", description: "the text, or /a regular expression/ with its flags" }, ...REF_PROPERTIES },
+      ["pattern"],
+      async (args) => {
+        const refs = refsOf(root, "search_diff", args);
+
+        if (!refs.ok) return refs;
+        const base = refs.value.base ?? mergeBase(root, refs.value.head ?? "HEAD");
+        const result = searchChange(root, base, refs.value.head, typeof args["pattern"] === "string" ? args["pattern"] : "");
+
+        return result.ok ? ok(foundMarkdown(result.value, String(args["pattern"]), `the change since ${shortCommits(base)}`)) : wrong(`search_diff: ${result.problem.message}`);
       },
     ),
   ];

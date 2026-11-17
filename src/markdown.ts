@@ -6,13 +6,14 @@
 //
 // Pure: Diagram + Analysis → text, byte-stable for the same inputs.
 // Entry points: `diagramMarkdown`, `nodeMarkdown`, `edgeMarkdown`,
-// `metricsMarkdown`, `impactMarkdown`, `commitMarkdown`.
+// `metricsMarkdown`, `impactMarkdown`, `commitMarkdown`,
+// `logicChangesMarkdown`, `logicChangesLine`.
 
 import type { Analysis } from "./analyze.ts";
 import { operationLabel, parseApiId, participantLabel, API_LABELS, API_SHORT } from "./apis.ts";
 import { contractMarkdown, contractSummary, contractsOf } from "./contracts.ts";
 import type { CommitInfo } from "./git.ts";
-import type { Diagram, Impact, ImpactData, Line, Shape } from "./diagram.ts";
+import type { Diagram, Impact, ImpactData, Line, LogicChanges, LogicRule, Shape } from "./diagram.ts";
 import { farFromMainSequence, type Metrics } from "./diagram.ts";
 import { toMermaid, type MermaidStyle } from "./export/mermaid.ts";
 import { isBlindSpot, moduleOf } from "./graph.ts";
@@ -24,6 +25,72 @@ function position(node: Shape): string {
   if (!node.ref?.file) return "";
 
   return node.ref.line !== undefined ? `${node.ref.file}:${node.ref.line}` : node.ref.file;
+}
+
+/** The head of a table of rules. */
+const RULES_HEAD = ["| when | calls | ends with |", "| --- | --- | --- |"];
+
+/** A rule of a function as a row of that table: the conditions taken, the calls made, how it ends. */
+function ruleRow(rule: LogicRule): string {
+  const cell = (text: string): string => text.replace(/\|/g, "\\|");
+
+  return `| ${rule.conditions.length === 0 ? "always" : rule.conditions.map((condition) => `\`${cell(condition)}\``).join(" and ")} | ${rule.calls.map((call) => `\`${cell(call)}\``).join(", ")} | ${rule.kind === "end" ? "the end of the body" : `**${cell(rule.outcome)}**`} |`;
+}
+
+/** What a change did to a function's logic, in one line of numbers: for a list of functions. */
+export function logicChangesLine(changes: LogicChanges): string {
+  if (changes.isNew) return `new: ${counted(changes.added.length, "step")}, ${counted(changes.rulesAdded.length, "rule")}`;
+
+  if (changes.added.length + changes.removed.length + changes.changed.length + changes.rulesAdded.length + changes.rulesRemoved.length === 0) return "its steps and rules are as they were";
+
+  return `steps +${changes.added.length} −${changes.removed.length} ~${changes.changed.length}, rules +${changes.rulesAdded.length} −${changes.rulesRemoved.length}`;
+}
+
+/** Steps and rules of a change listed, at most: a body rewritten whole is read in the Code tab, not as a list. */
+const MAX_LOGIC_CHANGES = 40;
+
+/**
+ * What a change did to the logic of a function, under a heading of the level given: the steps that came, went and
+ * changed (a changed one with the statements new to it and the ones gone from it), then the rules — the paths from
+ * the start to an exit — that came and went. For the logic's own page and for the function's page in a review.
+ */
+export function logicChangesMarkdown(changes: LogicChanges, heading: string): string[] {
+  const lines = [`${heading} What the change did to the logic, since \`${changes.since}\``, ""];
+  const code = (text: string): string => `\`${text.replace(/\s*\n\s*/g, "; ").replace(/`/g, "'")}\``;
+
+  if (changes.isNew) {
+    lines.push(`The function is new: ${counted(changes.added.length, "step")} and ${counted(changes.rulesAdded.length, "rule")}, all added.`);
+
+    return lines;
+  }
+
+  const steps = changes.added.length + changes.removed.length + changes.changed.length;
+
+  if (steps === 0 && changes.rulesAdded.length === 0 && changes.rulesRemoved.length === 0) {
+    lines.push("Nothing: every step and every rule is as it was. What changed in the body changed no condition, no statement the picture shows and no exit.");
+
+    return lines;
+  }
+
+  lines.push(`Steps +${changes.added.length} −${changes.removed.length} ~${changes.changed.length}; rules +${changes.rulesAdded.length} −${changes.rulesRemoved.length}.`, "");
+  const listed = [
+    ...changes.added.map((step) => ({ line: step.line, text: `- **+ ${step.kind}** ${code(step.text)} — line ${step.line}` })),
+    ...changes.changed.map((step) => ({ line: step.line, text: `- **~ ${step.kind}** at line ${step.line}: ${[...(step.came ?? []).map((text) => `+ ${code(text)}`), ...(step.went ?? []).map((text) => `− ${code(text)}`)].join("; ")}` })),
+  ].sort((a, b) => a.line - b.line);
+  const gone = changes.removed.map((step) => `- **− ${step.kind}** ${code(step.text)} — was at line ${step.line}`);
+  const all = [...listed.map((entry) => entry.text), ...gone];
+  lines.push(...all.slice(0, MAX_LOGIC_CHANGES));
+
+  if (all.length > MAX_LOGIC_CHANGES) lines.push(`- … ${counted(all.length - MAX_LOGIC_CHANGES, "more step", "more steps")}`);
+
+  for (const [title, rules] of [["Rules that came", changes.rulesAdded], ["Rules that went", changes.rulesRemoved]] as const) {
+    if (rules.length === 0) continue;
+    lines.push("", `${title}:`, "", ...RULES_HEAD, ...rules.slice(0, MAX_LOGIC_CHANGES).map(ruleRow));
+
+    if (rules.length > MAX_LOGIC_CHANGES) lines.push("", `… ${counted(rules.length - MAX_LOGIC_CHANGES, "more rule", "more rules")}`);
+  }
+
+  return lines;
 }
 
 /** The page of a diagram: title, Mermaid, the shapes by lane. */
@@ -91,9 +158,11 @@ export function diagramMarkdown(diagram: Diagram, analysis: Analysis, mermaid: M
   // A function's logic reads as its rules: every path from the start to an exit, the conditions taken, the calls made, how it ends.
   if (diagram.logic) {
     const logic = diagram.logic;
-    lines.push("## Rules: every path from the start to an exit", "", `${counted(logic.decisions, "decision")}, ${counted(logic.loops, "loop")}, ${counted(logic.exits, "exit")} in \`${logic.module}\`.${logic.truncated ? " The body is longer than the picture holds." : ""}`, "", "| when | calls | ends with |", "| --- | --- | --- |");
+    // Held against the base (`changes`): what the change did to the logic comes first, the rules as they are now after it.
+    if (logic.changes) lines.push(...logicChangesMarkdown(logic.changes, "##"), "");
+    lines.push("## Rules: every path from the start to an exit", "", `${counted(logic.decisions, "decision")}, ${counted(logic.loops, "loop")}, ${counted(logic.exits, "exit")} in \`${logic.module}\`.${logic.truncated ? " The body is longer than the picture holds." : ""}`, "", ...RULES_HEAD);
 
-    for (const rule of logic.rules) lines.push(`| ${rule.conditions.length === 0 ? "always" : rule.conditions.map((condition) => `\`${condition.replace(/\|/g, "\\|")}\``).join(" and ")} | ${rule.calls.map((call) => `\`${call.replace(/\|/g, "\\|")}\``).join(", ")} | ${rule.kind === "end" ? "the end of the body" : `**${rule.outcome.replace(/\|/g, "\\|")}**`} |`);
+    for (const rule of logic.rules) lines.push(ruleRow(rule));
 
     if (logic.moreRules) lines.push("", `… ${counted(logic.moreRules, "more rule", "more rules")}`);
     lines.push("", "A condition reads `condition: branch`; `each` and `done` are a loop's body and its end; `ok` and `error` a try's.");

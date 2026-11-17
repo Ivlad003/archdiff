@@ -72,3 +72,11 @@ Feature: Reviewing a change by its architecture
     Then it is at most 65536 characters long
     And the picture is whole
     And every list holds the same number of its first items and counts the rest
+
+  Scenario: A review reads down to the logic and the lines
+    Given the sample as a repository whose working tree adds a guard to placeOrder and makes validate stricter
+    When I open the review and pick "src/lib/orders.ts"
+    Then its page ends with a line for placeOrder and one for validate, each with what the change did to its logic
+    And the Code tab tints lines 10 and 17 and shows the line that went before line 17, struck out
+    When I press "logic:src/lib/orders.ts#placeOrder" on the page
+    Then the flowchart of placeOrder opens with the changes laid over it: the guard and its exit marked added

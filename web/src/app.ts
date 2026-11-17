@@ -29,6 +29,7 @@ import { fillBoardBar, showBoardBar } from "./board.ts";
 import { canvasHandle, canvasMode, leaveEdit, showScene } from "./canvas.ts";
 import { loadCommits, showCommitsBar } from "./commits.ts";
 import { loadAgents, loadTasks } from "./chat.ts";
+import { runCommandLine } from "./commands.ts";
 import { element } from "./dom.ts";
 import { renderExports } from "./export-menu.ts";
 import { loadFlow } from "./flow-tab.ts";
@@ -79,6 +80,7 @@ bindPage({
   load: () => load(),
   // After an agent run the code changed: the views, the stats and the coverage.
   loadViews: reloadCode,
+  command: runCommandLine,
 });
 
 /** What the canvas does on a tap, a double tap, its own selection (a box in the editor) and a right click. */
