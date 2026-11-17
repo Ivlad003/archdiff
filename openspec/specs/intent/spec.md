@@ -38,6 +38,30 @@ The system SHALL, with `archdiff check`, exit 1 when the code imports between tw
 - **WHEN** `src/routes/health.ts` imports `src/db/store.ts` and the contract has no arrow from `routes` to `db`
 - **THEN** `archdiff check` exits 1 and says "`src/routes/health.ts:2` imports `src/db/store.ts`: layer **routes** → **db** is not in the intent"
 
+### Requirement: A baseline keeps the known violations from failing the check
+
+The system SHALL, with `archdiff check --baseline [FILE]`, write the violations the check finds now — each as its rule, the module it is in and the module or package it imports, without a line, sorted, one per line — to `archdiff-baseline.json` at the root (the path `archdiff.json` names in `baseline`, or FILE), exit 0, and never write over a file that is not archdiff's. With that file present `archdiff check` SHALL exit 1 only when a violation is not listed in it, list the known violations apart with their count, and name the entries of the file that no longer occur; `--no-baseline` SHALL hold the code to no baseline. `--json` SHALL give every violation with its `rule` and `known`, the entries that no longer occur as `stale`, the baseline's file, and `ok`. A baseline that is not valid, or an entry of it without a rule and a module, SHALL exit 2 naming the file and the entry. The page's check and the contract check after an agent's run SHALL hold the code to the same baseline.
+
+#### Scenario: An old repository adopts the contract
+
+- **WHEN** the code has two imports against the contract and `archdiff check --baseline` runs
+- **THEN** `archdiff-baseline.json` lists both as `{ "rule": "layers", "from": …, "to": … }`, and `archdiff check` exits 0 saying "the code follows the intent; 2 known violations in archdiff-baseline.json"
+
+#### Scenario: A new violation beside the known ones
+
+- **WHEN** a third import against the contract is written
+- **THEN** `archdiff check` exits 1, lists it under "New violations (1)" and the other two under "Known violations (2)"
+
+#### Scenario: The line of a known violation moves
+
+- **WHEN** lines are added above a known import
+- **THEN** it is still known: `archdiff check` exits 0
+
+#### Scenario: The baseline shrinks
+
+- **WHEN** one of the known imports is removed from the code
+- **THEN** `archdiff check` exits 0 and names the entry under "Fixed since the baseline (1)", and `archdiff check --baseline` writes the file without it
+
 ### Requirement: The contract follows the drawing and the configuration follows the contract
 
 The system SHALL fold a drawing's planned modules, functions, layers, arrows and removals into the contract (`archdiff intent --view <view>`, "code this" on the page), naming the ends of drawn arrows with the layers the code gives them, and write `archdiff.json` `layers` from the contract's layers (a directory as the glob, the files themselves where another layer lives below the directory; the contract's layers first).

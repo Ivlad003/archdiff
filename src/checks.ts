@@ -1,5 +1,6 @@
 // The checks run after an agent's run, or on request from the page: the
-// contract (`archdiff check`, in process) and the commands archdiff.json
+// contract (`archdiff check`, in process, held against the baseline of
+// known violations as the command holds it) and the commands archdiff.json
 // names in `checks` (`npm test`, `npm run typecheck`, `npx -y
 // @fission-ai/openspec validate --specs`), each run in a shell in the
 // repository with a time limit, its exit code and the tail of its output
@@ -7,18 +8,21 @@
 // these commands (`--allowedTools Bash(<command>:*)`), so it can verify
 // its own work before it finishes.
 //
-// Sits at the I/O edge beside the agent. Entry points: `runChecks`,
-// `checkEvents`, `allowedToolsFor`, `CheckResult`.
+// Sits at the I/O edge beside the agent: it reads the baseline and runs
+// processes. Entry points: `runChecks`, `checkEvents`, `allowedToolsFor`,
+// `CheckResult`.
 
 import { spawn } from "node:child_process";
 import type { AgentEvent } from "./agent.ts";
 import type { Analysis } from "./analyze.ts";
-import { checkIntent, judgesLayers } from "./intent.ts";
+import { readBaseline } from "./baseline.ts";
+import { checkCode, checkSummary, violationLine } from "./violations.ts";
+import { INTENT_FILE, judgesLayers } from "./intent.ts";
 
 export interface CheckResult {
   command: string;
   ok: boolean;
-  /** The tail of what the command wrote, or the contract's findings. */
+  /** The tail of what the command wrote, or what the contract check says: its sentence, then the new violations. */
   output: string;
   /** The exit code of a command; absent for the contract check. */
   code?: number | null;
@@ -55,15 +59,29 @@ function runCommand(root: string, command: string): Promise<CheckResult> {
   });
 }
 
+/**
+ * The contract check as `archdiff check` runs it, held against the repository's baseline: the new violations fail
+ * it, each on a line; the known ones are counted. Null without a contract; a baseline that cannot be read fails it.
+ */
+function contractCheck(analysis: Analysis): CheckResult | null {
+  if (!analysis.intent) return null;
+
+  if (!judgesLayers(analysis.intent)) return { command: "archdiff check", ok: true, output: `${INTENT_FILE} names no layer: nothing to check against` };
+
+  try {
+    const check = checkCode(analysis, readBaseline(analysis.root, analysis.config.baseline))!;
+    const summary = checkSummary(check, INTENT_FILE);
+
+    return { command: "archdiff check", ok: check.ok, output: check.ok ? summary : [summary, ...check.fresh.map(violationLine)].join("\n") };
+  } catch (error) {
+    return { command: "archdiff check", ok: false, output: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /** The contract check, then every configured command, in order; an analysis without a contract skips the first. */
 export async function runChecks(analysis: Analysis): Promise<CheckResult[]> {
-  const results: CheckResult[] = [];
-
-  if (analysis.intent && !judgesLayers(analysis.intent)) results.push({ command: "archdiff check", ok: true, output: "ARCHITECTURE.md names no layer: nothing to check against" });
-  else if (analysis.intent) {
-    const report = checkIntent(analysis, analysis.intent);
-    results.push({ command: "archdiff check", ok: report.ok, output: report.ok ? "the code follows ARCHITECTURE.md" : report.violations.map((violation) => `${violation.from}:${violation.line} imports ${violation.to}: ${violation.fromLayer} → ${violation.toLayer} is not in the contract`).join("\n") });
-  }
+  const contract = contractCheck(analysis);
+  const results: CheckResult[] = contract ? [contract] : [];
 
   for (const command of analysis.config.checks) results.push(await runCommand(analysis.root, command));
 

@@ -7,14 +7,15 @@
 //
 // The file is the contract: the `intent` view draws it against the code
 // (what is planned and not built yet, what the code has beyond it),
-// `check` lists the imports between layers the contract does not allow,
+// `check` lists the imports between layers the contract does not allow
+// (violations.ts writes its report and holds it against the baseline),
 // and the drawing of the intent view adds to it (a drawn module is written
 // here before the agent builds it). Agents read and write the same file,
 // which is why it is Markdown and Mermaid, not a format of archdiff's own.
 //
 // Pure except `readIntent` / `writeIntent`. Entry points: `parseIntent`,
-// `intentMarkdown`, `checkIntent`, `checkMarkdown`,
-// `mergePlan`, `intentFromCode`, `INTENT_FILE`.
+// `intentMarkdown`, `checkIntent`, `judgesLayers`,
+// `intentFromCode`, `INTENT_FILE`.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -494,28 +495,6 @@ export function checkIntent(analysis: Analysis, intent: Intent): IntentReport {
   }
 
   return { planned, plannedEdges, beyond, violations, unintended: [...new Set(unintended)], ok: violations.length === 0 };
-}
-
-export function checkMarkdown(report: IntentReport, root: string): string {
-  const lines = [`<!-- archdiff:generated — check -->`, `# Check: the code of ${root} against ${INTENT_FILE}`, ""];
-  lines.push(report.ok ? "**No import between layers goes against the intent.**" : `**${report.violations.length} ${report.violations.length === 1 ? "import goes" : "imports go"} against the intent.**`, "");
-
-  if (report.violations.length > 0) {
-    lines.push("## Violations", "");
-
-    for (const violation of report.violations) lines.push(`- \`${violation.from}:${violation.line}\` imports \`${violation.to}\`: layer **${violation.fromLayer}** → **${violation.toLayer}** is not in the intent. Add the arrow to ${INTENT_FILE} if it is wanted, else move the import.`);
-    lines.push("");
-  }
-
-  if (report.planned.length > 0) lines.push(`## Planned, not built (${report.planned.length})`, "", ...report.planned.map((item) => `- \`${item}\``), "");
-
-  if (report.plannedEdges.length > 0) lines.push(`## Planned imports and calls, not built (${report.plannedEdges.length})`, "", ...report.plannedEdges.map((item) => `- ${item}`), "");
-
-  if (report.beyond.length > 0) lines.push(`## Built beyond the intent (${report.beyond.length})`, "", ...report.beyond.map((item) => `- \`${item}\` — name it in ${INTENT_FILE}, or it is a drift`), "");
-
-  if (report.unintended.length > 0) lines.push(`## Imports the intent does not name (${report.unintended.length})`, "", ...report.unintended.map((item) => `- ${item}`), "");
-
-  return `${lines.join("\n").trimEnd()}\n`;
 }
 
 /** How much of the code `intentFromCode` writes: every module (`modules`), or the layers with a few modules each (`layers`); `auto` picks by size. */

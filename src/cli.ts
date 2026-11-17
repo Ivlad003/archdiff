@@ -30,7 +30,10 @@ import { CACHE_DIRECTORY } from "./cache.ts";
 import { serve } from "./server.ts";
 import { drawnAtHead, usesDepth, viewSyntax, viewsOfFiles } from "./view-keys.ts";
 import { parseView, viewList, viewOf, type View } from "./views.ts";
-import { checkIntent, checkMarkdown, INTENT_FILE, intentFromCode, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "./intent.ts";
+import { INTENT_FILE, intentFromCode, intentMarkdown, judgesLayers, parseIntent, writeIntent } from "./intent.ts";
+import { baselineText, parseBaseline, readBaseline } from "./baseline.ts";
+import { checkCode, checkJson, checkMarkdown, checkSummary } from "./violations.ts";
+import { CONFIG_FILE } from "./config.ts";
 import { scaffold, TEMPLATES, type Template } from "./scaffold.ts";
 import { listSpecs, specPrompt, specSubject, validateSpecs } from "./spec.ts";
 import { writeTestSkeletons } from "./gherkin.ts";
@@ -672,11 +675,19 @@ const COMMANDS: readonly Command[] = [
   },
   {
     name: "check",
-    usage: "[dir] [--json] [--out FILE]",
-    help: ["The code against ARCHITECTURE.md: imports between layers the intent does", "not allow (exit 1), what is planned and not built, what is built beyond it"],
+    usage: "[dir] [--baseline [FILE]] [--no-baseline] [--json] [--out FILE]",
+    help: [
+      "The code against ARCHITECTURE.md: imports between layers the intent does",
+      "not allow (exit 1), what is planned and not built, what is built beyond it.",
+      "--baseline writes the violations found now to archdiff-baseline.json (or FILE;",
+      "archdiff.json's \"baseline\" names another), a file to commit: from then on only",
+      "a violation that is not in it fails, the known ones are listed apart, and the",
+      "entries that no longer occur are named. --no-baseline holds the code to none",
+    ],
     arity: 1,
-    flags: [flag("json"), flag("out", true)],
+    flags: [flag("json"), flag("out", true), flag("baseline", "optional"), flag("no-baseline")],
     async run(call) {
+      if (call.has("baseline") && call.has("no-baseline")) return fail("check: --baseline writes the baseline and --no-baseline reads none: one of them");
       const analysis = await analyze(call.dir(0));
 
       if (!analysis.intent) {
@@ -691,11 +702,30 @@ const COMMANDS: readonly Command[] = [
         return 0;
       }
 
-      const report = checkIntent(analysis, analysis.intent);
-      const code = writeOut(call.has("json") ? `${JSON.stringify(report, null, 2)}\n` : checkMarkdown(report, analysis.root), call.text("out"));
-      process.stderr.write(report.ok ? "archdiff check: the code follows the intent\n" : `archdiff check: ${report.violations.length} ${report.violations.length === 1 ? "import goes" : "imports go"} against the intent\n`);
+      // The baseline the code is held against: none when asked, the one written now, else the repository's.
+      let baseline = call.has("no-baseline") || call.has("baseline") ? null : readBaseline(analysis.root, analysis.config.baseline);
 
-      return code !== 0 ? code : report.ok ? 0 : 1;
+      // --baseline: what the check finds now becomes the baseline, and the report is of the code against it.
+      if (call.has("baseline")) {
+        const configured = resolve(analysis.root, analysis.config.baseline);
+        const file = call.text("baseline");
+        const text = baselineText(checkCode(analysis, null)?.violations ?? []);
+        const written = writeOut(text, file ?? configured);
+
+        if (written !== 0) return written;
+        baseline = parseBaseline(text, file ?? analysis.config.baseline);
+        process.stderr.write(`archdiff check: ${counted(baseline.violations.length, "violation")} known from now on${baseline.violations.length === 0 ? " (an empty baseline: the file can go)" : ": commit the file, and check fails on any other"}\n`);
+
+        if (file !== null && resolve(file) !== configured) process.stderr.write(`archdiff check: check reads ${analysis.config.baseline}; name ${file} as "baseline" in ${CONFIG_FILE} to have it read\n`);
+      }
+
+      const check = checkCode(analysis, baseline);
+
+      if (check === null) return 0;
+      const code = writeOut(call.has("json") ? `${JSON.stringify(checkJson(check), null, 2)}\n` : checkMarkdown(check, analysis.root), call.text("out"));
+      process.stderr.write(`archdiff check: ${checkSummary(check, "the intent")}\n`);
+
+      return code !== 0 ? code : check.ok ? 0 : 1;
     },
   },
   {

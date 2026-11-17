@@ -152,6 +152,10 @@ _Avoid_: plan, spec
 An import between two layers that no arrow of the contract allows.
 _Avoid_: error, breach
 
+**Baseline**:
+The violations a repository is known to have, kept in a committed file: the check fails on any other.
+_Avoid_: allowlist, ignore list, suppressions
+
 **Usage**:
 Who uses each export of a module.
 _Avoid_: contract (taken)

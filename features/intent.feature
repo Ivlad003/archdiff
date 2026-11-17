@@ -15,6 +15,30 @@ Feature: The contract: ARCHITECTURE.md
     Then the exit code is 1
     And the report says "`src/routes/health.ts:2` imports `src/db/store.ts`: layer **routes** → **db** is not in the intent"
 
+  Scenario: An old repository adopts the contract with a baseline
+    Given code with two imports against the contract
+    When I run "archdiff check --baseline"
+    Then archdiff-baseline.json lists the two violations by rule, importing module and imported module
+    And "archdiff check" exits 0 and lists them under "Known violations (2)"
+
+  Scenario: A new violation fails the check beside the known ones
+    Given a baseline with two known violations
+    And a third import against the contract
+    When I run "archdiff check"
+    Then the exit code is 1
+    And the report lists the third under "New violations (1)" and the others under "Known violations (2)"
+
+  Scenario: A known violation keeps its place when its line moves
+    Given a baseline with two known violations
+    When lines are added above the imports
+    Then "archdiff check" exits 0
+
+  Scenario: The baseline shrinks as the code is fixed
+    Given a baseline with two known violations
+    When one of the imports is removed
+    Then "archdiff check" exits 0 and names the entry under "Fixed since the baseline (1)"
+    And "archdiff check --baseline" writes the file with one violation
+
   Scenario: A design note becomes the contract
     Given a Markdown note with a Mermaid flowchart whose subgraphs are http and app
     When I run "archdiff import note.md"
