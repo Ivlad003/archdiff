@@ -42,5 +42,5 @@ jobs:
           node-version: 22
       - uses: ./
         with:
-          fail-on-layer-coupling: "true"
+          fail-on-check: "true"
           comment: "true"

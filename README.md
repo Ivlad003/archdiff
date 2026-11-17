@@ -96,7 +96,46 @@ In the Chat tab, the first row asks a question: about the picture on the canvas 
 
 ## Reviewing branches
 
-The header's **head** field is the code the page shows: any branch, tag or commit (the branches are offered as you type, `[` and `]` step through them), read from git without a checkout — every picture, the views list, the Code tab, the coverage and the project map follow it, and the title ends with "@ branch"; empty is the working tree (`diagram <view> --head REF` in the terminal). `b` shows the branches as a picture, to see where each one stands and open its code, its review or one of its commits. `review` on the page opens the branch bar: a base (develop, main or master by default, or any branch) and the heads — the working tree, the current branch, any other local or remote branch. One head is the review; tick two or more and `compare` draws every module any head touched — each head from where it left the base (their merge-base, named in its row), as its pull request would show it, so what the base gained since is not read as the head's doing — labelled with what each head did to it (`+ feature-a  ~ feature-b`, or "every head" when they all did the same; a module's page lists what each head did to it), the imports each head added or removed labelled with the head, and a table per head with the layer couplings it introduced. A bar below lists the commits of the range; pick one, or step with ‹ ›, to see that commit's own change against the one before it. A tap on a shape in a review shows the commits that touched its file. In the terminal: `archdiff branches`, `archdiff compare --base develop --heads feature-a,feature-b,WORKTREE`, `archdiff history`; [docs/ci.md](docs/ci.md) shows the GitHub Action that posts the review on every pull request.
+The header's **head** field is the code the page shows: any branch, tag or commit (the branches are offered as you type, `[` and `]` step through them), read from git without a checkout — every picture, the views list, the Code tab, the coverage and the project map follow it, and the title ends with "@ branch"; empty is the working tree (`diagram <view> --head REF` in the terminal). `b` shows the branches as a picture, to see where each one stands and open its code, its review or one of its commits. `review` on the page opens the branch bar: a base (develop, main or master by default, or any branch) and the heads — the working tree, the current branch, any other local or remote branch. One head is the review; tick two or more and `compare` draws every module any head touched — each head from where it left the base (their merge-base, named in its row), as its pull request would show it, so what the base gained since is not read as the head's doing — labelled with what each head did to it (`+ feature-a  ~ feature-b`, or "every head" when they all did the same; a module's page lists what each head did to it), the imports each head added or removed labelled with the head, and a table per head with the layer couplings it introduced. A bar below lists the commits of the range; pick one, or step with ‹ ›, to see that commit's own change against the one before it. A tap on a shape in a review shows the commits that touched its file. In the terminal: `archdiff branches`, `archdiff compare --base develop --heads feature-a,feature-b,WORKTREE`, `archdiff history`; the next section has the GitHub Action that keeps the review on every pull request.
+
+## On a pull request: the GitHub Action
+
+`action.yml` at the root of this repository puts the architectural diff on the pull request itself, as one comment that is rewritten on every push: what the head added, removed and changed since it left the base — the counts, the dependencies between layers that appeared and went, the Mermaid picture, and every change by kind, folded — under the verdict of `archdiff check` against `ARCHITECTURE.md` with its violations. The same goes to the job summary, and the job fails when the check does.
+
+```yaml
+# .github/workflows/archdiff.yml
+name: archdiff
+on:
+  pull_request:
+permissions:
+  contents: read
+  pull-requests: write # the comment
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the merge-base needs the history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Ivlad003/archdiff@v0
+        # with:
+        #   base: develop          # default: the pull request's base ref
+        #   fail-on-check: "false" # default "true": the job fails when archdiff check does
+        #   comment: "false"       # default "true"; "false" writes the job summary only
+        #   working-directory: packages/api
+```
+
+| input | default | what it does |
+| --- | --- | --- |
+| `base` | the pull request's base ref | The ref the head is compared with, from where it left it (their merge-base), so what the base gained since is not read as the head's doing |
+| `fail-on-check` | `true` | Fail the job when `archdiff check` finds an import between layers that `ARCHITECTURE.md` does not allow |
+| `comment` | `true` | Keep the comment on the pull request; `false` writes the job summary only |
+| `working-directory` | `.` | The directory archdiff runs in: the repository, or one package of it |
+
+`fetch-depth: 0` matters: the merge-base needs the history, and a clone without the base stops the job with a message naming the fix. The comment needs `pull-requests: write`; a pull request from a fork gets a read-only token, so there the review is in the job summary alone, with a warning. The check is of the whole code at the head: an import against the contract that the base already had fails it too, and without an `ARCHITECTURE.md` that names layers there is nothing to fail on, which the comment says (`archdiff intent --init` writes one from the code). A pull request that changed no module, function, import or call gets one line saying so instead of an empty picture. GitHub takes no comment over 65 536 characters: past it the picture stays and the lists are cut, each to the same number of its first items, with a count of what was left out; the job summary has them all. The action restores `.archdiff/` from the run before, so a review after the first takes about a second. [docs/ci.md](docs/ci.md) has the commands for any other CI.
 
 ## A project from scratch: the intent
 
