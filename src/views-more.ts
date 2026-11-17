@@ -508,10 +508,10 @@ export function eventsView(analysis: Analysis): PictureContent {
 
 /**
  * A test file, by the conventions of each language: a `tests/` or `__tests__/` directory, `x.test.ts`,
- * `x.spec.js` or `x_test.js`, `test_x.py`, Django's `tests.py`, `conftest.py`, `x_test.rs`, `XTest.php`, `x_test.go`, `XTest.java` (and `src/test/`). Not a
+ * `x.spec.js` or `x_test.js`, `test_x.py`, Django's `tests.py`, `conftest.py`, `x_test.rs`, `XTest.php`, `x_test.go`, `XTest.java` (and `src/test/`), `XTests.cs` (and a project `X.Tests/`). Not a
  * module whose name only contains the word (`ab-test.ts`, an A/B test).
  */
-const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$|_test\.(py|rs|php|go)$|(^|\/)tests?(_[^/]*)?\.py$|(^|\/)conftest\.py$|Test\.php$|(Tests?|IT)\.java$/;
+const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$|_test\.(py|rs|php|go)$|(^|\/)tests?(_[^/]*)?\.py$|(^|\/)conftest\.py$|Test\.php$|(Tests?|IT)\.java$|Tests?\.cs$|(^|\/)[^/]*[.]Tests?\//;
 
 /** Which modules the tests import: every non-test module in its layer's lane, with the number of test files importing it; one no test imports is marked. */
 export function testsView(graph: Graph): PictureContent {
@@ -725,35 +725,48 @@ function classBoxes(analysis: Analysis, module: string): ClassBox[] {
 }
 
 /**
- * A class written in several files — a Go type and the files that add methods to it (`QualifiedSymbol.part`) — is
- * one box: the declaration's, with the methods of every part among `boxes`, whose own boxes are taken out. The part
+ * A class written in several files — a Go type and the files that add methods to it, a C# `partial class`
+ * (`QualifiedSymbol.part`) — is one box: the declaration's (the first part's, of a class all in parts), with the fields
+ * and methods of every part among `boxes`, whose own boxes are taken out. The part
  * → the box it went into; a part whose declaration is not among the boxes stays a box of its own.
  */
 function foldParts(analysis: Analysis, boxes: Map<string, ClassBox>): Map<string, string> {
-  const declared = new Map<string, string>();
-  const parts: { id: string; key: string }[] = [];
+  // The declarations of each qualified name that has a part, in path order: `whole` is the one that is no part.
+  const classes = new Map<string, { whole: string | null; parts: string[]; name: string }>();
 
-  for (const file of analysis.facts.values()) {
+  for (const file of [...analysis.facts.values()].sort((a, b) => (a.path < b.path ? -1 : 1))) {
     for (const symbol of file.symbols ?? []) {
       if (symbol.table !== "class") continue;
       // A qualified name is one language's: the file's extension keeps two languages' apart.
       const key = `${file.path.slice(file.path.lastIndexOf("."))}\0${symbol.qualified}`;
+      const entry = classes.get(key) ?? { whole: null, parts: [], name: symbol.name };
 
-      if (symbol.part) parts.push({ id: `${file.path}#${symbol.name}`, key });
-      else if (!declared.has(key)) declared.set(key, `${file.path}#${symbol.name}`);
+      if (symbol.part) entry.parts.push(`${file.path}#${symbol.name}`);
+      else entry.whole ??= `${file.path}#${symbol.name}`;
+      classes.set(key, entry);
     }
   }
 
   const folded = new Map<string, string>();
 
-  for (const { id, key } of parts) {
-    const part = boxes.get(id);
-    const whole = boxes.get(declared.get(key) ?? "");
+  for (const { whole, parts, name } of classes.values()) {
+    const drawn = parts.filter((id) => boxes.has(id));
+    // Of a class all in parts (C#'s `partial`), the part in the file named after it stands for the class, else the first.
+    const into = boxes.get(whole ?? drawn.find((id) => new RegExp(`(^|/)${name}\\.[^./]+#`).test(id)) ?? drawn[0] ?? "");
 
-    if (!part || !whole || whole.id === id) continue;
-    whole.methods.push(...part.methods);
-    boxes.delete(id);
-    folded.set(id, whole.id);
+    if (!into) continue;
+
+    for (const id of drawn) {
+      const part = boxes.get(id)!;
+
+      if (id === into.id) continue;
+      into.fields.push(...part.fields.filter((field) => !into.fields.includes(field)));
+      into.methods.push(...part.methods);
+      into.extends.push(...part.extends.filter((base) => !into.extends.includes(base)));
+      into.implements.push(...part.implements.filter((base) => !into.implements.includes(base)));
+      boxes.delete(id);
+      folded.set(id, into.id);
+    }
   }
 
   return folded;
@@ -788,17 +801,18 @@ export function classesView(analysis: Analysis, scope: string | null, limit: num
   const folded = foldParts(analysis, boxes);
 
   if (boxes.size === 0) return unplaced(scope === null ? "Classes" : `Classes of ${scope}`, [], [], [], { reason: "no class, interface or object type here" });
-  // A name written on `extends`/`implements` → the box it means: the same module first, then the modules this one imports.
+  // A name written on `extends`/`implements` → the box it means: the same module first, then the modules this one imports
+  // (a part of a class folded into another box is that box).
   const resolveName = (from: string, name: string): string | null => {
     const own = `${from}#${name}`;
 
-    if (boxes.has(own) || graph.nodes.has(own)) return own;
+    if (boxes.has(own) || graph.nodes.has(own)) return folded.get(own) ?? own;
 
     for (const dep of graph.deps) {
       if (dep.from !== from || !graph.modules.has(dep.to)) continue;
       const id = `${dep.to}#${name}`;
 
-      if (graph.nodes.has(id)) return id;
+      if (graph.nodes.has(id)) return folded.get(id) ?? id;
     }
 
     return null;

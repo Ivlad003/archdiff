@@ -774,10 +774,10 @@ test("imports resolve as the tools resolve them: baseUrl, a jsconfig, the longes
     assert.ok(archdiff(["diagram", "calls:backend/app/api.py#run", dir, "--format", "mermaid"]).stdout.includes("backend_app_api_py_run ==> backend_app_models_py_load"));
   }));
 
-test("Python, Rust, PHP, Go and Java are read with the same graph: imports resolve and calls are followed", () => {
+test("Python, Rust, PHP, Go, Java and C# are read with the same graph: imports resolve and calls are followed", () => {
   const polyglot = join(root, "tests/fixtures/polyglot");
   const stats = JSON.parse(archdiff(["analyze", polyglot, "--json", "--no-cache"]).stdout) as { files: number; unresolvedImports: number; calls: number };
-  assert.equal(stats.files, 26);
+  assert.equal(stats.files, 35);
   assert.equal(stats.unresolvedImports, 0);
   const python = archdiff(["diagram", "calls:app/services/orders.py#place_order", polyglot, "--format", "mermaid"]).stdout;
   assert.ok(python.includes("app_services_orders_py_place_order ==> app_store_py_save_order"), python);
@@ -1886,6 +1886,64 @@ test("Java's flowchart: a case that runs into the next and a rule that does not,
     for (const line of ['n9 -->|"NEW"| n10', 'n9 -->|"PAID"| n11', "n11 --> n12", 'n9 -->|"no match"| n13', 'n13["synchronized (this)<br/>audit()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
     // The finally runs after the return and after the throw.
     for (const line of ['n14 -->|"ok"| n15', "n15 --> n16", 'n14 -->|"error RuntimeException e"| n17', "n17 --> n18", 'n16["done()"]', 'n18["done()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
+  }));
+
+test("C#: a using names a namespace — a class is found among the namespaces in scope and a global using's, a partial class is one class in two files, top-level statements are Main", () => {
+  const polyglot = join(root, "tests/fixtures/polyglot");
+  const id = (path: string): string => `csharp/Shop/${path}`.replace(/[^A-Za-z0-9]/g, "_");
+  const diagram = (key: string, ...flags: string[]): string => archdiff(["diagram", key, polyglot, "--format", "mermaid", ...flags]).stdout;
+  const modules = diagram("dir:csharp");
+  // By `using Shop.Orders;`, by the file's own namespace, and — Program.cs names MemoryOrders with no using of Shop.Store — by GlobalUsings.cs.
+  for (const [from, to] of [["Program.cs", "Web/OrdersController.cs"], ["Program.cs", "Store/MemoryOrders.cs"], ["Orders/OrderService.cs", "Store/IOrderRepository.cs"], ["Orders/OrderService.cs", "Orders/Order.cs"], ["Web/OrdersController.cs", "Orders/OrderService.cs"]]) assert.ok(modules.includes(`${id(from!)} --> ${id(to!)}`), `${from} → ${to}\n${modules}`);
+  // A partial class is named by the file called after it, not by its other part.
+  assert.ok(!modules.includes(`--> ${id("Orders/OrderService.Find.cs")}`), modules);
+  assert.ok(modules.includes(`csharp_Shop_Tests_OrderServiceTests_cs --> ${id("Orders/OrderService.cs")}`), modules);
+  assert.ok(archdiff(["views", polyglot]).stdout.includes("calls:csharp/Shop/Program.cs#Main\tMain (csharp/Shop/Program.cs) — main"));
+  const calls = diagram("calls:csharp/Shop/Program.cs#Main", "--depth", "4");
+  for (const [from, to, line] of [
+    // The lambda handed to MapPost calls the controller: its calls are the program's own; `controller.Show` is a method handed over.
+    ["Program.cs#Main", "Web/OrdersController.cs#OrdersController.Place", "==>"],
+    ["Program.cs#Main", "Web/OrdersController.cs#OrdersController.Show", "-.->"],
+    ["Web/OrdersController.cs#OrdersController.Place", "Orders/OrderService.cs#OrderService.Place", "==>"],
+    // `_repository.Save(order)` with `_repository` an IOrderRepository: the interface's one implementer.
+    ["Orders/OrderService.cs#OrderService.Place", "Store/MemoryOrders.cs#MemoryOrders.Save", "==>"],
+    // `Audit(order)` and `Find` are written in the other part of the class.
+    ["Orders/OrderService.cs#OrderService.Place", "Orders/OrderService.Find.cs#OrderService.Audit", "==>"],
+    ["Web/OrdersController.cs#OrdersController.Show", "Orders/OrderService.Find.cs#OrderService.Find", "==>"],
+    ["Orders/OrderService.cs#OrderService.Place", "Orders/Order.cs#Order.IsValid", "==>"],
+  ]) assert.ok(calls.includes(`${id(from!)} ${line} ${id(to!)}`), `${from} ${line} ${to}\n${calls}`);
+  // One box for the partial class, with the members of both files.
+  const classes = diagram("classes:csharp");
+  assert.equal(classes.split('["OrderService"]').length - 1, 1, classes);
+  assert.ok(classes.includes("+_repository: IOrderRepository") && classes.includes("+Find(string id) returns Order?") && classes.includes("-Audit(Order order) returns void") && classes.includes(`${id("Store/IOrderRepository.cs#IOrderRepository")} <|.. ${id("Store/MemoryOrders.cs#MemoryOrders")}`) && classes.includes("$Render(Order order) returns string"), classes);
+  // .NET is the language's library, a referenced package is named as the project file names it.
+  const externals = (JSON.parse(archdiff(["diagram", "module:csharp/Shop/Program.cs", polyglot, "--format", "json", "--packages"]).stdout) as { nodes: { id: string }[] }).nodes.map((node) => node.id);
+  assert.ok(externals.includes("pkg:Serilog") && externals.includes("pkg:Microsoft.AspNetCore"), externals.join());
+  // A file of a project named `….Tests` is a test file.
+  const tests = JSON.parse(archdiff(["diagram", "tests", polyglot, "--format", "json"]).stdout) as { nodes: { id: string; count?: number }[] };
+  assert.deepEqual(tests.nodes.filter((node) => node.id.startsWith("csharp/")).map((node) => [node.id.slice("csharp/Shop/".length), node.count]), [["GlobalUsings.cs", 0], ["Orders/Order.cs", 0], ["Orders/OrderService.Find.cs", 0], ["Orders/OrderService.cs", 1], ["Program.cs", 0], ["Store/IOrderRepository.cs", 0], ["Store/MemoryOrders.cs", 1], ["Web/OrdersController.cs", 0]]);
+  const coverage = archdiff(["coverage", polyglot]).stdout;
+  assert.ok(coverage.includes("0 blind") && coverage.includes("0 unresolved imports"), coverage);
+  const logic = archdiff(["diagram", "logic:csharp/Shop/Web/OrdersController.cs#OrdersController.Place", polyglot]).stdout;
+  assert.ok(logic.includes("| `try: ok` | `_orders.Place`, `Render` | **return Render(order)** |") && logic.includes("| `try: error (ArgumentException refused)` |"), logic);
+  // The program's own flowchart is read from its top-level statements; an expression-bodied method returns its expression.
+  assert.ok(diagram("logic:csharp/Shop/Program.cs#Main").includes('n4["app.Run()"]'));
+  assert.ok(diagram("logic:csharp/Shop/Orders/Order.cs#Order.IsValid").includes('(["return Total >= 0"])'));
+});
+
+test("C#'s flowchart: a section that runs into the next only when empty, a using and a lock, a foreach, a catch with a filter and a finally", () =>
+  withTempDir("archdiff-csharp-logic-", (dir) => {
+    writeFileSync(
+      join(dir, "Flow.cs"),
+      "class Flow\n{\n    int Run(Status status, List<string> items)\n    {\n        switch (status)\n        {\n            case Status.New:\n            case Status.Paid when items.Count > 0:\n                Ship();\n                break;\n            default:\n                Skip();\n                break;\n        }\n        foreach (var item in items)\n        {\n            if (item.Length == 0) continue;\n            Work(item);\n        }\n        using (var scope = Open())\n        {\n            Audit();\n        }\n        lock (_gate) { Count(); }\n        try { return 1; }\n        catch (InvalidOperationException e) when (e.Message != null) { throw new Failure(e); }\n        finally { Done(); }\n    }\n}\n",
+    );
+    const logic = archdiff(["diagram", "logic:Flow.cs#Flow.Run", dir, "--format", "mermaid"]).stdout;
+    // The two labels share the statements of the second; the default is apart; `break` leaves the switch.
+    for (const line of ['n1{"switch status"}', 'n1 -->|"Status.New"| n2', 'n1 -->|"Status.Paid when items.Count > 0"| n2', 'n1 -->|"default"| n3', 'n2["Ship()"]', "n2 --> n4", "n3 --> n4"]) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    for (const line of ['n4{{"↻ var item in items"}}', 'n4 -->|"each"| n5', 'n5{"item.Length == 0"}', 'n5 -->|"yes"| n4', 'n5 -->|"no"| n6', "n6 --> n4"]) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    // `using` and `lock` are a header before their block.
+    for (const line of ['n7["using (var scope = Open())<br/>Audit()"]', 'n8["lock (_gate)<br/>Count()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
+    for (const line of ['n9 -->|"ok"| n10', 'n10(["return 1"])', "n10 --> n11", 'n9 -->|"error (InvalidOperationException e)"| n12', 'n12(["throw new Failure(e)"])', 'n11["Done()"]', 'n13["Done()"]']) assert.ok(logic.includes(line), `${line}\n${logic}`);
   }));
 
 test("Rust integration tests are crates of their own: `mod util;` and `use <crate>::` resolve from tests/", () => {

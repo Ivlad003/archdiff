@@ -391,7 +391,7 @@ function declareModules(b: Building): void {
 
     for (const decl of file.decls) addDecl(decl);
 
-    // Java: a type nested in another is named by its own name in the file, where no top-level declaration has it.
+    // Java, C#: a type nested in another is named by its own name in the file, where no top-level declaration has it.
     if (nestedTypesInScope(file.path)) {
       const nest = (decl: DeclFact, parent: string): void => {
         for (const member of decl.members) {
@@ -445,8 +445,8 @@ function bindImports(b: Building): void {
         if (fact.url) dep.url = true;
         b.deps.push(dep);
       } else if (target.kind === "package" || target.kind === "builtin") {
-        // A package by its name; a language's own library by the language: `node:fs`, `py:os`, `rust:std`, `php:strlen`.
-        const id = `${target.kind === "package" ? "pkg" : target.runtime === undefined ? "node" : target.runtime === "python" ? "py" : target.runtime}:${target.name}`;
+        // A package by its name; a language's own library by the language: `node:fs`, `py:os`, `rust:std`, `php:strlen`, `go:net/http`, `java:java.util`, `dotnet:System.Linq`.
+        const id = `${target.kind === "package" ? "pkg" : target.runtime === undefined ? "node" : target.runtime === "python" ? "py" : target.runtime === "csharp" ? "dotnet" : target.runtime}:${target.name}`;
 
         if (!b.externals.has(id)) b.externals.set(id, { id, kind: target.kind, name: target.name });
         b.deps.push({ from: file.path, to: id, typeOnly, reexport: fact.reexport, line: fact.line });
@@ -482,7 +482,7 @@ class CallResolver {
   private readonly implementers = new Map<string, string[]>();
   /** The facts of each file, by its path. */
   private readonly files = new Map<string, FileFacts>();
-  /** The other declarations of a class written in several files (a Go type and the files that add methods to it), by class node. */
+  /** The other declarations of a class written in several files (a Go type and the files that add methods to it, a C# `partial class`), by class node. */
   private readonly parts = new Map<string, string[]>();
 
   constructor(b: Building, exports: ExportTable) {

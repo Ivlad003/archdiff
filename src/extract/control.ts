@@ -9,14 +9,14 @@
 // tree-sitter queries; Python with a walk, its comparison node having no
 // fields to query by.
 //
-// Shared by the TypeScript, Python, Go and Java frontends (source → FileFacts):
+// Shared by the TypeScript, Python, Go, Java and C# frontends (source → FileFacts):
 // `guardsOf` annotates every call fact, `collectStates` and
 // `collectMachines` fill `FileFacts.states` and `FileFacts.machines`
 // (TypeScript and Python only). Entry points: `guardsOf`, `countBranches`,
 // `headerOf`, `short`, `unwrapped`,
 // `collectTsStates`, `collectPyStates`, `collectTsMachines`,
 // `collectPyMachines`, `enclosingDeclaration`, `TS_CONTROL`, `PY_CONTROL`,
-// `GO_CONTROL`, `JAVA_CONTROL`.
+// `GO_CONTROL`, `JAVA_CONTROL`, `CSHARP_CONTROL`.
 
 import type { GuardFact, MachineFact, StateFact } from "./facts.ts";
 import { query, startCol, type Grammar, type Language, type Node } from "./treesitter.ts";
@@ -104,6 +104,23 @@ export const JAVA_CONTROL: ControlGrammar = {
   ternaries: new Set(["ternary_expression"]),
   functions: new Set(["method_declaration", "constructor_declaration", "compact_constructor_declaration", "lambda_expression"]),
   classes: new Set(["class_declaration", "interface_declaration", "enum_declaration", "record_declaration"]),
+  equality: tsEquality,
+};
+
+/** C#: `else` is followed by the statement itself; a `switch` holds sections, each of the patterns it matches and its statements. */
+export const CSHARP_CONTROL: ControlGrammar = {
+  ifs: new Set(["if_statement"]),
+  consequence: "consequence",
+  elses: new Set(),
+  alternative: "alternative",
+  loops: new Set(["for_statement", "foreach_statement", "while_statement", "do_statement"]),
+  switches: new Set(["switch_statement"]),
+  cases: new Set(["switch_section"]),
+  tries: new Set(["try_statement"]),
+  catches: new Set(["catch_clause", "finally_clause"]),
+  ternaries: new Set(["conditional_expression"]),
+  functions: new Set(["method_declaration", "constructor_declaration", "local_function_statement", "lambda_expression", "anonymous_method_expression", "accessor_declaration"]),
+  classes: new Set(["class_declaration", "struct_declaration", "record_declaration", "interface_declaration"]),
   equality: tsEquality,
 };
 
@@ -204,8 +221,8 @@ export function guardsOf(node: Node, stop: Node, grammar: ControlGrammar): Guard
 
       if (!body || body.id === child.id || body.startIndex <= node.startIndex) chain.push({ kind: "loop", text: headerOf(at), id: at.startIndex });
     } else if (grammar.cases.has(at.type)) {
-      // What the case names: a value, Python's pattern, the type of a Go type switch, the channel operation of a `select`, Java's label (`case NEW`, `default`).
-      const value = at.childForFieldName("value") ?? at.namedChildren.find((candidate) => candidate.type === "case_pattern" || candidate.type === "switch_label") ?? at.childForFieldName("type") ?? at.childForFieldName("communication");
+      // What the case names: a value, Python's pattern, the type of a Go type switch, the channel operation of a `select`, Java's label (`case NEW`, `default`), the first pattern of a C# section.
+      const value = at.childForFieldName("value") ?? at.namedChildren.find((candidate) => candidate.type.endsWith("_pattern") || candidate.type === "switch_label") ?? at.childForFieldName("type") ?? at.childForFieldName("communication");
 
       if (!value || value.id !== child.id) chain.push({ kind: "case", text: value ? short(value.text).replace(/^case\s+/, "") : "default", id: at.startIndex });
     } else if (grammar.tries.has(at.type)) {

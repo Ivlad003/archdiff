@@ -124,6 +124,8 @@ export function grammarFor(path: string): Grammar {
 
   if (path.endsWith(".java")) return "java";
 
+  if (path.endsWith(".cs")) return "c-sharp";
+
   if (path.endsWith(".tsx")) return "tsx";
 
   if (/\.[cm]?ts$/.test(path)) return "typescript";
@@ -385,6 +387,7 @@ const NO_VALUE_CODE = new Set([
   "import_declaration",
   "package_clause",
   "package_declaration",
+  "using_directive",
   "import_from_statement",
   "future_import_statement",
   "namespace_use_declaration",

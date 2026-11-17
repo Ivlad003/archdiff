@@ -23,9 +23,9 @@ export interface LanguageInfo {
   caselessNames: boolean;
   /** Every type declaration is an interface (PHP): a call through a value typed with one is dispatched at run time to a class a binding may name. */
   interfaceTypes: boolean;
-  /** A type declared inside another is in scope by its own name in the file (Java: `new Line()` inside `Order` makes an `Order.Line`). */
+  /** A type declared inside another is in scope by its own name in the file (Java, C#: `new Line()` inside `Order` makes an `Order.Line`). */
   nestedTypes?: true;
-  /** Members every class has from the language's root class (Java's `toString`, an enum's `values`): one a class of the repository does not declare is the language's. */
+  /** Members every class has from the language's root class (Java's `toString`, an enum's `values`, C#'s `GetHashCode`): one a class of the repository does not declare is the language's. */
   rootMember?: (name: string) => boolean;
 }
 
@@ -40,8 +40,16 @@ const JAVA_IMPLICIT = new Set(["toString", "equals", "hashCode", "compareTo", "i
 /** Java: what every class has from `Object`, and every enum from `Enum`. */
 const JAVA_ROOT = new Set(["toString", "equals", "hashCode", "getClass", "clone", "notify", "notifyAll", "wait", "finalize", "values", "valueOf", "ordinal", "name"]);
 
+/** C#: what every class has from `object`, and every enum from `Enum`. */
+const CSHARP_ROOT = new Set(["ToString", "Equals", "GetHashCode", "GetType", "MemberwiseClone", "ReferenceEquals", "HasFlag", "CompareTo"]);
+
+/** C#: the methods the language and its library call through `object`, `IDisposable`, `IEnumerable` and `IComparable`. */
+const CSHARP_IMPLICIT = new Set(["ToString", "Equals", "GetHashCode", "Dispose", "DisposeAsync", "GetEnumerator", "CompareTo"]);
+
 /** The table of supported languages, keyed by the name used in `archdiff.json`. */
 export const LANGUAGES = {
+  // C#: a constructor is the member `constructor`, as the frontend names it; a file is some types of its namespace, no directory's module.
+  csharp: { extensions: [".cs"], module: "file", index: new Array<string>(), constructor: "constructor", implicit: (name) => CSHARP_IMPLICIT.has(name), caselessNames: false, interfaceTypes: false, nestedTypes: true, rootMember: (name) => CSHARP_ROOT.has(name) },
   // Go: a composite literal makes a value and runs no member; a file is no directory's module (the package is the directory).
   go: { extensions: [".go"], module: "file", index: new Array<string>(), constructor: null, implicit: (name) => GO_IMPLICIT.has(name), caselessNames: false, interfaceTypes: false },
   // Java: a constructor is the member `constructor`, as the frontend names it; a file is one type of its package, no directory's module.

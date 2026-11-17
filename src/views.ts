@@ -142,9 +142,9 @@ function findEntryPoints(analysis: Analysis): EntryPoint[] {
   for (const node of graph.nodes.values()) {
     if (node.kind !== "fn" || entries.has(node.id)) continue;
 
-    // A `main` is an entry whether or not it is exported (Rust's and Python's are not; Java's is a method of a class); a method of a handler-like class
+    // A `main` is an entry whether or not it is exported (Rust's and Python's are not; Java's and C#'s `Main` are methods of a class, and C#'s top-level statements are read as one); a method of a handler-like class
     // (controller, handler, command, job, listener, middleware, route) that nothing calls is one the framework calls.
-    if (node.name === "main" && (!node.parent || node.module.endsWith(".java"))) entries.set(node.id, { node, label: "main" });
+    if ((node.name === "main" && (!node.parent || node.module.endsWith(".java"))) || (node.name === "Main" && node.module.endsWith(".cs"))) entries.set(node.id, { node, label: "main" });
     else if (!node.parent && node.exported && node.module.startsWith("bin/")) entries.set(node.id, { node, label: "bin" });
     else if (!node.parent && node.exported && config.entries.some((glob) => matchesGlob(node.module, glob))) entries.set(node.id, { node, label: "entries" });
     else if (!node.parent && node.exported && !called.has(node.id) && graph.calls.some((edge) => edge.from === node.id)) entries.set(node.id, { node, label: "uncalled export" });

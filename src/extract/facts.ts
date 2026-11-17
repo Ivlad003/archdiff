@@ -87,8 +87,9 @@ export interface QualifiedSymbol {
   table: "class" | "function" | "const";
   /**
    * The file holds a part of the class, which is written in several files: the methods a Go file declares on a
-   * type of another file of its package. The graph looks a member up in every declaration of the qualified name
-   * once one of them is a part, and a resolver names the file of the declaration that is none.
+   * type of another file of its package, a C# `partial class`. The graph looks a member up in every declaration of
+   * the qualified name once one of them is a part, and a resolver names the file of the declaration that is none
+   * (the first by path when all are parts).
    */
   part?: true;
 }

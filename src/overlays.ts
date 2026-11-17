@@ -23,7 +23,7 @@ import { counted } from "./words.ts";
 export { OVERLAYS, type Overlay } from "./options.ts";
 
 /** A test module, by its path (the same rule as the tests view). */
-const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|[.\-_](test|spec|stories)\.[cm]?[jt]sx?$|_test\.(py|rs|php|go)$|(^|\/)tests?_[^/]*\.py$|Test\.php$|(Tests?|IT)\.java$/;
+const TEST_MODULE = /(^|\/)(tests?|__tests__|spec|e2e)\/|[.\-_](test|spec|stories)\.[cm]?[jt]sx?$|_test\.(py|rs|php|go)$|(^|\/)tests?_[^/]*\.py$|Test\.php$|(Tests?|IT)\.java$|Tests?\.cs$|(^|\/)[^/]*[.]Tests?\//;
 
 /** Modules no test file imports get a mark and a line in their label. */
 export function overlayTests(diagram: Diagram, graph: Graph): Diagram {

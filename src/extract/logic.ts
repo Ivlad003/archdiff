@@ -13,11 +13,11 @@
 // the `logic:<path>#<fn>` view (logic.ts), which draws it and lists the
 // paths from the start to every exit as the rules of the function.
 //
-// TypeScript, JavaScript, Python, Go and Java, over the control grammars of
+// TypeScript, JavaScript, Python, Go, Java and C#, over the control grammars of
 // control.ts. Entry points: `readLogic`, `LogicFact`, `LogicStep`,
 // `LogicEdge`.
 
-import { GO_CONTROL, headerOf, JAVA_CONTROL, PY_CONTROL, short, TS_CONTROL, unwrapped, type ControlGrammar } from "./control.ts";
+import { CSHARP_CONTROL, GO_CONTROL, headerOf, JAVA_CONTROL, PY_CONTROL, short, TS_CONTROL, unwrapped, type ControlGrammar } from "./control.ts";
 import { collapse, grammarFor, withTree, type Grammar, type Node } from "./treesitter.ts";
 
 /** One box of the flowchart. */
@@ -66,7 +66,7 @@ const STATEMENT_CHARS = 56;
 
 /** The node types of one language's statements, beside the control grammar. */
 interface LogicGrammar {
-  lang: "ts" | "py" | "go" | "java";
+  lang: "ts" | "py" | "go" | "java" | "csharp";
   control: ControlGrammar;
   returns: ReadonlySet<string>;
   throws: ReadonlySet<string>;
@@ -81,7 +81,7 @@ interface LogicGrammar {
   silent: ReadonlySet<string>;
   calls: ReadonlySet<string>;
   /** How a switch (`control.switches`, but Python's `match`) is written: its cases, and whether one that does not leave runs into the next. */
-  cases: { of(node: Node): Node[]; fallThrough(clause: Node): boolean };
+  cases: { of(node: Node): Node[]; fallThrough(clause: Node): boolean; statements?(clause: Node): Node[] };
 }
 
 /** `case a:` and `default:` under the switch's body, each with its statements after the value: a case without `break` runs into the next. */
@@ -146,8 +146,37 @@ const JAVA_LOGIC: LogicGrammar = {
   cases: { of: (node) => (node.childForFieldName("body")?.namedChildren ?? []).filter((clause) => JAVA_CONTROL.cases.has(clause.type)), fallThrough: (clause) => clause.type === "switch_block_statement_group" },
 };
 
+/** The statements of a C# section: what comes after the patterns it matches (`case Status.New:`, `case > 5 when ready:`). */
+function sectionStatements(section: Node): Node[] {
+  return section.namedChildren.filter((child) => child.type.endsWith("_statement") || child.type === "block");
+}
+
+/** C#: a section of a `switch` runs into the next only when it is empty (`case A: case B:`); `using`, `lock` and `checked` run their block under a header. */
+const CSHARP_LOGIC: LogicGrammar = {
+  lang: "csharp",
+  control: CSHARP_CONTROL,
+  returns: new Set(["return_statement"]),
+  throws: new Set(["throw_statement"]),
+  breaks: new Set(["break_statement"]),
+  continues: new Set(["continue_statement"]),
+  blocks: new Set(["block"]),
+  wrappers: new Set(["using_statement", "lock_statement", "checked_statement", "fixed_statement", "unsafe_statement"]),
+  silent: new Set(["local_function_statement", "empty_statement", "comment"]),
+  calls: new Set(["invocation_expression", "object_creation_expression"]),
+  cases: { of: (node) => (node.childForFieldName("body")?.namedChildren ?? []).filter((clause) => clause.type === "switch_section"), fallThrough: (clause) => sectionStatements(clause).length === 0, statements: sectionStatements },
+};
+
 /** What a case of a switch names (null: the default), and the statements it runs: the clause's children but what it names. */
-function caseOf(clause: Node): { label: string | null; statements: Node[] } {
+function caseOf(clause: Node, cases: LogicGrammar["cases"]): { label: string | null; statements: Node[] } {
+  // C#: the patterns and their `when` come first, the statements after them.
+  if (cases.statements) {
+    const statements = cases.statements(clause);
+    const ids = new Set(statements.map((each) => each.id));
+    const texts = clause.namedChildren.filter((child) => !ids.has(child.id) && child.type !== "comment").map((child) => child.text);
+
+    return { label: texts.length === 0 ? null : short(texts.join(" ")), statements };
+  }
+
   // A value (`case "a":`), the types of a Go type switch (`case int, string:`), the channel operation of a `select`.
   const named = [clause.childForFieldName("value"), ...clause.childrenForFieldName("type"), clause.childForFieldName("communication")].filter((each) => each !== null);
   // Java writes labels before the statements (`case NEW:`, `case "a", "b" ->`, `default`).
@@ -341,7 +370,9 @@ class Builder {
 
     // Python's `with x as y:` runs its block under the context: the header is an action, the block follows.
     if (grammar.wrappers.has(node.type)) {
-      const body = node.childForFieldName("body");
+      // The block the header runs: a field of the statement, or (C#'s `lock`, `checked`) its last child.
+      const last = node.namedChildren[node.namedChildren.length - 1];
+      const body = node.childForFieldName("body") ?? (last && grammar.blocks.has(last.type) ? last : null);
       const header = collapse(node.text.slice(0, (body?.startIndex ?? node.endIndex) - node.startIndex)).replace(/:\s*$/, "");
       const made = this.add("action", short(header), node, calleesIn(node, grammar));
       this.link(open, made.id);
@@ -447,13 +478,17 @@ class Builder {
     let hasDefault = false;
 
     for (const clause of cases.of(node)) {
-      const { label, statements } = caseOf(clause);
+      const { label, statements } = caseOf(clause, cases);
       hasDefault = hasDefault || label === null;
       const entry: Exit[] = [...fall, { from: decision.id, label: label ?? "default" }];
       const exits = statements.length === 0 ? entry : this.statements(statements, entry);
 
+      // A case that runs on hands its open paths to the next; any other ends them here.
       if (cases.fallThrough(clause)) fall = exits;
-      else done.push(...exits);
+      else {
+        done.push(...exits);
+        fall = [];
+      }
     }
 
     this.frames.pop();
@@ -575,7 +610,7 @@ export async function readLogic(path: string, source: string, name: string, line
     return null;
   }
 
-  const grammar = g === "python" ? PY_LOGIC : g === "typescript" || g === "tsx" || g === "javascript" ? TS_LOGIC : g === "go" ? GO_LOGIC : g === "java" ? JAVA_LOGIC : null;
+  const grammar = g === "python" ? PY_LOGIC : g === "typescript" || g === "tsx" || g === "javascript" ? TS_LOGIC : g === "go" ? GO_LOGIC : g === "java" ? JAVA_LOGIC : g === "c-sharp" ? CSHARP_LOGIC : null;
 
   if (!grammar) return null;
 
@@ -585,13 +620,20 @@ export async function readLogic(path: string, source: string, name: string, line
     // The one at the declaration's line named like the graph node; else the first at that line; else the first so named.
     const found = candidates.find((candidate) => candidate.line === line && candidate.name === member) ?? candidates.find((candidate) => candidate.line === line) ?? candidates.find((candidate) => candidate.name === member);
 
-    if (!found) return null;
+    // C#'s top-level statements are the program's `Main`, a function no declaration writes: its body is those statements.
+    const program = !found && grammar.lang === "csharp" && name === "Main" ? tree.rootNode.namedChildren.filter((node) => node.type === "global_statement").flatMap((node) => node.namedChildren) : [];
+
+    if (!found && program.length === 0) return null;
     const builder = new Builder(grammar);
-    const start = builder.add("start", "start", found.node);
-    const body = found.node.childForFieldName("body");
+    const at = found?.node ?? tree.rootNode;
+    const start = builder.add("start", "start", found?.node ?? program[0]!);
+    const written = found?.node.childForFieldName("body") ?? null;
+    // C#'s `int Total() => a + b;`: the body is the expression after the arrow.
+    const body = written?.type === "arrow_expression_clause" ? (written.namedChildren[0] ?? written) : written;
     let exits: Exit[];
 
-    if (!body) exits = [{ from: start.id }];
+    if (!found) exits = builder.statements(program, [{ from: start.id }]);
+    else if (!body) exits = [{ from: start.id }];
     else if (grammar.blocks.has(body.type)) exits = builder.statements(body.namedChildren, [{ from: start.id }]);
     else {
       // An arrow function whose body is an expression: it returns the expression.
@@ -602,7 +644,7 @@ export async function readLogic(path: string, source: string, name: string, line
 
     // The paths that end the body, and the exits that ran a `finally` on the way out.
     if (exits.length > 0 || builder.afterExits.length > 0) {
-      const end = builder.add("end", "end", found.node);
+      const end = builder.add("end", "end", at);
       builder.link([...exits, ...builder.afterExits], end.id);
     }
 

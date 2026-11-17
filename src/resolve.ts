@@ -15,6 +15,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { join, posix } from "node:path";
+import { CSharpResolver } from "./csharp-imports.ts";
 import type { FileFacts } from "./extract/facts.ts";
 import type { Resolution as LanguageResolution, SourceResolver } from "./imports.ts";
 import { isJsonObject, isJsonString, parseJson, type JsonValue } from "./json.ts";
@@ -30,8 +31,8 @@ export type Resolution =
   /** `whole`: the import binds the module itself (Python's `from . import core`, Rust's `use crate::util`): a namespace of its names. */
   | { kind: "file"; path: string; whole?: true }
   | { kind: "package"; name: string }
-  /** The language's own library: Node's (`runtime` absent), Python's standard library, Rust's `std`, PHP's functions, a package of Go's or of the JDK. */
-  | { kind: "builtin"; name: string; runtime?: "python" | "rust" | "php" | "go" | "java" }
+  /** The language's own library: Node's (`runtime` absent), Python's standard library, Rust's `std`, PHP's functions, a package of Go's or of the JDK, a namespace of .NET. */
+  | { kind: "builtin"; name: string; runtime?: "python" | "rust" | "php" | "go" | "java" | "csharp" }
   /** The importing file itself (Rust `use self::Kind::*`, a Python relative import of the package's own module): no dependency, nothing unresolved. */
   | { kind: "self" }
   /**
@@ -266,7 +267,7 @@ export function tsconfigResolver(root: string, _files: Iterable<string>): (from:
 }
 
 /** A language resolver's answer as the graph's. */
-function fromLanguage(resolution: LanguageResolution, specifier: string, runtime: "python" | "rust" | "php" | "go" | "java"): Resolution {
+function fromLanguage(resolution: LanguageResolution, specifier: string, runtime: "python" | "rust" | "php" | "go" | "java" | "csharp"): Resolution {
   switch (resolution.kind) {
     case "internal":
       // `from . import core`, `use crate::util::{self}`: the import binds the module itself, a namespace of its names.
@@ -284,6 +285,9 @@ function fromLanguage(resolution: LanguageResolution, specifier: string, runtime
 
       // The JDK's classes are named by their package (`java.util` of `java.util.List`).
       if (runtime === "java") return { kind: "builtin", name: javaPackage(written.split(" ?? ").pop() ?? written), runtime };
+
+      // .NET's classes are named by their namespace (`System.Linq` of `using System.Linq;`, of `System.Linq.Enumerable`).
+      if (runtime === "csharp") return { kind: "builtin", name: written.endsWith(".*") ? written.slice(0, -2) : written.slice(0, Math.max(written.lastIndexOf("."), 0)) || written, runtime };
       const name = runtime === "php" ? (written.split("\\").pop() ?? written) : (written.split(runtime === "rust" ? "::" : ".")[0] ?? written);
 
       return { kind: "builtin", name, runtime };
@@ -300,9 +304,9 @@ function fromLanguage(resolution: LanguageResolution, specifier: string, runtime
 /**
  * A resolver over the repository's file list: `(from, specifier)` → where
  * it points, by the language of `from`: TypeScript/JavaScript here, Python,
- * Rust and PHP through the resolvers ported from keylang, Go and Java
- * through their own (PHP, Go and Java need the facts: their imports name
- * declarations).
+ * Rust and PHP through the resolvers ported from keylang, Go, Java and C#
+ * through their own (PHP, Go, Java and C# need the facts: their imports
+ * name declarations).
  * `from` and the files are POSIX paths relative to `root`.
  */
 export function createResolver(root: string, files: Iterable<string>, facts: readonly FileFacts[] = [], tsconfigOf: (from: string) => TsconfigPaths | null = tsconfigResolver(root, files), workspaces: readonly Workspace[] = []): (from: string, specifier: string) => Resolution {
@@ -314,6 +318,7 @@ export function createResolver(root: string, files: Iterable<string>, facts: rea
   let php: SourceResolver | null = null;
   let go: SourceResolver | null = null;
   let java: SourceResolver | null = null;
+  let csharp: SourceResolver | null = null;
 
   return (from, specifier) => {
     switch (languageOf(from)) {
@@ -372,6 +377,10 @@ export function createResolver(root: string, files: Iterable<string>, facts: rea
         java ??= new JavaResolver(root, known, facts);
 
         return fromLanguage(java.resolve(from, specifier), specifier, "java");
+      case "csharp":
+        csharp ??= new CSharpResolver(root, known, facts);
+
+        return fromLanguage(csharp.resolve(from, specifier), specifier, "csharp");
       default:
         return ecmascript(from, specifier);
     }

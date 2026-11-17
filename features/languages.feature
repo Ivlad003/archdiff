@@ -1,10 +1,11 @@
 Feature: The languages whose packages are many files
-  archdiff reads Go and Java beside TypeScript, JavaScript, Python, Rust and PHP: an import names a package or a class, and the file that declares what is used is the dependency.
+  archdiff reads Go, Java and C# beside TypeScript, JavaScript, Python, Rust and PHP: an import names a package, a class or a namespace, and the file that declares what is used is the dependency.
   The scenarios here are the ones tests/cli.test.ts and tests/extract.test.ts run on tests/fixtures/polyglot.
 
   Background:
     Given the polyglot repository with a Go module "example.com/shop" under go/
     And a Java package "com.example.shop" under java/src/main/java and java/src/test/java
+    And a C# project "Shop" under csharp/Shop with its tests under csharp/Shop.Tests
 
   Scenario: A Go package is its directory
     When I run "archdiff diagram dir:go --format mermaid"
@@ -54,3 +55,24 @@ Feature: The languages whose packages are many files
     When I run "archdiff diagram logic:java/src/main/java/com/example/shop/web/OrderController.java#OrderController.place"
     Then the rules table has "try: ok | orders.place, render | return render(order)"
     And the rules table has "try: error IllegalArgumentException refused | refused.getMessage"
+
+  Scenario: A C# using names a namespace, and a global using reaches every file
+    When I run "archdiff diagram dir:csharp --format mermaid"
+    Then "Orders/OrderService.cs" imports "Store/IOrderRepository.cs" and "Orders/Order.cs"
+    And "Program.cs" imports "Store/MemoryOrders.cs" through "global using Shop.Store;" of "GlobalUsings.cs"
+    And "archdiff coverage" reports 0 blind calls and 0 unresolved imports
+
+  Scenario: The call tree of a C# program's top-level statements
+    When I run "archdiff diagram calls:csharp/Shop/Program.cs#Main --depth 4 --format mermaid"
+    Then "Main" calls "OrdersController.Place" and a dashed line leads to "OrdersController.Show"
+    And "OrdersController.Place" calls "OrderService.Place", which calls "MemoryOrders.Save" and "Order.IsValid"
+
+  Scenario: A C# partial class is one class in two files
+    When I run "archdiff diagram classes:csharp --format mermaid"
+    Then it draws one box "OrderService" with "Place" of "OrderService.cs" and "Find" and "Audit" of "OrderService.Find.cs"
+    And "OrderService.Place" calls "OrderService.Audit", written in the other file
+
+  Scenario: The logic of a C# method
+    When I run "archdiff diagram logic:csharp/Shop/Web/OrdersController.cs#OrdersController.Place"
+    Then the rules table has "try: ok | _orders.Place, Render | return Render(order)"
+    And "archdiff diagram logic:csharp/Shop/Orders/Order.cs#Order.IsValid" is the one exit "return Total >= 0"

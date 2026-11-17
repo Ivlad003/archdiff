@@ -6,7 +6,7 @@
 // Entry points: `GRAMMARS`, `Grammar`, `wasmFile`.
 
 /** Every grammar archdiff ships. */
-export const GRAMMARS = ["typescript", "tsx", "javascript", "rust", "python", "php", "go", "java"] as const;
+export const GRAMMARS = ["typescript", "tsx", "javascript", "rust", "python", "php", "go", "java", "c-sharp"] as const;
 
 /** The name of one shipped grammar. */
 export type Grammar = (typeof GRAMMARS)[number];

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-What archdiff reads of the languages whose unit of code is not the file: where a package or a namespace is many files, an import names a declaration, and the file that declares it is the dependency. The analysis specification holds what every language shares; this one what Go and Java add.
+What archdiff reads of the languages whose unit of code is not the file: where a package or a namespace is many files, an import names a declaration, and the file that declares it is the dependency. The analysis specification holds what every language shares; this one what Go, Java and C# add.
 
 ## Requirements
 
@@ -82,3 +82,39 @@ The system SHALL treat the method `main` of a Java class as an entry point, a pu
 
 - **WHEN** a method holds `switch (s) { case NEW: start(); case PAID: ship(); break; default: skip(); }` and `switch (s) { case NEW -> start(); case PAID -> { ship(); return 2; } }`
 - **THEN** the first draws `NEW` into `start()` and on into `ship()`, `PAID` into `ship()` and `default` apart; the second one arrow per rule and `no match` carrying on
+
+### Requirement: A C# using names a namespace
+
+The system SHALL add no dependency for a `using` of a namespace of the repository; a class a C# file names in a type or calls on SHALL be looked for among the classes the analysed files declare, in the namespaces around the file's own, outermost last, the global namespace, each namespace the file uses in order, then each namespace a `global using` of any analysed file names, and SHALL be a dependency on the file that declares it, or nothing when none does. An alias (`using Repo = Shop.Store.OrderRepository`) and `using static` SHALL stand for their class. A namespace no file declares into SHALL be .NET's when it is `System` or under it (an external `dotnet:<namespace>`), else a package: the `PackageReference` of the nearest `.csproj` above the file whose name the namespace starts with, or the namespace's first two elements.
+
+#### Scenario: A class of a global using
+
+- **WHEN** `Program.cs` of the polyglot fixture runs `new MemoryOrders()` with no `using Shop.Store`, and `GlobalUsings.cs` says `global using Shop.Store;`
+- **THEN** `Program.cs` imports `Store/MemoryOrders.cs`, its externals are `pkg:Serilog` and `pkg:Microsoft.AspNetCore`, and `archdiff analyze` reports 0 unresolved imports
+
+### Requirement: C# declarations are types and their members
+
+The system SHALL record a C# class, struct, record and enum as a class with its fields and properties and their types as written (a record's and a primary constructor's parameters and an enum's members among them), its base and the interfaces it implements — of a class's base list the first entry is the base unless it is an interface of the file or reads as one (`IOrders`) — and an interface and a delegate as a type; a method as a member, a constructor as the member `constructor`, a property with code as a member that runs on access, a type nested in another as a member of it, in scope by its own name. A `partial` class SHALL be one class: a member SHALL be looked up in every part, the class diagram SHALL draw it once with the members of its parts, and the file named after the class SHALL stand for it where a file is named. Top-level statements SHALL be a function `Main` of the file, with the calls of its lambdas and local functions as its own. `public` SHALL be exported, as an interface's member is.
+
+#### Scenario: A partial class in two files
+
+- **WHEN** `OrderService.cs` declares `partial class OrderService` with `Place`, which calls `Audit(order)`, and `OrderService.Find.cs` declares the rest of it with `Find` and `Audit`
+- **THEN** `Place` calls `OrderService.Audit` of the other file, `OrdersController.Show` calls `OrderService.Find` there, `classes:csharp` draws one `OrderService`, and the modules that name the class import `OrderService.cs`
+
+### Requirement: C# calls follow the declared classes
+
+The system SHALL resolve a C# call of a method written without a receiver to the class's own method, to that of a class around it, to a local function (the caller's own code), or — in a class that extends nothing, in a file with a `using static` — to that class; `this.M()`, `base.M()` and a constructor's `: base(…)` and `: this(…)`; a method of a field, a property, a parameter (a lambda's typed parameter too) or a local by the class its declaration writes, of `var x = new T()`, of `var x = call()` by the result the call's target declares and of `var x = await call()` by what its `Task<T>` or `ValueTask<T>` gives, of a cast, of `x as T`, of `x?.M()` as `x.M()`, of a class named for a static method (a capitalised name nothing binds). `new T(…)` SHALL be a call line to the class; a method group among the arguments SHALL be a `ref` line where it resolves to a method. A method every class has from `object` that the class and its bases do not declare SHALL be the language's (`external`). `nameof(…)` SHALL be no call. A call of an extension method on a class of the repository SHALL be a gap of an unknown member; a call through an untyped `var`, a generic's element or `dynamic` a gap of a member of a value.
+
+#### Scenario: The program's top-level statements
+
+- **WHEN** `Program.cs` holds `app.MapPost("/orders", (string id, long total) => controller.Place(id, total));` and `app.MapGet("/orders/{id}", controller.Show);` among its top-level statements
+- **THEN** `archdiff views` lists `calls:csharp/Shop/Program.cs#Main` labelled `main`, with a call line to `OrdersController.Place` and a dashed line to `OrdersController.Show`
+
+### Requirement: C# entry points, tests and control flow
+
+The system SHALL treat a C# method named `Main` and the top-level statements of a file as an entry point, a public method of a controller, handler or the like that nothing calls as one, and a file named `*Test.cs` or `*Tests.cs` or under a directory named `*.Tests` as a test file; it SHALL count the branches of every C# method, carry on every call its guards (a section of a `switch` by its first pattern, a `catch` by what it catches), and draw `logic:<path>#<Class.Method>` for it: a section of a `switch` named by its patterns and their `when`, running into the next only when it is empty, `using`, `lock` and `checked` as an action before their block, an expression-bodied member as the return of its expression, and `Main` of a file of top-level statements as those statements.
+
+#### Scenario: A switch with two labels on one section
+
+- **WHEN** a method holds `switch (s) { case Status.New: case Status.Paid when n > 0: Ship(); break; default: Skip(); break; }`
+- **THEN** `Status.New` and `Status.Paid when n > 0` both lead into `Ship()`, `default` into `Skip()`, and both carry on after the switch
