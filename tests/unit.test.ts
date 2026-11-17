@@ -296,6 +296,93 @@ test("the resolver follows tsconfig paths, extensionless specifiers, index files
   });
 });
 
+test("Go, Java and C# resolve a name to the file that declares it: by go.mod and the package's directory, by the qualified name, by the namespaces in scope; the rest is the language's library or a package", async () => {
+  const { createResolver } = await import("../src/resolve.ts");
+  const { extractAny } = await import("../src/extract/any.ts");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const { dirname, join } = await import("node:path");
+
+  await withTempDir("archdiff-resolve-languages-", async (dir) => {
+    const sources: Record<string, string> = {
+      "svc/go.mod": 'module example.com/shop\n\ngo 1.22\n\nrequire (\n\tgithub.com/lib/pq v1.10.9\n\tgolang.org/x/sync v0.7.0\n)\n\nreplace example.com/kit => ../kit\n',
+      "svc/store/repo.go": "package store\n\ntype Repo struct{}\n\nfunc Open() *Repo { return &Repo{} }\n",
+      "svc/store/save.go": "package store\n\nfunc (r *Repo) Save() {}\n\nfunc helper() {}\n",
+      "svc/store/repo_test.go": "package store\n\nfunc helper2() {}\n",
+      "svc/cmd/main.go": "package main\n\nfunc main() {}\n",
+      "kit/go.mod": "module example.com/kit\n",
+      "kit/log/log.go": "package log\n\nfunc Info() {}\n",
+      "app/src/main/java/shop/store/Repo.java": "package shop.store;\n\npublic class Repo { public static class Row {} }\n",
+      "app/src/test/java/shop/store/Repo.java": "package shop.store;\n\npublic class Repo {}\n",
+      "app/src/main/java/shop/App.java": "package shop;\n\npublic class App {}\n",
+      "app/src/test/java/shop/AppTest.java": "package shop;\n\nclass AppTest {}\n",
+      "net/Shop/Shop.csproj": '<Project><ItemGroup><PackageReference Include="Serilog.Sinks.Console" Version="5.0.0" /><PackageReference Include="Serilog" Version="3.1.1" /></ItemGroup></Project>\n',
+      "net/Shop/Usings.cs": "global using Shop.Util;\n",
+      "net/Shop/Store/Repo.cs": "namespace Shop.Store;\n\npublic partial class Repo {}\n",
+      "net/Shop/Store/Repo.Read.cs": "namespace Shop.Store;\n\npublic partial class Repo {}\n",
+      "net/Shop/Util/Clock.cs": "namespace Shop.Util;\n\npublic class Clock {}\n",
+      "net/Shop/Program.cs": "System.Console.WriteLine();\n",
+    };
+
+    for (const [path, text] of Object.entries(sources)) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    }
+
+    const files = Object.keys(sources).filter((path) => /\.(go|java|cs)$/.test(path));
+    const facts = await Promise.all(files.map((path) => extractAny(path, sources[path]!)));
+    const resolve = createResolver(dir, files, facts);
+    const go = (spec: string, from = "svc/cmd/main.go") => resolve(from, spec);
+    // A package names no file; a declaration the file of the package that declares it — the type's own file before the one that adds a method to it.
+    assert.deepEqual(go("example.com/shop/store"), { kind: "self" });
+    assert.deepEqual(go("example.com/shop/store.Open"), { kind: "file", path: "svc/store/repo.go" });
+    assert.deepEqual(go("example.com/shop/store.Repo"), { kind: "file", path: "svc/store/repo.go" });
+    assert.deepEqual(go("_ example.com/shop/store"), { kind: "file", path: "svc/store/repo.go", whole: true });
+    assert.deepEqual(go("example.com/shop/store.Missing"), { kind: "unresolved", reason: "no such module: example.com/shop/store.Missing" });
+    // A name of the file's own package: another file of its directory, a test file last; the file itself is no dependency.
+    assert.deepEqual(go(".helper", "svc/store/repo.go"), { kind: "file", path: "svc/store/save.go" });
+    assert.deepEqual(go(".Open", "svc/store/repo.go"), { kind: "self" });
+    assert.equal(go(".nowhere", "svc/store/repo.go").kind, "unresolved");
+    // `replace` to a directory of the repository; the standard library by its path; a required module by its name, else three elements.
+    assert.deepEqual(go("example.com/kit/log.Info"), { kind: "file", path: "kit/log/log.go" });
+    assert.deepEqual(go("net/http.HandleFunc"), { kind: "builtin", name: "net/http", runtime: "go" });
+    assert.deepEqual(go("_ embed"), { kind: "builtin", name: "embed", runtime: "go" });
+    assert.deepEqual(go("github.com/lib/pq"), { kind: "package", name: "github.com/lib/pq" });
+    assert.deepEqual(go("golang.org/x/sync/errgroup.Group"), { kind: "package", name: "golang.org/x/sync" });
+    assert.deepEqual(go("github.com/acme/tools/cmd/x"), { kind: "package", name: "github.com/acme/tools" });
+    assert.deepEqual(go("gopkg.in/yaml.v3"), { kind: "package", name: "gopkg.in/yaml.v3" });
+
+    const java = (spec: string, from = "app/src/main/java/shop/App.java") => resolve(from, spec);
+    // A class by its qualified name, of the importing file's own source set when two declare it; a nested class by its own.
+    assert.deepEqual(java("shop.store.Repo"), { kind: "file", path: "app/src/main/java/shop/store/Repo.java" });
+    assert.deepEqual(java("shop.store.Repo", "app/src/test/java/shop/AppTest.java"), { kind: "file", path: "app/src/test/java/shop/store/Repo.java" });
+    assert.deepEqual(java("shop.store.Repo.Row"), { kind: "file", path: "app/src/main/java/shop/store/Repo.java" });
+    // The candidates of a simple name, in order; none declared is nothing the repository has.
+    assert.deepEqual(java("shop.Repo ?? shop.store.Repo"), { kind: "file", path: "app/src/main/java/shop/store/Repo.java" });
+    assert.deepEqual(java("shop.App ?? shop.store.App", "app/src/test/java/shop/AppTest.java"), { kind: "file", path: "app/src/main/java/shop/App.java" });
+    assert.equal(java("shop.String ?? shop.store.String").kind, "unresolved");
+    assert.deepEqual(java("shop.store.*"), { kind: "self" });
+    // The JDK by its package, a library by three elements of its package, a class missing from a package the repository declares.
+    assert.deepEqual(java("java.util.Map.Entry"), { kind: "builtin", name: "java.util", runtime: "java" });
+    assert.deepEqual(java("java.util.*"), { kind: "builtin", name: "java.util", runtime: "java" });
+    assert.deepEqual(java("org.springframework.web.bind.annotation.GetMapping"), { kind: "package", name: "org.springframework.web" });
+    assert.deepEqual(java("lombok.Getter"), { kind: "package", name: "lombok" });
+    assert.deepEqual(java("shop.store.Generated"), { kind: "unresolved", reason: "no such module: shop.store.Generated" });
+
+    const cs = (spec: string, from = "net/Shop/Program.cs") => resolve(from, spec);
+    // A partial class is named by the file called after it; a class of a `global using` is found after the candidates.
+    assert.deepEqual(cs("Repo ?? Shop.Store.Repo"), { kind: "file", path: "net/Shop/Store/Repo.cs" });
+    assert.deepEqual(cs("Shop.Store.Repo", "net/Shop/Store/Repo.Read.cs"), { kind: "self" });
+    assert.deepEqual(cs("Clock ?? Shop.Store.Clock"), { kind: "file", path: "net/Shop/Util/Clock.cs" });
+    assert.equal(cs("Guid ?? Shop.Store.Guid").kind, "unresolved");
+    assert.deepEqual(cs("Shop.Store.*"), { kind: "self" });
+    // .NET by its namespace; a package by the longest PackageReference its namespace starts with, else two elements.
+    assert.deepEqual(cs("System.Collections.Generic.*"), { kind: "builtin", name: "System.Collections.Generic", runtime: "csharp" });
+    assert.deepEqual(cs("Serilog.Sinks.Console.Themes.*"), { kind: "package", name: "Serilog.Sinks.Console" });
+    assert.deepEqual(cs("Serilog.Events.*"), { kind: "package", name: "Serilog" });
+    assert.deepEqual(cs("Microsoft.AspNetCore.Builder.*"), { kind: "package", name: "Microsoft.AspNetCore" });
+  });
+});
+
 test("the table of kinds registers every view once: the page lists what the server lists, the overviews parse, the tags are distinct", async () => {
   const { analyze } = await import("../src/analyze.ts");
   const { viewList } = await import("../src/views.ts");
