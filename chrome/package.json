@@ -17,6 +17,6 @@
     "build": "node scripts/build.mjs",
     "package": "node scripts/build.mjs --zip",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/hosts.test.ts tests/pull.test.ts tests/servers.test.ts tests/target.test.ts tests/github.test.ts tests/build.test.ts tests/builds.test.ts tests/panel.test.ts"
+    "test": "node --test tests/hosts.test.ts tests/pull.test.ts tests/servers.test.ts tests/target.test.ts tests/github.test.ts tests/build.test.ts tests/builds.test.ts tests/site.test.ts tests/panel.test.ts"
   }
 }

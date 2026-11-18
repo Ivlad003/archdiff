@@ -9,12 +9,18 @@
 // extension, which opens it with the version it carries (`?have=`) to say
 // whether a newer build is out.
 //
-// Plain JavaScript, with no build step: the page is its three files. The
-// functions that read GitHub's answer are pure and exported for the tests
+// On GitHub Pages it is also an app to install, on a phone too: sw.js keeps
+// its files, and the last list of releases read is kept here, so without a
+// network the page still opens with the versions it knew and says how old
+// that list is. The downloads themselves need a connection.
+//
+// Plain JavaScript, with no build step. The functions that read GitHub's
+// answer and keep it are pure and exported for the tests
 // (chrome/tests/builds.test.ts); the rest draws, and runs in a browser only.
 //
 // Entry points: `buildOf`, `releasesOf`, `arranged`, `newerBuild`,
-// `compareVersions`, `sizeText`, `REPOSITORY`, `DEVELOPMENT_TAG`.
+// `compareVersions`, `sizeText`, `remember`, `recalled`, `REPOSITORY`,
+// `DEVELOPMENT_TAG`.
 
 /** The repository whose releases hold the builds. */
 export const REPOSITORY = "Ivlad003/archdiff";
@@ -137,6 +143,40 @@ export function sizeText(bytes) {
   return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} kB`;
 }
 
+/** Where the last list of releases read is kept in this browser. */
+const SAVED_KEY = "archdiff.builds.releases";
+
+/**
+ * Keeps GitHub's answer for when it cannot be asked. Storage that is full or refused keeps nothing.
+ * @param {Pick<Storage, "setItem"> | null} storage
+ * @param {unknown} answer
+ * @param {number} at
+ */
+export function remember(storage, answer, at) {
+  if (!Array.isArray(answer)) return;
+
+  try {
+    storage?.setItem(SAVED_KEY, JSON.stringify({ at, answer }));
+  } catch {
+    // Nothing kept: the next visit without a network says the list could not be read.
+  }
+}
+
+/**
+ * The answer kept, and when it was read; null when there is none that can be read.
+ * @param {Pick<Storage, "getItem"> | null} storage
+ * @returns {{ at: number, answer: unknown[] } | null}
+ */
+export function recalled(storage) {
+  try {
+    const saved = JSON.parse(storage?.getItem(SAVED_KEY) ?? "null");
+
+    return Number.isFinite(saved?.at) && Array.isArray(saved?.answer) ? { at: saved.at, answer: saved.answer } : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── The page ─────────────────────────────────────────────────────────────────
 
 /** The page's texts in Ukrainian, by their English; a text without one shows in English. */
@@ -172,6 +212,10 @@ const UK = /** @type {Record<string, string>} */ ({
   "the repository": "репозиторій",
   "the Chrome extension's README": "README розширення для Chrome",
   "the VS Code extension's README": "README розширення для VS Code",
+  "Install": "Встановити",
+  "Both extensions are installed on a computer. On a phone, this page keeps the list of versions at hand, also without a network.": "Обидва розширення встановлюються на комп'ютер. На телефоні ця сторінка тримає список версій під рукою, зокрема без мережі.",
+  "GitHub cannot be reached right now. This list was saved on": "Зараз GitHub недоступний. Цей список збережено",
+  "Downloads need a connection.": "Для завантаження потрібне з'єднання.",
 });
 
 /** @type {(text: string) => string} */
@@ -218,10 +262,12 @@ function releaseCard(release, heading, language, note) {
   ]);
 }
 
-/** @param {{ latest: Release | null, development: Release | null, earlier: Release[] }} releases @param {string} language @param {string | null} have */
-function draw(releases, language, have) {
+/** @param {{ latest: Release | null, development: Release | null, earlier: Release[] }} releases @param {string} language @param {string | null} have @param {number | null} savedAt when the list was read, for one that is not fresh */
+function draw(releases, language, have, savedAt) {
   const list = /** @type {HTMLElement} */ (document.getElementById("builds"));
   list.replaceChildren();
+
+  if (savedAt !== null) list.append(make("p", { className: "have newer", id: "saved" }, [`${say("GitHub cannot be reached right now. This list was saved on")} ${dateText(new Date(savedAt).toISOString(), language).replace(/\.$/, "")}. ${say("Downloads need a connection.")}`]));
 
   if (have !== null) {
     const newer = newerBuild(have, "chrome", releases);
@@ -261,23 +307,81 @@ async function start() {
     for (const node of document.querySelectorAll("[data-say]")) node.textContent = say(node.textContent ?? "");
   }
 
+  showConnection();
+  window.addEventListener("offline", showConnection);
+  window.addEventListener("online", () => {
+    showConnection();
+    void load(language, have);
+  });
+  offerInstall();
+  await load(language, have);
+
+  // On the page's own site only: inside the Chrome extension Chrome keeps the files itself.
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "127.0.0.1" || location.hostname === "localhost")) await navigator.serviceWorker.register("sw.js").catch(() => undefined);
+}
+
+/** Marks the page while the browser has no network: what needs one is shown as out of reach. */
+function showConnection() {
+  document.documentElement.classList.toggle("offline", !navigator.onLine);
+}
+
+/** The browser's localStorage, or null where it is refused. */
+function storage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Draws the releases as GitHub has them now, else as they were last read, else says why there are none. @param {string} language @param {string | null} have */
+async function load(language, have) {
   const list = /** @type {HTMLElement} */ (document.getElementById("builds"));
 
   try {
     const response = await fetch(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=30`, { headers: { accept: "application/vnd.github+json" } });
 
     if (!response.ok) throw new Error(String(response.status));
-    draw(arranged(releasesOf(await response.json())), language, have);
+    const answer = await response.json();
+    remember(storage(), answer, Date.now());
+    draw(arranged(releasesOf(answer)), language, have, null);
   } catch {
-    list.replaceChildren(
-      make("section", { className: "card" }, [
-        make("h2", {}, [say("The builds could not be read from GitHub")]),
-        make("p", { className: "muted" }, [say("GitHub answers a browser that is not signed in sixty times an hour, and not at all offline. The same files are on the releases page:"), " ", make("a", { href: `https://github.com/${REPOSITORY}/releases` }, [say("releases on GitHub")])]),
-      ]),
-    );
+    const saved = recalled(storage());
+
+    if (saved) draw(arranged(releasesOf(saved.answer)), language, have, saved.at);
+    else {
+      list.replaceChildren(
+        make("section", { className: "card" }, [
+          make("h2", {}, [say("The builds could not be read from GitHub")]),
+          make("p", { className: "muted" }, [say("GitHub answers a browser that is not signed in sixty times an hour, and not at all offline. The same files are on the releases page:"), " ", make("a", { href: `https://github.com/${REPOSITORY}/releases` }, [say("releases on GitHub")])]),
+        ]),
+      );
+    }
   }
 
   document.body.dataset["state"] = "drawn";
+}
+
+/** Shows the page's install button once the browser says the page can be installed. */
+function offerInstall() {
+  const button = /** @type {HTMLButtonElement} */ (document.getElementById("install"));
+  /** @type {any} */
+  let offer = null;
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    offer = event;
+    button.hidden = false;
+  });
+  window.addEventListener("appinstalled", () => {
+    offer = null;
+    button.hidden = true;
+  });
+  button.addEventListener("click", () => {
+    offer?.prompt();
+    offer = null;
+    button.hidden = true;
+  });
 }
 
 if (typeof document !== "undefined") void start();

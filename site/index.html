@@ -2,11 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fafafa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1215" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="archdiff" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:" />
     <meta name="description" content="The builds of archdiff's extensions for Chrome and VS Code, to download and install from their files." />
     <title>archdiff — builds</title>
+    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icon.svg" />
+    <link rel="apple-touch-icon" href="icons/180.png" />
     <link rel="stylesheet" href="builds.css" />
   </head>
   <body>
@@ -17,7 +24,10 @@
           <h1><span>archdiff</span> · <span data-say>Builds</span></h1>
           <p class="muted" data-say>The extensions of archdiff, built and ready to download. No store carries them: each is installed from its file.</p>
         </div>
+        <button id="install" type="button" hidden data-say>Install</button>
       </header>
+
+      <p class="phone-note muted" data-say>Both extensions are installed on a computer. On a phone, this page keeps the list of versions at hand, also without a network.</p>
 
       <div id="builds">
         <p class="muted" data-say>Reading the builds from GitHub…</p>

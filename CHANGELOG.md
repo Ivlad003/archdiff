@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The builds page is an app.** https://ivlad003.github.io/archdiff/ can be installed from the browser, on a phone too, fits a phone's screen, and opens without a network: its files are kept by a service worker, and the last list of versions it read is shown with the day it was saved. The downloads themselves need a connection, and the page says so.
+
 ## 0.9.0 — 2026-11-18
 
 archdiff beside a pull request on GitHub: a Chrome extension that shows the architectural diff in the browser's side panel, builds of the extensions to download, and a server that ends when it is told to on Linux.

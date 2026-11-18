@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { arranged, buildOf, compareVersions, newerBuild, releasesOf, sizeText } from "../../site/builds.js";
+import { arranged, buildOf, compareVersions, newerBuild, recalled, releasesOf, remember, sizeText } from "../../site/builds.js";
 
 const site = join(import.meta.dirname, "..", "..", "site");
 
@@ -77,11 +77,32 @@ test("a reader's build is set against the newest version, then against the build
   assert.equal(newerBuild("0.1.0", "chrome", { latest: null, development: null }), null);
 });
 
+test("the last list read is kept with its time; what cannot be kept or read back is no list", () => {
+  const kept = new Map<string, string>();
+  const storage = { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value) };
+
+  assert.equal(recalled(storage), null);
+  remember(storage, ANSWER, 1_795_000_000_000);
+  assert.deepEqual(recalled(storage), { at: 1_795_000_000_000, answer: JSON.parse(JSON.stringify(ANSWER)) });
+  // An error of the API is no list, and does not take the place of the one kept.
+  remember(storage, { message: "API rate limit exceeded" }, 1_795_000_000_001);
+  assert.equal(recalled(storage)?.at, 1_795_000_000_000);
+
+  // Storage that is refused or full, and what another program left under the name.
+  assert.equal(recalled(null), null);
+  remember(null, ANSWER, 1);
+  remember({ setItem: () => { throw new Error("QuotaExceededError"); } }, ANSWER, 1);
+  assert.equal(recalled({ getItem: () => { throw new Error("SecurityError"); } }), null);
+
+  for (const other of ["not json", "null", "[]", `{"at":"today","answer":[]}`, `{"at":1,"answer":{}}`]) assert.equal(recalled({ getItem: () => other }), null, other);
+});
+
 test("a size reads as people say it", () => {
   assert.deepEqual([sizeText(29_973), sizeText(400), sizeText(1_449_000), sizeText(0)], ["30 kB", "1 kB", "1.4 MB", "1 kB"]);
 });
 
 test("every text of the page has its Ukrainian, and the page loads nothing but its own files", () => {
+  // The app's manifest and the icon iOS takes are among those files.
   const script = readFileSync(join(site, "builds.js"), "utf8");
   const page = readFileSync(join(site, "index.html"), "utf8");
   const table = /const UK = [^{]*\{([\s\S]*?)\n\}\);/.exec(script)?.[1];
@@ -98,6 +119,6 @@ test("every text of the page has its Ukrainian, and the page loads nothing but i
   assert.deepEqual([...translated].filter((text) => !said.has(text)).sort(), [], "translated and never said");
 
   // The page is its own files: a stylesheet, a script and an icon beside it, and GitHub's API by its policy.
-  assert.deepEqual([...page.matchAll(/(?:src|href)="([^"]+)"/g)].map((found) => found[1]!).filter((address) => !address.startsWith("https://github.com/Ivlad003/archdiff")), ["icon.svg", "builds.css", "icon.svg", "builds.js"]);
+  assert.deepEqual([...page.matchAll(/(?:src|href)="([^"]+)"/g)].map((found) => found[1]!).filter((address) => !address.startsWith("https://github.com/Ivlad003/archdiff")), ["manifest.webmanifest", "icon.svg", "icons/180.png", "builds.css", "icon.svg", "builds.js"]);
   assert.ok(page.includes(`content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:"`));
 });

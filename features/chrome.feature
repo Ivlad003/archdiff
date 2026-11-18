@@ -79,3 +79,12 @@ Feature: The Chrome extension and the builds page
     Given the page opened with "?have=0.1.0" when the build of master's last commit is 0.1.0.61
     Then it says a newer one is out, and links it
     And every text of the page has its Ukrainian
+
+  Scenario: The builds page on a phone and without a network
+    Given the builds page opened once on a touch screen 390 pixels wide
+    Then it fits the screen, at 320 pixels too, and says the extensions are installed on a computer
+    When the network and the site are gone and the page is opened again
+    Then it shows the versions it read last, with the day they were saved
+    And the downloads are out of reach
+    When the network comes back
+    Then the fresh list takes their place and the note is gone

@@ -48,10 +48,15 @@ body {
   background: var(--bg);
 }
 
+[hidden] {
+  display: none !important;
+}
+
+/* Clear of a phone's notch and rounded corners when the page is installed as an app. */
 main {
   max-width: 760px;
   margin: 0 auto;
-  padding: 40px 20px 56px;
+  padding: max(40px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(56px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
 }
 
 header {
@@ -64,6 +69,36 @@ header {
 header img {
   flex: none;
   margin-top: 4px;
+}
+
+header > div {
+  flex: 1;
+  min-width: 0;
+}
+
+#install {
+  flex: none;
+  min-height: 44px;
+  padding: 0 18px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+/* Said where the page is read on a touch screen: the extensions themselves are for a computer. */
+.phone-note {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .phone-note {
+    display: block;
+    margin-bottom: 18px;
+  }
 }
 
 h1 {
@@ -188,4 +223,48 @@ li {
 footer {
   margin-top: 26px;
   font-size: 13px;
+}
+
+/* Without a network a download cannot start: its button says so by its look. */
+.offline a.download {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.have {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  main {
+    padding-top: max(24px, env(safe-area-inset-top));
+    padding-right: max(14px, env(safe-area-inset-right));
+    padding-left: max(14px, env(safe-area-inset-left));
+  }
+
+  header {
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  .card {
+    padding: 16px;
+  }
+
+  a.download {
+    flex-basis: 100%;
+  }
+
+  #install {
+    width: 100%;
+  }
+
+  footer a {
+    display: inline-block;
+    padding: 8px 0;
+  }
 }
