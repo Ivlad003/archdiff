@@ -118,6 +118,11 @@ The system SHALL offer `action.yml`, a composite action with the inputs `base` (
 - **WHEN** the action runs on a pull request that adds a module and an import
 - **THEN** a comment starts with the hidden marker and holds the review's counts, the verdict of the check, the picture and the lists of the changes, folded, and the job summary holds the same
 
+#### Scenario: On archdiff's own repository
+
+- **WHEN** the action runs in a directory whose `package.json` names the package `@ivlad003/archdiff`
+- **THEN** it runs the published archdiff from outside that directory, on that directory, and the review is written as on any other repository
+
 #### Scenario: A second push
 
 - **WHEN** the pull request gets another commit and the action runs again

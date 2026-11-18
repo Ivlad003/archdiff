@@ -845,6 +845,26 @@ test("a changed source file of any language the analysis reads reaches the page 
   }
 });
 
+test("archdiff web ends when it is told to stop, while it watches the files", async () => {
+  // Windows ends a process outright; elsewhere the server's own handler runs, and a watcher left open kept it alive for good.
+  const { server: watching, origin } = startWeb(dir, []);
+  await origin;
+  let timer: NodeJS.Timeout | undefined;
+  const ended = await Promise.race([
+    new Promise<boolean>((resolve) => {
+      watching.once("exit", () => resolve(true));
+      watching.kill("SIGTERM");
+    }),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), 15_000);
+    }),
+  ]);
+  clearTimeout(timer);
+
+  if (!ended) watching.kill("SIGKILL");
+  assert.ok(ended, "the server was still running 15 seconds after SIGTERM");
+});
+
 test("the server says which repository it serves and what the checkout has of a change, for a host that looks for it", async () => {
   // Outside git: the folder and this archdiff's version, and no remote; a ref cannot be asked about.
   const plain = await getJson<{ name: string; root: string; version: string; remotes: unknown[] }>("/api/repository");
