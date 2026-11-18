@@ -197,14 +197,15 @@ const HEAD_LOG = ".git/logs/HEAD";
 /**
  * Watches the repository for a changed source file of any language archdiff reads (the cache, the drawings, git and
  * node_modules change for other reasons), and for the checkout moving (a commit: the board of the uncommitted
- * changes empties); the problem when it cannot, else null. A plain watch of the root goes
+ * changes empties); the problem when it cannot, else null, and the way to stop watching: a watcher left open keeps
+ * the process alive after the server has closed. A plain watch of the root goes
  * first, as a probe: Node's recursive watch on Linux gives neither events nor an error once the system's file
  * watchers are used up (ENOSPC), where a plain one throws.
  */
-function watchSources(root: string, onChange: (path: string) => void): string | null {
+function watchSources(root: string, onChange: (path: string) => void): { problem: string | null; close(): void } {
   try {
     watchFs(root).close();
-    watchFs(root, { recursive: true }, (_event, name) => {
+    const watcher = watchFs(root, { recursive: true }, (_event, name) => {
       const path = typeof name === "string" ? name.split("\\").join("/") : "";
 
       // The checkout moved — a commit, a switch of branch, a reset: what the working tree changes against it is another change.
@@ -214,13 +215,13 @@ function watchSources(root: string, onChange: (path: string) => void): string | 
       onChange(path);
     });
 
-    return null;
+    return { problem: null, close: () => watcher.close() };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const problem = message.includes("ENOSPC") ? "the system's file watchers are used up (raise fs.inotify.max_user_watches)" : message;
     process.stderr.write(`archdiff web: not watching the files: ${problem}\n`);
 
-    return problem;
+    return { problem, close: () => undefined };
   }
 }
 
@@ -376,7 +377,8 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   const changes = changeChannel(analyses.invalidate);
 
   // Whether the page follows the code, and why not when it was asked to (`--no-watch` is no problem).
-  const watching = options.watch ? watchSources(root, changes.notify) : null;
+  const watcher = options.watch ? watchSources(root, changes.notify) : null;
+  const watching = watcher?.problem ?? null;
   const config = (await analyze(root)).config;
   // The agent given (--agent, archdiff.json): the default of the page, which offers every agent installed here.
   const given = options.agent ?? config.agent;
@@ -418,6 +420,7 @@ export async function serve(root: string, options: ServeOptions): Promise<void> 
   await new Promise<void>((resolveStopped) => {
     const stop = (): void => {
       runner?.stopAll();
+      watcher?.close();
       server.close(() => resolveStopped());
       // A page left open holds its live-reload stream (and keeps reconnecting): `close` alone would wait for it forever.
       server.closeAllConnections();

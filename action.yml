@@ -61,16 +61,25 @@ runs:
         out="${RUNNER_TEMP:-/tmp}/archdiff"
         mkdir -p "$out"
 
+        # npx takes a package of the name it is asked for to be the project it stands in. In archdiff's own repository
+        # that finds no command to run, so there it is run from elsewhere, on this directory.
+        here="$PWD"
+        from="$here"
+        if [ "$(node -p 'try { require(process.cwd() + "/package.json").name } catch { "" }')" = "@ivlad003/archdiff" ]; then
+          from="$out"
+        fi
+
         # One archdiff command: its output into the file named first, its messages into the log, and a failure
         # (a wrong call, no git, a shallow clone) into the job's own error. Returns 0, or 1 for a finding.
         archdiff() {
           local file="$1"
-          shift
-          npx --yes @ivlad003/archdiff "$@" > "$file" 2> "$out/messages.txt"
+          local command="$2"
+          shift 2
+          (cd "$from" && npx --yes @ivlad003/archdiff "$command" "$here" "$@") > "$file" 2> "$out/messages.txt"
           local code=$?
           cat "$out/messages.txt" >&2
           if [ "$code" -ge 2 ]; then
-            echo "::error::archdiff $1 failed: $(tail -n 1 "$out/messages.txt")"
+            echo "::error::archdiff $command failed: $(tail -n 1 "$out/messages.txt")"
             exit 1
           fi
           return "$code"
