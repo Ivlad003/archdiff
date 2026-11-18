@@ -1,0 +1,112 @@
+# The builds of the extensions, for people to download: the Chrome extension as a .zip to load unpacked
+# and the VS Code extension as a .vsix, which no store carries. They are attached to releases on GitHub,
+# and the builds page (site/, served by GitHub Pages and from inside the Chrome extension) lists them
+# from there.
+#
+#   a tag v<version>   the release of that version gets them (made here if it is not there yet);
+#   a push to master   the release `dev` holds the build of master's last commit: its files are
+#                      replaced and its tag moved, so there is one such build, always the newest.
+#
+# publish.yml sends the same tag to npm on its own: neither workflow waits for the other.
+name: builds
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+# One at a time for each: a version's files and the files of `dev` are never written by two runs at once.
+concurrency: builds-${{ github.ref_type }}
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Built with no way to write to the repository: the token stays out of the checkout.
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      # A build between releases is stamped with the run's number (0.1.0.57: newer than 0.1.0, older than the next version).
+      - name: The Chrome extension
+        working-directory: chrome
+        env:
+          ARCHDIFF_BUILD: ${{ github.ref_type != 'tag' && github.run_number || '' }}
+          ARCHDIFF_COMMIT: ${{ github.sha }}
+        run: npm run package
+      - name: The VS Code extension
+        working-directory: vscode
+        run: |
+          npm ci
+          npx vsce package
+      - name: The files to download
+        run: |
+          mkdir builds
+          mv chrome/archdiff-chrome-*.zip vscode/archdiff-vscode-*.vsix builds/
+          ls -l builds
+      - uses: actions/upload-artifact@v7
+        with:
+          name: builds
+          path: builds/
+          if-no-files-found: error
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      # The release and its files, and the tag `dev`.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: builds
+          path: builds
+      - name: Attach the builds to the version's release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            # The release is there (made by hand, or by this job run again): its builds are replaced.
+            gh release upload "$GITHUB_REF_NAME" builds/* --clobber
+          else
+            {
+              echo "What changed: [CHANGELOG.md](https://github.com/$GH_REPO/blob/$GITHUB_REF_NAME/CHANGELOG.md)."
+              echo
+              echo "archdiff itself is on npm: \`npm install -g @ivlad003/archdiff@$version\`."
+              echo
+              echo "Attached are the builds of its extensions for Chrome and VS Code, which no store carries; [the README](https://github.com/$GH_REPO#builds) says how each is installed."
+            } > notes.md
+            gh release create "$GITHUB_REF_NAME" builds/* --verify-tag --title "archdiff $version" --notes-file notes.md
+          fi
+      - name: Replace the build of master's last commit
+        if: github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "The extensions as master has them now, built from $GITHUB_SHA on $(date -u +%Y-%m-%d). Replaced on every push: newer than the newest version, and not a release."
+            echo
+            echo "[The README](https://github.com/$GH_REPO#builds) says how each is installed."
+          } > notes.md
+
+          if gh release view dev > /dev/null 2>&1; then
+            # The same release, moved: its tag to this commit, its files out and these in.
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/dev" -f sha="$GITHUB_SHA" -F force=true > /dev/null
+
+            for name in $(gh release view dev --json assets --jq '.assets[].name'); do
+              gh release delete-asset dev "$name" --yes
+            done
+
+            gh release upload dev builds/*
+            gh release edit dev --prerelease --title "Build of master's last commit" --notes-file notes.md
+          else
+            gh release create dev builds/* --prerelease --target "$GITHUB_SHA" --title "Build of master's last commit" --notes-file notes.md
+          fi

@@ -63,6 +63,17 @@ Pack from a clean clone, not from a checkout with work in it. The file can be tr
 
 npm can hold what a workflow sends until a maintainer approves it with two-factor auth (staged publishing; npm 11.15 or later). For that the last step of the workflow stages instead of publishing — `npm stage publish` in place of `npm publish`, after the package is built — and the trusted publisher needs no `npm publish` among its allowed actions; the release then waits under *Staged Packages* on npmjs.com (or `npm stage approve <stage-id>`). The workflow here publishes directly, and the staged way has not been tried on this package: whether `npm stage publish` builds the package as `npm publish` does (prepack) is to be checked before relying on it.
 
+## The builds of the extensions
+
+The Chrome extension (`chrome/`) and the VS Code extension (`vscode/`) are in no store and no part of the npm package: people install each from its build. `.github/workflows/builds.yml` builds both — `archdiff-chrome-<version>.zip` and `archdiff-vscode-<version>.vsix`, each with the version of its own `package.json` — and attaches them to releases on GitHub:
+
+- **the same tag `v<version>`** that publishes to npm also makes the release *archdiff `<version>`* with the two builds (or replaces the builds of a release that is there). Neither workflow waits for the other: a failed `publish` leaves a release with builds, to be deleted with the tag or left for the run that follows the fix.
+- **every push to master** replaces the files of the release `dev` and moves its tag to the pushed commit. Its Chrome build is stamped with the run's number (`0.1.0.57`: newer than `0.1.0`, older than the next version), so a build of master is told from a release and from the build before it.
+
+An extension gets a new version when it changes: `npm version <v> --no-git-tag-version` in `chrome/` or in `vscode/`, and a line in its own `CHANGELOG.md`, in the commit of the change or of the release.
+
+The builds page is `site/` — `index.html`, `builds.css`, `builds.js` and an icon, with no build step. It reads the releases from GitHub's API when it is opened, so a new build needs no new page. `.github/workflows/site.yml` publishes it to GitHub Pages when `site/` changes. **Once**, by the owner of the repository: Settings → Pages → Build and deployment → Source: **GitHub Actions**. Until then that workflow fails at its second step and says so; the builds are on the releases either way. The Chrome extension carries a copy of the page (`chrome/scripts/build.mjs` copies it in), opened from its panel.
+
 ## What a release holds
 
 `prepack` builds `dist/` (tsc, the grammars, the page's bundle) and swaps `bin/archdiff.js` to the compiled entry; `postpack` swaps it back, so the checkout keeps running from `src/` with Node's type stripping. `npm pack --dry-run`, which CI runs on every push, lists what the file holds: `bin`, `dist`, `dist/wasm`, `dist/web`; no tests, no sources.

@@ -77,6 +77,10 @@
     ],
     "vscode": [
       "vscode/**"
+    ],
+    "chrome": [
+      "chrome/**",
+      "site/**"
     ]
   },
   "rules": [

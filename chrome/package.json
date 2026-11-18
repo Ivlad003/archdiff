@@ -1,0 +1,22 @@
+{
+  "name": "archdiff-chrome",
+  "displayName": "archdiff for GitHub",
+  "description": "The architectural diff of a pull request or a branch beside its page on GitHub: archdiff's picture in Chrome's side panel, drawn by the archdiff of your checkout",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ivlad003/archdiff.git",
+    "directory": "chrome"
+  },
+  "homepage": "https://github.com/Ivlad003/archdiff/tree/master/chrome#readme",
+  "bugs": "https://github.com/Ivlad003/archdiff/issues",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/build.mjs --zip",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/hosts.test.ts tests/pull.test.ts tests/servers.test.ts tests/target.test.ts tests/github.test.ts tests/build.test.ts tests/builds.test.ts tests/panel.test.ts"
+  }
+}

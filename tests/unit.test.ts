@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withTempDir } from "./temp-dir.ts";
-import { listBranches } from "../src/git.ts";
+import { listBranches, remoteAddress, remotes } from "../src/git.ts";
 import { isPageLanguage, PAGE_LANGUAGES } from "../src/page-language.ts";
 import { plural } from "../web/src/i18n-plural.ts";
 import { UK } from "../web/src/i18n-uk.ts";
@@ -591,6 +591,37 @@ test("the branches are listed with one question to git: a local one, a remote on
       ["origin/main", true, false],
     ]);
     assert.ok(branches.every((branch) => /^[0-9a-f]{7,}$/.test(branch.sha) && /^\d{4}-\d\d-\d\d$/.test(branch.date) && branch.subject === "the first"), JSON.stringify(branches));
+  }));
+
+test("a remote's address is told as its host and the repository's path there, without who signs in; a path on this computer is hosted nowhere", () => {
+  const github = { host: "github.com", path: "Ivlad003/archdiff" };
+
+  for (const address of ["https://github.com/Ivlad003/archdiff.git", "https://github.com/Ivlad003/archdiff", "https://github.com/Ivlad003/archdiff/", "git@github.com:Ivlad003/archdiff.git", "ssh://git@github.com/Ivlad003/archdiff.git", "ssh://git@github.com:22/Ivlad003/archdiff.git", "git://GitHub.com/Ivlad003/archdiff.git", "github.com:Ivlad003/archdiff", " https://github.com/Ivlad003/archdiff.git\n"]) assert.deepEqual(remoteAddress(address), github, address);
+  // The name and the token an address may carry are no part of what is told.
+  assert.deepEqual(remoteAddress("https://reader:ghp_secret@github.com/Ivlad003/archdiff.git"), github);
+  // A group within a group, and a port: part of where a web page of the host is, not of where ssh is.
+  assert.deepEqual(remoteAddress("git@gitlab.example.com:group/sub/shop.git"), { host: "gitlab.example.com", path: "group/sub/shop" });
+  assert.deepEqual(remoteAddress("https://git.example.com:8443/team/shop.git"), { host: "git.example.com:8443", path: "team/shop" });
+  assert.deepEqual(remoteAddress("ssh://git@git.example.com:2222/team/shop.git"), { host: "git.example.com", path: "team/shop" });
+
+  for (const local of ["../other", "/srv/git/shop.git", "C:\\repos\\shop", "C:/repos/shop", "file:///srv/git/shop.git", "shop", "", "https://github.com", "https://"]) assert.equal(remoteAddress(local), null, local);
+});
+
+test("the remotes of a repository are the hosted ones, by name; none outside git", () =>
+  withTempDir("archdiff-remotes-", (dir) => {
+    assert.deepEqual(remotes(dir), []);
+    const git = (...args: string[]): void => {
+      const result = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git("init", "-q", "-b", "main");
+    // A repository with no remote yet.
+    assert.deepEqual(remotes(dir), []);
+    git("remote", "add", "origin", "https://reader:secret@github.com/acme/shop.git");
+    // A name with a dot of its own, and a remote on the disk.
+    git("remote", "add", "my.fork", "git@github.com:me/shop.git");
+    git("remote", "add", "disk", "../elsewhere");
+    assert.deepEqual(remotes(dir), [{ name: "origin", host: "github.com", path: "acme/shop" }, { name: "my.fork", host: "github.com", path: "me/shop" }]);
   }));
 
 test("the page's Ukrainian holds every text the modules say, each once, and nothing nobody says", () => {

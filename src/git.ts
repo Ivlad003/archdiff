@@ -9,7 +9,7 @@
 // Sits at the I/O edge below review.ts (which reads a change), files.ts
 // (which lists the sources) and the server. Entry points: `listedFiles`,
 // `changedFiles`, `changedSources`, `changedPaths`, `worktreeDiff`, `treeAt`, `mergeBase`, `forkPoint`, `commitOf`,
-// `defaultBase`, `listBranches`, `branchGraph`, `commitsBetween`,
+// `defaultBase`, `listBranches`, `remotes`, `remoteAddress`, `branchGraph`, `commitsBetween`,
 // `commitInfo`, `commitFiles`, `fileHistory`, `gitStats`, `fileAt`,
 // `fileHunks`, `changedLines`, `revisionStamp`, `commitFirst`.
 
@@ -563,6 +563,73 @@ export function listBranches(root: string): { current: string | null; branches: 
   }
 
   return { current: head, branches };
+}
+
+/** A remote of the repository: its name, and where it is hosted. */
+export interface Remote {
+  name: string;
+  /** The host of the remote, in lower case (`github.com`); with its port when an http address names one. */
+  host: string;
+  /** The repository's path on the host, without `.git` (`Ivlad003/archdiff`). */
+  path: string;
+}
+
+/**
+ * Where a remote's address points — the host and the repository's path there — from `https://host/owner/repo.git`,
+ * `ssh://git@host/owner/repo.git` or `git@host:owner/repo.git`. The name and the password an address may carry
+ * are left out: what this returns can be told to a page. Null for a path on this computer (`../other`,
+ * `C:\repos\x`, `file://…`), which is hosted nowhere.
+ */
+export function remoteAddress(address: string): { host: string; path: string } | null {
+  const text = address.trim();
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(text)?.[1]?.toLowerCase();
+  let host: string;
+  let path: string;
+
+  if (scheme !== undefined) {
+    if (scheme === "file") return null;
+
+    try {
+      const parsed = new URL(text);
+      // A port is part of where a web page of the host is; an ssh port is not.
+      host = scheme === "http" || scheme === "https" ? parsed.host : parsed.hostname;
+      path = parsed.pathname;
+    } catch {
+      return null;
+    }
+  } else {
+    // git's own short form, `[user@]host:path`; a single letter before the colon is a drive of Windows.
+    const short = /^(?:[^@/\\\s]+@)?([^:/\\\s]+):(?!\/\/)(.+)$/.exec(text);
+
+    if (!short || /^[a-z]$/i.test(short[1]!)) return null;
+    host = short[1]!;
+    path = short[2]!;
+  }
+
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
+
+  return host === "" || path === "" ? null : { host: host.toLowerCase(), path };
+}
+
+/** The remotes of the repository that are hosted somewhere, in git's order; none outside git or without a remote. */
+export function remotes(root: string): Remote[] {
+  // Exit 1 when no remote is configured, 128 outside a repository: either way there is none to name.
+  const listed = git(root, ["config", "--get-regexp", "^remote\\..*\\.url$"]);
+
+  if (!listed.ok) return [];
+  const found: Remote[] = [];
+
+  for (const line of listed.out.split("\n")) {
+    const space = line.indexOf(" ");
+
+    if (space < 0) continue;
+    const address = remoteAddress(line.slice(space + 1));
+
+    // `remote.<name>.url`: the name may hold dots itself.
+    if (address) found.push({ name: line.slice("remote.".length, space - ".url".length), ...address });
+  }
+
+  return found;
 }
 
 /** A branch of the branches' picture: where it left the base, its own commits, how far it is ahead and behind. */
