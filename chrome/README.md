@@ -30,7 +30,7 @@ In your checkout of the repository, start archdiff:
 npx @ivlad003/archdiff web
 ```
 
-It needs an archdiff that says which repository it serves (`GET /api/repository`): a version after 0.8.0. Then open the repository on GitHub and press the extension's button. The panel follows the tab:
+It needs archdiff 0.9.0 or newer, which says which repository it serves (`GET /api/repository`). Then open the repository on GitHub and press the extension's button. The panel follows the tab:
 
 | The tab shows | The panel draws |
 |---|---|

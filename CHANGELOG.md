@@ -1,12 +1,30 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 — 2026-11-18
 
-- **`archdiff web` ends when it is told to.** On Linux, Ctrl+C or SIGTERM closed the server, but the watcher of the files kept the process running for good: the port was free and the process never left. Anything that stopped a server and waited for it hung, the VS Code extension's tests in CI among them. The server now stops watching when it stops. `--no-watch` never had the problem.
-- **The GitHub Action runs on archdiff's own repository.** There npx took the package it was asked for to be the project it stood in, found no command to run, and the job failed with `archdiff: not found`. In that repository the action now runs archdiff from outside it; every other repository runs as before.
+archdiff beside a pull request on GitHub: a Chrome extension that shows the architectural diff in the browser's side panel, builds of the extensions to download, and a server that ends when it is told to on Linux.
+
+**Highlights.**
+
+- The Chrome extension shows the review of a pull request, a comparison, a branch or a commit beside its page on GitHub, drawn by the `archdiff web` of your checkout; a tap on a shape sends the tab to that file.
+- `GET /api/repository` and `GET /api/refs` tell a host which repository a server serves and what its checkout has of a change.
+- The extensions for Chrome and VS Code are built for every version and listed on a page to download them from: https://ivlad003.github.io/archdiff/
+- `archdiff web` ends on Ctrl+C and SIGTERM on Linux, where the watcher of the files used to keep the process running.
+
+**Incompatible with 0.8.0.** Nothing.
+
+**Everything since 0.8.0**, by the work it came from:
+
+### archdiff beside GitHub
+
 - **archdiff beside GitHub: an extension for Chrome.** `chrome/` holds an extension that shows, in Chrome's side panel, the picture archdiff draws of what the tab shows on GitHub — a pull request or a comparison as the review from where the head left the base, a branch off the main line against it, the main line and a file as their code, a commit as its own change — with a select for the other pictures of the subject (the layers with the change marked, the impact, the commits, the code of the head). A tap on a shape sends the tab to that file on GitHub: in the pull request's list of files, under the file's anchor, when the change touched it, else at the head's revision and its lines. It draws nothing itself: it finds the `archdiff web` of the repository on this computer and frames its page, sends it nothing but GET requests, and names the command to run when the checkout has not got a pull request's commits or no server is running. English and Ukrainian. A package of its own, in no store and no part of the npm package ([chrome/README.md](chrome/README.md)).
 - **The server says which repository it serves.** `GET /api/repository` answers with the folder, archdiff's version and the remotes of the repository — each by its host and the repository's path there, never with the name or the token its address carries — and `GET /api/refs` with the commit each ref asked about names in this checkout, and where a head left a base (their merge-base). They are what a host needs to find the checkout of a repository it has the address of, and to review a pull request as GitHub lists it; the Chrome extension is the first to ask.
 - **Builds to download.** The extensions for Chrome and VS Code are in no store; their builds are now attached to the releases on GitHub by a workflow — to every version's release when it is tagged, and to the release `dev`, which holds the build of master's last commit — and listed on a builds page (`site/`, for GitHub Pages) with how each is installed. The Chrome extension carries the same page and says there whether a newer build than the one installed is out.
+
+### Fixes
+
+- **`archdiff web` ends when it is told to.** On Linux, Ctrl+C or SIGTERM closed the server, but the watcher of the files kept the process running for good: the port was free and the process never left. Anything that stopped a server and waited for it hung, the VS Code extension's tests in CI among them. The server now stops watching when it stops. `--no-watch` never had the problem.
+- **The GitHub Action runs on archdiff's own repository.** There npx took the package it was asked for to be the project it stood in, found no command to run, and the job failed with `archdiff: not found`. In that repository the action now runs archdiff from outside it; every other repository runs as before.
 - **A saved drawing stays saved.** After *save* (or Ctrl+S) in the editor, the next thing that changed no element — a move of the pointer over the canvas, a tool picked, a click on nothing — marked the drawing as unsaved again: *save* lit up, and leaving the editor asked whether to lose changes that were on the disk. The editor measured a change from the scene as it was when it opened; it now measures from the scene last saved. A stroke drawn while a save is on its way is still a change.
 
 ## 0.8.0 — 2026-11-17
