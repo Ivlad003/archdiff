@@ -844,3 +844,55 @@ test("a changed source file of any language the analysis reads reaches the page 
     rmSync(file, { force: true });
   }
 });
+
+test("the server says which repository it serves and what the checkout has of a change, for a host that looks for it", async () => {
+  // Outside git: the folder and this archdiff's version, and no remote; a ref cannot be asked about.
+  const plain = await getJson<{ name: string; root: string; version: string; remotes: unknown[] }>("/api/repository");
+  assert.deepEqual(plain, { name: dir.split(/[\\/]/).pop()!, root: dir, version: (JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version: string }).version, remotes: [] });
+  const outside = await fetch(`${base}/api/refs?ref=main`);
+  assert.equal(outside.status, 400);
+  assert.ok(((await outside.json()) as { error: string }).error.includes("not a git repository"));
+
+  await withOwnServer(
+    "archdiff-repository-",
+    (own) => {
+      const git = (...args: string[]): void => {
+        const result = spawnSync("git", ["-C", own, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      git("init", "-q", "-b", "main");
+      git("remote", "add", "origin", "https://reader:secret@github.com/acme/shop.git");
+      git("add", ".");
+      git("commit", "-q", "-m", "base");
+      git("checkout", "-q", "-b", "feature");
+      writeFileSync(join(own, "src/lib/log.ts"), "export function log(message: string): void {\n  console.error(message);\n}\n");
+      git("commit", "-q", "-am", "loud");
+      git("checkout", "-q", "main");
+      // main goes on after the branch left it.
+      writeFileSync(join(own, "README.md"), "# shop\n");
+      git("add", ".");
+      git("commit", "-q", "-m", "a readme");
+    },
+    async (origin, own) => {
+      const commit = (ref: string): string => spawnSync("git", ["-C", own, "rev-parse", ref], { encoding: "utf8" }).stdout.trim();
+      // The remote by its host and its path: the name and the password of its address are told to nobody.
+      const repository = await fetch(`${origin}/api/repository`);
+      const said = await repository.text();
+      assert.deepEqual((JSON.parse(said) as { remotes: unknown }).remotes, [{ name: "origin", host: "github.com", path: "acme/shop" }]);
+      assert.ok(!said.includes("secret") && !said.includes("reader"), said);
+
+      // The commit each ref names, null for one git does not know here; and where the head left the base.
+      const refs = (await (await fetch(`${origin}/api/refs?ref=main&ref=feature&ref=origin%2Ffeature&ref=${commit("feature").slice(0, 9)}&base=main&head=feature`)).json()) as { refs: { ref: string; commit: string | null }[]; fork: string | null };
+      assert.deepEqual(refs.refs, [{ ref: "main", commit: commit("main") }, { ref: "feature", commit: commit("feature") }, { ref: "origin/feature", commit: null }, { ref: commit("feature").slice(0, 9), commit: commit("feature") }]);
+      assert.equal(refs.fork, commit("main~1"));
+      // Without the two ends nothing is said of where they part; an end git does not know parts nowhere.
+      assert.deepEqual(await (await fetch(`${origin}/api/refs?base=main`)).json(), { refs: [], fork: null });
+      assert.deepEqual(await (await fetch(`${origin}/api/refs?base=main&head=nope`)).json(), { refs: [], fork: null });
+      // A ref git would read as an option is refused, and so are more refs than one request may ask about.
+      const option = await fetch(`${origin}/api/refs?ref=--all`);
+      assert.equal(option.status, 400);
+      assert.equal(((await option.json()) as { error: string }).error, 'not a git ref: "--all"');
+      assert.equal((await fetch(`${origin}/api/refs?${Array.from({ length: 25 }, (_unused, index) => `ref=r${index}`).join("&")}`)).status, 400);
+    },
+  );
+});

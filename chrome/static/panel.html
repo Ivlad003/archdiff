@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>archdiff</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body data-state="looking">
+    <header>
+      <div id="where">
+        <strong id="repository"></strong>
+        <span id="subject"></span>
+      </div>
+      <div id="tools">
+        <select id="picture" hidden data-say-title="picture_title"></select>
+        <button id="again" class="icon" data-say-title="again_title">⟳</button>
+        <button id="open-tab" class="icon" hidden data-say-title="tab_title">↗</button>
+        <label data-say-title="whole_title"><input id="whole" type="checkbox" /> <span data-say="whole"></span></label>
+        <button id="builds" class="link" data-say="builds" data-say-title="builds_title"></button>
+      </div>
+    </header>
+    <p id="note" hidden>
+      <span id="note-text"></span>
+      <code id="note-command"></code>
+      <button id="note-copy" data-say="copy"></button>
+    </p>
+    <main>
+      <iframe id="page" hidden allow="clipboard-read; clipboard-write"></iframe>
+      <section id="card" hidden>
+        <h1 id="card-title"></h1>
+        <p id="card-text"></p>
+        <p id="command-row" hidden>
+          <code id="command"></code>
+          <button id="command-copy" data-say="copy"></button>
+        </p>
+        <button id="card-again" class="primary" data-say="look_again"></button>
+        <ul id="card-found" hidden></ul>
+        <form id="address-row" hidden>
+          <label for="address" data-say="address_label"></label>
+          <span>
+            <input id="address" type="text" autocomplete="off" spellcheck="false" />
+            <button type="submit" data-say="address_add"></button>
+          </span>
+          <small id="address-wrong" hidden data-say="address_wrong"></small>
+        </form>
+      </section>
+    </main>
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>

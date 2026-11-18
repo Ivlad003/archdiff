@@ -1,0 +1,61 @@
+{
+  "name": { "message": "archdiff для GitHub" },
+  "description": { "message": "Архітектурний diff пул-реквесту чи гілки поруч з її сторінкою на GitHub — намальований archdiff вашого checkout." },
+  "action": { "message": "Показати archdiff поруч із цією сторінкою" },
+
+  "picture_title": { "message": "Малюнок того, що показує ця сторінка GitHub" },
+  "picture_review": { "message": "рев'ю — що зробила зміна" },
+  "picture_changes": { "message": "шари з позначеною зміною" },
+  "picture_impact": { "message": "вплив — що вона може зламати" },
+  "picture_timeline": { "message": "коміт за комітом" },
+  "picture_code": { "message": "шари цього коду" },
+  "picture_modules": { "message": "усі модулі" },
+  "picture_module": { "message": "цей файл — що він імпортує" },
+  "picture_inside": { "message": "усередині цього файла" },
+  "picture_commit": { "message": "зміна цього коміту" },
+  "picture_board": { "message": "незакомічені зміни" },
+  "picture_branches": { "message": "гілки" },
+
+  "subject_pull": { "message": "#$1 · $2 ← $3" },
+  "subject_compare": { "message": "$1 ← $2" },
+  "subject_file": { "message": "$1 @ $2" },
+  "subject_commit": { "message": "коміт $1" },
+  "subject_checkout": { "message": "checkout як він є" },
+  "default_branch": { "message": "типова гілка" },
+
+  "again_title": { "message": "Подивитися знову: сервер, що є в checkout, коміт пул-реквесту" },
+  "tab_title": { "message": "Відкрити цей малюнок в окремій вкладці, з усією сторінкою archdiff" },
+  "whole": { "message": "уся сторінка" },
+  "whole_title": { "message": "Уся сторінка archdiff тут, зі списками і вкладкою Code, а не лише малюнок" },
+  "builds": { "message": "білди" },
+  "builds_title": { "message": "Білди розширення для завантаження, і чи цей найновіший" },
+
+  "looking": { "message": "шукаю…" },
+  "stale": { "message": "Цей checkout не на коміті пул-реквесту. Щоб побачити його таким, як на GitHub, виконайте і подивіться знову:" },
+
+  "idle_title": { "message": "Тут нічого малювати" },
+  "idle_text": { "message": "Відкрийте репозиторій на GitHub — пул-реквест, порівняння, гілку, коміт — і archdiff вашого checkout намалює його тут." },
+
+  "noserver_title": { "message": "Жоден archdiff на цьому комп'ютері не обслуговує $1" },
+  "noserver_text": { "message": "Запустіть його у своєму checkout цього репозиторію і подивіться знову:" },
+  "noserver_found": { "message": "Натомість знайдено:" },
+  "found_item": { "message": "$1 — $2 ($3)" },
+  "no_remote": { "message": "без remote" },
+  "noserver_old": { "message": "$1 — archdiff, застарий, щоб сказати, що він обслуговує: оновіть його" },
+  "address_label": { "message": "archdiff на власному порту:" },
+  "address_placeholder": { "message": "порт або 127.0.0.1:порт" },
+  "address_add": { "message": "додати" },
+  "address_wrong": { "message": "Лише адреса цього комп'ютера: порт 127.0.0.1 або localhost." },
+
+  "missing_title": { "message": "У цьому checkout ще немає $1" },
+  "missing_text": { "message": "Отримайте це в checkout ($1) і подивіться знову:" },
+
+  "unread_title": { "message": "Не вдалося прочитати гілки пул-реквесту #$1" },
+  "unread_text": { "message": "GitHub їх не назвав. Якщо репозиторій приватний, увійдіть у GitHub у цьому браузері і подивіться знову." },
+
+  "failed_title": { "message": "archdiff відповів не так, як очікувалося" },
+
+  "copy": { "message": "копіювати" },
+  "copied": { "message": "скопійовано" },
+  "look_again": { "message": "подивитися знову" }
+}

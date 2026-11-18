@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:" />
+    <meta name="description" content="The builds of archdiff's extensions for Chrome and VS Code, to download and install from their files." />
+    <title>archdiff — builds</title>
+    <link rel="icon" href="icon.svg" />
+    <link rel="stylesheet" href="builds.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="icon.svg" alt="" width="36" height="36" />
+        <div>
+          <h1><span>archdiff</span> · <span data-say>Builds</span></h1>
+          <p class="muted" data-say>The extensions of archdiff, built and ready to download. No store carries them: each is installed from its file.</p>
+        </div>
+      </header>
+
+      <div id="builds">
+        <p class="muted" data-say>Reading the builds from GitHub…</p>
+        <noscript><p>The builds are the files of the <a href="https://github.com/Ivlad003/archdiff/releases">releases on GitHub</a>.</p></noscript>
+      </div>
+
+      <section class="card">
+        <h2 data-say>How to install</h2>
+
+        <h3 data-say>archdiff itself</h3>
+        <p class="muted" data-say>The extensions draw nothing themselves: they show what the archdiff of your repository draws. It is an npm package (Node 22.18 or newer):</p>
+        <pre><code>npm install -g @ivlad003/archdiff
+archdiff web</code></pre>
+
+        <h3 data-say>Chrome extension</h3>
+        <ol>
+          <li data-say>Unpack the .zip into a folder that stays where it is.</li>
+          <li data-say>Open chrome://extensions and turn on Developer mode (top right).</li>
+          <li data-say>Press Load unpacked and pick that folder.</li>
+          <li data-say>Start archdiff web in your checkout, open the repository on GitHub and press the extension's button.</li>
+        </ol>
+        <p class="muted" data-say>To update: unpack the newer build over the same folder and press the reload arrow on the extension's card.</p>
+
+        <h3 data-say>VS Code extension</h3>
+        <p class="muted" data-say>In VS Code: the Extensions view, its … menu, Install from VSIX…, and pick the file. Or from a terminal:</p>
+        <pre><code>code --install-extension archdiff-vscode-0.1.0.vsix</code></pre>
+      </section>
+
+      <footer class="muted">
+        <a href="https://github.com/Ivlad003/archdiff" data-say>the repository</a> ·
+        <a href="https://github.com/Ivlad003/archdiff/releases" data-say>releases on GitHub</a> ·
+        <a href="https://github.com/Ivlad003/archdiff/tree/master/chrome#readme" data-say>the Chrome extension's README</a> ·
+        <a href="https://github.com/Ivlad003/archdiff/tree/master/vscode#readme" data-say>the VS Code extension's README</a>
+      </footer>
+    </main>
+    <script type="module" src="builds.js"></script>
+  </body>
+</html>

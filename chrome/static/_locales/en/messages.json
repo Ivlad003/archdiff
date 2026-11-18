@@ -1,0 +1,61 @@
+{
+  "name": { "message": "archdiff for GitHub" },
+  "description": { "message": "The architectural diff of a pull request or a branch beside its page on GitHub, drawn by the archdiff of your checkout." },
+  "action": { "message": "Show archdiff beside this page" },
+
+  "picture_title": { "message": "The picture of what this page of GitHub shows" },
+  "picture_review": { "message": "review — what the change did" },
+  "picture_changes": { "message": "the layers, the change marked" },
+  "picture_impact": { "message": "impact — what it could break" },
+  "picture_timeline": { "message": "commit by commit" },
+  "picture_code": { "message": "the layers of this code" },
+  "picture_modules": { "message": "every module" },
+  "picture_module": { "message": "this file — what it imports" },
+  "picture_inside": { "message": "inside this file" },
+  "picture_commit": { "message": "this commit's change" },
+  "picture_board": { "message": "the uncommitted changes" },
+  "picture_branches": { "message": "the branches" },
+
+  "subject_pull": { "message": "#$1 · $2 ← $3" },
+  "subject_compare": { "message": "$1 ← $2" },
+  "subject_file": { "message": "$1 @ $2" },
+  "subject_commit": { "message": "commit $1" },
+  "subject_checkout": { "message": "the checkout as it is" },
+  "default_branch": { "message": "default branch" },
+
+  "again_title": { "message": "Look again: the server, what the checkout has, the pull request's commit" },
+  "tab_title": { "message": "Open this picture in a tab of its own, with the whole page of archdiff" },
+  "whole": { "message": "whole page" },
+  "whole_title": { "message": "The whole page of archdiff here, with its lists and its Code tab, instead of the picture alone" },
+  "builds": { "message": "builds" },
+  "builds_title": { "message": "The builds of the extension to download, and whether this one is the newest" },
+
+  "looking": { "message": "looking…" },
+  "stale": { "message": "This checkout is not at the pull request's commit. To see it as GitHub has it, then look again:" },
+
+  "idle_title": { "message": "Nothing to draw here" },
+  "idle_text": { "message": "Open a repository on GitHub — a pull request, a comparison, a branch, a commit — and its picture is drawn here by the archdiff of your checkout." },
+
+  "noserver_title": { "message": "No archdiff serves $1 on this computer" },
+  "noserver_text": { "message": "Start it in your checkout of the repository, then look again:" },
+  "noserver_found": { "message": "Found instead:" },
+  "found_item": { "message": "$1 — $2 ($3)" },
+  "no_remote": { "message": "no remote" },
+  "noserver_old": { "message": "$1 — an archdiff too old to say what it serves: update it" },
+  "address_label": { "message": "An archdiff on a port of its own:" },
+  "address_placeholder": { "message": "a port, or 127.0.0.1:port" },
+  "address_add": { "message": "add" },
+  "address_wrong": { "message": "Only an address of this computer: a port of 127.0.0.1 or of localhost." },
+
+  "missing_title": { "message": "This checkout has not got $1 yet" },
+  "missing_text": { "message": "Fetch it in the checkout ($1), then look again:" },
+
+  "unread_title": { "message": "The branches of pull request #$1 could not be read" },
+  "unread_text": { "message": "GitHub did not say them. If the repository is private, sign in to GitHub in this browser, then look again." },
+
+  "failed_title": { "message": "archdiff did not answer as expected" },
+
+  "copy": { "message": "copy" },
+  "copied": { "message": "copied" },
+  "look_again": { "message": "look again" }
+}

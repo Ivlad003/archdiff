@@ -116,6 +116,16 @@ flowchart LR
     n_vscode_src_diagnostics_ts["vscode/src/diagnostics.ts<br>the check's JSON as findings on lines"]
     n_vscode_src_panel_ts["vscode/src/panel.ts<br>the panel's document: the page in a frame, its messages passed on"]
   end
+  subgraph n_chrome["chrome — the Chrome extension: archdiff beside a page of GitHub, through the server's API and its page alone; and the builds page it carries"]
+    n_chrome_src_panel_ts["chrome/src/panel.ts<br>the side panel: follows the tab, frames the server's page on the picture that fits, sends the tab to the place of a tapped shape"]
+    n_chrome_src_hosts_ts["chrome/src/hosts.ts<br>what an address of GitHub shows: the repository, and a pull request, a comparison, a branch, a file or a commit of it"]
+    n_chrome_src_pull_ts["chrome/src/pull.ts<br>the two ends of a pull request, from GitHub's API or from its page"]
+    n_chrome_src_servers_ts["chrome/src/servers.ts<br>the archdiff that serves a repository on this computer, found by its remotes"]
+    n_chrome_src_target_ts["chrome/src/target.ts<br>the pictures that fit a page, as links of the server's page, on the refs the checkout has"]
+    n_chrome_src_github_ts["chrome/src/github.ts<br>where a place of the code is on GitHub: a changed file's anchor, or the file at the head's revision"]
+    n_chrome_scripts_build_mjs["chrome/scripts/build.mjs<br>builds the extension into the folder Chrome loads and packs the archive people download"]
+    n_site_builds_js["site/builds.js<br>the builds page: the extensions' builds among the releases on GitHub, laid out to download"]
+  end
   n_bin_archdiff_js --> n_src_cli_ts
   n_scripts_scapi_table_mjs --> n_src_scapi_runtime_ts
   n_src_cli_ts --> n_src_server_ts
@@ -215,8 +225,17 @@ flowchart LR
   n_vscode_src_extension_ts --> n_vscode_src_diagnostics_ts
   n_vscode_src_extension_ts --> n_vscode_src_panel_ts
   n_vscode_src_runner_ts --> n_vscode_src_command_ts
+  n_chrome_src_panel_ts --> n_chrome_src_hosts_ts
+  n_chrome_src_panel_ts --> n_chrome_src_pull_ts
+  n_chrome_src_panel_ts --> n_chrome_src_servers_ts
+  n_chrome_src_panel_ts --> n_chrome_src_target_ts
+  n_chrome_src_panel_ts --> n_chrome_src_github_ts
+  n_chrome_src_target_ts --> n_chrome_src_hosts_ts
+  n_chrome_src_target_ts --> n_chrome_src_github_ts
 ```
 
 The page (`web/src`) imports the Node-free vocabularies of the core, bundled into it — the table of picture options (`src/options.ts`), the kinds of view with their keys (`src/view-keys.ts`) and what a shape stands for and opens (`src/shape-keys.ts`, which the Excalidraw export shares), the looks of the shapes and lines (`src/looks.ts`, which the exports draw by too), and through `view-keys.ts` whether a path is a source file (`src/languages.ts`), the languages the page speaks (`src/page-language.ts`, which the settings share) — and only types from `src/diagram.ts` and `src/scene.ts`, which erase at build time. Tests import whatever they test. `src/routes/context.ts` imports the `ServeOptions` type back from `server.ts`: a type, inside one layer.
 
 The VS Code extension (`vscode/`, a package of its own that is no part of the npm package) has no arrow to any other layer, and none may appear: it runs whichever archdiff the workspace has, as a process (`archdiff web`, `archdiff check --json`), and reads what that prints and serves — never this repository's modules. What it relies on is the command line, the answer of `GET /api/diagram` and the page's message to its host (`web/src/host.ts`), which its tests run against the archdiff around them.
+
+The Chrome extension (`chrome/`, with the builds page `site/` it carries; no part of the npm package either, and a package that installs nothing: it is built with the repository's esbuild) has no arrow to any other layer, and none may appear: it finds an `archdiff web` already running on the computer and asks it over HTTP, GET only, and frames its page — never this repository's modules. What it relies on is the answers of `GET /api/repository`, `/api/refs`, `/api/branches` and `/api/views`, the page's link (`web/src/link.ts`) and its message to its host, which its tests run against the archdiff around them, in a real Chrome.

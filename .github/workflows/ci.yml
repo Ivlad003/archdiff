@@ -66,3 +66,21 @@ jobs:
         working-directory: vscode
       - run: npx vsce package
         working-directory: vscode
+  chrome:
+    # The Chrome extension (chrome/), a package that installs nothing of its own: its types, its tests — its parts
+    # against the archdiff of this checkout, and the built extension loaded into Chrome with the real page in its
+    # panel's frame — and the archive it packs to. The builds page (site/) is tested with it: the extension carries it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+        working-directory: chrome
+      - run: npm test
+        working-directory: chrome
+      - run: npm run package
+        working-directory: chrome

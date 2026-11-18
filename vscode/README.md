@@ -8,7 +8,7 @@ The extension draws nothing itself. It runs the `archdiff` of your repository â€
 
 The extension is not on the Marketplace: it is installed from its package, a `.vsix` file.
 
-Build the package in a checkout of archdiff (Node 22.18 or newer):
+Download `archdiff-vscode-<version>.vsix` from [the builds page](https://ivlad003.github.io/archdiff/) or from [the releases](https://github.com/Ivlad003/archdiff/releases) â€” or build the package in a checkout of archdiff (Node 22.18 or newer):
 
 ```bash
 cd vscode

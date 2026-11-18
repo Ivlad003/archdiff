@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- The page's own mark: a square and the one it is set against. -->
+  <rect x="46" y="46" width="70" height="70" rx="17" fill="#c9a6f5" />
+  <rect x="12" y="12" width="70" height="70" rx="17" fill="#6a1b9a" />
+</svg>

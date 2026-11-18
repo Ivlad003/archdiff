@@ -1,0 +1,38 @@
+# The builds page (site/) on GitHub Pages: three static files, published as they are. The page reads the
+# releases from GitHub's API when it is opened, so it is published again only when its own files change.
+#
+# Once, by the owner of the repository: Settings → Pages → Build and deployment → Source: GitHub Actions.
+# Until then this workflow fails at its second step, and says so.
+name: site
+on:
+  push:
+    branches: [master]
+    paths: ["site/**", ".github/workflows/site.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+# One deployment at a time, and one under way is finished: Pages takes a whole site, not half of one.
+concurrency:
+  group: site
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      # GitHub's word for this run, which Pages takes as the proof of where the site comes from.
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5
