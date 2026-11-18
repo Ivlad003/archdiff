@@ -236,12 +236,17 @@ The system SHALL copy, with one button beside the tabs, what the active tab show
 
 ### Requirement: Drawing is a mode, saved beside the repository
 
-The system SHALL switch the canvas to Excalidraw's full editor on `✎ edit`, save a drawing to `.archdiff/layouts/<view>.json` on `save` (Ctrl+S), follow the saved places in the live picture and every export, and merge a fresh picture of the code into the drawing on `refresh` (shapes that still exist keep their place, strokes stay, stale shapes go); leaving the editor with unsaved changes SHALL ask first.
+The system SHALL switch the canvas to Excalidraw's full editor on `✎ edit`, save a drawing to `.archdiff/layouts/<view>.json` on `save` (Ctrl+S), follow the saved places in the live picture and every export, and merge a fresh picture of the code into the drawing on `refresh` (shapes that still exist keep their place, strokes stay, stale shapes go); leaving the editor with unsaved changes SHALL ask first. A change SHALL be measured from the scene last saved (from the scene as the editor opened, before a save): what changes no element SHALL not make a saved drawing unsaved.
 
 #### Scenario: Leaving an untouched editor
 
 - **WHEN** the editor is opened and closed without a change
 - **THEN** nothing asks to confirm
+
+#### Scenario: A saved drawing stays saved
+
+- **WHEN** the reader draws a rectangle, saves, then moves the pointer over the canvas and picks another tool
+- **THEN** *save* does not call the drawing unsaved, and leaving the editor does not ask
 
 ### Requirement: The page follows the code
 

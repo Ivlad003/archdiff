@@ -66,6 +66,13 @@ export interface CanvasHandle {
   replace(elements: SceneElement[], place?: Viewport | null): void;
   /** View mode (reading) or edit mode (Excalidraw's whole UI). */
   setMode(mode: "view" | "edit"): void;
+  /**
+   * The scene as it is now, about to be saved: the function it gives back makes that scene what a change is measured
+   * from, and is called when the save went through. Without it a drawing just saved was called unsaved again by the
+   * next thing that changed no element — a move of the pointer, a tool picked. A stroke drawn while the save was on
+   * its way is still a change.
+   */
+  saving(): () => void;
   /** A PNG or SVG of the whole scene, or of the selected elements when there are some. */
   screenshot(kind: "png" | "svg"): Promise<Blob>;
   scrollToContent(): void;
@@ -720,6 +727,13 @@ export function mountCanvas(container: HTMLElement, elements: SceneElement[], ev
         mounted.api?.updateScene({ elements: restoreElements(asExcalidraw(next), null) });
         mounted.placed = null;
         requestAnimationFrame(() => settle(place));
+      },
+      saving: () => {
+        const saved = mounted.versions?.fingerprint ?? null;
+
+        return () => {
+          if (mounted.versions && saved !== null && mounted.mode === "edit") mounted.versions.baseline = saved;
+        };
       },
       setMode: (next) => {
         if (next === "edit") lights.clear();
