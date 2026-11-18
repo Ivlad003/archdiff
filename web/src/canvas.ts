@@ -161,7 +161,10 @@ export function setMode(next: "view" | "edit"): void {
 /** Saves the scene and the flow's mocks as the view's drawing. */
 export async function saveDrawing(): Promise<void> {
   if (!canvas) return;
+  // What is saved is what a change is measured from, from the save on.
+  const kept = canvas.saving();
   const { saved } = await api.saveDrawing(editedView ?? currentLink().view, canvas.scene(), page.mocks());
+  kept();
   dirty = false;
   saveButton.classList.remove("dirty");
   notice(t("saved to {saved}", { saved }));

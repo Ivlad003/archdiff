@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A saved drawing stays saved.** After *save* (or Ctrl+S) in the editor, the next thing that changed no element — a move of the pointer over the canvas, a tool picked, a click on nothing — marked the drawing as unsaved again: *save* lit up, and leaving the editor asked whether to lose changes that were on the disk. The editor measured a change from the scene as it was when it opened; it now measures from the scene last saved. A stroke drawn while a save is on its way is still a change.
+
 ## 0.8.0 — 2026-11-17
 
 The page, easier to read and to find one's way in: the branches of a review as a list to search, the code in the colours of its language on a tab that comes at the press, a hint for every control, English or Ukrainian, and a look of its own; and a release that publishes itself from its tag.

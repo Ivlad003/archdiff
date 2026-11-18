@@ -262,3 +262,8 @@ Feature: The page
     Then the page is drawn again in English at the same link, and the settings file holds no language
     When I pick "Українська"
     Then the page is in Ukrainian again and the settings file holds the language "uk"
+
+  Scenario: A saved drawing stays saved
+    Given the page open on the layer "lib" in the editor, with a rectangle drawn
+    When I save with Ctrl+S, then move the pointer over the canvas and pick the selection tool
+    Then "save" does not call the drawing unsaved again

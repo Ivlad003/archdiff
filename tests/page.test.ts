@@ -605,6 +605,12 @@ test("a reader who stays in the editor keeps the link of the picture drawn on; l
       await page!.waitForFunction(`!document.querySelector("#save")?.classList.contains("dirty")`);
       assert.ok(existsSync(join(dir, ".archdiff/layouts/layer_lib.json")));
       assert.ok(!existsSync(join(dir, ".archdiff/layouts/module_src_lib_log.ts.json")));
+      // What is saved stays saved: a move of the pointer and a tool picked change no element, and the button does not
+      // call the drawing unsaved again (it did, and a runner on which the canvas said so before the line above looked failed here).
+      await page!.mouse.move(box.x + 400, box.y + 300, { steps: 8 });
+      await page!.click(".excalidraw [data-testid='toolbar-selection']", { force: true });
+      await page!.waitForTimeout(400);
+      assert.equal(await page!.evaluate(`document.querySelector("#save").classList.contains("dirty")`), false);
       // One more stroke, given up on leaving: it goes, the saved one stays.
       await rectangle();
       await page!.mouse.move(box.x + 260, box.y + box.height - 160);
